@@ -87,7 +87,7 @@ from worldgen.stages.erosion import ErosionStage
 from worldgen.stages.terrain_class import TerrainClassificationStage
 from worldgen.stages.hydrology import HydrologyStage
 
-cfg = WorldConfig(width=128, height=128, seed=42)
+cfg = WorldConfig(width=128, height=128)
 pipeline = GeneratorPipeline(seed=42, config=cfg)
 pipeline.add_stage(ElevationStage).add_stage(ErosionStage) \
         .add_stage(TerrainClassificationStage).add_stage(HydrologyStage)

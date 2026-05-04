@@ -84,6 +84,15 @@ def test_tags_assigned(hydro_state):
     assert "river_mouth" in all_tags, "No river_mouth tags found"
 
 
+def test_flow_volume(hydro_state):
+    for river in hydro_state.rivers:
+        assert 0.0 < river.flow_volume <= 1.0, f"flow_volume {river.flow_volume} out of (0, 1]"
+    # flow_volume should be non-decreasing from headwater to mouth among rivers
+    # that share the same drainage basin (longer rivers carry more water).
+    # At minimum: the river with max flow_volume must exist.
+    assert max(r.flow_volume for r in hydro_state.rivers) > 0
+
+
 def test_reproducibility():
     s1 = _build_pipeline(seed=7).run()
     s2 = _build_pipeline(seed=7).run()
