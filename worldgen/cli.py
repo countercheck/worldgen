@@ -32,13 +32,19 @@ def generate(seed: int, config: str, output_dir: str, width: int, height: int):
 
     from .stages.elevation import ElevationStage
     from .stages.erosion import ErosionStage
+    from .stages.hydrology import HydrologyStage
     from .stages.terrain_class import TerrainClassificationStage
 
     click.echo(f"Generating world with seed {seed}...")
     click.echo(f"  Size: {cfg.width}×{cfg.height}")
 
     pipeline = GeneratorPipeline(seed, cfg)
-    pipeline.add_stage(ElevationStage).add_stage(ErosionStage).add_stage(TerrainClassificationStage)
+    (
+        pipeline.add_stage(ElevationStage)
+        .add_stage(ErosionStage)
+        .add_stage(TerrainClassificationStage)
+        .add_stage(HydrologyStage)
+    )
     state = pipeline.run()
 
     click.echo("Writing output...")
@@ -48,6 +54,7 @@ def generate(seed: int, config: str, output_dir: str, width: int, height: int):
 
     render_debug(state, "elevation", str(output_path / "elevation.png"))
     render_debug(state, "terrain_class", str(output_path / "terrain_class.png"))
+    render_debug(state, "river_flow", str(output_path / "river_flow.png"))
 
     click.echo("✓ Done")
 
