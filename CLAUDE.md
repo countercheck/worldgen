@@ -6,6 +6,8 @@ Hex-based procedural world generator for TTRPGs, worldbuilding, and wargaming.
 ## Setup
 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
