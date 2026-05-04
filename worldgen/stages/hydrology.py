@@ -1,9 +1,7 @@
 import heapq
 from collections import defaultdict, deque
 
-import numpy as np
-
-from ..core.hex import HexCoord, TerrainClass
+from ..core.hex import Hex, HexCoord, TerrainClass
 from ..core.hex_grid import neighbors
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import River, WorldState
@@ -42,23 +40,31 @@ class HydrologyStage(GeneratorStage):
         # C — Flow accumulation (topological sort)
         acc = self._flow_accumulation(flow_dir, land)
 
-        # D — Extract river hexes above threshold
+        # D — Extract river hexes: top threshold fraction by flow accumulation count.
+        # Sorting by accumulation and slicing avoids tie-boundary over-selection that
+        # quantile + >= causes when many cells share the cutoff value.
         land_acc_vals = list(acc.values())
         if not land_acc_vals:
             return state
         threshold = max(0.0, min(1.0, self.config.river_flow_threshold))
-        threshold_val = np.quantile(land_acc_vals, 1.0 - threshold)
-        river_set: set[HexCoord] = {c for c, v in acc.items() if v >= threshold_val}
+        if threshold == 0.0:
+            state.rivers = []
+            return state
+        n_river = max(1, round(len(land_acc_vals) * threshold))
+        sorted_by_acc = sorted(acc.keys(), key=lambda c: acc[c], reverse=True)
+        river_set: set[HexCoord] = set(sorted_by_acc[:n_river])
 
         max_acc = max(land_acc_vals)
-        for coord in river_set:
-            hexes[coord].river_flow = acc[coord] / max_acc
 
-        # E — Tag and build River objects
-        self._tag_hexes(river_set, flow_dir, hexes, ocean)
+        # E — Build River objects (may extend river_set via fallback for stalled rivers)
         state.rivers = self._build_rivers(
-            river_set, flow_dir, hexes, land, ocean, acc, max_acc, w, h
+            river_set, flow_dir, hexes, land, ocean, acc, max_acc, filled, w, h
         )
+
+        # F — Normalize river_flow and tag all river hexes (including any added by fallback)
+        for coord in river_set:
+            hexes[coord].river_flow = acc.get(coord, 0.0) / max_acc
+        self._tag_hexes(river_set, flow_dir, hexes, ocean, w, h)
 
         return state
 
@@ -184,8 +190,10 @@ class HydrologyStage(GeneratorStage):
         self,
         river_set: set[HexCoord],
         flow_dir: dict[HexCoord, HexCoord | None],
-        hexes: dict,
+        hexes: dict[HexCoord, "Hex"],
         ocean: set[HexCoord],
+        w: int,
+        h: int,
     ) -> None:
         # upstream river neighbors count
         upstream_river_nbrs: dict[HexCoord, int] = defaultdict(int)
@@ -201,28 +209,41 @@ class HydrologyStage(GeneratorStage):
                 hx.tags.add("headwater")
             if up_count >= 2:
                 hx.tags.add("confluence")
-            if any(nbr in ocean for nbr in neighbors(coord)):
+            q, r = coord
+            on_border = q == 0 or q == w - 1 or r == 0 or r == h - 1
+            if on_border or any(nbr in ocean for nbr in neighbors(coord)):
                 hx.tags.add("river_mouth")
 
     def _build_rivers(
         self,
         river_set: set[HexCoord],
         flow_dir: dict[HexCoord, HexCoord | None],
-        hexes: dict,
+        hexes: dict[HexCoord, Hex],
         land: set[HexCoord],
         ocean: set[HexCoord],
         acc: dict[HexCoord, float],
         max_acc: float,
+        filled: dict[HexCoord, float],
         w: int,
         h: int,
     ) -> list[River]:
         """Trace each headwater downstream to ocean/border.
 
-        If flow_dir stalls before reaching ocean (flat-area artefact), extend the
-        path via BFS toward the nearest ocean-adjacent hex.
+        Headwaters are derived directly from river_set and flow_dir (not from hex tags,
+        since _tag_hexes runs after this method). If flow_dir stalls before reaching ocean
+        (flat-area artefact), extend the path via elevation-guided search toward the nearest
+        outlet; fallback hexes are added to river_set and flow_dir is updated to keep
+        all downstream data consistent.
         """
         rivers: list[River] = []
-        headwaters = [c for c in river_set if "headwater" in hexes[c].tags]
+
+        # Compute headwaters without relying on tags: any river hex with no upstream river hex
+        has_upstream: set[HexCoord] = set()
+        for c in river_set:
+            ds = flow_dir.get(c)
+            if ds is not None and ds in river_set:
+                has_upstream.add(ds)
+        headwaters = [c for c in river_set if c not in has_upstream]
 
         for start in headwaters:
             path: list[HexCoord] = [start]
@@ -242,14 +263,32 @@ class HydrologyStage(GeneratorStage):
                 visited_path.add(ds)
                 current = ds
 
-            # If the path stalled without reaching ocean or a grid border, extend via BFS.
+            # If the path stalled without reaching ocean or a grid border, extend via
+            # elevation-guided search.  Fallback hexes are registered in river_set and
+            # flow_dir is updated so that subsequent tagging is consistent.
             mouth = path[-1]
             mq, mr = mouth
             on_border = mq == 0 or mq == w - 1 or mr == 0 or mr == h - 1
             reached_ocean = any(n in ocean for n in neighbors(mouth)) or mouth in ocean
-            if not reached_ocean and not on_border and len(path) > 0:
-                extension = self._bfs_to_ocean(mouth, land, ocean, visited_path, w, h)
-                path.extend(extension)
+            if not reached_ocean and not on_border:
+                extension = self._guided_path_to_ocean(mouth, filled, land, ocean, visited_path, w, h)
+                if extension:
+                    # Carry the stalled mouth's accumulation through the fallback segment.
+                    # Use max(natural_acc, mouth_acc) to avoid lowering the river_flow of
+                    # hexes that are also traversed by natural river paths (e.g. confluences).
+                    # This keeps river_flow non-decreasing along both fallback and natural paths.
+                    # acc[mouth] is always present for land hexes; 1.0 (minimum accumulation)
+                    # is the safe fallback in case mouth somehow isn't in acc.
+                    mouth_acc = acc.get(mouth, 1.0)
+                    # Update flow_dir along fallback path so _tag_hexes sees coherent state
+                    prev = mouth
+                    for ext_coord in extension:
+                        if ext_coord in land:
+                            flow_dir[prev] = ext_coord
+                            river_set.add(ext_coord)
+                            acc[ext_coord] = max(acc.get(ext_coord, 0.0), mouth_acc)
+                            prev = ext_coord
+                    path.extend(extension)
 
             if len(path) > 1:
                 # Use the last land hex for flow_volume — path[-1] may be an ocean hex
@@ -259,20 +298,30 @@ class HydrologyStage(GeneratorStage):
 
         return rivers
 
-    def _bfs_to_ocean(
+    def _guided_path_to_ocean(
         self,
         start: HexCoord,
+        filled: dict[HexCoord, float],
         land: set[HexCoord],
         ocean: set[HexCoord],
         avoid: set[HexCoord],
         w: int,
         h: int,
     ) -> list[HexCoord]:
-        """BFS over land-only hexes from start toward the nearest ocean-adjacent or border hex."""
+        """Elevation-guided Dijkstra over land hexes from *start* toward the nearest
+        ocean-adjacent or border hex.
+
+        Unlike a plain BFS, uphill movement is penalised heavily so the path stays in
+        valleys and does not cross ridgelines or enter ocean tiles.
+        """
+        dist: dict[HexCoord, float] = {start: 0.0}
         from_map: dict[HexCoord, HexCoord | None] = {start: None}
-        queue: deque[HexCoord] = deque([start])
-        while queue:
-            coord = queue.popleft()
+        heap: list[tuple[float, HexCoord]] = [(0.0, start)]
+
+        while heap:
+            cost, coord = heapq.heappop(heap)
+            if cost > dist[coord]:
+                continue
             q, r = coord
             on_border = q == 0 or q == w - 1 or r == 0 or r == h - 1
             ocean_adj = any(n in ocean for n in neighbors(coord))
@@ -284,8 +333,13 @@ class HydrologyStage(GeneratorStage):
                     node = from_map[node]
                 return list(reversed(path))
             for nbr in neighbors(coord):
-                if nbr not in land or nbr in from_map or nbr in avoid:
+                if nbr not in land or nbr in avoid:
                     continue
-                from_map[nbr] = coord
-                queue.append(nbr)
+                # Penalise uphill movement to keep rivers in valleys
+                elev_penalty = max(0.0, filled.get(nbr, 0.0) - filled.get(coord, 0.0)) * 1000.0
+                new_cost = cost + 1.0 + elev_penalty
+                if new_cost < dist.get(nbr, float("inf")):
+                    dist[nbr] = new_cost
+                    from_map[nbr] = coord
+                    heapq.heappush(heap, (new_cost, nbr))
         return []
