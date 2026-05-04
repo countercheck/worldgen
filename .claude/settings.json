@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.file_path // empty' | grep -qE '\\.py$' && cd /Users/countercheck/Code/worldgen && python3 -m pytest -q 2>&1 || true",
+            "statusMessage": "Running tests...",
+            "timeout": 60
+          }
+        ]
+      }
+    ]
+  }
+}
