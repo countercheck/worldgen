@@ -46,7 +46,8 @@ class HydrologyStage(GeneratorStage):
         land_acc_vals = list(acc.values())
         if not land_acc_vals:
             return state
-        threshold_val = np.quantile(land_acc_vals, 1.0 - self.config.river_flow_threshold)
+        threshold = max(0.0, min(1.0, self.config.river_flow_threshold))
+        threshold_val = np.quantile(land_acc_vals, 1.0 - threshold)
         river_set: set[HexCoord] = {c for c, v in acc.items() if v >= threshold_val}
 
         max_acc = max(land_acc_vals)
@@ -55,7 +56,9 @@ class HydrologyStage(GeneratorStage):
 
         # E — Tag and build River objects
         self._tag_hexes(river_set, flow_dir, hexes, ocean)
-        state.rivers = self._build_rivers(river_set, flow_dir, hexes, ocean, acc, max_acc, w, h)
+        state.rivers = self._build_rivers(
+            river_set, flow_dir, hexes, land, ocean, acc, max_acc, w, h
+        )
 
         return state
 
@@ -206,6 +209,7 @@ class HydrologyStage(GeneratorStage):
         river_set: set[HexCoord],
         flow_dir: dict[HexCoord, HexCoord | None],
         hexes: dict,
+        land: set[HexCoord],
         ocean: set[HexCoord],
         acc: dict[HexCoord, float],
         max_acc: float,
@@ -244,26 +248,27 @@ class HydrologyStage(GeneratorStage):
             on_border = mq == 0 or mq == w - 1 or mr == 0 or mr == h - 1
             reached_ocean = any(n in ocean for n in neighbors(mouth)) or mouth in ocean
             if not reached_ocean and not on_border and len(path) > 0:
-                extension = self._bfs_to_ocean(mouth, hexes, ocean, visited_path, w, h)
+                extension = self._bfs_to_ocean(mouth, land, ocean, visited_path, w, h)
                 path.extend(extension)
 
             if len(path) > 1:
-                final_mouth = path[-1]
-                mouth_acc = acc.get(final_mouth, acc[start])
-                rivers.append(River(hexes=path, flow_volume=mouth_acc / max_acc))
+                # Use the last land hex for flow_volume — path[-1] may be an ocean hex
+                # which has no accumulation value.
+                last_land = next((c for c in reversed(path) if c in acc), start)
+                rivers.append(River(hexes=path, flow_volume=acc[last_land] / max_acc))
 
         return rivers
 
     def _bfs_to_ocean(
         self,
         start: HexCoord,
-        hexes: dict,
+        land: set[HexCoord],
         ocean: set[HexCoord],
         avoid: set[HexCoord],
         w: int,
         h: int,
     ) -> list[HexCoord]:
-        """BFS from start to the nearest ocean-adjacent or border hex, returning the path."""
+        """BFS over land-only hexes from start toward the nearest ocean-adjacent or border hex."""
         from_map: dict[HexCoord, HexCoord | None] = {start: None}
         queue: deque[HexCoord] = deque([start])
         while queue:
@@ -272,7 +277,6 @@ class HydrologyStage(GeneratorStage):
             on_border = q == 0 or q == w - 1 or r == 0 or r == h - 1
             ocean_adj = any(n in ocean for n in neighbors(coord))
             if (on_border or ocean_adj) and coord != start:
-                # Reconstruct path (excluding start)
                 path: list[HexCoord] = []
                 node: HexCoord | None = coord
                 while node is not None and node != start:
@@ -280,7 +284,7 @@ class HydrologyStage(GeneratorStage):
                     node = from_map[node]
                 return list(reversed(path))
             for nbr in neighbors(coord):
-                if nbr not in hexes or nbr in from_map or nbr in avoid:
+                if nbr not in land or nbr in from_map or nbr in avoid:
                     continue
                 from_map[nbr] = coord
                 queue.append(nbr)
