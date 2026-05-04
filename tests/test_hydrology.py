@@ -85,12 +85,19 @@ def test_tags_assigned(hydro_state):
 
 
 def test_flow_volume(hydro_state):
-    for river in hydro_state.rivers:
-        assert 0.0 < river.flow_volume <= 1.0, f"flow_volume {river.flow_volume} out of (0, 1]"
-    # flow_volume should be non-decreasing from headwater to mouth among rivers
-    # that share the same drainage basin (longer rivers carry more water).
-    # At minimum: the river with max flow_volume must exist.
-    assert max(r.flow_volume for r in hydro_state.rivers) > 0
+    rivers = hydro_state.rivers
+    assert all(0.0 < r.flow_volume <= 1.0 for r in rivers), "flow_volume out of (0, 1]"
+    # flow_volume must reflect mouth accumulation, not headwater discharge.
+    # Each river's flow_volume (normalized accumulation at its last land hex) must be
+    # >= the river_flow of its headwater (the first hex in the path), because rivers
+    # accumulate water as they flow downstream.
+    for river in rivers:
+        head = river.hexes[0]
+        head_flow = hydro_state.hexes[head].river_flow if head in hydro_state.hexes else 0.0
+        assert river.flow_volume >= head_flow - 1e-9, (  # 1e-9 tolerance for floating-point arithmetic
+            f"flow_volume {river.flow_volume:.6f} < headwater river_flow {head_flow:.6f}; "
+            "flow_volume must represent mouth discharge, not headwater"
+        )
 
 
 def test_reproducibility():
@@ -100,4 +107,12 @@ def test_reproducibility():
         assert s1.hexes[coord].river_flow == s2.hexes[coord].river_flow, (
             f"river_flow differs at {coord} between identical seeds"
         )
-    assert len(s1.rivers) == len(s2.rivers)
+        assert s1.hexes[coord].tags == s2.hexes[coord].tags, (
+            f"hex tags differ at {coord} between identical seeds"
+        )
+    assert len(s1.rivers) == len(s2.rivers), "river count differs between identical seeds"
+    for i, (r1, r2) in enumerate(zip(s1.rivers, s2.rivers, strict=True)):
+        assert r1.hexes == r2.hexes, f"river[{i}] path differs between identical seeds"
+        assert r1.flow_volume == r2.flow_volume, (
+            f"river[{i}] flow_volume differs between identical seeds"
+        )

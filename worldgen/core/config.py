@@ -32,6 +32,12 @@ class WorldConfig:
     # Hydrology
     river_flow_threshold: float = 0.05
 
+    def __post_init__(self) -> None:
+        if not (0.0 <= self.river_flow_threshold <= 1.0):
+            raise ValueError(
+                f"river_flow_threshold must be in [0, 1], got {self.river_flow_threshold}"
+            )
+
     # Climate
     wind_direction: tuple[float, float] = (1.0, 0.0)
     latitude_temp_range: float = 0.6
