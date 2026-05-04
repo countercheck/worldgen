@@ -30,14 +30,24 @@ def generate(seed: int, config: str, output_dir: str, width: int, height: int):
     if height:
         cfg.height = height
 
+    from .stages.elevation import ElevationStage
+    from .stages.erosion import ErosionStage
+    from .stages.terrain_class import TerrainClassificationStage
+
     click.echo(f"Generating world with seed {seed}...")
     click.echo(f"  Size: {cfg.width}×{cfg.height}")
 
     pipeline = GeneratorPipeline(seed, cfg)
-    pipeline.run()
+    pipeline.add_stage(ElevationStage).add_stage(ErosionStage).add_stage(TerrainClassificationStage)
+    state = pipeline.run()
 
     click.echo("Writing output...")
     cfg.to_json(str(output_path / "config.json"))
+
+    from .render.debug_viewer import render as render_debug
+
+    render_debug(state, "elevation", str(output_path / "elevation.png"))
+    render_debug(state, "terrain_class", str(output_path / "terrain_class.png"))
 
     click.echo("✓ Done")
 

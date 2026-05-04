@@ -18,6 +18,10 @@ class WorldConfig:
     domain_warp_strength: float = 0.3
     continent_falloff: bool = True
 
+    # Terrain classification
+    terrain_hill_gradient: float = 0.02
+    terrain_mountain_gradient: float = 0.04
+
     # Erosion
     erosion_iterations: int = 15000
     erosion_inertia: float = 0.05
