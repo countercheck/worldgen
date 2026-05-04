@@ -29,6 +29,9 @@ class WorldConfig:
     erosion_deposition: float = 0.3
     erosion_erosion_rate: float = 0.3
 
+    # Hydrology
+    river_flow_threshold: float = 0.05
+
     # Climate
     wind_direction: tuple[float, float] = (1.0, 0.0)
     latitude_temp_range: float = 0.6
