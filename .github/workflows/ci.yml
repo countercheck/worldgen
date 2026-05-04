@@ -47,7 +47,7 @@ jobs:
         run: python -m pytest --cov=worldgen --cov-fail-under=50 --quiet || true
 
   required:
-    name: Status Check
+    name: name: CIExpected
     runs-on: ubuntu-latest
     needs: [lint, test]
     if: always()
