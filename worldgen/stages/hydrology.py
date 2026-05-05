@@ -153,6 +153,18 @@ class HydrologyStage(GeneratorStage):
                 if nbr_e < best_elev:
                     best_elev = nbr_e
                     best_coord = nbr
+
+            # A border land hex whose steepest descent leads to another border land hex
+            # would produce rivers that creep along the map edge.  Terminate here instead
+            # so the border acts as a drain, not a channel.
+            if best_coord is not None and best_coord not in ocean:
+                q, r = coord
+                bq, br = best_coord
+                if (q == 0 or q == w - 1 or r == 0 or r == h - 1) and (
+                    bq == 0 or bq == w - 1 or br == 0 or br == h - 1
+                ):
+                    best_coord = None
+
             flow_dir[coord] = best_coord
         return flow_dir
 
