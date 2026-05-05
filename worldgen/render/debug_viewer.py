@@ -2,7 +2,7 @@ import numpy as np
 from matplotlib import patches
 from matplotlib import pyplot as plt
 
-from ..core.hex import Biome, TerrainClass
+from ..core.hex import Biome, SettlementTier, TerrainClass
 from ..core.hex_grid import axial_to_pixel
 from ..core.world_state import WorldState
 
@@ -36,10 +36,19 @@ def _get_color_terrain(h: WorldState) -> tuple[float, float, float]:
     return TERRAIN_COLORS[h.terrain_class]
 
 
+_SETTLEMENT_STYLE = {
+    SettlementTier.CITY: ("*", 14, "gold"),
+    SettlementTier.TOWN: ("s", 8, "white"),
+    SettlementTier.VILLAGE: ("o", 5, "white"),
+}
+
+
 def render(state: WorldState, attribute: str, output_path: str, hex_size: float = 20):
     """Render hex map colored by attribute."""
     fig, ax = plt.subplots(figsize=(14, 10))
     ax.set_aspect("equal")
+
+    settlement_overlay = False
 
     if attribute == "biome":
         get_color = _get_color_biome
@@ -70,6 +79,9 @@ def render(state: WorldState, attribute: str, output_path: str, hex_size: float 
 
         def get_color(h: WorldState):  # noqa: F811
             return cmap(h.habitability)
+    elif attribute == "settlements":
+        get_color = _get_color_biome
+        settlement_overlay = True
     else:
         raise ValueError(f"Unknown attribute: {attribute}")
 
@@ -80,6 +92,20 @@ def render(state: WorldState, attribute: str, output_path: str, hex_size: float 
         vertices = _hex_vertices(x, y, hex_size)
         polygon = patches.Polygon(vertices, facecolor=color, edgecolor="gray", linewidth=0.5)
         ax.add_patch(polygon)
+
+    if settlement_overlay:
+        for s in state.settlements:
+            x, y = axial_to_pixel(s.coord, hex_size)
+            marker, size, color = _SETTLEMENT_STYLE[s.tier]
+            ax.plot(
+                x,
+                y,
+                marker,
+                markersize=size,
+                color=color,
+                markeredgecolor="black",
+                markeredgewidth=0.8,
+            )
 
     ax.autoscale_view()
     ax.set_title(f"World Map — {attribute}")

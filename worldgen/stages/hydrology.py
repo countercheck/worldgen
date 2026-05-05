@@ -283,9 +283,16 @@ class HydrologyStage(GeneratorStage):
             on_border = mq == 0 or mq == w - 1 or mr == 0 or mr == h - 1
             reached_ocean = any(n in ocean for n in neighbors(mouth)) or mouth in ocean
             if not reached_ocean and not on_border:
+                # Stage 1: valley-preferring, excluding already-visited hexes
                 extension = self._guided_path_to_ocean(
                     mouth, filled, land, ocean, visited_path, w, h
                 )
+                if not extension:
+                    # Stage 2: same elevation-guided search without the avoid constraint
+                    extension = self._guided_path_to_ocean(mouth, filled, land, ocean, set(), w, h)
+                if not extension:
+                    # Stage 3: plain BFS over any hex — guaranteed to reach a border
+                    extension = self._forced_exit_to_border(mouth, hexes, ocean, w, h)
                 if extension:
                     # Carry the stalled mouth's accumulation through the fallback segment.
                     # Use max(natural_acc, mouth_acc) to avoid lowering the river_flow of
@@ -356,4 +363,32 @@ class HydrologyStage(GeneratorStage):
                     dist[nbr] = new_cost
                     from_map[nbr] = coord
                     heapq.heappush(heap, (new_cost, nbr))
+        return []
+
+    def _forced_exit_to_border(
+        self,
+        start: HexCoord,
+        hexes: dict[HexCoord, "Hex"],
+        ocean: set[HexCoord],
+        w: int,
+        h: int,
+    ) -> list[HexCoord]:
+        """Plain BFS over all hexes (land and ocean) to the nearest border or ocean-adjacent hex.
+
+        No elevation penalty, no avoid set — guaranteed to find a path on any finite connected grid.
+        Used only when both elevation-guided passes in _guided_path_to_ocean fail.
+        """
+        visited: set[HexCoord] = {start}
+        queue: deque[tuple[HexCoord, list[HexCoord]]] = deque([(start, [])])
+        while queue:
+            coord, path = queue.popleft()
+            q, r = coord
+            on_border = q == 0 or q == w - 1 or r == 0 or r == h - 1
+            ocean_adj = any(n in ocean for n in neighbors(coord))
+            if (on_border or ocean_adj) and coord != start:
+                return path
+            for nbr in neighbors(coord):
+                if nbr in hexes and nbr not in visited:
+                    visited.add(nbr)
+                    queue.append((nbr, path + [nbr]))
         return []

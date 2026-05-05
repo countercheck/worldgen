@@ -14,13 +14,15 @@ class ClimateStage(GeneratorStage):
 
     def _compute_temperature(self, state: WorldState) -> None:
         height = state.height
+        base = self.config.base_temperature
         lat_range = self.config.latitude_temp_range
         lapse = self.config.altitude_lapse_rate
 
         for (_, r), h in state.hexes.items():
             row_frac = r / max(height - 1, 1)
             lat_temp = math.sin(row_frac * math.pi)
-            temp = lat_temp * lat_range + (1.0 - lat_range) / 2.0
+            # (lat_temp - 0.5) centres the sine so base_temperature is the map mean
+            temp = base + (lat_temp - 0.5) * lat_range
             temp -= h.elevation * lapse
             h.temperature = max(0.0, min(1.0, temp))
 
