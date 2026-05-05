@@ -101,7 +101,9 @@ class RoadStage(GeneratorStage):
             s_cut = max(p_cut + 1, round(n_elig * (cfg.road_primary_pct + cfg.road_secondary_pct)))
             t_cut = max(
                 s_cut + 1,
-                round(n_elig * (cfg.road_primary_pct + cfg.road_secondary_pct + cfg.road_track_pct)),
+                round(
+                    n_elig * (cfg.road_primary_pct + cfg.road_secondary_pct + cfg.road_track_pct)
+                ),
             )
             for i, c in enumerate(eligible):
                 if i < p_cut:
@@ -115,7 +117,9 @@ class RoadStage(GeneratorStage):
         cities = [s for s in settlements if s.tier == SettlementTier.CITY]
         fallback_paths: list[list] = []
         if len(cities) > 1:
-            hex_tier, fallback_paths = self._guarantee_city_connectivity(hexes, cities, hex_tier, cfg)
+            hex_tier, fallback_paths = self._guarantee_city_connectivity(
+                hexes, cities, hex_tier, cfg
+            )
 
         # Build Road objects from canonical routes
         roads: list[Road] = []

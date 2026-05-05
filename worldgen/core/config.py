@@ -40,7 +40,8 @@ class WorldConfig:
 
     # Climate
     wind_direction: tuple[float, float] = (1.0, 0.0)
-    latitude_temp_range: float = 0.6
+    base_temperature: float = 0.5  # map's central temperature (0=arctic, 1=tropical)
+    latitude_temp_range: float = 0.1  # pole-to-equator spread (was 0.6; tiny at 1 hex=1 km)
     altitude_lapse_rate: float = 0.4
     orographic_strength: float = 2.0
 
