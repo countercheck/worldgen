@@ -4,7 +4,7 @@ from matplotlib import pyplot as plt
 
 from ..core.hex import Biome, SettlementTier, TerrainClass
 from ..core.hex_grid import axial_to_pixel
-from ..core.world_state import WorldState
+from ..core.world_state import RoadTier, WorldState
 
 TERRAIN_COLORS = {
     TerrainClass.OCEAN: (0.2, 0.4, 0.8),
@@ -36,6 +36,12 @@ def _get_color_terrain(h: WorldState) -> tuple[float, float, float]:
     return TERRAIN_COLORS[h.terrain_class]
 
 
+_ROAD_STYLE = {
+    RoadTier.PRIMARY: {"color": "#5c3d1e", "lw": 2.0, "zorder": 3},
+    RoadTier.SECONDARY: {"color": "#8b6914", "lw": 1.2, "zorder": 2},
+    RoadTier.TRACK: {"color": "#b8a070", "lw": 0.6, "zorder": 1},
+}
+
 _SETTLEMENT_STYLE = {
     SettlementTier.CITY: ("*", 14, "gold"),
     SettlementTier.TOWN: ("s", 8, "white"),
@@ -49,6 +55,7 @@ def render(state: WorldState, attribute: str, output_path: str, hex_size: float 
     ax.set_aspect("equal")
 
     settlement_overlay = False
+    road_overlay = False
 
     if attribute == "biome":
         get_color = _get_color_biome
@@ -82,6 +89,9 @@ def render(state: WorldState, attribute: str, output_path: str, hex_size: float 
     elif attribute == "settlements":
         get_color = _get_color_biome
         settlement_overlay = True
+    elif attribute == "roads":
+        get_color = _get_color_biome
+        road_overlay = True
     else:
         raise ValueError(f"Unknown attribute: {attribute}")
 
@@ -105,6 +115,20 @@ def render(state: WorldState, attribute: str, output_path: str, hex_size: float 
                 color=color,
                 markeredgecolor="black",
                 markeredgewidth=0.8,
+            )
+
+    if road_overlay:
+        for road in state.roads:
+            xs = [axial_to_pixel(coord, hex_size)[0] for coord in road.path]
+            ys = [axial_to_pixel(coord, hex_size)[1] for coord in road.path]
+            style = _ROAD_STYLE[road.tier]
+            ax.plot(
+                xs,
+                ys,
+                color=style["color"],
+                lw=style["lw"],
+                zorder=style["zorder"],
+                solid_capstyle="round",
             )
 
     ax.autoscale_view()
