@@ -73,7 +73,7 @@ class ClimateStage(GeneratorStage):
             fraction = min(1.0, lift * orographic)
             precip = incoming * fraction
             h.moisture = precip
-            atm[coord] = incoming - precip
+            atm[coord] = max(0.0, incoming - precip)
 
         # River-adjacency and coastal moisture bonuses
         for coord, h in state.hexes.items():
