@@ -61,10 +61,7 @@ def render(state: WorldState, attribute: str, output_path: str, hex_size: float 
         def get_color(h: WorldState):  # noqa: F811
             return cmap(h.temperature)
     elif attribute == "river_flow":
-        cmap = plt.cm.get_cmap("Blues")
-
-        def get_color(h: WorldState):  # noqa: F811
-            return cmap(min(h.river_flow * 3, 1.0))
+        get_color = _get_color_terrain
     elif attribute == "habitability":
         cmap = plt.cm.get_cmap("YlGn")
 
@@ -81,11 +78,38 @@ def render(state: WorldState, attribute: str, output_path: str, hex_size: float 
         polygon = patches.Polygon(vertices, facecolor=color, edgecolor="gray", linewidth=0.5)
         ax.add_patch(polygon)
 
+    if attribute == "river_flow":
+        _draw_rivers(ax, state, hex_size)
+
     ax.autoscale_view()
     ax.set_title(f"World Map — {attribute}")
     plt.tight_layout()
     plt.savefig(output_path, dpi=100, bbox_inches="tight")
     plt.close()
+
+
+def _draw_rivers(ax, state: WorldState, hex_size: float) -> None:
+    """Overlay river paths as lines scaled by flow volume."""
+    for river in state.rivers:
+        xs = []
+        ys = []
+        for coord in river.hexes:
+            if coord in state.hexes:
+                x, y = axial_to_pixel(coord, hex_size)
+                xs.append(x)
+                ys.append(y)
+        if len(xs) < 2:
+            continue
+        width = 0.5 + river.flow_volume * 4.0
+        ax.plot(
+            xs,
+            ys,
+            color=(0.1, 0.4, 0.8),
+            linewidth=width,
+            solid_capstyle="round",
+            solid_joinstyle="round",
+            zorder=2,
+        )
 
 
 def _hex_vertices(x: float, y: float, size: float) -> list[tuple[float, float]]:
