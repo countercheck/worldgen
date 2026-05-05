@@ -87,8 +87,10 @@ def astar(
     start: HexCoord,
     goal: HexCoord,
     cost_fn: Callable[[Hex], float],
+    edge_cost_fn: Callable[[Hex, Hex], float] | None = None,
 ) -> list[HexCoord] | None:
-    """A* pathfinding. cost_fn returns movement cost (inf = impassable)."""
+    """A* pathfinding. cost_fn returns node entry cost (inf = impassable).
+    edge_cost_fn(from_hex, to_hex) adds an optional per-edge cost (e.g. slope)."""
     if start not in grid or goal not in grid:
         return None
 
@@ -120,6 +122,9 @@ def astar(
             cost = cost_fn(grid[neighbor])
             if cost == float("inf"):
                 continue
+
+            if edge_cost_fn is not None:
+                cost += edge_cost_fn(grid[current], grid[neighbor])
 
             tentative_g = g_score[current] + cost
 
