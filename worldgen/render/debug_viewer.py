@@ -36,7 +36,7 @@ def _get_color_terrain(h: WorldState) -> tuple[float, float, float]:
     return TERRAIN_COLORS[h.terrain_class]
 
 
-def render(state: WorldState, attribute: str, output_path: str, hex_size: float = 20):
+def render(state: WorldState, attribute: str, output_path: str, hex_size: float = 60):
     """Render hex map colored by attribute."""
     fig, ax = plt.subplots(figsize=(14, 10))
     ax.set_aspect("equal")
@@ -61,10 +61,7 @@ def render(state: WorldState, attribute: str, output_path: str, hex_size: float 
         def get_color(h: WorldState):  # noqa: F811
             return cmap(h.temperature)
     elif attribute == "river_flow":
-        cmap = plt.cm.get_cmap("Blues")
-
-        def get_color(h: WorldState):  # noqa: F811
-            return cmap(min(h.river_flow * 3, 1.0))
+        get_color = _get_color_terrain
     elif attribute == "habitability":
         cmap = plt.cm.get_cmap("YlGn")
 
@@ -80,6 +77,21 @@ def render(state: WorldState, attribute: str, output_path: str, hex_size: float 
         vertices = _hex_vertices(x, y, hex_size)
         polygon = patches.Polygon(vertices, facecolor=color, edgecolor="gray", linewidth=0.5)
         ax.add_patch(polygon)
+
+    for river in state.rivers:
+        coords = [axial_to_pixel(c, hex_size) for c in river.hexes]
+        xs = [c[0] for c in coords]
+        ys = [c[1] for c in coords]
+        lw = 0.8 + river.flow_volume * 4.0
+        ax.plot(
+            xs,
+            ys,
+            color=(0.15, 0.35, 0.75),
+            linewidth=lw,
+            solid_capstyle="round",
+            solid_joinstyle="round",
+            zorder=2,
+        )
 
     ax.autoscale_view()
     ax.set_title(f"World Map — {attribute}")
