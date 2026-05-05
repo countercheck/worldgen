@@ -42,6 +42,14 @@ class WorldConfig:
     wind_direction: tuple[float, float] = (1.0, 0.0)
     latitude_temp_range: float = 0.6
     altitude_lapse_rate: float = 0.4
+    orographic_strength: float = 2.0
+
+    # Biome thresholds
+    biome_alpine_elev: float = 0.85
+    biome_cold_temp: float = 0.25
+    biome_warm_temp: float = 0.6
+    biome_dry_moist: float = 0.2
+    biome_wet_moist: float = 0.5
 
     # Settlements
     city_min_separation: int = 20

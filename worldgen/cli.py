@@ -30,6 +30,8 @@ def generate(seed: int, config: str, output_dir: str, width: int, height: int):
     if height:
         cfg.height = height
 
+    from .stages.biomes import BiomeStage
+    from .stages.climate import ClimateStage
     from .stages.elevation import ElevationStage
     from .stages.erosion import ErosionStage
     from .stages.hydrology import HydrologyStage
@@ -44,6 +46,8 @@ def generate(seed: int, config: str, output_dir: str, width: int, height: int):
         .add_stage(ErosionStage)
         .add_stage(TerrainClassificationStage)
         .add_stage(HydrologyStage)
+        .add_stage(ClimateStage)
+        .add_stage(BiomeStage)
     )
     state = pipeline.run()
 
@@ -55,6 +59,9 @@ def generate(seed: int, config: str, output_dir: str, width: int, height: int):
     render_debug(state, "elevation", str(output_path / "elevation.png"))
     render_debug(state, "terrain_class", str(output_path / "terrain_class.png"))
     render_debug(state, "river_flow", str(output_path / "river_flow.png"))
+    render_debug(state, "temperature", str(output_path / "temperature.png"))
+    render_debug(state, "moisture", str(output_path / "moisture.png"))
+    render_debug(state, "biome", str(output_path / "biome.png"))
 
     click.echo("✓ Done")
 
