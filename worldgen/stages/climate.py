@@ -70,9 +70,10 @@ class ClimateStage(GeneratorStage):
             incoming = sum(upwind_vals) / len(upwind_vals) if upwind_vals else 1.0
 
             lift = max(0.0, h.elevation - sea_level)
-            precip = incoming * lift * orographic
+            fraction = min(1.0, lift * orographic)
+            precip = incoming * fraction
             h.moisture = precip
-            atm[coord] = max(0.0, incoming - precip)
+            atm[coord] = incoming - precip
 
         # River-adjacency and coastal moisture bonuses
         for coord, h in state.hexes.items():
