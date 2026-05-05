@@ -40,11 +40,11 @@ def test_ocean_hexes_have_ocean_biome(biome_state):
 
 
 def test_alpine_hexes_assigned(biome_state):
-    cfg = WorldConfig()
+    alpine_elev = biome_state.metadata["config"]["biome_alpine_elev"]
     high_land = [
         h
         for h in biome_state.hexes.values()
-        if h.elevation > cfg.biome_alpine_elev and h.terrain_class != TerrainClass.OCEAN
+        if h.elevation > alpine_elev and h.terrain_class != TerrainClass.OCEAN
     ]
     for h in high_land:
         assert h.biome == Biome.ALPINE, (

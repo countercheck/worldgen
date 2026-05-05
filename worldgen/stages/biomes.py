@@ -17,7 +17,7 @@ class BiomeStage(GeneratorStage):
             elif h.elevation > alpine_elev:
                 h.biome = Biome.ALPINE
             elif h.temperature < cold_temp:
-                h.biome = Biome.TUNDRA if h.moisture < 0.33 else Biome.BOREAL
+                h.biome = Biome.TUNDRA if h.moisture < wet_moist else Biome.BOREAL
             elif h.temperature >= warm_temp:
                 if h.moisture < dry_moist:
                     h.biome = Biome.DESERT
