@@ -47,8 +47,10 @@ class HabitabilityStage(GeneratorStage):
             ):
                 score += 0.15
 
-            # Coastal access
-            if any(n.terrain_class == TerrainClass.COAST for n in nbrs):
+            # Coastal access (including the hex itself)
+            if hx.terrain_class == TerrainClass.COAST or any(
+                n.terrain_class == TerrainClass.COAST for n in nbrs
+            ):
                 score += 0.15
 
             # Confluence bonus: river junction hexes → historically where cities form

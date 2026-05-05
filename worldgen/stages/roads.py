@@ -99,18 +99,23 @@ class RoadStage(GeneratorStage):
         if n_elig > 0:
             p_cut = max(1, round(n_elig * cfg.road_primary_pct))
             s_cut = max(p_cut + 1, round(n_elig * (cfg.road_primary_pct + cfg.road_secondary_pct)))
+            t_cut = max(
+                s_cut + 1,
+                round(n_elig * (cfg.road_primary_pct + cfg.road_secondary_pct + cfg.road_track_pct)),
+            )
             for i, c in enumerate(eligible):
                 if i < p_cut:
                     hex_tier[c] = RoadTier.PRIMARY
                 elif i < s_cut:
                     hex_tier[c] = RoadTier.SECONDARY
-                else:
+                elif i < t_cut:
                     hex_tier[c] = RoadTier.TRACK
 
         # City connectivity guarantee
         cities = [s for s in settlements if s.tier == SettlementTier.CITY]
+        fallback_paths: list[list] = []
         if len(cities) > 1:
-            hex_tier = self._guarantee_city_connectivity(hexes, cities, hex_tier, cfg)
+            hex_tier, fallback_paths = self._guarantee_city_connectivity(hexes, cities, hex_tier, cfg)
 
         # Build Road objects from canonical routes
         roads: list[Road] = []
@@ -119,22 +124,30 @@ class RoadStage(GeneratorStage):
             if tier is not None:
                 roads.append(Road(path=path, tier=tier))
 
-        # Populate hex.road_connections from hex_tier
-        for c in hex_tier:
-            if c not in hexes:
-                continue
-            for n in neighbors(c):
-                if n in hex_tier and n in hexes:
-                    hexes[c].road_connections.add(n)
-                    hexes[n].road_connections.add(c)
+        # Add fallback roads for city connectivity (always PRIMARY)
+        for path in fallback_paths:
+            roads.append(Road(path=path, tier=RoadTier.PRIMARY))
 
-        # Ford / bridge tagging — sequential
+        # Populate hex.road_connections from actual road paths
         for road in roads:
-            for c in road.path:
+            for a, b in zip(road.path, road.path[1:], strict=False):
+                if a in hexes and b in hexes:
+                    hexes[a].road_connections.add(b)
+                    hexes[b].road_connections.add(a)
+
+        # Ford / bridge tagging — only where a road enters a river hex from a non-river hex
+        for road in roads:
+            path = road.path
+            for i, c in enumerate(path):
                 if c not in hexes:
                     continue
                 hx = hexes[c]
-                if hx.river_flow > 0:
+                if hx.river_flow == 0:
+                    continue
+                # Only tag the entry point of each river-crossing run
+                prev_c = path[i - 1] if i > 0 else None
+                prev_hx = hexes.get(prev_c) if prev_c is not None else None
+                if prev_hx is None or prev_hx.river_flow == 0:
                     if "ford" not in hx.tags:
                         hx.tags.add("ford")
                     else:
@@ -152,14 +165,25 @@ class RoadStage(GeneratorStage):
                 hx.habitability = min(1.0, hx.habitability + 0.2)
 
         # Promote villages near roads with high habitability
+        # Respect town_min_separation for promoted villages
+        town_coords_set = {s.coord for s in settlements if s.tier == SettlementTier.TOWN}
         for s in list(settlements):
             if s.tier != SettlementTier.VILLAGE:
                 continue
             hx = hexes[s.coord]
-            if hx.habitability > 0.8:
-                s.tier = SettlementTier.TOWN
-                s.role = self._assign_role_simple(s.coord, hx, hexes)
-                s.population = int(self.rng.integers(1_000, 10_001))
+            # Must be adjacent to a road hex (road adjacency re-score skips settled hexes)
+            if not any(n in road_hex_set for n in neighbors(s.coord)):
+                continue
+            if hx.habitability <= 0.8:
+                continue
+            # Enforce town minimum separation among towns (including already-promoted ones)
+            if not all(distance(s.coord, tc) >= cfg.town_min_separation for tc in town_coords_set):
+                continue
+            s.tier = SettlementTier.TOWN
+            s.role = self._assign_role_simple(s.coord, hx, hexes)
+            s.population = int(self.rng.integers(1_000, 10_001))
+            s.name = s.name.replace("_village_", "_town_")
+            town_coords_set.add(s.coord)
 
         state.roads = roads
         return state
@@ -201,7 +225,7 @@ class RoadStage(GeneratorStage):
             components.append(comp)
 
         if not components:
-            return hex_tier
+            return hex_tier, []
 
         # Largest component wins
         main = max(components, key=len)
@@ -213,40 +237,56 @@ class RoadStage(GeneratorStage):
         def slope_edge(from_hx, to_hx):
             return abs(to_hx.elevation - from_hx.elevation) * cfg.road_slope_cost
 
+        def path_total_cost(p):
+            """Compute total movement cost for a path using plain_cost + slope_edge."""
+            if not p:
+                return float("inf")
+            total = plain_cost(hexes[p[0]])
+            for i in range(1, len(p)):
+                total += plain_cost(hexes[p[i]])
+                total += slope_edge(hexes[p[i - 1]], hexes[p[i]])
+            return total
+
         # Connect isolated cities to main component
+        fallback_paths: list[list] = []
         max_iter = len(cities) * 2
         iterations = 0
         while iterations < max_iter:
             isolated = [s for s in cities if s.coord not in main]
             if not isolated:
                 break
-            # Find nearest main-component hex to each isolated city
+            # Find nearest main-component city by A* movement cost
             for iso in isolated:
                 best_path = None
-                best_len = float("inf")
-                # Try connecting to each city already in main
+                best_cost = float("inf")
                 for target_coord in main & city_coords:
                     p = astar(hexes, iso.coord, target_coord, plain_cost, slope_edge)
-                    if p and len(p) < best_len:
-                        best_path = p
-                        best_len = len(p)
+                    if p:
+                        cost = path_total_cost(p)
+                        if cost < best_cost:
+                            best_path = p
+                            best_cost = cost
                 if best_path:
                     for c in best_path:
                         if c not in hex_tier:
                             hex_tier[c] = RoadTier.PRIMARY
+                    fallback_paths.append(best_path)
                     # Expand main component
                     main |= bfs_component(iso.coord, set(hex_tier.keys()) | city_coords)
                     break
             iterations += 1
 
-        return hex_tier
+        return hex_tier, fallback_paths
 
     def _assign_role_simple(self, coord, hx, hexes):
         from ..core.hex import Biome, SettlementRole
 
         nbrs = [hexes[n] for n in neighbors(coord) if n in hexes]
-        if any(n.river_flow > 0.5 for n in nbrs) or any(
-            n.terrain_class == TerrainClass.COAST for n in nbrs
+        if (
+            hx.river_flow > 0.5
+            or hx.terrain_class == TerrainClass.COAST
+            or any(n.river_flow > 0.5 for n in nbrs)
+            or any(n.terrain_class == TerrainClass.COAST for n in nbrs)
         ):
             return SettlementRole.PORT
         mountain_nbrs = [n for n in nbrs if n.terrain_class == TerrainClass.MOUNTAIN]

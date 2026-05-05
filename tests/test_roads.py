@@ -77,14 +77,20 @@ def test_road_connections_symmetric(road_state):
             )
 
 
-def test_river_hexes_in_roads_tagged(road_state):
-    road_hexes = {c for road in road_state.roads for c in road.path}
-    for c in road_hexes:
-        hx = road_state.hexes[c]
-        if hx.river_flow > 0:
-            assert "ford" in hx.tags or "bridge" in hx.tags, (
-                f"River hex {c} on road not tagged ford/bridge"
-            )
+def test_river_crossing_hexes_tagged(road_state):
+    """Road hexes that enter a river from a non-river hex must be tagged ford/bridge."""
+    for road in road_state.roads:
+        path = road.path
+        for i, c in enumerate(path):
+            hx = road_state.hexes.get(c)
+            if hx is None or hx.river_flow == 0:
+                continue
+            prev_c = path[i - 1] if i > 0 else None
+            prev_hx = road_state.hexes.get(prev_c) if prev_c is not None else None
+            if prev_hx is None or prev_hx.river_flow == 0:
+                assert "ford" in hx.tags or "bridge" in hx.tags, (
+                    f"River crossing hex {c} on road not tagged ford/bridge"
+                )
 
 
 def test_valid_road_tiers(road_state):
