@@ -24,6 +24,19 @@ class ClimateStage(GeneratorStage):
             temp -= h.elevation * lapse
             h.temperature = max(0.0, min(1.0, temp))
 
+        # Smooth temperature so it varies gradually over space rather than
+        # jumping sharply between adjacent hexes that differ in elevation.
+        for _ in range(5):
+            smoothed = {}
+            for coord, h in state.hexes.items():
+                nbr_temps = [h.temperature]
+                for n in neighbors(coord):
+                    if n in state.hexes:
+                        nbr_temps.append(state.hexes[n].temperature)
+                smoothed[coord] = sum(nbr_temps) / len(nbr_temps)
+            for coord, t in smoothed.items():
+                state.hexes[coord].temperature = t
+
     def _compute_moisture(self, state: WorldState) -> None:
         wind = self.config.wind_direction
         wlen = math.hypot(wind[0], wind[1])
