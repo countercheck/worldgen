@@ -1,0 +1,260 @@
+from collections import defaultdict, deque
+
+from ..core.hex import Settlement, SettlementTier, TerrainClass
+from ..core.hex_grid import astar, distance, neighbors
+from ..core.pipeline import GeneratorStage
+from ..core.world_state import Road, RoadTier, WorldState
+
+_TIER_ORDER = [RoadTier.PRIMARY, RoadTier.SECONDARY, RoadTier.TRACK]
+
+
+def _terrain_base_cost(hx, cfg) -> float:
+    tc = hx.terrain_class
+    if tc == TerrainClass.OCEAN:
+        return float("inf")
+    if tc == TerrainClass.MOUNTAIN:
+        return cfg.road_mountain_cost
+    if tc == TerrainClass.HILL:
+        return cfg.road_hill_cost
+    return cfg.road_flat_cost
+
+
+class RoadStage(GeneratorStage):
+    def run(self, state: WorldState) -> WorldState:
+        hexes = state.hexes
+        cfg = self.config
+        settlements = state.settlements
+        if not settlements:
+            return state
+
+        hex_traffic: dict = defaultdict(float)
+        canonical_routes: dict = {}  # (origin, dest) -> path
+
+        # Node cost closure (reads live hex_traffic)
+        def node_cost(hx):
+            base = _terrain_base_cost(hx, cfg)
+            if base == float("inf"):
+                return base
+            if hx.river_flow > 0:
+                base = max(0.1, base - cfg.road_river_discount)
+            pheromone = cfg.road_pheromone_factor * hex_traffic[hx.coord]
+            return max(0.1, base - pheromone)
+
+        # Edge cost: slope penalty
+        def edge_cost(from_hx, to_hx):
+            return abs(to_hx.elevation - from_hx.elevation) * cfg.road_slope_cost
+
+        # Build traveller list
+        tier_counts = {
+            SettlementTier.CITY: cfg.road_travellers_city,
+            SettlementTier.TOWN: cfg.road_travellers_town,
+            SettlementTier.VILLAGE: cfg.road_travellers_village,
+        }
+        travellers = []
+        for s in settlements:
+            travellers.extend([s] * tier_counts[s.tier])
+        order = self.rng.permutation(len(travellers))
+
+        # Pre-compute populations as floats for gravity model
+        pop_arr = [float(s.population) for s in settlements]
+        coords_arr = [s.coord for s in settlements]
+        n_s = len(settlements)
+        s_index = {s.coord: i for i, s in enumerate(settlements)}
+
+        for idx in order:
+            origin_s: Settlement = travellers[idx]
+            oi = s_index[origin_s.coord]
+
+            # Gravity-weighted destination sampling
+            dists = [max(1, distance(origin_s.coord, c)) for c in coords_arr]
+            weights = [
+                pop_arr[j] / (dists[j] ** cfg.road_gravity_exponent) if j != oi else 0.0
+                for j in range(n_s)
+            ]
+            total_w = sum(weights)
+            if total_w == 0:
+                continue
+            probs = [w / total_w for w in weights]
+            di = int(self.rng.choice(n_s, p=probs))
+            dest_coord = coords_arr[di]
+
+            # Route
+            path = astar(hexes, origin_s.coord, dest_coord, node_cost, edge_cost)
+            if path is None or len(path) < 2:
+                continue
+
+            # Track canonical route (first traveller on each pair)
+            key = (min(origin_s.coord, dest_coord), max(origin_s.coord, dest_coord))
+            if key not in canonical_routes:
+                canonical_routes[key] = path
+
+            for c in path:
+                hex_traffic[c] += 1.0
+
+        # Threshold traffic into tiers
+        eligible = [c for c, t in hex_traffic.items() if t >= cfg.road_min_traffic]
+        eligible.sort(key=lambda c: hex_traffic[c], reverse=True)
+        n_elig = len(eligible)
+        hex_tier: dict = {}
+        if n_elig > 0:
+            p_cut = max(1, round(n_elig * cfg.road_primary_pct))
+            s_cut = max(p_cut + 1, round(n_elig * (cfg.road_primary_pct + cfg.road_secondary_pct)))
+            for i, c in enumerate(eligible):
+                if i < p_cut:
+                    hex_tier[c] = RoadTier.PRIMARY
+                elif i < s_cut:
+                    hex_tier[c] = RoadTier.SECONDARY
+                else:
+                    hex_tier[c] = RoadTier.TRACK
+
+        # City connectivity guarantee
+        cities = [s for s in settlements if s.tier == SettlementTier.CITY]
+        if len(cities) > 1:
+            hex_tier = self._guarantee_city_connectivity(hexes, cities, hex_tier, cfg)
+
+        # Build Road objects from canonical routes
+        roads: list[Road] = []
+        for path in canonical_routes.values():
+            tier = self._path_min_tier(path, hex_tier)
+            if tier is not None:
+                roads.append(Road(path=path, tier=tier))
+
+        # Populate hex.road_connections from hex_tier
+        for c in hex_tier:
+            if c not in hexes:
+                continue
+            for n in neighbors(c):
+                if n in hex_tier and n in hexes:
+                    hexes[c].road_connections.add(n)
+                    hexes[n].road_connections.add(c)
+
+        # Ford / bridge tagging — sequential
+        for road in roads:
+            for c in road.path:
+                if c not in hexes:
+                    continue
+                hx = hexes[c]
+                if hx.river_flow > 0:
+                    if "ford" not in hx.tags:
+                        hx.tags.add("ford")
+                    else:
+                        hx.tags.discard("ford")
+                        hx.tags.add("bridge")
+
+        # Habitability re-score for road adjacency
+        road_hex_set = set(hex_tier.keys())
+        for coord, hx in hexes.items():
+            if hx.settlement is not None:
+                continue
+            if hx.terrain_class == TerrainClass.OCEAN:
+                continue
+            if any(n in road_hex_set for n in neighbors(coord)):
+                hx.habitability = min(1.0, hx.habitability + 0.2)
+
+        # Promote villages near roads with high habitability
+        for s in list(settlements):
+            if s.tier != SettlementTier.VILLAGE:
+                continue
+            hx = hexes[s.coord]
+            if hx.habitability > 0.8:
+                s.tier = SettlementTier.TOWN
+                s.role = self._assign_role_simple(s.coord, hx, hexes)
+                s.population = int(self.rng.integers(1_000, 10_001))
+
+        state.roads = roads
+        return state
+
+    def _path_min_tier(self, path, hex_tier) -> RoadTier | None:
+        tiers = [hex_tier[c] for c in path if c in hex_tier]
+        if not tiers:
+            return None
+        # Return minimum quality (TRACK < SECONDARY < PRIMARY in quality order)
+        order = {RoadTier.PRIMARY: 0, RoadTier.SECONDARY: 1, RoadTier.TRACK: 2}
+        return max(tiers, key=lambda t: order[t])
+
+    def _guarantee_city_connectivity(self, hexes, cities, hex_tier, cfg):
+        """BFS over hex_tier to find isolated cities; connect with plain A*."""
+
+        # Build adjacency from hex_tier
+        def bfs_component(start, road_coords):
+            visited = {start}
+            queue = deque([start])
+            while queue:
+                c = queue.popleft()
+                for n in neighbors(c):
+                    if n in road_coords and n not in visited:
+                        visited.add(n)
+                        queue.append(n)
+            return visited
+
+        city_coords = {s.coord for s in cities}
+        road_coords = set(hex_tier.keys()) | city_coords
+
+        # Find largest connected component containing at least one city
+        visited_global: set = set()
+        components = []
+        for cc in city_coords:
+            if cc in visited_global:
+                continue
+            comp = bfs_component(cc, road_coords)
+            visited_global |= comp
+            components.append(comp)
+
+        if not components:
+            return hex_tier
+
+        # Largest component wins
+        main = max(components, key=len)
+
+        # Plain terrain cost for gap-filling
+        def plain_cost(hx):
+            return _terrain_base_cost(hx, cfg)
+
+        def slope_edge(from_hx, to_hx):
+            return abs(to_hx.elevation - from_hx.elevation) * cfg.road_slope_cost
+
+        # Connect isolated cities to main component
+        max_iter = len(cities) * 2
+        iterations = 0
+        while iterations < max_iter:
+            isolated = [s for s in cities if s.coord not in main]
+            if not isolated:
+                break
+            # Find nearest main-component hex to each isolated city
+            for iso in isolated:
+                best_path = None
+                best_len = float("inf")
+                # Try connecting to each city already in main
+                for target_coord in main & city_coords:
+                    p = astar(hexes, iso.coord, target_coord, plain_cost, slope_edge)
+                    if p and len(p) < best_len:
+                        best_path = p
+                        best_len = len(p)
+                if best_path:
+                    for c in best_path:
+                        if c not in hex_tier:
+                            hex_tier[c] = RoadTier.PRIMARY
+                    # Expand main component
+                    main |= bfs_component(iso.coord, set(hex_tier.keys()) | city_coords)
+                    break
+            iterations += 1
+
+        return hex_tier
+
+    def _assign_role_simple(self, coord, hx, hexes):
+        from ..core.hex import Biome, SettlementRole
+
+        nbrs = [hexes[n] for n in neighbors(coord) if n in hexes]
+        if any(n.river_flow > 0.5 for n in nbrs) or any(
+            n.terrain_class == TerrainClass.COAST for n in nbrs
+        ):
+            return SettlementRole.PORT
+        mountain_nbrs = [n for n in nbrs if n.terrain_class == TerrainClass.MOUNTAIN]
+        if mountain_nbrs:
+            if any(n.elevation > 0.70 for n in mountain_nbrs):
+                return SettlementRole.MINING
+            return SettlementRole.FORTRESS
+        fertile = sum(1 for n in nbrs if n.biome in (Biome.GRASSLAND, Biome.TEMPERATE_FOREST))
+        if fertile >= 3:
+            return SettlementRole.AGRICULTURAL
+        return SettlementRole.MARKET

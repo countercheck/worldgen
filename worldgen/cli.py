@@ -34,7 +34,10 @@ def generate(seed: int, config: str, output_dir: str, width: int, height: int):
     from .stages.climate import ClimateStage
     from .stages.elevation import ElevationStage
     from .stages.erosion import ErosionStage
+    from .stages.habitability import HabitabilityStage
     from .stages.hydrology import HydrologyStage
+    from .stages.roads import RoadStage
+    from .stages.settlements import SettlementStage
     from .stages.terrain_class import TerrainClassificationStage
 
     click.echo(f"Generating world with seed {seed}...")
@@ -48,6 +51,9 @@ def generate(seed: int, config: str, output_dir: str, width: int, height: int):
         .add_stage(HydrologyStage)
         .add_stage(ClimateStage)
         .add_stage(BiomeStage)
+        .add_stage(HabitabilityStage)
+        .add_stage(SettlementStage)
+        .add_stage(RoadStage)
     )
     state = pipeline.run()
 

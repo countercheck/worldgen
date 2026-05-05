@@ -116,7 +116,7 @@ def test_no_border_edge_creep(hydro_state):
         for i in range(len(river.hexes) - 1):
             a, b = river.hexes[i], river.hexes[i + 1]
             assert not (on_border(a) and on_border(b)), (
-                f"River has consecutive border hexes at positions {i} and {i+1}: {a} -> {b}"
+                f"River has consecutive border hexes at positions {i} and {i + 1}: {a} -> {b}"
             )
 
 

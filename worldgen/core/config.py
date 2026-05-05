@@ -57,11 +57,23 @@ class WorldConfig:
     target_city_count: int = 6
     target_town_count: int = 24
 
-    # Roads
+    # Roads — base terrain costs
     road_mountain_cost: float = 10.0
     road_hill_cost: float = 3.0
     road_flat_cost: float = 1.0
-    road_river_crossing_cost: float = 5.0
+
+    # Roads — traveller simulation
+    road_travellers_city: int = 500
+    road_travellers_town: int = 100
+    road_travellers_village: int = 20
+    road_gravity_exponent: float = 1.5
+    road_river_discount: float = 0.5
+    road_pheromone_factor: float = 0.1
+    road_slope_cost: float = 5.0
+    road_min_traffic: int = 3
+    road_primary_pct: float = 0.10
+    road_secondary_pct: float = 0.30
+    road_track_pct: float = 0.60
 
     @classmethod
     def from_json(cls, path: str) -> "WorldConfig":
