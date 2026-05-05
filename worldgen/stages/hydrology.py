@@ -388,10 +388,12 @@ class HydrologyStage(GeneratorStage):
             ocean_adj = any(n in ocean for n in neighbors(coord))
             if (on_border or ocean_adj) and coord != start:
                 path: list[HexCoord] = []
-                cur: HexCoord | None = coord
+                cur: HexCoord = coord
                 while cur != start:
-                    path.append(cur)  # type: ignore[arg-type]
-                    cur = came_from[cur]  # type: ignore[index]
+                    path.append(cur)
+                    parent = came_from[cur]
+                    assert parent is not None
+                    cur = parent
                 path.reverse()
                 return path
             for nbr in neighbors(coord):
