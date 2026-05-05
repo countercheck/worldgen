@@ -94,7 +94,9 @@ def test_flow_volume(hydro_state):
     for river in rivers:
         head = river.hexes[0]
         head_flow = hydro_state.hexes[head].river_flow if head in hydro_state.hexes else 0.0
-        assert river.flow_volume >= head_flow - 1e-9, (  # 1e-9 tolerance for floating-point arithmetic
+        assert (
+            river.flow_volume >= head_flow - 1e-9
+        ), (  # 1e-9 tolerance for floating-point arithmetic
             f"flow_volume {river.flow_volume:.6f} < headwater river_flow {head_flow:.6f}; "
             "flow_volume must represent mouth discharge, not headwater"
         )

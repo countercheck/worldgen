@@ -271,7 +271,9 @@ class HydrologyStage(GeneratorStage):
             on_border = mq == 0 or mq == w - 1 or mr == 0 or mr == h - 1
             reached_ocean = any(n in ocean for n in neighbors(mouth)) or mouth in ocean
             if not reached_ocean and not on_border:
-                extension = self._guided_path_to_ocean(mouth, filled, land, ocean, visited_path, w, h)
+                extension = self._guided_path_to_ocean(
+                    mouth, filled, land, ocean, visited_path, w, h
+                )
                 if extension:
                     # Carry the stalled mouth's accumulation through the fallback segment.
                     # Use max(natural_acc, mouth_acc) to avoid lowering the river_flow of
