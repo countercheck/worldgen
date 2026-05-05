@@ -377,18 +377,25 @@ class HydrologyStage(GeneratorStage):
 
         No elevation penalty, no avoid set — guaranteed to find a path on any finite connected grid.
         Used only when both elevation-guided passes in _guided_path_to_ocean fail.
+        Uses a parent-map to reconstruct the path, avoiding O(V·L) memory cost.
         """
-        visited: set[HexCoord] = {start}
-        queue: deque[tuple[HexCoord, list[HexCoord]]] = deque([(start, [])])
+        came_from: dict[HexCoord, HexCoord | None] = {start: None}
+        queue: deque[HexCoord] = deque([start])
         while queue:
-            coord, path = queue.popleft()
+            coord = queue.popleft()
             q, r = coord
             on_border = q == 0 or q == w - 1 or r == 0 or r == h - 1
             ocean_adj = any(n in ocean for n in neighbors(coord))
             if (on_border or ocean_adj) and coord != start:
+                path: list[HexCoord] = []
+                cur: HexCoord | None = coord
+                while cur != start:
+                    path.append(cur)  # type: ignore[arg-type]
+                    cur = came_from[cur]  # type: ignore[index]
+                path.reverse()
                 return path
             for nbr in neighbors(coord):
-                if nbr in hexes and nbr not in visited:
-                    visited.add(nbr)
-                    queue.append((nbr, path + [nbr]))
+                if nbr in hexes and nbr not in came_from:
+                    came_from[nbr] = coord
+                    queue.append(nbr)
         return []

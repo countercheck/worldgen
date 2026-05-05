@@ -37,6 +37,14 @@ class WorldConfig:
             raise ValueError(
                 f"river_flow_threshold must be in [0, 1], got {self.river_flow_threshold}"
             )
+        if not (0.0 <= self.base_temperature <= 1.0):
+            raise ValueError(
+                f"base_temperature must be in [0, 1], got {self.base_temperature}"
+            )
+        if not (0.0 <= self.latitude_temp_range <= 1.0):
+            raise ValueError(
+                f"latitude_temp_range must be in [0, 1], got {self.latitude_temp_range}"
+            )
 
     # Climate
     wind_direction: tuple[float, float] = (1.0, 0.0)

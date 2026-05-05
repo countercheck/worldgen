@@ -21,8 +21,9 @@ class ClimateStage(GeneratorStage):
         for (_, r), h in state.hexes.items():
             row_frac = r / max(height - 1, 1)
             lat_temp = math.sin(row_frac * math.pi)
-            # (lat_temp - 0.5) centres the sine so base_temperature is the map mean
-            temp = base + (lat_temp - 0.5) * lat_range
+            # Subtract the mean of sin over [0, π] (= 2/π ≈ 0.637) so that
+            # base_temperature is the true map mean temperature.
+            temp = base + (lat_temp - 2.0 / math.pi) * lat_range
             temp -= h.elevation * lapse
             h.temperature = max(0.0, min(1.0, temp))
 
