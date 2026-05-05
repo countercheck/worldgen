@@ -119,8 +119,11 @@ def render(state: WorldState, attribute: str, output_path: str, hex_size: float 
 
     if road_overlay:
         for road in state.roads:
-            xs = [axial_to_pixel(coord, hex_size)[0] for coord in road.path]
-            ys = [axial_to_pixel(coord, hex_size)[1] for coord in road.path]
+            pixel_coords = [axial_to_pixel(coord, hex_size) for coord in road.path]
+            if pixel_coords:
+                xs, ys = map(list, zip(*pixel_coords))
+            else:
+                xs, ys = [], []
             style = _ROAD_STYLE[road.tier]
             ax.plot(
                 xs,
