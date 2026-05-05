@@ -102,6 +102,24 @@ def test_flow_volume(hydro_state):
         )
 
 
+def test_no_border_edge_creep(hydro_state):
+    # Rivers must not "creep" along the map edge: no river path should contain two
+    # consecutive hexes that are both on the grid border.  This validates that the
+    # border-land -> border-land flow termination in _flow_direction works correctly.
+    w, h = hydro_state.width, hydro_state.height
+
+    def on_border(coord):
+        q, r = coord
+        return q == 0 or q == w - 1 or r == 0 or r == h - 1
+
+    for river in hydro_state.rivers:
+        for i in range(len(river.hexes) - 1):
+            a, b = river.hexes[i], river.hexes[i + 1]
+            assert not (on_border(a) and on_border(b)), (
+                f"River has consecutive border hexes at positions {i} and {i+1}: {a} -> {b}"
+            )
+
+
 def test_reproducibility():
     s1 = _build_pipeline(seed=7).run()
     s2 = _build_pipeline(seed=7).run()
