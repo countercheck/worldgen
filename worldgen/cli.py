@@ -70,6 +70,7 @@ def generate(seed: int, config: str, output_dir: str, width: int, height: int):
     render_debug(state, "biome", str(output_path / "biome.png"))
     render_debug(state, "habitability", str(output_path / "habitability.png"))
     render_debug(state, "settlements", str(output_path / "settlements.png"))
+    render_debug(state, "roads", str(output_path / "roads.png"))
 
     click.echo("✓ Done")
 
