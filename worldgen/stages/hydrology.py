@@ -506,7 +506,7 @@ class HydrologyStage(GeneratorStage):
 
         # Sort seeds for deterministic processing order regardless of set hash randomization
         for seed in sorted(lakes):
-            if seed in processed or seed not in lakes:
+            if seed in processed:
                 continue
 
             # Derive the current connected component from the live lakes set
