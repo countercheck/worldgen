@@ -40,7 +40,7 @@ class HydrologyStage(GeneratorStage):
             ) / (w + h)
 
         # B — Flow direction (steepest descent on filled surface)
-        flow_dir = self._flow_direction(filled, land, ocean, lakes, w, h)
+        flow_dir = self._flow_direction(filled, land, ocean, lakes, elev, w, h)
 
         # C — Flow accumulation (topological sort)
         acc = self._flow_accumulation(flow_dir, land)
@@ -83,6 +83,12 @@ class HydrologyStage(GeneratorStage):
             for coord in river_set:
                 hexes[coord].river_flow = acc.get(coord, 0.0) / max_acc
             self._tag_hexes(river_set, flow_dir, hexes, ocean, lakes, w, h)
+            # Recompute flow_volume for all rivers now that max_acc is final;
+            # _ensure_lake_drainage may remove land hexes from acc (submerged into lake)
+            # which can change max_acc, making pre-drainage flow_volume values stale.
+            for river in state.rivers:
+                last_land = next((c for c in reversed(river.hexes) if c in acc), river.hexes[0])
+                river.flow_volume = acc.get(last_land, 0.0) / max_acc
 
         return state
 
@@ -154,6 +160,7 @@ class HydrologyStage(GeneratorStage):
         land: set[HexCoord],
         ocean: set[HexCoord],
         lakes: set[HexCoord],
+        elev: dict[HexCoord, float],
         w: int,
         h: int,
     ) -> dict[HexCoord, HexCoord | None]:
@@ -161,7 +168,13 @@ class HydrologyStage(GeneratorStage):
 
         The caller adds an epsilon tilt before calling, so all filled elevations
         are unique — no tie-breaking needed, and the result is cycle-free.
+
+        Priority-Flood does not seed lake hexes, so their filled elevation may be
+        raised by the algorithm.  To guarantee that land hexes adjacent to lakes
+        still drain into them, we use the raw (pre-flood) elevation for ocean and
+        lake neighbors when computing steepest descent.
         """
+        water = ocean | lakes
         flow_dir: dict[HexCoord, HexCoord | None] = {}
         for coord in land:
             best_coord: HexCoord | None = None
@@ -169,7 +182,9 @@ class HydrologyStage(GeneratorStage):
             for nbr in neighbors(coord):
                 if nbr not in filled:
                     continue
-                nbr_e = filled[nbr]
+                # Use raw elevation for water hexes so PF-raised lake/ocean values
+                # never appear higher than the actual landscape.
+                nbr_e = elev[nbr] if nbr in water else filled[nbr]
                 if nbr_e < best_elev:
                     best_elev = nbr_e
                     best_coord = nbr
@@ -543,38 +558,52 @@ class HydrologyStage(GeneratorStage):
             if outflow_exists:
                 continue
 
-            # Try spillways in elevation order; Dijkstra prefers valleys
+            # Try spillways in elevation order; Dijkstra prefers valleys.
+            # Use an empty lake set so drainage terminates only at ocean/border —
+            # stopping at another lake adjacency would create trivial cyclic routes.
             extension: list[HexCoord] = []
             spillway: HexCoord | None = None
             for candidate in border_land:
                 extension = self._guided_path_to_ocean(
-                    candidate, filled, land, ocean, lakes, set(), w, h
+                    candidate, filled, land, ocean, frozenset(), set(), w, h
                 )
                 if extension:
                     spillway = candidate
                     break
 
-            # Guaranteed fallback: plain BFS
+            # Guaranteed fallback: plain BFS (only border/ocean as terminals)
             if not extension:
                 spillway = border_land[0]
-                extension = self._forced_exit_to_border(spillway, hexes, ocean, lakes, w, h)
+                extension = self._forced_exit_to_border(spillway, hexes, ocean, frozenset(), w, h)
 
             if not extension or spillway is None:
                 continue
 
-            path = [spillway] + extension
-            mouth_acc = acc.get(spillway, 1.0)
+            # Build the actual drainage path, stopping when we merge into an
+            # existing river (to avoid raising that river's acc beyond its
+            # natural downstream value, which would violate the flow-accumulation
+            # monotonicity invariant).
+            actual_path: list[HexCoord] = [spillway]
             prev = spillway
+            prev_acc = max(acc.get(spillway, 0.0), 1.0)  # starting acc for propagation
             for coord in extension:
-                if coord in land:
-                    flow_dir[prev] = coord
-                    river_set.add(coord)
-                    acc[coord] = max(acc.get(coord, 0.0), mouth_acc)
-                    prev = coord
+                if coord not in land:
+                    continue
+                flow_dir[prev] = coord
+                actual_path.append(coord)
+                if coord in river_set:
+                    # Merged into existing river network — acc already correct here.
+                    break
+                # New drainage hex: propagate acc non-decreasingly from previous.
+                new_acc_val = max(acc.get(coord, 0.0), prev_acc)
+                acc[coord] = new_acc_val
+                prev_acc = new_acc_val
+                river_set.add(coord)
+                prev = coord
             river_set.add(spillway)
             acc[spillway] = max(acc.get(spillway, 0.0), 1.0)
-            last_land = next((c for c in reversed(path) if c in acc), spillway)
-            new_rivers.append(River(hexes=path, flow_volume=acc[last_land] / max_acc))
+            last_land = next((c for c in reversed(actual_path) if c in acc), spillway)
+            new_rivers.append(River(hexes=actual_path, flow_volume=acc[last_land] / max_acc))
 
         return new_rivers
 
