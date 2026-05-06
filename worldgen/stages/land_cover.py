@@ -31,7 +31,11 @@ def _derive(h, wet_moist: float) -> LandCover:
         return LandCover.MARSH if tc == TerrainClass.COAST else LandCover.BOG
     if b == Biome.BOREAL:
         return LandCover.DENSE_FOREST
-    if b == Biome.TEMPERATE_FOREST and h.moisture > wet_moist:
+    # Split TEMPERATE_FOREST into dense (very wet) vs woodland (moderately wet).
+    # All TEMPERATE_FOREST hexes have moisture >= wet_moist, so we need a higher
+    # threshold here to ensure both cover types actually appear.
+    dense_thresh = (wet_moist + 1.0) / 2.0
+    if b == Biome.TEMPERATE_FOREST and h.moisture > dense_thresh:
         return LandCover.DENSE_FOREST
     if b in (Biome.TEMPERATE_FOREST, Biome.TROPICAL):
         return LandCover.WOODLAND

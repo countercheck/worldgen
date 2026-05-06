@@ -33,10 +33,11 @@ class BiomeStage(GeneratorStage):
                 else:
                     h.biome = Biome.TEMPERATE_FOREST
 
-        # Assign WETLAND to flat river hexes with very high moisture (below alpine elevation)
+        # Assign WETLAND to flat or coastal river hexes with very high moisture (below alpine
+        # elevation).  FLAT → BOG, COAST → MARSH in LandCoverStage.
         for h in state.hexes.values():
             if (
-                h.terrain_class == TerrainClass.FLAT
+                h.terrain_class in (TerrainClass.FLAT, TerrainClass.COAST)
                 and h.moisture > wet_moist
                 and h.river_flow > 0
                 and h.elevation <= alpine_elev
