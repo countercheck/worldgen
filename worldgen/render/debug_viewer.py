@@ -121,7 +121,7 @@ def render(state: WorldState, attribute: str, output_path: str, hex_size: float 
         for road in state.roads:
             pixel_coords = [axial_to_pixel(coord, hex_size) for coord in road.path]
             if pixel_coords:
-                xs, ys = map(list, zip(*pixel_coords))
+                xs, ys = map(list, zip(*pixel_coords, strict=False))
             else:
                 xs, ys = [], []
             style = _ROAD_STYLE[road.tier]

@@ -78,14 +78,22 @@ class RoadStage(GeneratorStage):
             di = int(self.rng.choice(n_s, p=probs))
             dest_coord = coords_arr[di]
 
-            # Route
-            path = astar(hexes, origin_s.coord, dest_coord, node_cost, edge_cost)
-            if path is None or len(path) < 2:
-                continue
-
-            # Track canonical route (first traveller on each pair)
+            # Route — check cache before running A* (most travellers repeat popular pairs)
             key = (min(origin_s.coord, dest_coord), max(origin_s.coord, dest_coord))
-            if key not in canonical_routes:
+            if key in canonical_routes:
+                path = canonical_routes[key]
+            else:
+                path = self._stitch_via_junction(
+                    origin_s.coord,
+                    dest_coord,
+                    coords_arr,
+                    canonical_routes,
+                    hexes,
+                    node_cost,
+                    edge_cost,
+                )
+                if path is None or len(path) < 2:
+                    continue
                 canonical_routes[key] = path
 
             for c in path:
@@ -191,6 +199,65 @@ class RoadStage(GeneratorStage):
 
         state.roads = roads
         return state
+
+    def _stitch_via_junction(
+        self,
+        origin: tuple,
+        dest: tuple,
+        settlement_coords: list,
+        canonical_routes: dict,
+        hexes: dict,
+        node_cost,
+        edge_cost,
+    ) -> list | None:
+        """Try to stitch origin→dest via an intermediate settlement junction.
+
+        If canonical routes exist for both (origin, mid) and (mid, dest),
+        concatenate them instead of running a full A* from origin to dest.
+        Falls back to A* when no suitable junction is found.
+        """
+        best_path = None
+        best_len = float("inf")
+
+        for mid in settlement_coords:
+            if mid in (origin, dest):
+                continue
+            k1 = (min(origin, mid), max(origin, mid))
+            k2 = (min(mid, dest), max(mid, dest))
+            if k1 not in canonical_routes or k2 not in canonical_routes:
+                continue
+
+            seg1 = canonical_routes[k1]
+            seg2 = canonical_routes[k2]
+
+            # Orient seg1 so it ends at mid
+            if seg1[-1] == mid:
+                s1 = seg1
+            elif seg1[0] == mid:
+                s1 = list(reversed(seg1))
+            else:
+                continue
+
+            # Orient seg2 so it starts at mid
+            if seg2[0] == mid:
+                s2 = seg2
+            elif seg2[-1] == mid:
+                s2 = list(reversed(seg2))
+            else:
+                continue
+
+            if s1[0] != origin or s2[-1] != dest:
+                continue
+
+            stitched = s1 + s2[1:]
+            if len(stitched) < best_len:
+                best_path = stitched
+                best_len = len(stitched)
+
+        if best_path is not None:
+            return best_path
+
+        return astar(hexes, origin, dest, node_cost, edge_cost)
 
     def _path_min_tier(self, path, hex_tier) -> RoadTier | None:
         tiers = [hex_tier[c] for c in path if c in hex_tier]

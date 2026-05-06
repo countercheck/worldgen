@@ -101,16 +101,13 @@ def test_reproducibility():
 
 
 def _mean_land_temperature(state) -> float:
-    temps = [
-        h.temperature
-        for h in state.hexes.values()
-        if h.terrain_class != TerrainClass.OCEAN
-    ]
+    temps = [h.temperature for h in state.hexes.values() if h.terrain_class != TerrainClass.OCEAN]
     return sum(temps) / len(temps) if temps else 0.0
 
 
 def test_base_temperature_shifts_mean_upward():
     """Higher base_temperature should produce a higher mean land temperature."""
+
     def run_with_base(base: float):
         cfg = WorldConfig(width=32, height=32, erosion_iterations=500, base_temperature=base)
         p = GeneratorPipeline(42, cfg)
@@ -159,15 +156,12 @@ def test_base_temperature_preserves_latitude_shape():
         equatorial_temps = [
             h.temperature
             for (_, r), h in state.hexes.items()
-            if h.terrain_class != TerrainClass.OCEAN
-            and height * 0.4 < r < height * 0.6
+            if h.terrain_class != TerrainClass.OCEAN and height * 0.4 < r < height * 0.6
         ]
         if polar_temps and equatorial_temps:
             assert sum(equatorial_temps) / len(equatorial_temps) > sum(polar_temps) / len(
                 polar_temps
-            ), (
-                f"With base_temperature={base}, equatorial hexes are not warmer than polar hexes"
-            )
+            ), f"With base_temperature={base}, equatorial hexes are not warmer than polar hexes"
 
 
 def test_base_temperature_validation():

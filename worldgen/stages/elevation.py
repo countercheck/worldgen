@@ -1,22 +1,8 @@
-import math
-
 import numpy as np
 from opensimplex import OpenSimplex
 
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
-
-
-def _fbm(
-    gen: OpenSimplex, x: float, y: float, octaves: int, persistence: float, lacunarity: float
-) -> float:
-    value, amplitude, frequency, max_val = 0.0, 1.0, 1.0, 0.0
-    for _ in range(octaves):
-        value += gen.noise2(x * frequency, y * frequency) * amplitude
-        max_val += amplitude
-        amplitude *= persistence
-        frequency *= lacunarity
-    return value / max_val
 
 
 class ElevationStage(GeneratorStage):
@@ -29,31 +15,39 @@ class ElevationStage(GeneratorStage):
         gen = OpenSimplex(seed_a)
         warp_gen = OpenSimplex(seed_b)
 
-        arr = np.zeros((w, h))
+        # Base coordinate axes
+        q_1d = np.arange(w) / w * cfg.noise_scale  # (w,)
+        r_1d = np.arange(h) / h * cfg.noise_scale  # (h,)
 
-        for q in range(w):
-            for r in range(h):
-                nx = q / w * cfg.noise_scale
-                ny = r / h * cfg.noise_scale
+        # Domain warp: batch evaluate on the cartesian grid (2 calls instead of 2*w*h)
+        warp_x = warp_gen.noise2array(q_1d, r_1d).T * cfg.domain_warp_strength  # (w, h)
+        warp_y = warp_gen.noise2array(q_1d + 100.0, r_1d + 100.0).T * cfg.domain_warp_strength
 
-                warp_x = warp_gen.noise2(nx, ny) * cfg.domain_warp_strength
-                warp_y = warp_gen.noise2(nx + 100.0, ny + 100.0) * cfg.domain_warp_strength
+        # Warped coordinates as flat arrays for single-loop FBM
+        nx_flat = (q_1d[:, np.newaxis] + warp_x).ravel()  # (w*h,)
+        ny_flat = (r_1d[np.newaxis, :] + warp_y).ravel()
 
-                value = _fbm(
-                    gen,
-                    nx + warp_x,
-                    ny + warp_y,
-                    cfg.noise_octaves,
-                    cfg.noise_persistence,
-                    cfg.noise_lacunarity,
-                )
+        # FBM accumulation via single flat loop (avoids Python double-loop overhead)
+        octaves = cfg.noise_octaves
+        amps = np.array([cfg.noise_persistence**i for i in range(octaves)])
+        freqs = np.array([cfg.noise_lacunarity**i for i in range(octaves)])
+        max_val = float(amps.sum())
 
-                if cfg.continent_falloff:
-                    dist = math.sqrt(((q / w - 0.5) * 2) ** 2 + ((r / h - 0.5) * 2) ** 2)
-                    falloff = max(0.0, 1.0 - dist)
-                    value *= falloff
+        noise2 = gen.noise2
+        result = np.empty(w * h)
+        for i in range(w * h):
+            nx, ny = nx_flat[i], ny_flat[i]
+            v = 0.0
+            for j in range(octaves):
+                v += noise2(nx * freqs[j], ny * freqs[j]) * amps[j]
+            result[i] = v / max_val
+        arr = result.reshape(w, h)
 
-                arr[q, r] = value
+        if cfg.continent_falloff:
+            qf = (np.arange(w)[:, np.newaxis] / w - 0.5) * 2
+            rf = (np.arange(h)[np.newaxis, :] / h - 0.5) * 2
+            dist = np.sqrt(qf**2 + rf**2)
+            arr *= np.maximum(0.0, 1.0 - dist)
 
         lo, hi = arr.min(), arr.max()
         if hi > lo:
