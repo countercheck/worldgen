@@ -112,3 +112,32 @@ def test_layer_toggle_terrain_only():
     config = PNGConfig(layers={"terrain"})
     img = render(ws, config)
     assert isinstance(img, Image.Image)
+
+
+def test_contours_layer_renders():
+    ws = WorldState.empty(seed=1, width=4, height=4)
+    coords = list(ws.hexes.keys())
+    ws.hexes[coords[0]].elevation = 0.0
+    ws.hexes[coords[1]].elevation = 0.5
+    config = PNGConfig(layers={"terrain", "contours"})
+    img = render(ws, config)
+    assert isinstance(img, Image.Image)
+    assert img.width > 0
+
+
+def test_topographic_style_includes_contours():
+    ws = _small_world()
+    config = PNGConfig(style="topographic")
+    img = render(ws, config)
+    assert isinstance(img, Image.Image)
+    assert img.mode == "RGB"
+
+
+def test_contours_flat_world_no_lines():
+    ws = WorldState.empty(seed=1, width=4, height=4)
+    for h in ws.hexes.values():
+        h.elevation = 0.5
+    # Flat world renders without error; contour layer runs but draws nothing.
+    config = PNGConfig(layers={"terrain", "contours"})
+    img = render(ws, config)
+    assert isinstance(img, Image.Image)

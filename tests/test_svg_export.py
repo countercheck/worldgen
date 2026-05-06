@@ -137,3 +137,52 @@ def test_all_settlement_tiers_rendered():
     assert "gold" in svg  # city star
     assert "<rect" in svg  # town square
     assert "<circle" in svg  # village circle
+
+
+def test_contours_layer_produces_lines():
+    ws = WorldState.empty(seed=1, width=4, height=4)
+    # Set up a steep elevation gradient between two adjacent hexes.
+    coords = list(ws.hexes.keys())
+    ws.hexes[coords[0]].elevation = 0.0
+    ws.hexes[coords[1]].elevation = 0.5  # 1500 m diff at scale 3000
+    config = SVGConfig(layers={"contours"})
+    svg = render(ws, config)
+    assert 'id="layer-contours"' in svg
+    assert "<line" in svg
+
+
+def test_contours_below_threshold_omitted():
+    ws = WorldState.empty(seed=1, width=4, height=4)
+    # All hexes at same elevation → no contour lines drawn.
+    for h in ws.hexes.values():
+        h.elevation = 0.5
+    config = SVGConfig(layers={"contours"})
+    svg = render(ws, config)
+    assert 'id="layer-contours"' in svg
+    assert "<line" not in svg
+
+
+def test_topographic_style_includes_contours():
+    ws = _small_world()
+    config = SVGConfig(style="topographic")
+    svg = render(ws, config)
+    assert 'id="layer-contours"' in svg
+
+
+def test_contour_stroke_scales_with_elevation_diff():
+    ws = WorldState.empty(seed=1, width=4, height=4)
+    coords = sorted(ws.hexes.keys())
+    # Pair A: small diff (just above threshold at scale 3000 → ~0.005 = 15 m)
+    ws.hexes[coords[0]].elevation = 0.5
+    ws.hexes[coords[1]].elevation = 0.505
+    # Pair B: large diff (near max → ~0.1 = 300 m)
+    ws.hexes[coords[2]].elevation = 0.0
+    ws.hexes[coords[3]].elevation = 0.1
+    config = SVGConfig(layers={"contours"})
+    svg = render(ws, config)
+    # Extract all stroke-width values from contour lines.
+    import re
+
+    widths = [float(m) for m in re.findall(r'stroke-width="([\d.]+)"', svg)]
+    assert len(widths) >= 2
+    assert min(widths) < max(widths)  # thicker for larger elevation diff
