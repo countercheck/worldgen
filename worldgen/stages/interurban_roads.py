@@ -118,7 +118,7 @@ class InterurbanRoadStage(GeneratorStage):
         fallback_paths: list[list] = []
         if len(cities) > 1:
             hex_tier, fallback_paths = self._guarantee_city_connectivity(
-                hexes, cities, hex_tier, cfg
+                hexes, cities, hex_tier, canonical_routes, cfg
             )
 
         roads: list[Road] = []
@@ -196,26 +196,35 @@ class InterurbanRoadStage(GeneratorStage):
         order = {RoadTier.PRIMARY: 0, RoadTier.SECONDARY: 1, RoadTier.TRACK: 2}
         return max(tiers, key=lambda t: order[t])
 
-    def _guarantee_city_connectivity(self, hexes, cities, hex_tier, cfg):
-        def bfs_component(start, road_coords):
+    def _guarantee_city_connectivity(self, hexes, cities, hex_tier, canonical_routes, cfg):
+        # Build road adjacency from actual road path edges (not hex-neighbour proximity).
+        # Only include paths that contribute a tier (i.e. pass the traffic threshold).
+        road_adj: dict = defaultdict(set)
+        for path in canonical_routes.values():
+            if self._path_min_tier(path, hex_tier) is not None:
+                for a, b in zip(path, path[1:], strict=False):
+                    road_adj[a].add(b)
+                    road_adj[b].add(a)
+
+        city_coords = {s.coord for s in cities}
+
+        def bfs_component(start):
             visited = {start}
             queue = deque([start])
             while queue:
                 c = queue.popleft()
-                for n in neighbors(c):
-                    if n in road_coords and n not in visited:
+                for n in road_adj.get(c, set()):
+                    if n not in visited:
                         visited.add(n)
                         queue.append(n)
             return visited
 
-        city_coords = {s.coord for s in cities}
-        road_coords = set(hex_tier.keys()) | city_coords
         visited_global: set = set()
         components = []
         for cc in city_coords:
             if cc in visited_global:
                 continue
-            comp = bfs_component(cc, road_coords)
+            comp = bfs_component(cc)
             visited_global |= comp
             components.append(comp)
         if not components:
@@ -254,11 +263,15 @@ class InterurbanRoadStage(GeneratorStage):
                             best_path = p
                             best_cost = cost
                 if best_path:
+                    # Update road adjacency so the next BFS sees the new edges.
+                    for a, b in zip(best_path, best_path[1:], strict=False):
+                        road_adj[a].add(b)
+                        road_adj[b].add(a)
                     for c in best_path:
                         if c not in hex_tier:
                             hex_tier[c] = RoadTier.PRIMARY
                     fallback_paths.append(best_path)
-                    main |= bfs_component(iso.coord, set(hex_tier.keys()) | city_coords)
+                    main |= bfs_component(iso.coord)
                     break
 
         return hex_tier, fallback_paths

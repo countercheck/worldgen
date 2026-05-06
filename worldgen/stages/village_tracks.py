@@ -53,12 +53,16 @@ class VillageTrackStage(GeneratorStage):
             if not targets:
                 break
 
-            # Find nearest target by hex distance heuristic, then A*
-            nearest = min(
+            # Sort targets by coordinate-distance heuristic; try each until one is reachable.
+            sorted_targets = sorted(
                 targets,
                 key=lambda t: abs(t[0] - village.coord[0]) + abs(t[1] - village.coord[1]),
             )
-            path = astar(hexes, village.coord, nearest, node_cost, edge_cost)
+            path = None
+            for candidate in sorted_targets:
+                path = astar(hexes, village.coord, candidate, node_cost, edge_cost)
+                if path and len(path) >= 2:
+                    break
             if path and len(path) >= 2:
                 new_roads.append(Road(path=path, tier=RoadTier.TRACK))
                 for a, b in zip(path, path[1:], strict=False):

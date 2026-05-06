@@ -50,11 +50,12 @@ def test_mountain_terrain_is_bare_rock(lc_state):
 
 
 def test_wetland_biome_is_bog_or_marsh(lc_state):
-    for h in lc_state.hexes.values():
-        if h.biome == Biome.WETLAND:
-            assert h.land_cover in (LandCover.BOG, LandCover.MARSH), (
-                f"WETLAND hex has land_cover {h.land_cover}"
-            )
+    wetland_hexes = [h for h in lc_state.hexes.values() if h.biome == Biome.WETLAND]
+    assert wetland_hexes, "No WETLAND biome hexes found — wetland assignment may be broken"
+    for h in wetland_hexes:
+        assert h.land_cover in (LandCover.BOG, LandCover.MARSH), (
+            f"WETLAND hex has land_cover {h.land_cover}"
+        )
 
 
 def test_boreal_biome_is_dense_forest(lc_state):
@@ -68,8 +69,15 @@ def test_boreal_biome_is_dense_forest(lc_state):
 
 def test_woodland_and_dense_forest_both_present(lc_state):
     covers = {h.land_cover for h in lc_state.hexes.values()}
-    assert LandCover.DENSE_FOREST in covers or LandCover.WOODLAND in covers, (
-        "No forested land cover found"
+    assert LandCover.DENSE_FOREST in covers and LandCover.WOODLAND in covers, (
+        "Both DENSE_FOREST and WOODLAND must be present"
+    )
+
+
+def test_marsh_land_cover_present(lc_state):
+    covers = {h.land_cover for h in lc_state.hexes.values()}
+    assert LandCover.MARSH in covers, (
+        "MARSH land cover never assigned — coastal wetland biome logic may be broken"
     )
 
 

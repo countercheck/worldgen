@@ -123,6 +123,24 @@ def test_village_separation(cult_state):
             assert d >= 3, f"Villages {a.name} and {b.name} too close: {d} < 3"
 
 
+def test_villages_have_track_connection(cult_state):
+    """Every village must be an endpoint of a TRACK road connecting it to the road network."""
+    from worldgen.core.world_state import RoadTier
+
+    track_endpoints: set = set()
+    for road in cult_state.roads:
+        if road.tier == RoadTier.TRACK and len(road.path) >= 2:
+            track_endpoints.add(road.path[0])
+            track_endpoints.add(road.path[-1])
+
+    villages = [s for s in cult_state.settlements if s.tier == SettlementTier.VILLAGE]
+    for v in villages:
+        assert v.coord in track_endpoints, (
+            f"Village at {v.coord} is not an endpoint of any TRACK road — "
+            "VillageTrackStage may have failed to connect it"
+        )
+
+
 def test_has_all_tiers(cult_state):
     tiers = {s.tier for s in cult_state.settlements}
     assert SettlementTier.CITY in tiers
