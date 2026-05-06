@@ -62,11 +62,82 @@ worldgen render --input output/world.json --attribute biome --output biome.png
 Available attributes: `elevation`, `terrain_class`, `river_flow`, `temperature`, `moisture`,
 `biome`, `habitability`, `settlements`, `roads`, `land_cover`, `cultivation`.
 
-List available presets:
+## SVG export
+
+SVG generation is available via the Python API using `SVGConfig`:
+
+```python
+from worldgen.core.pipeline import GeneratorPipeline
+from worldgen.core.config import WorldConfig
+from worldgen.export.svg_export import save, SVGConfig
+
+state = GeneratorPipeline(seed=42, config=WorldConfig()).run()
+
+# default atlas style — biome colors, all layers
+save(state, "world.svg", SVGConfig())
+
+# topographic — elevation colors, terrain + rivers + grid only
+save(state, "topo.svg", SVGConfig(style="topographic"))
+
+# wargame — terrain colors, roads + settlements + grid
+save(state, "wargame.svg", SVGConfig(style="wargame", hex_size=8.0))
+
+# fully custom
+save(state, "custom.svg", SVGConfig(
+    color_mode="land_cover",
+    layers={"terrain", "rivers", "settlements", "labels"},
+    hex_size=16.0,
+    padding=30,
+))
+```
+
+`SVGConfig` options:
+
+| Option | Default | Values |
+|---|---|---|
+| `style` | `"atlas"` | `"atlas"`, `"topographic"`, `"wargame"` |
+| `color_mode` | `"biome"` | `"biome"`, `"terrain"`, `"land_cover"`, `"elevation"` |
+| `layers` | all | any subset of `{"terrain", "rivers", "roads", "settlements", "labels", "grid"}` |
+| `hex_size` | `12.0` | pixels per hex |
+| `padding` | `20` | border padding in pixels |
+
+`style` is a shortcut that sets `color_mode` and `layers` together: `"topographic"` forces elevation coloring with terrain + rivers + grid; `"wargame"` forces terrain coloring with roads + settlements + grid. Setting `style` and also specifying `color_mode`/`layers` overrides the style defaults for those fields.
+
+SVG output is not yet exposed as a CLI subcommand.
+
+## Presets
+
+Presets are JSON files that override any subset of `WorldConfig` fields. Place them in a `presets/` directory and load with `--config`:
 
 ```bash
-worldgen presets
+worldgen presets                                      # list available presets
+worldgen generate --seed 42 --config presets/island.json
 ```
+
+No built-in presets ship with the project — create your own. Any field omitted in the JSON falls back to its `WorldConfig` default:
+
+```json
+{
+    "width": 96,
+    "height": 96,
+    "continent_falloff": 0.8,
+    "sea_level": 0.60,
+    "base_temperature": 0.75,
+    "target_city_count": 3,
+    "target_town_count": 12
+}
+```
+
+Key fields to customize per world type:
+
+| Field | Effect |
+|---|---|
+| `sea_level` | fraction of hexes below sea (0.3 = lots of land, 0.7 = archipelago) |
+| `continent_falloff` | edge-falloff strength — higher = more island-shaped |
+| `base_temperature` | 0 = arctic, 1 = tropical |
+| `noise_octaves` | fBm detail levels — more = rougher terrain |
+| `erosion_iterations` | more = sharper valleys |
+| `target_city_count` / `target_town_count` | settlement density |
 
 ## Architecture
 
