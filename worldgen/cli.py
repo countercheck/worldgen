@@ -69,7 +69,10 @@ def generate(seed: int, config: str, output_dir: str, width: int, height: int):
     click.echo("Writing output...")
     cfg.to_json(str(output_path / "config.json"))
 
+    from .export.json_export import save as save_json
     from .render.debug_viewer import render as render_debug
+
+    save_json(state, str(output_path / "world.json"))
 
     render_debug(state, "elevation", str(output_path / "elevation.png"))
     render_debug(state, "terrain_class", str(output_path / "terrain_class.png"))
@@ -86,15 +89,25 @@ def generate(seed: int, config: str, output_dir: str, width: int, height: int):
     click.echo("✓ Done")
 
 
-@cli.command()
-@click.option("--input", type=str, required=True, help="Input JSON world file")
-@click.option("--attribute", type=str, default="terrain_class", help="Attribute to render")
+@cli.command(name="render")
+@click.option("--input", type=str, required=True, help="Input world.json file")
+@click.option(
+    "--attribute",
+    type=str,
+    default="terrain_class",
+    help="Attribute to render: elevation, terrain_class, river_flow, temperature, moisture, "
+    "biome, habitability, settlements, roads, land_cover, cultivation",
+)
 @click.option("--output", type=str, required=True, help="Output PNG file")
 def render_map(input: str, attribute: str, output: str):
-    """Render an existing world."""
-    click.echo(f"Loading {input}...")
+    """Render a saved world from world.json."""
+    from .export.json_export import load as load_json
+    from .render.debug_viewer import render as render_debug
 
+    click.echo(f"Loading {input}...")
+    state = load_json(input)
     click.echo(f"Rendering {attribute}...")
+    render_debug(state, attribute, output)
     click.echo(f"✓ Saved to {output}")
 
 

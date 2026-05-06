@@ -13,10 +13,10 @@ Hex-based procedural world generator for TTRPGs, worldbuilding, and wargaming.
 | 0 | Foundation — hex grid, pipeline, config | ✓ Complete |
 | 1 | Terrain & Elevation — fBm noise, erosion, terrain classification | ✓ Complete |
 | 2 | Hydrology — sink filling, flow accumulation, river networks | ✓ Complete |
-| 3 | Climate & Biomes | Planned |
-| 4 | Settlements & Roads | Planned |
-| 5 | Export (JSON, SVG, PNG) | Planned |
-| 6 | CLI & Presets | Planned |
+| 3 | Climate & Biomes — temperature gradient, orographic moisture, Whittaker biomes | ✓ Complete |
+| 4 | Settlements & Roads — cities, towns, villages, inter-urban & track roads | ✓ Complete |
+| 5 | Export — JSON round-trip, SVG hex map, PNG raster | ✓ Complete |
+| 6 | CLI — generate / render / presets commands | ✓ Complete |
 
 ## Setup
 
@@ -38,10 +38,34 @@ Outputs go to `./output/` by default:
 
 ```
 output/
-├── config.json       # full WorldConfig used for this run
-├── elevation.png     # debug view: raw elevation
-├── terrain_class.png # debug view: ocean / coast / flat / hill / mountain
-└── river_flow.png    # debug view: river network and flow volume
+├── config.json          # WorldConfig used for this run
+├── world.json           # full WorldState (JSON round-trip)
+├── elevation.png
+├── terrain_class.png
+├── river_flow.png
+├── temperature.png
+├── moisture.png
+├── biome.png
+├── habitability.png
+├── settlements.png
+├── roads.png
+├── land_cover.png
+└── cultivation.png
+```
+
+Re-render any attribute from a saved world without re-running the pipeline:
+
+```bash
+worldgen render --input output/world.json --attribute biome --output biome.png
+```
+
+Available attributes: `elevation`, `terrain_class`, `river_flow`, `temperature`, `moisture`,
+`biome`, `habitability`, `settlements`, `roads`, `land_cover`, `cultivation`.
+
+List available presets:
+
+```bash
+worldgen presets
 ```
 
 ## Architecture
@@ -49,18 +73,32 @@ output/
 ```
 worldgen/
 ├── core/           # data types and pipeline only — no rendering, no file I/O
-│   ├── hex.py          # Hex dataclass, enums (TerrainClass, Biome, ...)
+│   ├── hex.py          # Hex dataclass, enums (TerrainClass, Biome, LandCover, ...)
 │   ├── world_state.py  # WorldState, River, Settlement, Road
 │   ├── hex_grid.py     # axial math, neighbors, A*, ring/range queries
 │   ├── pipeline.py     # GeneratorPipeline, GeneratorStage base class
 │   └── config.py       # WorldConfig — all tunable parameters
 ├── stages/         # pure transformers: stage.run(WorldState) -> WorldState
-│   ├── elevation.py    # fractal Brownian motion + domain warping
-│   ├── erosion.py      # particle-based hydraulic erosion
-│   ├── terrain_class.py
-│   └── hydrology.py    # Priority-Flood, flow accumulation, river extraction
+│   ├── elevation.py         # fractal Brownian motion + domain warping
+│   ├── erosion.py           # particle-based hydraulic erosion
+│   ├── terrain_class.py     # ocean / coast / flat / hill / mountain
+│   ├── hydrology.py         # Priority-Flood, flow accumulation, river extraction
+│   ├── climate.py           # temperature gradient, orographic moisture
+│   ├── biomes.py            # Whittaker-style temp × moisture → biome
+│   ├── land_cover.py        # land cover classification
+│   ├── habitability.py      # composite score for settlement placement
+│   ├── city_town.py         # city & town placement
+│   ├── interurban_roads.py  # inter-settlement road network
+│   ├── cultivation.py       # city/town cultivation rings
+│   ├── village_placement.py # village placement
+│   ├── village_tracks.py    # village-scale track roads
+│   └── village_cultivation.py
 ├── export/         # all file I/O lives here
+│   ├── json_export.py  # WorldState ↔ JSON
+│   ├── svg_export.py   # hex map → SVG
+│   └── png_export.py   # rasterised map via Pillow
 ├── render/         # matplotlib debug viewer (never imported by stages)
+│   └── debug_viewer.py
 └── cli.py
 ```
 
@@ -77,7 +115,10 @@ worldgen/
 ElevationStage → ErosionStage → TerrainClassificationStage → HydrologyStage → …
 ```
 
-Each stage receives the full `WorldState` and returns it with new fields populated. Stages are composed in `GeneratorPipeline`:
+The full pipeline runs 14 stages, continuing through climate, biomes, land cover, habitability,
+city/town placement, inter-urban roads, cultivation, village placement, village tracks, and
+village cultivation. Each stage receives the full `WorldState` and returns it with new fields
+populated. Stages are composed in `GeneratorPipeline`:
 
 ```python
 from worldgen.core.config import WorldConfig
@@ -105,6 +146,10 @@ WorldConfig(
     noise_octaves=6,             # fBm detail levels
     erosion_iterations=15000,    # more = sharper valleys
     river_flow_threshold=0.05,   # top N% of flow accumulation becomes rivers
+    base_temperature=0.5,        # 0 = arctic, 1 = tropical
+    target_city_count=6,
+    target_town_count=24,
+    road_mountain_cost=10.0,     # cost multiplier for mountain hexes
 )
 ```
 
