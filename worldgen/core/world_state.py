@@ -116,6 +116,12 @@ class WorldState:
             TerrainClass,
         )
 
+        version = data.get("version")
+        if version is not None and version != "1.0":
+            raise ValueError(
+                f"Unsupported WorldState version '{version}'. Expected '1.0'."
+            )
+
         ws = cls(
             seed=data["seed"],
             width=data["width"],

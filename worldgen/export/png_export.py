@@ -14,6 +14,7 @@ class PNGConfig:
     hex_size: float = 12.0
     dpi: int = 150
     style: str = "atlas"  # "atlas" | "topographic" | "wargame"
+    color_mode: str = "biome"  # "biome" | "terrain" | "land_cover" | "elevation"
     layers: set[str] = field(
         default_factory=lambda: {"terrain", "rivers", "roads", "settlements", "labels", "grid"}
     )
@@ -86,7 +87,7 @@ def render(ws: WorldState, config: PNGConfig | None = None) -> Image.Image:
         color_mode = "terrain"
         layers = {"terrain", "roads", "settlements", "grid"}
     else:
-        color_mode = config.color_mode if hasattr(config, "color_mode") else "biome"
+        color_mode = config.color_mode
         layers = config.layers
 
     size = config.hex_size
@@ -103,8 +104,8 @@ def render(ws: WorldState, config: PNGConfig | None = None) -> Image.Image:
 
     ox = -min_x + pad
     oy = -min_y + pad
-    width = int(max_x - min_x + 2 * pad)
-    height = int(max_y - min_y + 2 * pad)
+    width = math.ceil(max_x - min_x + 2 * pad)
+    height = math.ceil(max_y - min_y + 2 * pad)
 
     img = Image.new("RGB", (width, height), (255, 255, 255))
     draw = ImageDraw.Draw(img)

@@ -104,8 +104,8 @@ def render(ws: WorldState, config: SVGConfig | None = None) -> str:
 
     ox = -min_x + pad
     oy = -min_y + pad
-    w = int(max_x - min_x + 2 * pad)
-    h = int(max_y - min_y + 2 * pad)
+    w = math.ceil(max_x - min_x + 2 * pad)
+    h = math.ceil(max_y - min_y + 2 * pad)
 
     out = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}">'
@@ -203,4 +203,4 @@ def render(ws: WorldState, config: SVGConfig | None = None) -> str:
 
 def save(ws: WorldState, path, config: SVGConfig | None = None) -> None:
     """Write SVG hex map to a file."""
-    Path(path).write_text(render(ws, config))
+    Path(path).write_text(render(ws, config), encoding="utf-8")
