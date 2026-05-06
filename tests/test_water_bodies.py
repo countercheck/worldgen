@@ -91,32 +91,69 @@ def test_all_water_classified(world):
 
 
 def test_lake_has_outflow_river(world):
-    """Each LAKE component must have at least one adjacent land hex with river_flow > 0."""
+    """Each LAKE must have an outflow: a border river hex whose downstream path
+    (non-decreasing river_flow, not re-entering this lake) reaches ocean or border."""
     lake_comps = _water_components(world, TerrainClass.LAKE)
     if not lake_comps:
         pytest.skip("No lakes in this world — nothing to check")
 
+    w, h = world.width, world.height
     land = {
         c
-        for c, h in world.hexes.items()
-        if h.terrain_class not in (TerrainClass.OCEAN, TerrainClass.LAKE)
+        for c, hx in world.hexes.items()
+        if hx.terrain_class not in (TerrainClass.OCEAN, TerrainClass.LAKE)
     }
 
+    def downstream_reaches_terminal(start, comp_set):
+        """BFS along non-decreasing river_flow from start, not through comp_set."""
+        visited = {start} | comp_set
+        queue = deque([start])
+        while queue:
+            coord = queue.popleft()
+            q, r = coord
+            if q == 0 or q == w - 1 or r == 0 or r == h - 1:
+                return True
+            for nbr in neighbors(coord):
+                if nbr not in world.hexes or nbr in visited:
+                    continue
+                nhx = world.hexes[nbr]
+                if nhx.terrain_class == TerrainClass.OCEAN:
+                    return True
+                # Accept reaching a *different* lake as a valid intermediate terminal
+                if nhx.terrain_class == TerrainClass.LAKE and nbr not in comp_set:
+                    return True
+                # Follow downstream: non-decreasing river_flow moves toward accumulation
+                if (
+                    nbr in land
+                    and nhx.river_flow >= world.hexes[coord].river_flow
+                    and nhx.river_flow > 0
+                ):
+                    visited.add(nbr)
+                    queue.append(nbr)
+        return False
+
     for comp in lake_comps:
-        border_river_hexes = [
+        comp_set = frozenset(comp)
+        border_rivers = [
             nbr
             for c in comp
             for nbr in neighbors(c)
             if nbr in land and world.hexes[nbr].river_flow > 0
         ]
-        assert border_river_hexes, (
-            f"LAKE component (size {len(comp)}) has no adjacent river hex — drainage missing"
+        assert border_rivers, f"LAKE (size {len(comp)}) has no adjacent river hex at all"
+        assert any(downstream_reaches_terminal(r, comp_set) for r in border_rivers), (
+            f"LAKE component (size {len(comp)}) has no outflow: "
+            "no border river hex has a downstream path to ocean/border"
         )
 
 
 def test_lake_chain_terminates(world):
-    """Following lake outflow rivers from any LAKE must eventually reach a map-edge hex
-    or a hex adjacent to OCEAN (not cycle in another lake forever)."""
+    """Chain rule: following lake outflow rivers must reach ocean or border without cycles.
+
+    For each lake component, BFS through river hexes (not re-entering this lake) to find
+    the next water body.  If that next body is another lake, recurse; if it is ocean or
+    border the chain terminates successfully.  Tracking visited lake indices detects cycles.
+    """
     lake_comps = _water_components(world, TerrainClass.LAKE)
     if not lake_comps:
         pytest.skip("No lakes in this world — nothing to check")
@@ -125,38 +162,59 @@ def test_lake_chain_terminates(world):
     ocean = {c for c, hx in world.hexes.items() if hx.terrain_class == TerrainClass.OCEAN}
     land = {
         c
-        for c, h in world.hexes.items()
-        if h.terrain_class not in (TerrainClass.OCEAN, TerrainClass.LAKE)
+        for c, hx in world.hexes.items()
+        if hx.terrain_class not in (TerrainClass.OCEAN, TerrainClass.LAKE)
     }
+    hex_to_lake_idx = {c: i for i, comp in enumerate(lake_comps) for c in comp}
 
-    def reaches_terminal(start_comp):
-        """BFS over lake components and their river outflows until we hit a terminal."""
-        visited_comps = set()
-        queue = deque([frozenset(start_comp)])
+    def follow_river_to_water(start, current_comp):
+        """BFS from *start* through river hexes; return 'ocean', 'border', lake_idx, or None."""
+        visited = set(current_comp) | {start}
+        queue = deque([start])
         while queue:
-            comp_key = queue.popleft()
-            if comp_key in visited_comps:
-                return False  # cycle
-            visited_comps.add(comp_key)
-            for c in comp_key:
-                for nbr in neighbors(c):
-                    if nbr not in world.hexes:
-                        continue
-                    if _on_border(nbr, w, h):
-                        return True
-                    if nbr in ocean:
-                        return True
-                    # Follow river hexes out of this lake
-                    if nbr in land and world.hexes[nbr].river_flow > 0:
-                        # Find if this river eventually reaches a terminal via simple check:
-                        # We trust test_rivers_reach_ocean covers that; here just check the
-                        # lake component has at least one non-lake-recirculating outflow.
-                        return True
-        return False
+            coord = queue.popleft()
+            cq, cr = coord
+            if cq == 0 or cq == w - 1 or cr == 0 or cr == h - 1:
+                return "border"
+            for nbr in neighbors(coord):
+                if nbr not in world.hexes or nbr in visited:
+                    continue
+                nhx = world.hexes[nbr]
+                if nhx.terrain_class == TerrainClass.OCEAN:
+                    return "ocean"
+                if nbr in hex_to_lake_idx:
+                    return hex_to_lake_idx[nbr]
+                if nbr in land and nhx.river_flow > 0:
+                    visited.add(nbr)
+                    queue.append(nbr)
+        return None
 
-    for comp in lake_comps:
-        assert reaches_terminal(comp), (
-            f"LAKE component (size {len(comp)}) chain does not terminate at ocean or border"
+    for start_idx, start_comp in enumerate(lake_comps):
+        visited_lakes: set[int] = {start_idx}
+        queue: deque[int] = deque([start_idx])
+        found_terminal = False
+
+        while queue and not found_terminal:
+            idx = queue.popleft()
+            comp = lake_comps[idx]
+            border_rivers = [
+                nbr
+                for c in comp
+                for nbr in neighbors(c)
+                if nbr in land and world.hexes[nbr].river_flow > 0
+            ]
+            for r in border_rivers:
+                result = follow_river_to_water(r, comp)
+                if result in ("ocean", "border"):
+                    found_terminal = True
+                    break
+                if isinstance(result, int) and result not in visited_lakes:
+                    visited_lakes.add(result)
+                    queue.append(result)
+
+        assert found_terminal, (
+            f"LAKE component {start_idx} (size {len(start_comp)}) outflow chain "
+            "does not terminate at ocean or border (possible cycle or missing drainage)"
         )
 
 

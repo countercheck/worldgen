@@ -66,13 +66,11 @@ def _fix_coast_hexes(state: WorldState) -> None:
     original terrain classification.
     """
     hexes = state.hexes
-    sea = state.metadata.get("config", {}).get("sea_level", 0.45)
+    cfg_dict = state.metadata.get("config", {})
+    sea = cfg_dict.get("sea_level", 0.45)
     coast_threshold = sea + 0.05
-    cfg = state.metadata.get("_config_obj")  # may be absent; fall back to thresholds below
-
-    # Import config thresholds — use defaults matching WorldConfig if obj unavailable
-    mountain_gradient = getattr(cfg, "terrain_mountain_gradient", 0.18)
-    hill_gradient = getattr(cfg, "terrain_hill_gradient", 0.08)
+    mountain_gradient = cfg_dict.get("terrain_mountain_gradient", 0.04)
+    hill_gradient = cfg_dict.get("terrain_hill_gradient", 0.02)
 
     for coord, hx in hexes.items():
         if hx.terrain_class != TerrainClass.COAST:
