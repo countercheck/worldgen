@@ -446,22 +446,88 @@ class HydrologyStage(GeneratorStage):
         w: int,
         h: int,
     ) -> list[River]:
-        """Guarantee each lake has at least one outflow river.
+        """Raise each lake to its natural spillway, expand into submerged land, then
+        route an outflow river.
 
-        For each lake lacking an outflow, try perimeter land hexes in ascending
-        elevation order (natural spillways).  The lowest hex is tried first; if
-        its path to water/border is blocked, try the next-higher one — equivalent
-        to filling the lake until water finds a usable spillway.  Plain BFS is
-        the guaranteed fallback.
+        Phase 1 — fill & expand: the lake's water level rises to the elevation of the
+        lowest perimeter land hex (the natural spillway).  Any land hex reachable from
+        the lake whose raw elevation is below that level is submerged and converted to
+        LAKE.  If the expanded body reaches the map edge it becomes OCEAN instead.
+
+        Phase 2 — outflow: after expansion, perimeter hexes are retried in ascending
+        elevation order; elevation-guided Dijkstra finds the outflow path, with plain
+        BFS as a guaranteed fallback.
         """
         if not lake_components:
             return []
+
+        def on_border(coord: HexCoord) -> bool:
+            q, r = coord
+            return q == 0 or q == w - 1 or r == 0 or r == h - 1
 
         max_acc = max(acc.values()) if acc else 1.0
         new_rivers: list[River] = []
 
         for component in lake_components:
-            # Land hexes bordering this lake, sorted by ascending elevation (lowest = natural spillway)
+            # --- Phase 1: fill lake to spillway level, expand into submerged land ---
+
+            # Sort by raw elevation so we find the true geographic spillway, not the
+            # priority-flood-adjusted one.
+            border_land = sorted(
+                {nbr for c in component for nbr in neighbors(c) if nbr in land},
+                key=lambda c: hexes[c].elevation,
+            )
+            if not border_land:
+                continue
+
+            spillway_hex = border_land[0]
+            water_level = hexes[spillway_hex].elevation  # lake surface rises to here
+            routing_level = filled[spillway_hex]  # filled value kept for Dijkstra gradient
+
+            # Flood-fill: find all land hexes reachable from the lake below water_level
+            newly_submerged: set[HexCoord] = set()
+            expand_q: deque[HexCoord] = deque(component)
+            expand_seen: set[HexCoord] = set(component)
+            while expand_q:
+                c = expand_q.popleft()
+                for nbr in neighbors(c):
+                    if nbr not in hexes or nbr in expand_seen:
+                        continue
+                    if nbr in land and hexes[nbr].elevation < water_level:
+                        newly_submerged.add(nbr)
+                        expand_seen.add(nbr)
+                        expand_q.append(nbr)
+
+            # Convert submerged land hexes to lake
+            for c in newly_submerged:
+                hexes[c].terrain_class = TerrainClass.LAKE
+                hexes[c].elevation = water_level
+                hexes[c].river_flow = 0.0
+                filled[c] = routing_level
+                land.discard(c)
+                lakes.add(c)
+                river_set.discard(c)
+                flow_dir.pop(c, None)
+                acc.pop(c, None)
+
+            component = component | newly_submerged
+
+            # Raise the stored elevation of all lake hexes (including originals) to water_level
+            for c in component:
+                hexes[c].elevation = water_level
+                filled[c] = routing_level
+
+            # If the expanded body now touches the map edge it is ocean, not a lake
+            if any(on_border(c) for c in component):
+                for c in component:
+                    hexes[c].terrain_class = TerrainClass.OCEAN
+                    ocean.add(c)
+                    lakes.discard(c)
+                continue
+
+            # --- Phase 2: route outflow river from the spillway ---
+
+            # Recompute perimeter after expansion (newly submerged hexes change the boundary)
             border_land = sorted(
                 {nbr for c in component for nbr in neighbors(c) if nbr in land},
                 key=lambda c: filled.get(c, float("inf")),
@@ -469,7 +535,7 @@ class HydrologyStage(GeneratorStage):
             if not border_land:
                 continue
 
-            # Check if any border land hex is already a river hex flowing away from the lake
+            # Check if a natural outflow already exists (river leaving the lake)
             outflow_exists = any(
                 c in river_set and flow_dir.get(c) not in component and flow_dir.get(c) is not None
                 for c in border_land
@@ -477,7 +543,7 @@ class HydrologyStage(GeneratorStage):
             if outflow_exists:
                 continue
 
-            # Try spillways in elevation order (fill-to-spillway: low → high)
+            # Try spillways in elevation order; Dijkstra prefers valleys
             extension: list[HexCoord] = []
             spillway: HexCoord | None = None
             for candidate in border_land:
