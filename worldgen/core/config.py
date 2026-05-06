@@ -76,6 +76,11 @@ class WorldConfig:
     target_city_count: int = 6
     target_town_count: int = 24
 
+    # Cultivation radii
+    cultivation_city_radius: int = 8
+    cultivation_town_radius: int = 4
+    cultivation_village_radius: int = 2
+
     # Roads — base terrain costs
     road_mountain_cost: float = 10.0
     road_hill_cost: float = 3.0

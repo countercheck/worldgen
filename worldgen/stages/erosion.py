@@ -14,6 +14,7 @@ except ImportError:  # numba optional — fall back to pure Python
     def _jit(fn):  # type: ignore[misc]
         return fn
 
+
 _MAX_STEPS = 64
 _EVAPORATION = 0.99
 

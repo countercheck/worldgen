@@ -12,6 +12,20 @@ class TerrainClass(Enum):
     MOUNTAIN = "mountain"
 
 
+class LandCover(Enum):
+    OPEN_WATER = "open_water"
+    BOG = "bog"
+    MARSH = "marsh"
+    DENSE_FOREST = "dense_forest"
+    WOODLAND = "woodland"
+    SCRUB = "scrub"
+    OPEN = "open"
+    TUNDRA = "tundra"
+    DESERT = "desert"
+    ALPINE = "alpine"
+    BARE_ROCK = "bare_rock"
+
+
 class Biome(Enum):
     TUNDRA = "tundra"
     BOREAL = "boreal"
@@ -61,3 +75,5 @@ class Hex:
     road_connections: set[HexCoord] = field(default_factory=set)
     tags: set[str] = field(default_factory=set)
     habitability: float = 0.0
+    land_cover: LandCover | None = None
+    cultivated: bool = False
