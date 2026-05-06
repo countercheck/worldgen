@@ -140,6 +140,10 @@ def render(ws: WorldState, config: SVGConfig | None = None) -> str:
         min_m = config.contour_min_m
         max_m = config.contour_max_m
         max_stroke = config.contour_max_stroke
+        if max_m <= min_m:
+            raise ValueError(
+                f"contour_max_m ({max_m!r}) must be greater than contour_min_m ({min_m!r})"
+            )
         out.append('  <g id="layer-contours">')
         for coord, hex_item in ws.hexes.items():
             ca = axial_to_pixel(coord, size)
@@ -160,6 +164,8 @@ def render(ws: WorldState, config: SVGConfig | None = None) -> str:
                 dx = cb[0] - ca[0]
                 dy = cb[1] - ca[1]
                 dist = math.sqrt(dx * dx + dy * dy)
+                if dist == 0:
+                    continue
                 px = -dy / dist
                 py = dx / dist
                 half = size / 2

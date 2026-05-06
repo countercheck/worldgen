@@ -141,10 +141,10 @@ def test_all_settlement_tiers_rendered():
 
 def test_contours_layer_produces_lines():
     ws = WorldState.empty(seed=1, width=4, height=4)
-    # Set up a steep elevation gradient between two adjacent hexes.
-    coords = list(ws.hexes.keys())
-    ws.hexes[coords[0]].elevation = 0.0
-    ws.hexes[coords[1]].elevation = 0.5  # 1500 m diff at scale 3000
+    # Set up a steep elevation gradient between two known-adjacent hexes.
+    # (1, 0) is a neighbor of (0, 0) per the axial hex grid.
+    ws.hexes[(0, 0)].elevation = 0.0
+    ws.hexes[(1, 0)].elevation = 0.5  # 1500 m diff at scale 3000
     config = SVGConfig(layers={"contours"})
     svg = render(ws, config)
     assert 'id="layer-contours"' in svg
