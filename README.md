@@ -64,7 +64,15 @@ Available attributes: `elevation`, `terrain_class`, `river_flow`, `temperature`,
 
 ## SVG export
 
-SVG generation is available via the Python API using `SVGConfig`:
+```bash
+worldgen export --input output/world.json --output world.svg
+worldgen export --input output/world.json --output topo.svg --style topographic
+worldgen export --input output/world.json --output wargame.svg --style wargame --hex-size 8
+worldgen export --input output/world.json --output custom.svg \
+    --color-mode land_cover --layers terrain,rivers,settlements,labels
+```
+
+Or via the Python API using `SVGConfig`:
 
 ```python
 from worldgen.core.pipeline import GeneratorPipeline
@@ -102,8 +110,6 @@ save(state, "custom.svg", SVGConfig(
 | `padding` | `20` | border padding in pixels |
 
 `style` is a shortcut that sets `color_mode` and `layers` together: `"topographic"` forces elevation coloring with terrain + rivers + grid; `"wargame"` forces terrain coloring with roads + settlements + grid. Setting `style` and also specifying `color_mode`/`layers` overrides the style defaults for those fields.
-
-SVG output is not yet exposed as a CLI subcommand.
 
 ## Presets
 
