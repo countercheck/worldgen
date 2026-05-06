@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..core.hex import SettlementTier
-from ..core.hex_grid import axial_to_pixel
+from ..core.hex_grid import axial_to_pixel, neighbors
 from ..core.world_state import RoadTier, WorldState
 from ..render.debug_viewer import BIOME_COLORS, LAND_COVER_COLORS, TERRAIN_COLORS
 
@@ -17,6 +17,10 @@ class SVGConfig:
         default_factory=lambda: {"terrain", "rivers", "roads", "settlements", "labels", "grid"}
     )
     style: str = "atlas"  # "atlas" | "topographic" | "wargame"
+    contour_elevation_scale_m: float = 3000.0
+    contour_min_m: float = 10.0
+    contour_max_m: float = 300.0
+    contour_max_stroke: float = 4.0
 
 
 _ROAD_SVG = {
@@ -82,7 +86,7 @@ def render(ws: WorldState, config: SVGConfig | None = None) -> str:
 
     if config.style == "topographic":
         color_mode = "elevation"
-        layers = {"terrain", "rivers", "grid"}
+        layers = {"terrain", "rivers", "grid", "contours"}
     elif config.style == "wargame":
         color_mode = "terrain"
         layers = {"terrain", "roads", "settlements", "grid"}
@@ -129,6 +133,42 @@ def render(ws: WorldState, config: SVGConfig | None = None) -> str:
             out.append(
                 f'    <polygon points="{_points_str(verts)}" fill="none" stroke="#555555" stroke-width="{grid_lw}"/>'
             )
+        out.append("  </g>")
+
+    if "contours" in layers:
+        scale = config.contour_elevation_scale_m
+        min_m = config.contour_min_m
+        max_m = config.contour_max_m
+        max_stroke = config.contour_max_stroke
+        out.append('  <g id="layer-contours">')
+        for coord, hex_item in ws.hexes.items():
+            ca = axial_to_pixel(coord, size)
+            for nbr_coord in neighbors(coord):
+                if nbr_coord < coord:
+                    continue
+                nbr = ws.hexes.get(nbr_coord)
+                if nbr is None:
+                    continue
+                diff_m = abs(hex_item.elevation - nbr.elevation) * scale
+                if diff_m < min_m:
+                    continue
+                t = min((diff_m - min_m) / (max_m - min_m), 1.0)
+                stroke = 0.3 + t * (max_stroke - 0.3)
+                cb = axial_to_pixel(nbr_coord, size)
+                mx = (ca[0] + cb[0]) / 2 + ox
+                my = (ca[1] + cb[1]) / 2 + oy
+                dx = cb[0] - ca[0]
+                dy = cb[1] - ca[1]
+                dist = math.sqrt(dx * dx + dy * dy)
+                px = -dy / dist
+                py = dx / dist
+                half = size / 2
+                x1, y1 = mx + px * half, my + py * half
+                x2, y2 = mx - px * half, my - py * half
+                out.append(
+                    f'    <line x1="{x1:.2f}" y1="{y1:.2f}" x2="{x2:.2f}" y2="{y2:.2f}"'
+                    f' stroke="#333333" stroke-width="{stroke:.2f}" stroke-linecap="round"/>'
+                )
         out.append("  </g>")
 
     if "rivers" in layers:
