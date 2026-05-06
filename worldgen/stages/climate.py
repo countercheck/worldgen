@@ -60,15 +60,18 @@ class ClimateStage(GeneratorStage):
         for coord, h in state.hexes.items():
             if h.terrain_class == TerrainClass.OCEAN:
                 atm[coord] = 1.0
+            elif h.terrain_class == TerrainClass.LAKE:
+                h.moisture = 1.0
 
         orographic = self.config.orographic_strength
         sea_level = self.config.sea_level
 
         for coord in sorted_coords:
             h = state.hexes[coord]
-            if h.terrain_class == TerrainClass.OCEAN:
+            if h.terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE):
                 h.moisture = 1.0
-                atm[coord] = 1.0
+                if h.terrain_class == TerrainClass.OCEAN:
+                    atm[coord] = 1.0
                 continue
 
             hx, hy = pos(coord)
@@ -90,26 +93,25 @@ class ClimateStage(GeneratorStage):
             atm[coord] = max(0.0, incoming - precip)
 
         # River-adjacency and coastal moisture bonuses
+        water = (TerrainClass.OCEAN, TerrainClass.LAKE)
         for coord, h in state.hexes.items():
-            if h.terrain_class == TerrainClass.OCEAN:
+            if h.terrain_class in water:
                 continue
             for n in neighbors(coord):
                 if n in state.hexes and state.hexes[n].river_flow > 0:
                     h.moisture += 0.15
                     break
             for n in neighbors(coord):
-                if n in state.hexes and state.hexes[n].terrain_class == TerrainClass.OCEAN:
+                if n in state.hexes and state.hexes[n].terrain_class in water:
                     h.moisture += 0.1
                     break
 
         # Normalize land moisture to [0, 1]
-        land_vals = [
-            h.moisture for h in state.hexes.values() if h.terrain_class != TerrainClass.OCEAN
-        ]
+        land_vals = [h.moisture for h in state.hexes.values() if h.terrain_class not in water]
         if land_vals:
             lo = min(land_vals)
             hi = max(land_vals)
             span = hi - lo if hi > lo else 1.0
             for h in state.hexes.values():
-                if h.terrain_class != TerrainClass.OCEAN:
+                if h.terrain_class not in water:
                     h.moisture = (h.moisture - lo) / span

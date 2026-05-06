@@ -8,6 +8,7 @@ from ..core.world_state import RoadTier, WorldState
 
 TERRAIN_COLORS = {
     TerrainClass.OCEAN: (0.2, 0.4, 0.8),
+    TerrainClass.LAKE: (0.35, 0.6, 0.85),
     TerrainClass.COAST: (0.9, 0.8, 0.4),
     TerrainClass.FLAT: (0.4, 0.8, 0.4),
     TerrainClass.HILL: (0.7, 0.6, 0.3),

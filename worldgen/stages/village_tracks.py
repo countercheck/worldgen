@@ -6,7 +6,7 @@ from ..core.world_state import Road, RoadTier, WorldState
 
 def _terrain_base_cost(hx, cfg) -> float:
     tc = hx.terrain_class
-    if tc == TerrainClass.OCEAN:
+    if tc in (TerrainClass.OCEAN, TerrainClass.LAKE):
         return float("inf")
     if tc == TerrainClass.MOUNTAIN:
         return cfg.road_mountain_cost

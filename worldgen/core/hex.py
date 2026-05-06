@@ -6,6 +6,7 @@ HexCoord = tuple[int, int]
 
 class TerrainClass(Enum):
     OCEAN = "ocean"
+    LAKE = "lake"
     COAST = "coast"
     FLAT = "flat"
     HILL = "hill"

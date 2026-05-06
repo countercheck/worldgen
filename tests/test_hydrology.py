@@ -8,6 +8,7 @@ from worldgen.stages.elevation import ElevationStage
 from worldgen.stages.erosion import ErosionStage
 from worldgen.stages.hydrology import HydrologyStage
 from worldgen.stages.terrain_class import TerrainClassificationStage
+from worldgen.stages.water_bodies import WaterBodiesStage
 
 
 def _build_pipeline(seed: int = 42, width: int = 32, height: int = 32):
@@ -16,6 +17,7 @@ def _build_pipeline(seed: int = 42, width: int = 32, height: int = 32):
     p.add_stage(ElevationStage)
     p.add_stage(ErosionStage)
     p.add_stage(TerrainClassificationStage)
+    p.add_stage(WaterBodiesStage)
     p.add_stage(HydrologyStage)
     return p
 
@@ -44,17 +46,20 @@ def test_river_paths_connected(hydro_state):
 
 
 def test_rivers_reach_ocean(hydro_state):
-    ocean_set = {
-        coord for coord, h in hydro_state.hexes.items() if h.terrain_class == TerrainClass.OCEAN
+    # Rivers may legitimately terminate at ocean, lake, or the grid border.
+    water_set = {
+        coord
+        for coord, h in hydro_state.hexes.items()
+        if h.terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE)
     }
     w, h = hydro_state.width, hydro_state.height
     for river in hydro_state.rivers:
         mouth = river.hexes[-1]
         q, r = mouth
         on_border = q == 0 or q == w - 1 or r == 0 or r == h - 1
-        reaches_ocean = any(n in ocean_set for n in neighbors(mouth)) or mouth in ocean_set
-        assert reaches_ocean or on_border, (
-            f"River mouth {mouth} does not reach ocean or grid border"
+        reaches_water = any(n in water_set for n in neighbors(mouth)) or mouth in water_set
+        assert reaches_water or on_border, (
+            f"River mouth {mouth} does not reach water body or grid border"
         )
 
 

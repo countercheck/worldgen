@@ -37,7 +37,8 @@ class SettlementStage(GeneratorStage):
         land = [
             (coord, hx)
             for coord, hx in hexes.items()
-            if hx.habitability > 0 and hx.terrain_class != TerrainClass.OCEAN
+            if hx.habitability > 0
+            and hx.terrain_class not in (TerrainClass.OCEAN, TerrainClass.LAKE)
         ]
         land.sort(key=lambda x: x[1].habitability, reverse=True)
 
@@ -118,7 +119,7 @@ class SettlementStage(GeneratorStage):
             coord
             for coord, hx in hexes.items()
             if hx.habitability > 0.3
-            and hx.terrain_class != TerrainClass.OCEAN
+            and hx.terrain_class not in (TerrainClass.OCEAN, TerrainClass.LAKE)
             and hx.settlement is None
         ]
         weights = [

@@ -24,7 +24,7 @@ class VillagePlacementStage(GeneratorStage):
         candidates = []
         weights = []
         for coord, hx in hexes.items():
-            if hx.terrain_class == TerrainClass.OCEAN:
+            if hx.terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE):
                 continue
             if hx.settlement is not None:
                 continue
@@ -36,7 +36,8 @@ class VillagePlacementStage(GeneratorStage):
             on_frontier = hx.cultivated and any(
                 not hexes[n].cultivated
                 for n in neighbors(coord)
-                if n in hexes and hexes[n].terrain_class != TerrainClass.OCEAN
+                if n in hexes
+                and hexes[n].terrain_class not in (TerrainClass.OCEAN, TerrainClass.LAKE)
             )
             road_adjacent = bool(hx.road_connections) or any(
                 hexes[n].road_connections for n in neighbors(coord) if n in hexes

@@ -47,16 +47,36 @@ class WorldState:
         return self.hexes.get(coord)
 
     def all_land(self) -> list[Hex]:
-        """All non-ocean hexes."""
+        """All non-water hexes."""
         from .hex import TerrainClass
 
-        return [h for h in self.hexes.values() if h.terrain_class != TerrainClass.OCEAN]
+        return [
+            h
+            for h in self.hexes.values()
+            if h.terrain_class not in (TerrainClass.OCEAN, TerrainClass.LAKE)
+        ]
 
-    def all_water(self) -> list[Hex]:
-        """All ocean hexes."""
+    def all_ocean(self) -> list[Hex]:
+        """All ocean hexes (map-edge-connected water bodies)."""
         from .hex import TerrainClass
 
         return [h for h in self.hexes.values() if h.terrain_class == TerrainClass.OCEAN]
+
+    def all_lakes(self) -> list[Hex]:
+        """All lake hexes (inland water bodies)."""
+        from .hex import TerrainClass
+
+        return [h for h in self.hexes.values() if h.terrain_class == TerrainClass.LAKE]
+
+    def all_water(self) -> list[Hex]:
+        """All water hexes (ocean and lakes)."""
+        from .hex import TerrainClass
+
+        return [
+            h
+            for h in self.hexes.values()
+            if h.terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE)
+        ]
 
     def to_dict(self) -> dict:
         """Serialize to a JSON-compatible dict."""

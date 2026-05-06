@@ -24,7 +24,7 @@ class HabitabilityStage(GeneratorStage):
 
         for coord, hx in hexes.items():
             if (
-                hx.terrain_class == TerrainClass.OCEAN
+                hx.terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE)
                 or hx.terrain_class == TerrainClass.MOUNTAIN
                 or hx.biome == Biome.WETLAND
             ):
