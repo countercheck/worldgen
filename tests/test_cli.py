@@ -121,3 +121,33 @@ def test_export_bad_style(world_json, tmp_path):
         cli, ["export", "--input", world_json, "--output", out, "--style", "fantasy"]
     )
     assert result.exit_code != 0
+
+
+def test_export_bad_layer(world_json, tmp_path):
+    out = str(tmp_path / "world.svg")
+    result = CliRunner().invoke(
+        cli, ["export", "--input", world_json, "--output", out, "--layers", "terrain,typo"]
+    )
+    assert result.exit_code != 0
+    assert "typo" in result.output
+    assert "Allowed" in result.output
+
+
+def test_export_layers_with_whitespace(world_json, tmp_path):
+    """Whitespace around layer names should be stripped and accepted."""
+    out = str(tmp_path / "world.svg")
+    result = CliRunner().invoke(
+        cli,
+        ["export", "--input", world_json, "--output", out, "--layers", "terrain, rivers"],
+    )
+    assert result.exit_code == 0, result.output
+
+
+def test_export_layers_empty_entries(world_json, tmp_path):
+    """Empty entries from trailing/double commas should be dropped silently."""
+    out = str(tmp_path / "world.svg")
+    result = CliRunner().invoke(
+        cli,
+        ["export", "--input", world_json, "--output", out, "--layers", "terrain,,rivers"],
+    )
+    assert result.exit_code == 0, result.output

@@ -109,7 +109,7 @@ save(state, "custom.svg", SVGConfig(
 | `hex_size` | `12.0` | pixels per hex |
 | `padding` | `20` | border padding in pixels |
 
-`style` is a shortcut that sets `color_mode` and `layers` together: `"topographic"` forces elevation coloring with terrain + rivers + grid; `"wargame"` forces terrain coloring with roads + settlements + grid. Setting `style` and also specifying `color_mode`/`layers` overrides the style defaults for those fields.
+`style` is a shortcut that sets `color_mode` and `layers` together: `"topographic"` forces elevation coloring with terrain + rivers + grid; `"wargame"` forces terrain coloring with roads + settlements + grid. For `"topographic"` and `"wargame"`, the `color_mode` and `layers` values are fixed by the style and any explicitly provided values are ignored. Only `"atlas"` (the default) uses the `color_mode` and `layers` you provide.
 
 ## Presets
 
