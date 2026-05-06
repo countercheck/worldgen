@@ -89,25 +89,43 @@ def generate(seed: int, config: str, output_dir: str, width: int, height: int):
     click.echo("✓ Done")
 
 
+_ATTRIBUTES = [
+    "elevation",
+    "terrain_class",
+    "river_flow",
+    "temperature",
+    "moisture",
+    "biome",
+    "habitability",
+    "settlements",
+    "roads",
+    "land_cover",
+    "cultivation",
+]
+
+
 @cli.command(name="render")
-@click.option("--input", type=str, required=True, help="Input world.json file")
+@click.option("--input", "input_path", type=str, required=True, help="Input world.json file")
 @click.option(
     "--attribute",
-    type=str,
+    type=click.Choice(_ATTRIBUTES, case_sensitive=False),
     default="terrain_class",
-    help="Attribute to render: elevation, terrain_class, river_flow, temperature, moisture, "
-    "biome, habitability, settlements, roads, land_cover, cultivation",
+    show_default=True,
+    help="Attribute to render.",
 )
 @click.option("--output", type=str, required=True, help="Output PNG file")
-def render_map(input: str, attribute: str, output: str):
+def render_map(input_path: str, attribute: str, output: str):
     """Render a saved world from world.json."""
     from .export.json_export import load as load_json
     from .render.debug_viewer import render as render_debug
 
-    click.echo(f"Loading {input}...")
-    state = load_json(input)
-    click.echo(f"Rendering {attribute}...")
-    render_debug(state, attribute, output)
+    click.echo(f"Loading {input_path}...")
+    try:
+        state = load_json(input_path)
+        click.echo(f"Rendering {attribute}...")
+        render_debug(state, attribute, output)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
     click.echo(f"✓ Saved to {output}")
 
 
