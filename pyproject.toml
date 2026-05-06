@@ -14,7 +14,6 @@ dependencies = [
     "matplotlib>=3.8",
     "Pillow>=10.0",
     "click>=8.1",
-    "numba>=0.59",
 ]
 
 [project.optional-dependencies]
@@ -22,6 +21,9 @@ dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
     "ruff>=0.4",
+]
+perf = [
+    "numba>=0.59",
 ]
 
 [project.scripts]
