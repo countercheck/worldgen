@@ -2,7 +2,7 @@ import numpy as np
 from matplotlib import patches
 from matplotlib import pyplot as plt
 
-from ..core.hex import Biome, SettlementTier, TerrainClass
+from ..core.hex import Biome, LandCover, SettlementTier, TerrainClass
 from ..core.hex_grid import axial_to_pixel
 from ..core.world_state import RoadTier, WorldState
 
@@ -35,6 +35,20 @@ def _get_color_biome(h: WorldState) -> tuple[float, float, float]:
 def _get_color_terrain(h: WorldState) -> tuple[float, float, float]:
     return TERRAIN_COLORS[h.terrain_class]
 
+
+LAND_COVER_COLORS = {
+    LandCover.OPEN_WATER: (0.255, 0.412, 0.882),
+    LandCover.BOG: (0.333, 0.420, 0.184),
+    LandCover.MARSH: (0.420, 0.557, 0.420),
+    LandCover.DENSE_FOREST: (0.102, 0.290, 0.102),
+    LandCover.WOODLAND: (0.227, 0.478, 0.227),
+    LandCover.SCRUB: (0.545, 0.455, 0.333),
+    LandCover.OPEN: (0.784, 0.847, 0.439),
+    LandCover.TUNDRA: (0.690, 0.769, 0.769),
+    LandCover.DESERT: (0.824, 0.706, 0.549),
+    LandCover.ALPINE: (0.627, 0.627, 0.627),
+    LandCover.BARE_ROCK: (0.376, 0.376, 0.376),
+}
 
 _ROAD_STYLE = {
     RoadTier.PRIMARY: {"color": "#5c3d1e", "lw": 2.0, "zorder": 3},
@@ -92,6 +106,20 @@ def render(state: WorldState, attribute: str, output_path: str, hex_size: float 
     elif attribute == "roads":
         get_color = _get_color_biome
         road_overlay = True
+    elif attribute == "land_cover":
+
+        def get_color(h):  # noqa: F811
+            if h.land_cover is None:
+                return (0.5, 0.5, 0.5)
+            return LAND_COVER_COLORS.get(h.land_cover, (0.5, 0.5, 0.5))
+    elif attribute == "cultivation":
+        _CULTIVATED = (0.831, 0.643, 0.298)
+
+        def get_color(h):  # noqa: F811
+            if h.land_cover is None:
+                return (0.5, 0.5, 0.5)
+            base = LAND_COVER_COLORS.get(h.land_cover, (0.5, 0.5, 0.5))
+            return _CULTIVATED if h.cultivated else base
     else:
         raise ValueError(f"Unknown attribute: {attribute}")
 

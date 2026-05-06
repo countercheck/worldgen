@@ -33,4 +33,14 @@ class BiomeStage(GeneratorStage):
                 else:
                     h.biome = Biome.TEMPERATE_FOREST
 
+        # Assign WETLAND to flat river hexes with very high moisture (below alpine elevation)
+        for h in state.hexes.values():
+            if (
+                h.terrain_class == TerrainClass.FLAT
+                and h.moisture > wet_moist
+                and h.river_flow > 0
+                and h.elevation <= alpine_elev
+            ):
+                h.biome = Biome.WETLAND
+
         return state

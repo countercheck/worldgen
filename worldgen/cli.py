@@ -31,14 +31,18 @@ def generate(seed: int, config: str, output_dir: str, width: int, height: int):
         cfg.height = height
 
     from .stages.biomes import BiomeStage
+    from .stages.city_town import CityTownStage
     from .stages.climate import ClimateStage
+    from .stages.cultivation import CultivationStage, VillageCultivationStage
     from .stages.elevation import ElevationStage
     from .stages.erosion import ErosionStage
     from .stages.habitability import HabitabilityStage
     from .stages.hydrology import HydrologyStage
-    from .stages.roads import RoadStage
-    from .stages.settlements import SettlementStage
+    from .stages.interurban_roads import InterurbanRoadStage
+    from .stages.land_cover import LandCoverStage
     from .stages.terrain_class import TerrainClassificationStage
+    from .stages.village_placement import VillagePlacementStage
+    from .stages.village_tracks import VillageTrackStage
 
     click.echo(f"Generating world with seed {seed}...")
     click.echo(f"  Size: {cfg.width}×{cfg.height}")
@@ -51,9 +55,14 @@ def generate(seed: int, config: str, output_dir: str, width: int, height: int):
         .add_stage(HydrologyStage)
         .add_stage(ClimateStage)
         .add_stage(BiomeStage)
+        .add_stage(LandCoverStage)
         .add_stage(HabitabilityStage)
-        .add_stage(SettlementStage)
-        .add_stage(RoadStage)
+        .add_stage(CityTownStage)
+        .add_stage(InterurbanRoadStage)
+        .add_stage(CultivationStage)
+        .add_stage(VillagePlacementStage)
+        .add_stage(VillageTrackStage)
+        .add_stage(VillageCultivationStage)
     )
     state = pipeline.run()
 
@@ -71,6 +80,8 @@ def generate(seed: int, config: str, output_dir: str, width: int, height: int):
     render_debug(state, "habitability", str(output_path / "habitability.png"))
     render_debug(state, "settlements", str(output_path / "settlements.png"))
     render_debug(state, "roads", str(output_path / "roads.png"))
+    render_debug(state, "land_cover", str(output_path / "land_cover.png"))
+    render_debug(state, "cultivation", str(output_path / "cultivation.png"))
 
     click.echo("✓ Done")
 
