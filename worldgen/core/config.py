@@ -28,6 +28,8 @@ class WorldConfig:
     erosion_capacity: float = 4.0
     erosion_deposition: float = 0.3
     erosion_erosion_rate: float = 0.3
+    erosion_channel_affinity_gain: float = 0.5
+    erosion_affinity_update_interval: int = 500
 
     # Hydrology
     river_flow_threshold: float = 0.05
@@ -38,9 +40,7 @@ class WorldConfig:
                 f"river_flow_threshold must be in [0, 1], got {self.river_flow_threshold}"
             )
         if not (0.0 <= self.base_temperature <= 1.0):
-            raise ValueError(
-                f"base_temperature must be in [0, 1], got {self.base_temperature}"
-            )
+            raise ValueError(f"base_temperature must be in [0, 1], got {self.base_temperature}")
         if not (0.0 <= self.latitude_temp_range <= 1.0):
             raise ValueError(
                 f"latitude_temp_range must be in [0, 1], got {self.latitude_temp_range}"

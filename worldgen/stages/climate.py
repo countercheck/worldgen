@@ -1,5 +1,8 @@
 import math
 
+import numpy as np
+from scipy.ndimage import gaussian_filter
+
 from ..core.hex import TerrainClass
 from ..core.hex_grid import neighbors
 from ..core.pipeline import GeneratorStage
@@ -13,32 +16,27 @@ class ClimateStage(GeneratorStage):
         return state
 
     def _compute_temperature(self, state: WorldState) -> None:
+        w, h = state.width, state.height
         height = state.height
         base = self.config.base_temperature
         lat_range = self.config.latitude_temp_range
         lapse = self.config.altitude_lapse_rate
 
-        for (_, r), h in state.hexes.items():
+        for (_, r), hx in state.hexes.items():
             row_frac = r / max(height - 1, 1)
             lat_temp = math.sin(row_frac * math.pi)
             # Subtract the mean of sin over [0, π] (= 2/π ≈ 0.637) so that
             # base_temperature is the true map mean temperature.
             temp = base + (lat_temp - 2.0 / math.pi) * lat_range
-            temp -= h.elevation * lapse
-            h.temperature = max(0.0, min(1.0, temp))
+            temp -= hx.elevation * lapse
+            hx.temperature = max(0.0, min(1.0, temp))
 
-        # Smooth temperature so it varies gradually over space rather than
-        # jumping sharply between adjacent hexes that differ in elevation.
-        for _ in range(5):
-            smoothed = {}
-            for coord, h in state.hexes.items():
-                nbr_temps = [h.temperature]
-                for n in neighbors(coord):
-                    if n in state.hexes:
-                        nbr_temps.append(state.hexes[n].temperature)
-                smoothed[coord] = sum(nbr_temps) / len(nbr_temps)
-            for coord, t in smoothed.items():
-                state.hexes[coord].temperature = t
+        # Smooth temperature with gaussian_filter (replaces 5 manual neighbor-average passes)
+        temp_arr = np.array([[state.hexes[(q, r)].temperature for r in range(h)] for q in range(w)])
+        temp_arr = gaussian_filter(temp_arr, sigma=1.0)
+        for q in range(w):
+            for r in range(h):
+                state.hexes[(q, r)].temperature = float(temp_arr[q, r])
 
     def _compute_moisture(self, state: WorldState) -> None:
         wind = self.config.wind_direction

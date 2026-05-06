@@ -131,7 +131,7 @@ def astar(
             if neighbor not in g_score or tentative_g < g_score[neighbor]:
                 came_from[neighbor] = current
                 g_score[neighbor] = tentative_g
-                h = distance(neighbor, goal) * min(1.0, 3.0)
+                h = distance(neighbor, goal)
                 f = tentative_g + h
                 heapq.heappush(open_set, (f, neighbor))
 
