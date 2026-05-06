@@ -89,10 +89,9 @@ worldgen/
 │   ├── habitability.py      # composite score for settlement placement
 │   ├── city_town.py         # city & town placement
 │   ├── interurban_roads.py  # inter-settlement road network
-│   ├── cultivation.py       # city/town cultivation rings
+│   ├── cultivation.py       # city/town and village cultivation rings
 │   ├── village_placement.py # village placement
-│   ├── village_tracks.py    # village-scale track roads
-│   └── village_cultivation.py
+│   └── village_tracks.py    # village-scale track roads
 ├── export/         # all file I/O lives here
 │   ├── json_export.py  # WorldState ↔ JSON
 │   ├── svg_export.py   # hex map → SVG
