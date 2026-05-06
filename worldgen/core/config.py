@@ -45,6 +45,16 @@ class WorldConfig:
             raise ValueError(
                 f"latitude_temp_range must be in [0, 1], got {self.latitude_temp_range}"
             )
+        if self.erosion_affinity_update_interval < 1:
+            raise ValueError(
+                "erosion_affinity_update_interval must be >= 1, "
+                f"got {self.erosion_affinity_update_interval}"
+            )
+        if self.erosion_channel_affinity_gain < 0:
+            raise ValueError(
+                f"erosion_channel_affinity_gain must be >= 0, "
+                f"got {self.erosion_channel_affinity_gain}"
+            )
 
     # Climate
     wind_direction: tuple[float, float] = (1.0, 0.0)

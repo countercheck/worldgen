@@ -1,3 +1,9 @@
+import numpy as np
+from scipy.ndimage import gaussian_filter
+
+from ..core.pipeline import GeneratorStage
+from ..core.world_state import WorldState
+
 try:
     import numba as _numba
 
@@ -7,13 +13,6 @@ except ImportError:  # numba optional — fall back to pure Python
 
     def _jit(fn):  # type: ignore[misc]
         return fn
-
-
-import numpy as np
-from scipy.ndimage import gaussian_filter
-
-from ..core.pipeline import GeneratorStage
-from ..core.world_state import WorldState
 
 _MAX_STEPS = 64
 _EVAPORATION = 0.99
@@ -133,7 +132,7 @@ class ErosionStage(GeneratorStage):
                 )
 
                 # Periodically re-weight remaining indices toward established channels
-                if step % affinity_interval == 0 and step > 0:
+                if affinity_interval > 0 and step > 0 and step % affinity_interval == 0:
                     remaining = n_iter - step - 1
                     if remaining > 0:
                         land_weights = channel_affinity[land_arr[:, 0], land_arr[:, 1]]

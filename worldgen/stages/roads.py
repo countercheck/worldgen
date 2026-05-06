@@ -217,7 +217,16 @@ class RoadStage(GeneratorStage):
         Falls back to A* when no suitable junction is found.
         """
         best_path = None
-        best_len = float("inf")
+        best_cost = float("inf")
+
+        def _path_cost(path: list) -> float:
+            if not path:
+                return float("inf")
+            total = node_cost(hexes[path[0]])
+            for i in range(1, len(path)):
+                total += node_cost(hexes[path[i]])
+                total += edge_cost(hexes[path[i - 1]], hexes[path[i]])
+            return total
 
         for mid in settlement_coords:
             if mid in (origin, dest):
@@ -250,9 +259,10 @@ class RoadStage(GeneratorStage):
                 continue
 
             stitched = s1 + s2[1:]
-            if len(stitched) < best_len:
+            cost = _path_cost(stitched)
+            if cost < best_cost:
                 best_path = stitched
-                best_len = len(stitched)
+                best_cost = cost
 
         if best_path is not None:
             return best_path
