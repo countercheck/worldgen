@@ -17,7 +17,7 @@ def _derive(h, wet_moist: float) -> LandCover:
     tc = h.terrain_class
     b = h.biome
 
-    if tc == TerrainClass.OCEAN:
+    if tc in (TerrainClass.OCEAN, TerrainClass.LAKE):
         return LandCover.OPEN_WATER
     if tc == TerrainClass.MOUNTAIN:
         return LandCover.BARE_ROCK

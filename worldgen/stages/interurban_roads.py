@@ -8,7 +8,7 @@ from ..core.world_state import Road, RoadTier, WorldState
 
 def _terrain_base_cost(hx, cfg) -> float:
     tc = hx.terrain_class
-    if tc == TerrainClass.OCEAN:
+    if tc in (TerrainClass.OCEAN, TerrainClass.LAKE):
         return float("inf")
     if tc == TerrainClass.MOUNTAIN:
         return cfg.road_mountain_cost
@@ -142,7 +142,7 @@ class InterurbanRoadStage(GeneratorStage):
         for coord, hx in hexes.items():
             if hx.settlement is not None:
                 continue
-            if hx.terrain_class == TerrainClass.OCEAN:
+            if hx.terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE):
                 continue
             if any(n in road_hex_set for n in neighbors(coord)):
                 hx.habitability = min(1.0, hx.habitability + 0.2)
