@@ -72,16 +72,21 @@ class HydrologyStage(GeneratorStage):
         self._tag_hexes(river_set, flow_dir, hexes, ocean, lakes, w, h)
 
         # G — Ensure every lake has an outflow river (fill-to-spillway enforcement)
-        lake_components = _get_lake_components(lakes, hexes)
         drainage_rivers = self._ensure_lake_drainage(
-            lake_components, river_set, flow_dir, hexes, land, ocean, lakes, acc, filled, w, h
+            river_set, flow_dir, hexes, land, ocean, lakes, acc, filled, w, h
         )
         if drainage_rivers:
             state.rivers.extend(drainage_rivers)
-            # Re-normalize and re-tag after any new river hexes were added
+            # Re-normalize after any new river hexes were added
             max_acc = max(acc.values()) if acc else 1.0
             for coord in river_set:
                 hexes[coord].river_flow = acc.get(coord, 0.0) / max_acc
+            # Clear stale river tags from hexes submerged into lake during drainage
+            # (they were removed from river_set but still carry tags from the first pass)
+            _river_tags = {"headwater", "confluence", "river_mouth"}
+            for coord, hx in hexes.items():
+                if coord not in river_set:
+                    hx.tags -= _river_tags
             self._tag_hexes(river_set, flow_dir, hexes, ocean, lakes, w, h)
             # Recompute flow_volume for all rivers now that max_acc is final;
             # _ensure_lake_drainage may remove land hexes from acc (submerged into lake)
@@ -449,7 +454,6 @@ class HydrologyStage(GeneratorStage):
 
     def _ensure_lake_drainage(
         self,
-        lake_components: list[set[HexCoord]],
         river_set: set[HexCoord],
         flow_dir: dict[HexCoord, HexCoord | None],
         hexes: dict[HexCoord, "Hex"],
@@ -472,18 +476,42 @@ class HydrologyStage(GeneratorStage):
         Phase 2 — outflow: after expansion, perimeter hexes are retried in ascending
         elevation order; elevation-guided Dijkstra finds the outflow path, with plain
         BFS as a guaranteed fallback.
+
+        Components are derived live from the `lakes` set (not a stale snapshot) so that
+        lake–lake merges caused by expansion are handled correctly.  Seeds are processed
+        in deterministic coordinate order to ensure reproducibility.
         """
-        if not lake_components:
+        if not lakes:
             return []
 
         def on_border(coord: HexCoord) -> bool:
             q, r = coord
             return q == 0 or q == w - 1 or r == 0 or r == h - 1
 
+        def bfs_component(seeds: set[HexCoord]) -> set[HexCoord]:
+            """BFS-expand *seeds* through the live `lakes` set."""
+            comp: set[HexCoord] = set(seeds) & lakes
+            queue: deque[HexCoord] = deque(comp)
+            while queue:
+                c = queue.popleft()
+                for nbr in neighbors(c):
+                    if nbr in lakes and nbr not in comp:
+                        comp.add(nbr)
+                        queue.append(nbr)
+            return comp
+
         max_acc = max(acc.values()) if acc else 1.0
         new_rivers: list[River] = []
+        processed: set[HexCoord] = set()
 
-        for component in lake_components:
+        # Sort seeds for deterministic processing order regardless of set hash randomization
+        for seed in sorted(lakes):
+            if seed in processed or seed not in lakes:
+                continue
+
+            # Derive the current connected component from the live lakes set
+            component = bfs_component({seed})
+
             # --- Phase 1: fill lake to spillway level, expand into submerged land ---
 
             # Sort by raw elevation so we find the true geographic spillway, not the
@@ -493,6 +521,7 @@ class HydrologyStage(GeneratorStage):
                 key=lambda c: hexes[c].elevation,
             )
             if not border_land:
+                processed |= component
                 continue
 
             spillway_hex = border_land[0]
@@ -525,12 +554,18 @@ class HydrologyStage(GeneratorStage):
                 flow_dir.pop(c, None)
                 acc.pop(c, None)
 
-            component = component | newly_submerged
+            # Recompute full component from live lakes set after expansion:
+            # newly submerged hexes may bridge previously separate lake components.
+            component = bfs_component(component | newly_submerged)
 
             # Raise the stored elevation of all lake hexes (including originals) to water_level
             for c in component:
                 hexes[c].elevation = water_level
                 filled[c] = routing_level
+
+            # Mark entire (post-expansion) component as processed so we never revisit
+            # any hex that was merged in (e.g. via a previously separate lake component)
+            processed |= component
 
             # If the expanded body now touches the map edge it is ocean, not a lake
             if any(on_border(c) for c in component):
@@ -609,10 +644,13 @@ class HydrologyStage(GeneratorStage):
 
 
 def _get_lake_components(lakes: set[HexCoord], hexes: dict[HexCoord, "Hex"]) -> list[set[HexCoord]]:
-    """Return a list of connected lake components via BFS."""
+    """Return a list of connected lake components via BFS.
+
+    Seeds are sorted by coordinate for deterministic ordering across runs.
+    """
     visited: set[HexCoord] = set()
     components: list[set[HexCoord]] = []
-    for seed in lakes:
+    for seed in sorted(lakes):
         if seed in visited:
             continue
         component: set[HexCoord] = {seed}
