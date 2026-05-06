@@ -175,7 +175,18 @@ def export_svg(
     from .export.svg_export import SVGConfig
     from .export.svg_export import save as save_svg
 
-    layer_set = set(layers.split(",")) if layers else _ALL_LAYERS
+    if layers:
+        parsed = [layer.strip() for layer in layers.split(",")]
+        parsed = [layer for layer in parsed if layer]
+        unknown = set(parsed) - _ALL_LAYERS
+        if unknown:
+            allowed = ", ".join(sorted(_ALL_LAYERS))
+            raise click.ClickException(
+                f"Unknown layer(s): {', '.join(sorted(unknown))}. Allowed: {allowed}"
+            )
+        layer_set = set(parsed)
+    else:
+        layer_set = _ALL_LAYERS
 
     click.echo(f"Loading {input_path}...")
     try:
