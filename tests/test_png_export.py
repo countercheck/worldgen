@@ -116,13 +116,17 @@ def test_layer_toggle_terrain_only():
 
 def test_contours_layer_renders():
     ws = WorldState.empty(seed=1, width=4, height=4)
-    coords = list(ws.hexes.keys())
-    ws.hexes[coords[0]].elevation = 0.0
-    ws.hexes[coords[1]].elevation = 0.5
-    config = PNGConfig(layers={"terrain", "contours"})
+    # Use known-adjacent hexes: (1, 0) is a neighbor of (0, 0).
+    ws.hexes[(0, 0)].elevation = 0.0
+    ws.hexes[(1, 0)].elevation = 0.5  # 1500 m diff → contour line drawn
+    # Render only the contours layer so the background stays plain white.
+    config = PNGConfig(layers={"contours"})
     img = render(ws, config)
     assert isinstance(img, Image.Image)
     assert img.width > 0
+    # At least one pixel should be non-white (the contour line itself).
+    pixels = list(img.getdata())
+    assert any(p != (255, 255, 255) for p in pixels), "expected contour pixels to be drawn"
 
 
 def test_topographic_style_includes_contours():
@@ -137,7 +141,9 @@ def test_contours_flat_world_no_lines():
     ws = WorldState.empty(seed=1, width=4, height=4)
     for h in ws.hexes.values():
         h.elevation = 0.5
-    # Flat world renders without error; contour layer runs but draws nothing.
-    config = PNGConfig(layers={"terrain", "contours"})
+    # Flat world: contour layer runs but draws nothing — all pixels stay white.
+    config = PNGConfig(layers={"contours"})
     img = render(ws, config)
     assert isinstance(img, Image.Image)
+    pixels = list(img.getdata())
+    assert all(p == (255, 255, 255) for p in pixels), "expected no contour pixels for flat world"
