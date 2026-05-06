@@ -159,7 +159,6 @@ def test_lake_chain_terminates(world):
         pytest.skip("No lakes in this world — nothing to check")
 
     w, h = world.width, world.height
-    ocean = {c for c, hx in world.hexes.items() if hx.terrain_class == TerrainClass.OCEAN}
     land = {
         c
         for c, hx in world.hexes.items()
