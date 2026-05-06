@@ -129,6 +129,71 @@ def render_map(input_path: str, attribute: str, output: str):
     click.echo(f"✓ Saved to {output}")
 
 
+_STYLES = ["atlas", "topographic", "wargame"]
+_COLOR_MODES = ["biome", "terrain", "land_cover", "elevation"]
+_ALL_LAYERS = {"terrain", "rivers", "roads", "settlements", "labels", "grid"}
+
+
+@cli.command(name="export")
+@click.option("--input", "input_path", type=str, required=True, help="Input world.json file")
+@click.option("--output", type=str, required=True, help="Output SVG file")
+@click.option(
+    "--style",
+    type=click.Choice(_STYLES, case_sensitive=False),
+    default="atlas",
+    show_default=True,
+    help="Visual style preset.",
+)
+@click.option(
+    "--color-mode",
+    type=click.Choice(_COLOR_MODES, case_sensitive=False),
+    default="biome",
+    show_default=True,
+    help="Hex fill color source (ignored when --style overrides it).",
+)
+@click.option(
+    "--layers",
+    default=None,
+    help="Comma-separated layers to include (default: all). "
+    "Choices: terrain,rivers,roads,settlements,labels,grid",
+)
+@click.option("--hex-size", type=float, default=12.0, show_default=True, help="Hex size in pixels.")
+@click.option(
+    "--padding", type=int, default=20, show_default=True, help="Border padding in pixels."
+)
+def export_svg(
+    input_path: str,
+    output: str,
+    style: str,
+    color_mode: str,
+    layers: str | None,
+    hex_size: float,
+    padding: int,
+) -> None:
+    """Export a saved world as an SVG hex map."""
+    from .export.json_export import load as load_json
+    from .export.svg_export import SVGConfig
+    from .export.svg_export import save as save_svg
+
+    layer_set = set(layers.split(",")) if layers else _ALL_LAYERS
+
+    click.echo(f"Loading {input_path}...")
+    try:
+        state = load_json(input_path)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    cfg = SVGConfig(
+        style=style,
+        color_mode=color_mode,
+        layers=layer_set,
+        hex_size=hex_size,
+        padding=padding,
+    )
+    save_svg(state, output, cfg)
+    click.echo(f"✓ Saved to {output}")
+
+
 @cli.command()
 def presets():
     """List available presets."""
