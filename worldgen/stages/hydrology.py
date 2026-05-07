@@ -639,6 +639,9 @@ class HydrologyStage(GeneratorStage):
                     merged_into_existing = True
                     merge_acc = acc.get(prev, running_acc)
                     if running_acc > merge_acc:
+                        # If the merged river already carries less flow than the
+                        # new tributary path, clamp newly added upstream cells down
+                        # to the merge value so downstream accumulation never decreases.
                         for added in added_land:
                             if added in acc:
                                 acc[added] = min(acc[added], merge_acc)
