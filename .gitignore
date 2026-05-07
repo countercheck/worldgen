@@ -10,3 +10,6 @@ build/
 .coverage
 htmlcov/
 output/
+.claude/worktrees/
+.claude/cache/
+.claude/*.local.*
