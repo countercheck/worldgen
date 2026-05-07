@@ -2,6 +2,7 @@ from ..core.hex import Biome, Settlement, SettlementRole, SettlementTier, Terrai
 from ..core.hex_grid import distance, grade_reachable_count, hex_range, neighbors
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
+from .road_cost import grade_is_under_cap
 
 
 def _assign_role(coord, hx, hexes) -> SettlementRole:
@@ -34,9 +35,7 @@ class CityTownStage(GeneratorStage):
         cfg = self.config
 
         def grade_ok(a_hx, b_hx):
-            delta = abs(b_hx.elevation - a_hx.elevation)
-            grade_pct = delta * cfg.road_elev_range_m * 100.0 / cfg.hex_size_m
-            return grade_pct < cfg.road_slope_cap_pct
+            return grade_is_under_cap(a_hx, b_hx, cfg)
 
         reachable_cache: dict[tuple[int, int], int] = {}
 
