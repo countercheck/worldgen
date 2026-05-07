@@ -133,7 +133,8 @@ def render_map(input_path: str, attribute: str, output: str):
 
 _STYLES = ["atlas", "topographic", "wargame"]
 _COLOR_MODES = ["biome", "terrain", "land_cover", "elevation"]
-_ALL_LAYERS = {"terrain", "rivers", "roads", "settlements", "labels", "grid", "contours"}
+_DEFAULT_LAYERS = {"terrain", "rivers", "roads", "settlements", "labels", "grid"}
+_ALLOWED_LAYERS = _DEFAULT_LAYERS | {"contours"}
 
 
 @cli.command(name="export")
@@ -157,7 +158,7 @@ _ALL_LAYERS = {"terrain", "rivers", "roads", "settlements", "labels", "grid", "c
     "--layers",
     default=None,
     help="Comma-separated layers to include (default: all). "
-    "Choices: terrain,rivers,roads,settlements,labels,grid",
+    "Choices: terrain,rivers,roads,settlements,labels,grid,contours",
 )
 @click.option("--hex-size", type=float, default=12.0, show_default=True, help="Hex size in pixels.")
 @click.option(
@@ -180,15 +181,15 @@ def export_svg(
     if layers:
         parsed = [layer.strip() for layer in layers.split(",")]
         parsed = [layer for layer in parsed if layer]
-        unknown = set(parsed) - _ALL_LAYERS
+        unknown = set(parsed) - _ALLOWED_LAYERS
         if unknown:
-            allowed = ", ".join(sorted(_ALL_LAYERS))
+            allowed = ", ".join(sorted(_ALLOWED_LAYERS))
             raise click.ClickException(
                 f"Unknown layer(s): {', '.join(sorted(unknown))}. Allowed: {allowed}"
             )
         layer_set = set(parsed)
     else:
-        layer_set = _ALL_LAYERS
+        layer_set = _DEFAULT_LAYERS
 
     click.echo(f"Loading {input_path}...")
     try:

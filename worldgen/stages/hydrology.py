@@ -485,6 +485,21 @@ class HydrologyStage(GeneratorStage):
             q, r = coord
             return q == 0 or q == w - 1 or r == 0 or r == h - 1
 
+        def reaches_terminal(coord: HexCoord) -> bool:
+            seen: set[HexCoord] = set()
+            cur = coord
+            while cur not in seen:
+                seen.add(cur)
+                if cur in ocean or on_border(cur):
+                    return True
+                ds = flow_dir.get(cur)
+                if ds is None:
+                    return any(n in ocean for n in neighbors(cur))
+                if ds not in land:
+                    return ds in ocean or on_border(ds)
+                cur = ds
+            return False
+
         def bfs_component(seeds: set[HexCoord]) -> set[HexCoord]:
             """BFS-expand *seeds* through the live `lakes` set."""
             comp: set[HexCoord] = set(seeds) & lakes
@@ -611,20 +626,52 @@ class HydrologyStage(GeneratorStage):
             if not extension or spillway is None:
                 continue
 
-            path = [spillway] + extension
+            path = [spillway]
             prev = spillway
             running_acc = max(acc.get(spillway, 0.0), 1.0)
+            added_land = [spillway]
+            merged_into_existing = False
             for coord in extension:
                 if coord not in land:
+                    path.append(coord)
                     continue
+                if prev in river_set and reaches_terminal(prev):
+                    merged_into_existing = True
+                    merge_acc = acc.get(prev, running_acc)
+                    if running_acc > merge_acc:
+                        for added in added_land:
+                            if added in acc:
+                                acc[added] = min(acc[added], merge_acc)
+                            else:
+                                acc[added] = merge_acc
+                    break
                 flow_dir[prev] = coord
+                path.append(coord)
                 river_set.add(coord)
                 new_val = max(acc.get(coord, 0.0), running_acc)
                 acc[coord] = new_val
                 running_acc = new_val
                 prev = coord
+                added_land.append(coord)
+
+            if merged_into_existing:
+                seen = {prev}
+                tail = prev
+                while True:
+                    ds = flow_dir.get(tail)
+                    if ds is None or ds in seen:
+                        break
+                    path.append(ds)
+                    seen.add(ds)
+                    if ds not in land:
+                        break
+                    acc[ds] = max(acc.get(ds, 0.0), acc.get(tail, 0.0))
+                    tail = ds
             river_set.add(spillway)
-            acc[spillway] = max(acc.get(spillway, 0.0), 1.0)
+            spillway_acc = max(acc.get(spillway, 0.0), 1.0)
+            if merged_into_existing:
+                spillway_acc = min(spillway_acc, acc.get(prev, spillway_acc))
+            acc[spillway] = spillway_acc
             last_land = next((c for c in reversed(path) if c in acc), spillway)
             new_rivers.append(River(hexes=path, flow_volume=acc[last_land] / max_acc))
 

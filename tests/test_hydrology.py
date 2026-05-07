@@ -1,9 +1,11 @@
+import numpy as np
 import pytest
 
 from worldgen.core.config import WorldConfig
 from worldgen.core.hex import TerrainClass
 from worldgen.core.hex_grid import neighbors
 from worldgen.core.pipeline import GeneratorPipeline
+from worldgen.core.world_state import WorldState
 from worldgen.stages.elevation import ElevationStage
 from worldgen.stages.erosion import ErosionStage
 from worldgen.stages.hydrology import HydrologyStage
@@ -141,3 +143,51 @@ def test_reproducibility():
         assert r1.flow_volume == r2.flow_volume, (
             f"river[{i}] flow_volume differs between identical seeds"
         )
+
+
+def test_lake_drainage_merges_without_rewiring_existing_river():
+    cfg = WorldConfig(width=5, height=5)
+    stage = HydrologyStage(cfg, np.random.default_rng(0))
+    ws = WorldState.empty(seed=3, width=5, height=5)
+
+    lake = (2, 2)
+    spillway = (2, 1)
+    merge = (2, 0)
+    downstream = (3, 0)
+
+    for hex_item in ws.hexes.values():
+        hex_item.terrain_class = TerrainClass.FLAT
+        hex_item.elevation = 10.0
+        hex_item.river_flow = 0.0
+    ws.hexes[lake].terrain_class = TerrainClass.LAKE
+    ws.hexes[lake].elevation = 0.0
+    ws.hexes[spillway].elevation = 1.0
+
+    river_set = {merge, downstream}
+    flow_dir = {merge: downstream, downstream: None, spillway: None}
+    land = set(ws.hexes) - {lake}
+    ocean: set[tuple[int, int]] = set()
+    lakes = {lake}
+    acc = {spillway: 1.0, merge: 5.0, downstream: 8.0}
+    filled = {coord: hex_item.elevation for coord, hex_item in ws.hexes.items()}
+    filled[spillway] = 1.0
+
+    stage._guided_path_to_ocean = lambda *args, **kwargs: [merge]
+    stage._forced_exit_to_border = lambda *args, **kwargs: [merge]
+
+    stage._ensure_lake_drainage(
+        river_set=river_set,
+        flow_dir=flow_dir,
+        hexes=ws.hexes,
+        land=land,
+        ocean=ocean,
+        lakes=lakes,
+        acc=acc,
+        filled=filled,
+        w=ws.width,
+        h=ws.height,
+    )
+
+    assert flow_dir[spillway] == merge
+    assert flow_dir[merge] == downstream
+    assert acc[merge] == 5.0
