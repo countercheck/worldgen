@@ -81,6 +81,10 @@ class WorldConfig:
     cultivation_town_radius: int = 4
     cultivation_village_radius: int = 2
 
+    # World scale
+    hex_size_m: float = 1000.0  # metres per hex
+    road_elev_range_m: float = 3000.0  # metres for full 0→1 elevation span
+
     # Roads — base terrain costs
     road_mountain_cost: float = 10.0
     road_hill_cost: float = 3.0
@@ -93,11 +97,17 @@ class WorldConfig:
     road_gravity_exponent: float = 1.5
     road_river_discount: float = 0.5
     road_pheromone_factor: float = 0.1
-    road_slope_cost: float = 5.0
+    road_slope_cost: float = 2.0
+    road_slope_free_pct: float = 3.0  # grade % below which slope costs nothing
+    road_slope_cap_pct: float = 25.0  # grade % at which cost saturates
+    road_slope_cap_mult: float = 10.0  # saturation multiplier at cap grade
     road_min_traffic: int = 3
     road_primary_pct: float = 0.10
     road_secondary_pct: float = 0.30
     road_track_pct: float = 0.60
+
+    # Settlement placement
+    settlement_min_reachable: int = 100  # min hexes reachable below cap grade
 
     @classmethod
     def from_json(cls, path: str) -> "WorldConfig":

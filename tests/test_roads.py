@@ -149,3 +149,48 @@ def test_reproducibility():
     tiers1 = sorted((r.tier.value, tuple(r.path)) for r in s1.roads)
     tiers2 = sorted((r.tier.value, tuple(r.path)) for r in s2.roads)
     assert tiers1 == tiers2, "Roads differ between identical seeds"
+
+
+def test_slope_edge_cost_formula():
+    """Unit test for the hyperbolic slope cost formula used in edge_cost."""
+    cfg = WorldConfig()
+
+    def slope_cost(delta_elev):
+        grade_pct = delta_elev * cfg.road_elev_range_m * 100.0 / cfg.hex_size_m
+        if grade_pct <= cfg.road_slope_free_pct:
+            return 0.0
+        if grade_pct >= cfg.road_slope_cap_pct:
+            return cfg.road_slope_cost * cfg.road_slope_cap_mult
+        raw = (
+            cfg.road_slope_cost
+            * (grade_pct - cfg.road_slope_free_pct)
+            / (cfg.road_slope_cap_pct - grade_pct)
+        )
+        return min(raw, cfg.road_slope_cost * cfg.road_slope_cap_mult)
+
+    # grade = 0% → free
+    assert slope_cost(0.0) == 0.0
+    # grade = free_pct (3%) → zero cost
+    delta_free = cfg.road_slope_free_pct * cfg.hex_size_m / (cfg.road_elev_range_m * 100.0)
+    assert slope_cost(delta_free) == 0.0
+    # grade slightly above free → small positive cost
+    assert slope_cost(delta_free * 1.01) > 0.0
+    # midpoint grade → cost = road_slope_cost × 1.0
+    mid_pct = (cfg.road_slope_free_pct + cfg.road_slope_cap_pct) / 2
+    delta_mid = mid_pct * cfg.hex_size_m / (cfg.road_elev_range_m * 100.0)
+    mid_cost = slope_cost(delta_mid)
+    expected_mid = (
+        cfg.road_slope_cost
+        * (mid_pct - cfg.road_slope_free_pct)
+        / (cfg.road_slope_cap_pct - mid_pct)
+    )
+    assert abs(mid_cost - expected_mid) < 1e-9
+    # grade = cap_pct → saturated at road_slope_cost * road_slope_cap_mult
+    delta_cap = cfg.road_slope_cap_pct * cfg.hex_size_m / (cfg.road_elev_range_m * 100.0)
+    assert slope_cost(delta_cap) == pytest.approx(cfg.road_slope_cost * cfg.road_slope_cap_mult)
+    # grade > cap → same saturation value
+    assert slope_cost(delta_cap * 2) == pytest.approx(cfg.road_slope_cost * cfg.road_slope_cap_mult)
+    # monotonically increasing between free and cap
+    deltas = [delta_free + i * (delta_cap - delta_free) / 20 for i in range(1, 21)]
+    costs = [slope_cost(d) for d in deltas]
+    assert all(a <= b for a, b in zip(costs, costs[1:], strict=False))
