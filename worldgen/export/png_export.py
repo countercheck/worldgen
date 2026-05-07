@@ -19,8 +19,8 @@ class PNGConfig:
         default_factory=lambda: {"terrain", "rivers", "roads", "settlements", "labels", "grid"}
     )
     contour_elevation_scale_m: float = 3000.0
-    contour_min_m: float = 10.0
-    contour_max_m: float = 300.0
+    contour_interval_m: float = 100.0
+    contour_max_crossings: int = 5
     contour_max_stroke: float = 4.0
 
 
@@ -130,13 +130,11 @@ def render(ws: WorldState, config: PNGConfig | None = None) -> Image.Image:
 
     if "contours" in layers:
         scale = config.contour_elevation_scale_m
-        min_m = config.contour_min_m
-        max_m = config.contour_max_m
+        interval = config.contour_interval_m
+        max_n = config.contour_max_crossings
         max_stroke = config.contour_max_stroke
-        if max_m <= min_m:
-            raise ValueError(
-                f"contour_max_m ({max_m!r}) must be greater than contour_min_m ({min_m!r})"
-            )
+        if interval <= 0:
+            raise ValueError(f"contour_interval_m must be positive, got {interval!r}")
         for coord, hex_item in ws.hexes.items():
             ca = axial_to_pixel(coord, size)
             for nbr_coord in neighbors(coord):
@@ -145,11 +143,14 @@ def render(ws: WorldState, config: PNGConfig | None = None) -> Image.Image:
                 nbr = ws.hexes.get(nbr_coord)
                 if nbr is None:
                     continue
-                diff_m = abs(hex_item.elevation - nbr.elevation) * scale
-                if diff_m < min_m:
+                lo_m = min(hex_item.elevation, nbr.elevation) * scale
+                hi_m = max(hex_item.elevation, nbr.elevation) * scale
+                n = int(hi_m / interval) - int(lo_m / interval)
+                if n <= 0:
                     continue
-                t = min((diff_m - min_m) / (max_m - min_m), 1.0)
+                t = min(n / max_n, 1.0)
                 stroke = max(1, round(0.3 + t * (max_stroke - 0.3)))
+                v = round(187 * (1 - t) + 17 * t)
                 cb = axial_to_pixel(nbr_coord, size)
                 mx = (ca[0] + cb[0]) / 2 + ox
                 my = (ca[1] + cb[1]) / 2 + oy
@@ -163,7 +164,7 @@ def render(ws: WorldState, config: PNGConfig | None = None) -> Image.Image:
                 half = size / 2
                 x1, y1 = int(mx + px * half), int(my + py * half)
                 x2, y2 = int(mx - px * half), int(my - py * half)
-                draw.line([(x1, y1), (x2, y2)], fill=(51, 51, 51), width=stroke)
+                draw.line([(x1, y1), (x2, y2)], fill=(v, v, v), width=stroke)
 
     if "rivers" in layers:
         for river in ws.rivers:

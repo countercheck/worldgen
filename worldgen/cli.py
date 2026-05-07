@@ -133,7 +133,7 @@ def render_map(input_path: str, attribute: str, output: str):
 
 _STYLES = ["atlas", "topographic", "wargame"]
 _COLOR_MODES = ["biome", "terrain", "land_cover", "elevation"]
-_ALL_LAYERS = {"terrain", "rivers", "roads", "settlements", "labels", "grid"}
+_ALL_LAYERS = {"terrain", "rivers", "roads", "settlements", "labels", "grid", "contours"}
 
 
 @cli.command(name="export")

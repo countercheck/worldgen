@@ -342,18 +342,15 @@ class HydrologyStage(GeneratorStage):
                     # Stage 3: plain BFS over any hex — guaranteed to reach a border
                     extension = self._forced_exit_to_border(mouth, hexes, ocean, lakes, w, h)
                 if extension:
-                    # Carry the stalled mouth's accumulation through the fallback segment.
-                    # Use max(natural_acc, mouth_acc) to avoid lowering the river_flow of
-                    # hexes that are also traversed by natural river paths (e.g. confluences).
-                    # This keeps river_flow non-decreasing along both fallback and natural paths.
-                    # acc[mouth] is always present for land hexes; 1.0 (minimum accumulation)
-                    # is the safe fallback in case mouth somehow isn't in acc.
                     mouth_acc = acc.get(mouth, 1.0)
-                    # Update flow_dir along fallback path so _tag_hexes sees coherent state
                     prev = mouth
                     for ext_coord in extension:
                         if ext_coord in land:
                             flow_dir[prev] = ext_coord
+                            if ext_coord in river_set:
+                                # Merged into existing network; don't inflate its acc.
+                                prev = ext_coord
+                                break
                             river_set.add(ext_coord)
                             acc[ext_coord] = max(acc.get(ext_coord, 0.0), mouth_acc)
                             prev = ext_coord
@@ -614,31 +611,22 @@ class HydrologyStage(GeneratorStage):
             if not extension or spillway is None:
                 continue
 
-            # Build the actual drainage path, stopping when we merge into an
-            # existing river (to avoid raising that river's acc beyond its
-            # natural downstream value, which would violate the flow-accumulation
-            # monotonicity invariant).
-            actual_path: list[HexCoord] = [spillway]
+            path = [spillway] + extension
             prev = spillway
-            prev_acc = max(acc.get(spillway, 0.0), 1.0)  # starting acc for propagation
+            running_acc = max(acc.get(spillway, 0.0), 1.0)
             for coord in extension:
                 if coord not in land:
                     continue
                 flow_dir[prev] = coord
-                actual_path.append(coord)
-                if coord in river_set:
-                    # Merged into existing river network — acc already correct here.
-                    break
-                # New drainage hex: propagate acc non-decreasingly from previous.
-                new_acc_val = max(acc.get(coord, 0.0), prev_acc)
-                acc[coord] = new_acc_val
-                prev_acc = new_acc_val
                 river_set.add(coord)
+                new_val = max(acc.get(coord, 0.0), running_acc)
+                acc[coord] = new_val
+                running_acc = new_val
                 prev = coord
             river_set.add(spillway)
             acc[spillway] = max(acc.get(spillway, 0.0), 1.0)
-            last_land = next((c for c in reversed(actual_path) if c in acc), spillway)
-            new_rivers.append(River(hexes=actual_path, flow_volume=acc[last_land] / max_acc))
+            last_land = next((c for c in reversed(path) if c in acc), spillway)
+            new_rivers.append(River(hexes=path, flow_volume=acc[last_land] / max_acc))
 
         return new_rivers
 

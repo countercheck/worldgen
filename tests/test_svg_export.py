@@ -170,19 +170,35 @@ def test_topographic_style_includes_contours():
 
 
 def test_contour_stroke_scales_with_elevation_diff():
-    ws = WorldState.empty(seed=1, width=4, height=4)
-    coords = sorted(ws.hexes.keys())
-    # Pair A: small diff (just above threshold at scale 3000 → ~0.005 = 15 m)
-    ws.hexes[coords[0]].elevation = 0.5
-    ws.hexes[coords[1]].elevation = 0.505
-    # Pair B: large diff (near max → ~0.1 = 300 m)
-    ws.hexes[coords[2]].elevation = 0.0
-    ws.hexes[coords[3]].elevation = 0.1
-    config = SVGConfig(layers={"contours"})
-    svg = render(ws, config)
-    # Extract all stroke-width values from contour lines.
     import re
 
+    ws = WorldState.empty(seed=1, width=4, height=4)
+    # (0,0)↔(1,0) and (2,0)↔(3,0) are adjacent pairs in the axial grid.
+    # Pair A: 1 threshold crossing (100 m)
+    ws.hexes[(0, 0)].elevation = 0.0  # 0 m
+    ws.hexes[(1, 0)].elevation = 0.05  # 150 m → crosses 100 m
+    # Pair B: 4 threshold crossings (100, 200, 300, 400 m)
+    ws.hexes[(2, 0)].elevation = 0.0  # 0 m
+    ws.hexes[(3, 0)].elevation = 0.15  # 450 m → crosses 100–400 m
+    config = SVGConfig(layers={"contours"})
+    svg = render(ws, config)
     widths = [float(m) for m in re.findall(r'stroke-width="([\d.]+)"', svg)]
     assert len(widths) >= 2
-    assert min(widths) < max(widths)  # thicker for larger elevation diff
+    assert min(widths) < max(widths)  # more crossings → thicker
+
+
+def test_contour_darkness_scales_with_crossings():
+    import re
+
+    ws = WorldState.empty(seed=1, width=4, height=4)
+    # Pair A: 1 crossing → light gray
+    ws.hexes[(0, 0)].elevation = 0.0
+    ws.hexes[(1, 0)].elevation = 0.05  # 150 m
+    # Pair B: saturated crossings → near-black
+    ws.hexes[(2, 0)].elevation = 0.0
+    ws.hexes[(3, 0)].elevation = 0.5  # 1500 m → 15 crossings
+    config = SVGConfig(layers={"contours"})
+    svg = render(ws, config)
+    colors = re.findall(r'stroke="(#[0-9a-f]{6})"', svg)
+    grays = [int(c[1:3], 16) for c in colors]  # red channel == gray value
+    assert min(grays) < max(grays)  # more crossings → darker

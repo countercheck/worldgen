@@ -18,8 +18,8 @@ class SVGConfig:
     )
     style: str = "atlas"  # "atlas" | "topographic" | "wargame"
     contour_elevation_scale_m: float = 3000.0
-    contour_min_m: float = 10.0
-    contour_max_m: float = 300.0
+    contour_interval_m: float = 100.0
+    contour_max_crossings: int = 5
     contour_max_stroke: float = 4.0
 
 
@@ -137,13 +137,11 @@ def render(ws: WorldState, config: SVGConfig | None = None) -> str:
 
     if "contours" in layers:
         scale = config.contour_elevation_scale_m
-        min_m = config.contour_min_m
-        max_m = config.contour_max_m
+        interval = config.contour_interval_m
+        max_n = config.contour_max_crossings
         max_stroke = config.contour_max_stroke
-        if max_m <= min_m:
-            raise ValueError(
-                f"contour_max_m ({max_m!r}) must be greater than contour_min_m ({min_m!r})"
-            )
+        if interval <= 0:
+            raise ValueError(f"contour_interval_m must be positive, got {interval!r}")
         out.append('  <g id="layer-contours">')
         for coord, hex_item in ws.hexes.items():
             ca = axial_to_pixel(coord, size)
@@ -153,11 +151,15 @@ def render(ws: WorldState, config: SVGConfig | None = None) -> str:
                 nbr = ws.hexes.get(nbr_coord)
                 if nbr is None:
                     continue
-                diff_m = abs(hex_item.elevation - nbr.elevation) * scale
-                if diff_m < min_m:
+                lo_m = min(hex_item.elevation, nbr.elevation) * scale
+                hi_m = max(hex_item.elevation, nbr.elevation) * scale
+                n = int(hi_m / interval) - int(lo_m / interval)
+                if n <= 0:
                     continue
-                t = min((diff_m - min_m) / (max_m - min_m), 1.0)
+                t = min(n / max_n, 1.0)
                 stroke = 0.3 + t * (max_stroke - 0.3)
+                v = round(187 * (1 - t) + 17 * t)
+                color = f"#{v:02x}{v:02x}{v:02x}"
                 cb = axial_to_pixel(nbr_coord, size)
                 mx = (ca[0] + cb[0]) / 2 + ox
                 my = (ca[1] + cb[1]) / 2 + oy
@@ -173,7 +175,7 @@ def render(ws: WorldState, config: SVGConfig | None = None) -> str:
                 x2, y2 = mx - px * half, my - py * half
                 out.append(
                     f'    <line x1="{x1:.2f}" y1="{y1:.2f}" x2="{x2:.2f}" y2="{y2:.2f}"'
-                    f' stroke="#333333" stroke-width="{stroke:.2f}" stroke-linecap="round"/>'
+                    f' stroke="{color}" stroke-width="{stroke:.2f}" stroke-linecap="round"/>'
                 )
         out.append("  </g>")
 
