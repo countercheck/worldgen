@@ -1,3 +1,4 @@
+import pytest
 from PIL import Image
 
 from worldgen.core.hex import (
@@ -147,3 +148,9 @@ def test_contours_flat_world_no_lines():
     assert isinstance(img, Image.Image)
     pixels = list(img.getdata())
     assert all(p == (255, 255, 255) for p in pixels), "expected no contour pixels for flat world"
+
+
+def test_contours_reject_nonpositive_max_crossings():
+    ws = _small_world()
+    with pytest.raises(ValueError, match="contour_max_crossings must be positive"):
+        render(ws, PNGConfig(layers={"contours"}, contour_max_crossings=0))

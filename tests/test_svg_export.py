@@ -1,3 +1,5 @@
+import pytest
+
 from worldgen.core.hex import (
     Biome,
     LandCover,
@@ -202,3 +204,9 @@ def test_contour_darkness_scales_with_crossings():
     colors = re.findall(r'stroke="(#[0-9a-f]{6})"', svg)
     grays = [int(c[1:3], 16) for c in colors]  # red channel == gray value
     assert min(grays) < max(grays)  # more crossings → darker
+
+
+def test_contours_reject_nonpositive_max_crossings():
+    ws = _small_world()
+    with pytest.raises(ValueError, match="contour_max_crossings must be positive"):
+        render(ws, SVGConfig(layers={"contours"}, contour_max_crossings=0))

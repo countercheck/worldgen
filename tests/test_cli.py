@@ -52,6 +52,7 @@ def test_export_default(world_json, tmp_path):
         content = f.read()
     assert content.startswith("<svg")
     assert content.rstrip().endswith("</svg>")
+    assert 'id="layer-contours"' not in content
 
 
 def test_export_style_topographic(world_json, tmp_path):
@@ -91,6 +92,17 @@ def test_export_custom_layers(world_json, tmp_path):
     assert 'id="layer-rivers"' in content
     assert 'id="layer-roads"' not in content
     assert 'id="layer-settlements"' not in content
+
+
+def test_export_contours_layer_allowed(world_json, tmp_path):
+    out = str(tmp_path / "contours.svg")
+    result = CliRunner().invoke(
+        cli, ["export", "--input", world_json, "--output", out, "--layers", "contours"]
+    )
+    assert result.exit_code == 0, result.output
+    with open(out) as f:
+        content = f.read()
+    assert 'id="layer-contours"' in content
 
 
 def test_export_hex_size(world_json, tmp_path):

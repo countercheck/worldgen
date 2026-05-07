@@ -135,6 +135,8 @@ def render(ws: WorldState, config: PNGConfig | None = None) -> Image.Image:
         max_stroke = config.contour_max_stroke
         if interval <= 0:
             raise ValueError(f"contour_interval_m must be positive, got {interval!r}")
+        if max_n <= 0:
+            raise ValueError(f"contour_max_crossings must be positive, got {max_n!r}")
         for coord, hex_item in ws.hexes.items():
             ca = axial_to_pixel(coord, size)
             for nbr_coord in neighbors(coord):
