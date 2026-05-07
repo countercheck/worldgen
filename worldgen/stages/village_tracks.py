@@ -2,6 +2,7 @@ from ..core.hex import SettlementTier, TerrainClass
 from ..core.hex_grid import astar
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import Road, RoadTier, WorldState
+from .road_cost import slope_edge_cost
 
 
 def _terrain_base_cost(hx, cfg) -> float:
@@ -45,18 +46,7 @@ class VillageTrackStage(GeneratorStage):
             return base
 
         def edge_cost(from_hx, to_hx):
-            delta = abs(to_hx.elevation - from_hx.elevation)
-            grade_pct = delta * cfg.road_elev_range_m * 100.0 / cfg.hex_size_m
-            if grade_pct <= cfg.road_slope_free_pct:
-                return 0.0
-            if grade_pct >= cfg.road_slope_cap_pct:
-                return cfg.road_slope_cost * cfg.road_slope_cap_mult
-            raw = (
-                cfg.road_slope_cost
-                * (grade_pct - cfg.road_slope_free_pct)
-                / (cfg.road_slope_cap_pct - grade_pct)
-            )
-            return min(raw, cfg.road_slope_cost * cfg.road_slope_cap_mult)
+            return slope_edge_cost(from_hx, to_hx, cfg)
 
         new_roads: list[Road] = []
 
