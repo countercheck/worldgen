@@ -115,3 +115,9 @@ class ClimateStage(GeneratorStage):
             for h in state.hexes.values():
                 if h.terrain_class not in water:
                     h.moisture = (h.moisture - lo) / span
+
+        base = self.config.base_moisture
+        if base != 0.0:
+            for h in state.hexes.values():
+                if h.terrain_class not in water:
+                    h.moisture = max(0.0, min(1.0, h.moisture + base))

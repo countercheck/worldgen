@@ -1,5 +1,6 @@
 import json
 from dataclasses import asdict, dataclass
+from typing import Any
 
 
 @dataclass
@@ -17,6 +18,7 @@ class WorldConfig:
     noise_scale: float = 3.0
     domain_warp_strength: float = 0.3
     continent_falloff: bool = True
+    elevation_gradient: tuple[float, float] = (0.0, 0.0)
 
     # Terrain classification
     terrain_hill_gradient: float = 0.02
@@ -58,26 +60,19 @@ class WorldConfig:
         if self.hex_size_m <= 0:
             raise ValueError(f"hex_size_m must be > 0, got {self.hex_size_m}")
         if self.road_elev_range_m <= 0:
-            raise ValueError(
-                f"road_elev_range_m must be > 0, got {self.road_elev_range_m}"
-            )
+            raise ValueError(f"road_elev_range_m must be > 0, got {self.road_elev_range_m}")
         if self.road_slope_free_pct < 0:
-            raise ValueError(
-                f"road_slope_free_pct must be >= 0, got {self.road_slope_free_pct}"
-            )
+            raise ValueError(f"road_slope_free_pct must be >= 0, got {self.road_slope_free_pct}")
         if self.road_slope_cap_pct <= self.road_slope_free_pct:
             raise ValueError(
                 "road_slope_cap_pct must be greater than road_slope_free_pct, "
                 f"got cap={self.road_slope_cap_pct}, free={self.road_slope_free_pct}"
             )
         if self.road_slope_cap_mult <= 0:
-            raise ValueError(
-                f"road_slope_cap_mult must be > 0, got {self.road_slope_cap_mult}"
-            )
+            raise ValueError(f"road_slope_cap_mult must be > 0, got {self.road_slope_cap_mult}")
         if self.settlement_min_reachable < 1:
             raise ValueError(
-                "settlement_min_reachable must be >= 1, "
-                f"got {self.settlement_min_reachable}"
+                f"settlement_min_reachable must be >= 1, got {self.settlement_min_reachable}"
             )
 
     # Climate
@@ -86,6 +81,7 @@ class WorldConfig:
     latitude_temp_range: float = 0.1  # pole-to-equator spread (was 0.6; tiny at 1 hex=1 km)
     altitude_lapse_rate: float = 0.4
     orographic_strength: float = 2.0
+    base_moisture: float = 0.0
 
     # Biome thresholds
     biome_alpine_elev: float = 0.85
@@ -138,9 +134,40 @@ class WorldConfig:
         """Load config from JSON file."""
         with open(path) as f:
             data = json.load(f)
+        _coerce_tuples(data)
         return cls(**data)
 
     def to_json(self, path: str) -> None:
         """Save config to JSON file."""
         with open(path, "w") as f:
             json.dump(asdict(self), f, indent=2)
+
+    @classmethod
+    def from_yaml(cls, path: str) -> "WorldConfig":
+        """Load config from YAML file. An 'export:' section is ignored."""
+        import yaml
+
+        with open(path) as f:
+            data = yaml.safe_load(f)
+        data.pop("export", None)
+        _coerce_tuples(data)
+        return cls(**data)
+
+    def to_yaml(self, path: str) -> None:
+        """Save config to YAML file."""
+        import yaml
+
+        d = asdict(self)
+        for key in _TUPLE_FIELDS:
+            d[key] = list(d[key])
+        with open(path, "w") as f:
+            yaml.dump(d, f, default_flow_style=False, sort_keys=False)
+
+
+_TUPLE_FIELDS = ("wind_direction", "elevation_gradient")
+
+
+def _coerce_tuples(data: dict[str, Any]) -> None:
+    for key in _TUPLE_FIELDS:
+        if key in data:
+            data[key] = tuple(data[key])

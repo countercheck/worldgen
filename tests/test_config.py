@@ -1,6 +1,54 @@
+import json
+
 import pytest
+import yaml
 
 from worldgen.core.config import WorldConfig
+
+
+def test_yaml_roundtrip(tmp_path):
+    cfg = WorldConfig(width=64, height=48, base_moisture=0.1, elevation_gradient=(0.3, -0.2))
+    out = str(tmp_path / "cfg.yaml")
+    cfg.to_yaml(out)
+    loaded = WorldConfig.from_yaml(out)
+    assert loaded.width == 64
+    assert loaded.height == 48
+    assert loaded.base_moisture == pytest.approx(0.1)
+    assert loaded.elevation_gradient == pytest.approx((0.3, -0.2))
+
+
+def test_from_yaml_ignores_export_block(tmp_path):
+    data = {"width": 32, "export": {"style": "topographic", "hex_size": 8.0}}
+    p = tmp_path / "cfg.yaml"
+    p.write_text(yaml.dump(data))
+    cfg = WorldConfig.from_yaml(str(p))
+    assert cfg.width == 32
+
+
+def test_from_yaml_wind_direction_is_tuple(tmp_path):
+    data = {"wind_direction": [0.0, 1.0]}
+    p = tmp_path / "cfg.yaml"
+    p.write_text(yaml.dump(data))
+    cfg = WorldConfig.from_yaml(str(p))
+    assert isinstance(cfg.wind_direction, tuple)
+    assert cfg.wind_direction == (0.0, 1.0)
+
+
+def test_from_yaml_elevation_gradient_is_tuple(tmp_path):
+    data = {"elevation_gradient": [0.5, -0.3]}
+    p = tmp_path / "cfg.yaml"
+    p.write_text(yaml.dump(data))
+    cfg = WorldConfig.from_yaml(str(p))
+    assert isinstance(cfg.elevation_gradient, tuple)
+    assert cfg.elevation_gradient == pytest.approx((0.5, -0.3))
+
+
+def test_from_json_wind_direction_is_tuple(tmp_path):
+    data = {"wind_direction": [0.0, 1.0]}
+    p = tmp_path / "cfg.json"
+    p.write_text(json.dumps(data))
+    cfg = WorldConfig.from_json(str(p))
+    assert isinstance(cfg.wind_direction, tuple)
 
 
 @pytest.mark.parametrize(

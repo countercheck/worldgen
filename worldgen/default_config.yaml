@@ -1,0 +1,150 @@
+# worldgen.yaml — Map generation configuration
+# Pass to the CLI with: worldgen generate --config worldgen.yaml
+#                        worldgen export  --config worldgen.yaml ...
+# All values shown are defaults. Edit any line to override.
+
+# ---------------------------------------------------------------------------
+# Map dimensions
+# ---------------------------------------------------------------------------
+width: 128    # Map width in hexes. Default: 128
+height: 128   # Map height in hexes. Default: 128
+sea_level: 0.45  # Water level threshold (0–1). Lower = more ocean. Default: 0.45
+
+# ---------------------------------------------------------------------------
+# Elevation noise (Fractal Brownian Motion)
+# ---------------------------------------------------------------------------
+noise_octaves: 6          # Number of FBM octaves; more = finer terrain detail. Default: 6
+noise_persistence: 0.5    # Amplitude decay per octave (0–1). Default: 0.5
+noise_lacunarity: 2.0     # Frequency multiplier per octave. Default: 2.0
+noise_scale: 3.0          # Coordinate scale for noise sampling. Default: 3.0
+domain_warp_strength: 0.3 # Displacement magnitude for domain warping; higher = more organic coastlines. Default: 0.3
+continent_falloff: true   # Apply radial edge falloff to create a continent/island shape. Default: true
+
+# Directional tilt [east_bias, south_bias] added to raw elevation before normalization.
+# Positive x raises the east edge; negative x raises the west edge.
+# Positive y raises the south edge; negative y raises the north edge.
+# Values around ±0.5 produce a clear slope across the map.
+# Examples:
+#   [0.0, -0.5]  →  north is highest, map runs downhill to the south
+#   [-0.5, 0.0]  →  east is highest, map runs downhill to the west
+#   [0.0, 0.0]   →  no tilt (default)
+elevation_gradient: [0.0, 0.0]
+
+# ---------------------------------------------------------------------------
+# Terrain classification
+# ---------------------------------------------------------------------------
+terrain_hill_gradient: 0.02      # Elevation gradient threshold for hills. Default: 0.02
+terrain_mountain_gradient: 0.04  # Elevation gradient threshold for mountains. Default: 0.04
+
+# ---------------------------------------------------------------------------
+# Erosion (hydraulic droplet simulation)
+# ---------------------------------------------------------------------------
+erosion_iterations: 15000              # Number of water-droplet simulations. Default: 15000
+erosion_inertia: 0.05                  # Droplet momentum factor. Default: 0.05
+erosion_capacity: 4.0                  # Sediment capacity multiplier. Default: 4.0
+erosion_deposition: 0.3                # Rate of sediment deposition. Default: 0.3
+erosion_erosion_rate: 0.3              # Rate of terrain erosion. Default: 0.3
+erosion_channel_affinity_gain: 0.5     # Affinity gain per deposition event; higher = deeper channels. Default: 0.5
+erosion_affinity_update_interval: 500  # Update channel affinity every N droplets. Default: 500
+
+# ---------------------------------------------------------------------------
+# Hydrology
+# ---------------------------------------------------------------------------
+river_flow_threshold: 0.05  # Minimum flow volume (0–1) for a hex to be a river. Default: 0.05
+
+# ---------------------------------------------------------------------------
+# Climate
+# ---------------------------------------------------------------------------
+wind_direction: [1.0, 0.0]  # Wind vector [x, y] driving moisture transport. Default: [1.0, 0.0] (eastward)
+base_temperature: 0.5       # Map's mean temperature (0=arctic, 1=tropical). Default: 0.5
+latitude_temp_range: 0.1    # Pole-to-equator temperature variation. Default: 0.1
+altitude_lapse_rate: 0.4    # Temperature drop per unit of elevation. Default: 0.4
+orographic_strength: 2.0    # Wind-driven precipitation intensity; higher = drier leeward slopes. Default: 2.0
+
+# Flat moisture bias added to all land hexes after normalization.
+# Positive = uniformly wetter; negative = uniformly drier. Clipped to [0, 1].
+# Default: 0.0 (no adjustment)
+base_moisture: 0.0
+
+# ---------------------------------------------------------------------------
+# Biome thresholds
+# ---------------------------------------------------------------------------
+biome_alpine_elev: 0.85  # Elevation above which terrain becomes alpine. Default: 0.85
+biome_cold_temp: 0.25    # Temperature below which climate is considered cold. Default: 0.25
+biome_warm_temp: 0.6     # Temperature above which climate is considered warm. Default: 0.6
+biome_dry_moist: 0.2     # Moisture below which climate is considered dry. Default: 0.2
+biome_wet_moist: 0.5     # Moisture above which climate is considered wet. Default: 0.5
+
+# ---------------------------------------------------------------------------
+# Settlements
+# ---------------------------------------------------------------------------
+target_city_count: 6    # Number of cities to place. Default: 6
+target_town_count: 24   # Number of towns to place. Default: 24
+city_min_separation: 20 # Minimum hexes between any two cities. Default: 20
+town_min_separation: 8  # Minimum hexes between any two towns. Default: 8
+settlement_min_reachable: 100  # Minimum accessible hexes required for a valid settlement site. Default: 100
+
+# ---------------------------------------------------------------------------
+# Cultivation (farmland around settlements)
+# ---------------------------------------------------------------------------
+cultivation_city_radius: 8    # Farmland radius in hexes around cities. Default: 8
+cultivation_town_radius: 4    # Farmland radius in hexes around towns. Default: 4
+cultivation_village_radius: 2 # Farmland radius in hexes around villages. Default: 2
+
+# ---------------------------------------------------------------------------
+# World scale
+# ---------------------------------------------------------------------------
+hex_size_m: 1000.0        # Metres per hex; used for slope cost calculations. Default: 1000.0
+road_elev_range_m: 3000.0 # Elevation span in metres representing the full 0→1 range. Default: 3000.0
+
+# ---------------------------------------------------------------------------
+# Roads: base terrain costs (pathfinding multipliers by terrain type)
+# ---------------------------------------------------------------------------
+road_mountain_cost: 10.0  # Cost multiplier for mountain hexes. Default: 10.0
+road_hill_cost: 3.0       # Cost multiplier for hill hexes. Default: 3.0
+road_flat_cost: 1.0       # Cost multiplier for flat hexes. Default: 1.0
+
+# ---------------------------------------------------------------------------
+# Roads: traveller simulation
+# ---------------------------------------------------------------------------
+road_travellers_city: 500    # Simulated daily travellers originating from each city. Default: 500
+road_travellers_town: 100    # Simulated daily travellers originating from each town. Default: 100
+road_travellers_village: 20  # Simulated daily travellers originating from each village. Default: 20
+road_gravity_exponent: 1.5   # Distance-decay exponent for gravity model; higher = traffic stays local. Default: 1.5
+road_river_discount: 0.5     # Cost reduction for hexes adjacent to rivers. Default: 0.5
+road_pheromone_factor: 0.1   # How strongly existing traffic attracts new routes. Default: 0.1
+
+# Slope-based cost: grade % = (elevation_delta_m / hex_size_m) * 100
+road_slope_cost: 2.0      # Base multiplier applied to grade-based costs. Default: 2.0
+road_slope_free_pct: 3.0  # Grade % below which slope adds no extra cost. Default: 3.0
+road_slope_cap_pct: 25.0  # Grade % at which slope cost saturates. Default: 25.0
+road_slope_cap_mult: 10.0 # Cost multiplier at saturation grade. Default: 10.0
+
+road_min_traffic: 3       # Minimum traffic volume required to draw a road. Default: 3
+road_primary_pct: 0.10    # Top fraction of traffic share classified as primary roads. Default: 0.10
+road_secondary_pct: 0.30  # Next fraction classified as secondary roads. Default: 0.30
+road_track_pct: 0.60      # Remainder classified as tracks. Default: 0.60
+
+# ---------------------------------------------------------------------------
+# Export  (used by: worldgen export --config worldgen.yaml ...)
+# CLI flags --style, --color-mode, --hex-size, --padding, --layers override these.
+# ---------------------------------------------------------------------------
+export:
+  style: atlas        # Visual style: atlas | topographic | wargame. Default: atlas
+  color_mode: biome   # Hex fill colour: biome | terrain | land_cover | elevation. Default: biome
+  hex_size: 12.0      # Hex size in pixels. Default: 12.0
+  padding: 20         # Border padding in pixels. Default: 20
+  layers:             # Layers to render. Remove a line to disable that layer.
+    - terrain
+    - rivers
+    - roads
+    - settlements
+    - labels
+    - grid
+    # - contours      # Uncomment to add topographic contour lines
+
+  # Contour settings — only used when "contours" is in the layers list above
+  contour_elevation_scale_m: 3000.0  # Elevation span in metres for contour scaling. Default: 3000.0
+  contour_interval_m: 100.0          # Vertical spacing between contour lines in metres. Default: 100.0
+  contour_max_crossings: 5           # Maximum contour lines drawn per hex edge. Default: 5
+  contour_max_stroke: 4.0            # Maximum contour stroke width in pixels. Default: 4.0

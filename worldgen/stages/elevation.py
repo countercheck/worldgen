@@ -43,6 +43,12 @@ class ElevationStage(GeneratorStage):
             result[i] = v / max_val
         arr = result.reshape(w, h)
 
+        gx, gy = cfg.elevation_gradient
+        if gx != 0.0 or gy != 0.0:
+            qf = np.linspace(-0.5, 0.5, w)[:, np.newaxis]
+            rf = np.linspace(-0.5, 0.5, h)[np.newaxis, :]
+            arr += gx * qf + gy * rf
+
         if cfg.continent_falloff:
             qf = (np.arange(w)[:, np.newaxis] / w - 0.5) * 2
             rf = (np.arange(h)[np.newaxis, :] / h - 0.5) * 2

@@ -172,6 +172,52 @@ def test_base_temperature_validation():
         WorldConfig(base_temperature=1.1)
 
 
+def _mean_land_moisture(state) -> float:
+    from worldgen.core.hex import TerrainClass
+
+    vals = [
+        h.moisture
+        for h in state.hexes.values()
+        if h.terrain_class not in (TerrainClass.OCEAN, TerrainClass.LAKE)
+    ]
+    return sum(vals) / len(vals) if vals else 0.0
+
+
+def test_base_moisture_shifts_mean_upward():
+    """Positive base_moisture should raise mean land moisture."""
+
+    def run(base: float):
+        cfg = WorldConfig(width=32, height=32, erosion_iterations=500, base_moisture=base)
+        p = GeneratorPipeline(42, cfg)
+        p.add_stage(ElevationStage)
+        p.add_stage(ErosionStage)
+        p.add_stage(TerrainClassificationStage)
+        p.add_stage(HydrologyStage)
+        p.add_stage(ClimateStage)
+        return p.run()
+
+    dry = run(0.0)
+    wet = run(0.3)
+    assert _mean_land_moisture(dry) < _mean_land_moisture(wet), (
+        "Positive base_moisture did not raise mean land moisture"
+    )
+
+
+def test_base_moisture_clamps_to_unit_interval():
+    """base_moisture = 1.0 should not push moisture above 1.0."""
+
+    cfg = WorldConfig(width=32, height=32, erosion_iterations=500, base_moisture=1.0)
+    p = GeneratorPipeline(42, cfg)
+    p.add_stage(ElevationStage)
+    p.add_stage(ErosionStage)
+    p.add_stage(TerrainClassificationStage)
+    p.add_stage(HydrologyStage)
+    p.add_stage(ClimateStage)
+    state = p.run()
+    for h in state.hexes.values():
+        assert h.moisture <= 1.0, f"moisture {h.moisture} exceeded 1.0 with base_moisture=1.0"
+
+
 def test_latitude_temp_range_validation():
     """latitude_temp_range outside [0, 1] should raise ValueError."""
     with pytest.raises(ValueError, match="latitude_temp_range"):
