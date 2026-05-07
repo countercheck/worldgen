@@ -60,6 +60,33 @@ def test_mountain_not_isolated(phase1_state):
     )
 
 
+def test_elevation_gradient_tilts_north_high():
+    """Negative south_bias should make northern rows higher on average."""
+    cfg = WorldConfig(width=32, height=32, erosion_iterations=0, elevation_gradient=(0.0, -0.8))
+    p = GeneratorPipeline(42, cfg)
+    p.add_stage(ElevationStage)
+    state = p.run()
+
+    north_elev = [h.elevation for (_, r), h in state.hexes.items() if r < 8]
+    south_elev = [h.elevation for (_, r), h in state.hexes.items() if r >= 24]
+    assert sum(north_elev) / len(north_elev) > sum(south_elev) / len(south_elev), (
+        "Negative south gradient did not raise northern elevations above southern"
+    )
+
+
+def test_elevation_gradient_default_no_bias():
+    """Default gradient (0, 0) should not skew east vs. west elevation."""
+    cfg = WorldConfig(width=32, height=32, erosion_iterations=0, elevation_gradient=(0.0, 0.0))
+    p = GeneratorPipeline(42, cfg)
+    p.add_stage(ElevationStage)
+    state = p.run()
+
+    west_elev = [h.elevation for (q, _), h in state.hexes.items() if q < 8]
+    east_elev = [h.elevation for (q, _), h in state.hexes.items() if q >= 24]
+    diff = abs(sum(east_elev) / len(east_elev) - sum(west_elev) / len(west_elev))
+    assert diff < 0.2, f"Default gradient produced unexpected east-west bias: {diff:.3f}"
+
+
 def test_reproducible():
     cfg = WorldConfig(width=32, height=32, erosion_iterations=500)
 

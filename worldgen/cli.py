@@ -23,7 +23,13 @@ def generate(seed: int, config: str, output_dir: str, width: int, height: int):
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
-    cfg = WorldConfig.from_json(config) if config else WorldConfig()
+    if config:
+        if config.lower().endswith((".yaml", ".yml")):
+            cfg = WorldConfig.from_yaml(config)
+        else:
+            cfg = WorldConfig.from_json(config)
+    else:
+        cfg = WorldConfig()
 
     if width:
         cfg.width = width
@@ -140,56 +146,100 @@ _ALLOWED_LAYERS = _DEFAULT_LAYERS | {"contours"}
 @cli.command(name="export")
 @click.option("--input", "input_path", type=str, required=True, help="Input world.json file")
 @click.option("--output", type=str, required=True, help="Output SVG file")
+@click.option("--config", "config_path", type=str, default=None, help="Config YAML/JSON file")
 @click.option(
     "--style",
     type=click.Choice(_STYLES, case_sensitive=False),
-    default="atlas",
-    show_default=True,
-    help="Visual style preset.",
+    default=None,
+    help="Visual style preset (overrides config file). Choices: atlas, topographic, wargame.",
 )
 @click.option(
     "--color-mode",
     type=click.Choice(_COLOR_MODES, case_sensitive=False),
-    default="biome",
-    show_default=True,
-    help="Hex fill color source (ignored when --style overrides it).",
+    default=None,
+    help="Hex fill color source (overrides config file). Choices: biome, terrain, land_cover, elevation.",
 )
 @click.option(
     "--layers",
     default=None,
-    help="Comma-separated layers to include (default: terrain,rivers,roads,settlements,labels,grid). "
+    help="Comma-separated layers to include (overrides config file). "
     "Choices: terrain,rivers,roads,settlements,labels,grid,contours",
 )
-@click.option("--hex-size", type=float, default=12.0, show_default=True, help="Hex size in pixels.")
 @click.option(
-    "--padding", type=int, default=20, show_default=True, help="Border padding in pixels."
+    "--hex-size", type=float, default=None, help="Hex size in pixels (overrides config file)."
+)
+@click.option(
+    "--padding", type=int, default=None, help="Border padding in pixels (overrides config file)."
 )
 def export_svg(
     input_path: str,
     output: str,
-    style: str,
-    color_mode: str,
+    config_path: str | None,
+    style: str | None,
+    color_mode: str | None,
     layers: str | None,
-    hex_size: float,
-    padding: int,
+    hex_size: float | None,
+    padding: int | None,
 ) -> None:
     """Export a saved world as an SVG hex map."""
     from .export.json_export import load as load_json
     from .export.svg_export import SVGConfig
     from .export.svg_export import save as save_svg
 
-    if layers:
-        parsed = [layer.strip() for layer in layers.split(",")]
-        parsed = [layer for layer in parsed if layer]
+    # Start with SVGConfig defaults, then override with config file, then CLI flags
+    svg_kwargs: dict = {
+        "style": "atlas",
+        "color_mode": "biome",
+        "hex_size": 12.0,
+        "padding": 20,
+        "layers": set(_DEFAULT_LAYERS),
+    }
+
+    if config_path:
+        if config_path.lower().endswith((".yaml", ".yml")):
+            import yaml
+
+            with open(config_path) as f:
+                raw = yaml.safe_load(f)
+            export_section = raw.get("export", {}) if isinstance(raw, dict) else {}
+        else:
+            import json as _json
+
+            with open(config_path) as f:
+                raw = _json.load(f)
+            export_section = raw.get("export", {}) if isinstance(raw, dict) else {}
+
+        for key in ("style", "color_mode", "hex_size", "padding"):
+            if key in export_section:
+                svg_kwargs[key] = export_section[key]
+        if "layers" in export_section:
+            svg_kwargs["layers"] = set(export_section["layers"])
+
+    # CLI flags override config file (only when explicitly provided)
+    if style is not None:
+        svg_kwargs["style"] = style
+    if color_mode is not None:
+        svg_kwargs["color_mode"] = color_mode
+    if hex_size is not None:
+        svg_kwargs["hex_size"] = hex_size
+    if padding is not None:
+        svg_kwargs["padding"] = padding
+    if layers is not None:
+        parsed = [layer.strip() for layer in layers.split(",") if layer.strip()]
         unknown = set(parsed) - _ALLOWED_LAYERS
         if unknown:
             allowed = ", ".join(sorted(_ALLOWED_LAYERS))
             raise click.ClickException(
                 f"Unknown layer(s): {', '.join(sorted(unknown))}. Allowed: {allowed}"
             )
-        layer_set = set(parsed)
-    else:
-        layer_set = _DEFAULT_LAYERS
+        svg_kwargs["layers"] = set(parsed)
+
+    unknown_cfg = svg_kwargs["layers"] - _ALLOWED_LAYERS
+    if unknown_cfg:
+        allowed = ", ".join(sorted(_ALLOWED_LAYERS))
+        raise click.ClickException(
+            f"Unknown layer(s) in config: {', '.join(sorted(unknown_cfg))}. Allowed: {allowed}"
+        )
 
     click.echo(f"Loading {input_path}...")
     try:
@@ -197,15 +247,30 @@ def export_svg(
     except ValueError as exc:
         raise click.ClickException(str(exc)) from exc
 
-    cfg = SVGConfig(
-        style=style,
-        color_mode=color_mode,
-        layers=layer_set,
-        hex_size=hex_size,
-        padding=padding,
-    )
+    cfg = SVGConfig(**svg_kwargs)
     save_svg(state, output, cfg)
     click.echo(f"✓ Saved to {output}")
+
+
+@cli.command(name="init-config")
+@click.option(
+    "--output",
+    type=str,
+    default="worldgen.yaml",
+    show_default=True,
+    help="Path to write the default config file.",
+)
+@click.option("--force", is_flag=True, default=False, help="Overwrite existing file.")
+def init_config(output: str, force: bool) -> None:
+    """Write the default annotated worldgen.yaml to disk."""
+    out = Path(output)
+    if out.exists() and not force:
+        raise click.ClickException(f"{output} already exists. Use --force to overwrite.")
+    template = Path(__file__).parent / "default_config.yaml"
+    import shutil
+
+    shutil.copyfile(template, out)
+    click.echo(f"✓ Written to {output}")
 
 
 @cli.command()
