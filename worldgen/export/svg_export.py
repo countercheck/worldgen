@@ -158,7 +158,7 @@ def render(ws: WorldState, config: SVGConfig | None = None) -> str:
                 n = int(hi_m / interval) - int(lo_m / interval)
                 if n <= 0:
                     continue
-                t = min(n / max_n, 1.0)
+                t = 1.0 if max_n == 1 else min((n - 1) / (max_n - 1), 1.0)
                 stroke = 0.3 + t * (max_stroke - 0.3)
                 v = round(187 * (1 - t) + 17 * t)
                 color = f"#{v:02x}{v:02x}{v:02x}"

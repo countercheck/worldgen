@@ -157,7 +157,7 @@ _ALLOWED_LAYERS = _DEFAULT_LAYERS | {"contours"}
 @click.option(
     "--layers",
     default=None,
-    help="Comma-separated layers to include (default: all). "
+    help="Comma-separated layers to include (default: terrain,rivers,roads,settlements,labels,grid). "
     "Choices: terrain,rivers,roads,settlements,labels,grid,contours",
 )
 @click.option("--hex-size", type=float, default=12.0, show_default=True, help="Hex size in pixels.")

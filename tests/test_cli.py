@@ -163,3 +163,10 @@ def test_export_layers_empty_entries(world_json, tmp_path):
         ["export", "--input", world_json, "--output", out, "--layers", "terrain,,rivers"],
     )
     assert result.exit_code == 0, result.output
+
+
+def test_export_help_layers_default_text():
+    result = CliRunner().invoke(cli, ["export", "--help"])
+    assert result.exit_code == 0, result.output
+    normalized = " ".join(result.output.split())
+    assert "default: terrain,rivers,roads,settlements,labels,grid" in normalized, result.output
