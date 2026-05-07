@@ -55,6 +55,30 @@ class WorldConfig:
                 f"erosion_channel_affinity_gain must be >= 0, "
                 f"got {self.erosion_channel_affinity_gain}"
             )
+        if self.hex_size_m <= 0:
+            raise ValueError(f"hex_size_m must be > 0, got {self.hex_size_m}")
+        if self.road_elev_range_m <= 0:
+            raise ValueError(
+                f"road_elev_range_m must be > 0, got {self.road_elev_range_m}"
+            )
+        if self.road_slope_free_pct < 0:
+            raise ValueError(
+                f"road_slope_free_pct must be >= 0, got {self.road_slope_free_pct}"
+            )
+        if self.road_slope_cap_pct <= self.road_slope_free_pct:
+            raise ValueError(
+                "road_slope_cap_pct must be greater than road_slope_free_pct, "
+                f"got cap={self.road_slope_cap_pct}, free={self.road_slope_free_pct}"
+            )
+        if self.road_slope_cap_mult <= 0:
+            raise ValueError(
+                f"road_slope_cap_mult must be > 0, got {self.road_slope_cap_mult}"
+            )
+        if self.settlement_min_reachable < 1:
+            raise ValueError(
+                "settlement_min_reachable must be >= 1, "
+                f"got {self.settlement_min_reachable}"
+            )
 
     # Climate
     wind_direction: tuple[float, float] = (1.0, 0.0)

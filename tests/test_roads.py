@@ -1,7 +1,7 @@
 import pytest
 
 from worldgen.core.config import WorldConfig
-from worldgen.core.hex import SettlementTier, TerrainClass
+from worldgen.core.hex import Hex, SettlementTier, TerrainClass
 from worldgen.core.pipeline import GeneratorPipeline
 from worldgen.core.world_state import RoadTier
 from worldgen.stages.biomes import BiomeStage
@@ -10,6 +10,7 @@ from worldgen.stages.elevation import ElevationStage
 from worldgen.stages.erosion import ErosionStage
 from worldgen.stages.habitability import HabitabilityStage
 from worldgen.stages.hydrology import HydrologyStage
+from worldgen.stages.road_cost import slope_edge_cost
 from worldgen.stages.roads import RoadStage
 from worldgen.stages.settlements import SettlementStage
 from worldgen.stages.terrain_class import TerrainClassificationStage
@@ -156,23 +157,17 @@ def test_slope_edge_cost_formula():
     cfg = WorldConfig()
 
     def slope_cost(delta_elev):
-        grade_pct = delta_elev * cfg.road_elev_range_m * 100.0 / cfg.hex_size_m
-        if grade_pct <= cfg.road_slope_free_pct:
-            return 0.0
-        if grade_pct >= cfg.road_slope_cap_pct:
-            return cfg.road_slope_cost * cfg.road_slope_cap_mult
-        raw = (
-            cfg.road_slope_cost
-            * (grade_pct - cfg.road_slope_free_pct)
-            / (cfg.road_slope_cap_pct - grade_pct)
+        return slope_edge_cost(
+            Hex(coord=(0, 0), elevation=0.0),
+            Hex(coord=(1, 0), elevation=delta_elev),
+            cfg,
         )
-        return min(raw, cfg.road_slope_cost * cfg.road_slope_cap_mult)
 
     # grade = 0% → free
-    assert slope_cost(0.0) == 0.0
+    assert slope_cost(0.0) == pytest.approx(0.0)
     # grade = free_pct (3%) → zero cost
     delta_free = cfg.road_slope_free_pct * cfg.hex_size_m / (cfg.road_elev_range_m * 100.0)
-    assert slope_cost(delta_free) == 0.0
+    assert slope_cost(delta_free) == pytest.approx(0.0)
     # grade slightly above free → small positive cost
     assert slope_cost(delta_free * 1.01) > 0.0
     # midpoint grade → cost = road_slope_cost × 1.0

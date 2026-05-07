@@ -38,8 +38,14 @@ class SettlementStage(GeneratorStage):
             grade_pct = delta * cfg.road_elev_range_m * 100.0 / cfg.hex_size_m
             return grade_pct < cfg.road_slope_cap_pct
 
+        reachable_cache: dict[tuple[int, int], int] = {}
+
         def reachable(coord):
-            return grade_reachable_count(coord, hexes, grade_ok, cfg.settlement_min_reachable)
+            if coord not in reachable_cache:
+                reachable_cache[coord] = grade_reachable_count(
+                    coord, hexes, grade_ok, cfg.settlement_min_reachable
+                )
+            return reachable_cache[coord]
 
         # Collect eligible land hexes sorted by habitability
         land = [

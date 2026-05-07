@@ -141,12 +141,18 @@ def astar(
 
 def grade_reachable_count(
     start: HexCoord,
-    hexes: dict,
+    hexes: dict[HexCoord, Hex],
     grade_ok: Callable[[Hex, Hex], bool],
     max_count: int,
 ) -> int:
     """BFS from start over non-water hexes where grade_ok(from_hex, to_hex) is True.
-    Returns the number of reachable hexes, stopping once max_count is reached."""
+    Returns the number of reachable hexes, stopping once max_count is reached.
+    If start is missing or water, returns 0."""
+    if start not in hexes:
+        return 0
+    if hexes[start].terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE):
+        return 0
+
     visited: set[HexCoord] = {start}
     q: deque[HexCoord] = deque([start])
     count = 0

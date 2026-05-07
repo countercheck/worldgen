@@ -81,3 +81,15 @@ def test_grade_reachable_count_skips_water():
     count = grade_reachable_count((0, 0), grid, lambda a, b: True, max_count=100)
     # Only left column (q=0, r=0..2 = 3 hexes)
     assert count == 3
+
+
+def test_grade_reachable_count_start_missing():
+    grid = {(0, 0): Hex(coord=(0, 0))}
+    count = grade_reachable_count((1, 1), grid, lambda a, b: True, max_count=100)
+    assert count == 0
+
+
+def test_grade_reachable_count_start_water():
+    grid = {(0, 0): Hex(coord=(0, 0), terrain_class=TerrainClass.OCEAN)}
+    count = grade_reachable_count((0, 0), grid, lambda a, b: True, max_count=100)
+    assert count == 0
