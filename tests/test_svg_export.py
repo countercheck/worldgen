@@ -215,6 +215,8 @@ def test_contour_single_crossing_uses_lightest_min_styling():
     svg = render(ws, SVGConfig(layers={"contours"}, contour_max_crossings=5))
     m = re.search(r'stroke="(#[0-9a-f]{6})" stroke-width="([\d.]+)"', svg)
     assert m is not None
+    # For n=1, normalization pins t=0, yielding the configured minimum contour style:
+    # light gray (#bbbbbb from 187) and base stroke width (0.30 from the 0.3 floor).
     assert m.group(1) == "#bbbbbb"
     assert m.group(2) == "0.30"
 
@@ -228,6 +230,7 @@ def test_contour_max_crossings_one_saturates_first_crossing():
     svg = render(ws, SVGConfig(layers={"contours"}, contour_max_crossings=1))
     m = re.search(r'stroke="(#[0-9a-f]{6})" stroke-width="([\d.]+)"', svg)
     assert m is not None
+    # max_n=1 is the saturation case: the first crossing uses darkest color and max stroke.
     assert m.group(1) == "#111111"
     assert m.group(2) == "4.00"
 
