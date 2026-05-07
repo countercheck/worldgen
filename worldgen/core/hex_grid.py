@@ -1,8 +1,9 @@
 import heapq
 import math
+from collections import deque
 from collections.abc import Callable
 
-from .hex import Hex, HexCoord
+from .hex import Hex, HexCoord, TerrainClass
 
 
 def neighbors(coord: HexCoord) -> list[HexCoord]:
@@ -136,3 +137,29 @@ def astar(
                 heapq.heappush(open_set, (f, neighbor))
 
     return None
+
+
+def grade_reachable_count(
+    start: HexCoord,
+    hexes: dict,
+    grade_ok: Callable[[Hex, Hex], bool],
+    max_count: int,
+) -> int:
+    """BFS from start over non-water hexes where grade_ok(from_hex, to_hex) is True.
+    Returns the number of reachable hexes, stopping once max_count is reached."""
+    visited: set[HexCoord] = {start}
+    q: deque[HexCoord] = deque([start])
+    count = 0
+    while q and count < max_count:
+        coord = q.popleft()
+        count += 1
+        for nb in neighbors(coord):
+            if nb not in hexes or nb in visited:
+                continue
+            nb_hx = hexes[nb]
+            if nb_hx.terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE):
+                continue
+            if grade_ok(hexes[coord], nb_hx):
+                visited.add(nb)
+                q.append(nb)
+    return count

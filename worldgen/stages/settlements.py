@@ -1,5 +1,5 @@
 from ..core.hex import Biome, Settlement, SettlementRole, SettlementTier, TerrainClass
-from ..core.hex_grid import distance, hex_range, neighbors
+from ..core.hex_grid import distance, grade_reachable_count, hex_range, neighbors
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
 
@@ -33,6 +33,14 @@ class SettlementStage(GeneratorStage):
         hexes = state.hexes
         cfg = self.config
 
+        def grade_ok(a_hx, b_hx):
+            delta = abs(b_hx.elevation - a_hx.elevation)
+            grade_pct = delta * cfg.road_elev_range_m * 100.0 / cfg.hex_size_m
+            return grade_pct < cfg.road_slope_cap_pct
+
+        def reachable(coord):
+            return grade_reachable_count(coord, hexes, grade_ok, cfg.settlement_min_reachable)
+
         # Collect eligible land hexes sorted by habitability
         land = [
             (coord, hx)
@@ -52,6 +60,8 @@ class SettlementStage(GeneratorStage):
         for coord, hx in land:
             if len(city_coords) >= cfg.target_city_count:
                 break
+            if reachable(coord) < cfg.settlement_min_reachable:
+                continue
             if all(distance(coord, c) >= cfg.city_min_separation for c in city_coords):
                 pop = int(self.rng.integers(10_000, 50_001))
                 role = _assign_role(coord, hx, hexes)
@@ -96,6 +106,8 @@ class SettlementStage(GeneratorStage):
             hx = hexes[coord]
             if hx.settlement is not None:
                 continue
+            if reachable(coord) < cfg.settlement_min_reachable:
+                continue
             if all(distance(coord, c) >= cfg.town_min_separation for c in town_coords):
                 pop = int(self.rng.integers(1_000, 10_001))
                 role = _assign_role(coord, hx, hexes)
@@ -139,6 +151,8 @@ class SettlementStage(GeneratorStage):
             coord = candidates[i]
             hx = hexes[coord]
             if hx.settlement is not None:
+                continue
+            if reachable(coord) < cfg.settlement_min_reachable:
                 continue
             if all(distance(coord, c) >= 3 for c in placed_all):
                 pop = int(self.rng.integers(100, 1_001))
