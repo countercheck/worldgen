@@ -2,7 +2,7 @@ import pytest
 
 from worldgen.core.config import WorldConfig
 from worldgen.core.hex import LandCover, SettlementTier
-from worldgen.core.hex_grid import distance
+from worldgen.core.hex_grid import distance, grade_reachable_count
 from worldgen.core.pipeline import GeneratorPipeline
 from worldgen.stages.biomes import BiomeStage
 from worldgen.stages.city_town import CityTownStage
@@ -14,6 +14,7 @@ from worldgen.stages.habitability import HabitabilityStage
 from worldgen.stages.hydrology import HydrologyStage
 from worldgen.stages.interurban_roads import InterurbanRoadStage
 from worldgen.stages.land_cover import LandCoverStage
+from worldgen.stages.road_cost import grade_is_under_cap
 from worldgen.stages.terrain_class import TerrainClassificationStage
 from worldgen.stages.village_placement import VillagePlacementStage
 from worldgen.stages.village_tracks import VillageTrackStage
@@ -112,6 +113,22 @@ def test_villages_on_frontier_or_road(cult_state):
         )
         assert on_frontier or road_adjacent, (
             f"Village at {v.coord} is neither on cultivation frontier nor road-adjacent"
+        )
+
+
+def test_villages_meet_reachability_guard(cult_state):
+    cfg = WorldConfig(**cult_state.metadata["config"])
+    hexes = cult_state.hexes
+    villages = [s for s in cult_state.settlements if s.tier == SettlementTier.VILLAGE]
+    for village in villages:
+        reachable = grade_reachable_count(
+            village.coord,
+            hexes,
+            lambda a, b: grade_is_under_cap(a, b, cfg),
+            cfg.settlement_min_reachable,
+        )
+        assert reachable >= cfg.settlement_min_reachable, (
+            f"Village at {village.coord} is in a topographic pocket ({reachable} reachable hexes)"
         )
 
 

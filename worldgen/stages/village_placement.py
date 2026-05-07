@@ -1,8 +1,9 @@
 from ..core.hex import LandCover, Settlement, SettlementTier, TerrainClass
-from ..core.hex_grid import distance, neighbors
+from ..core.hex_grid import distance, grade_reachable_count, neighbors
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
 from .city_town import _assign_role
+from .road_cost import grade_is_under_cap
 
 _RESISTANT = {
     LandCover.BOG,
@@ -18,6 +19,19 @@ _RESISTANT = {
 class VillagePlacementStage(GeneratorStage):
     def run(self, state: WorldState) -> WorldState:
         hexes = state.hexes
+        cfg = self.config
+
+        def grade_ok(a_hx, b_hx):
+            return grade_is_under_cap(a_hx, b_hx, cfg)
+
+        reachable_cache: dict[tuple[int, int], int] = {}
+
+        def reachable(coord):
+            if coord not in reachable_cache:
+                reachable_cache[coord] = grade_reachable_count(
+                    coord, hexes, grade_ok, cfg.settlement_min_reachable
+                )
+            return reachable_cache[coord]
 
         placed_coords = [s.coord for s in state.settlements]
 
@@ -31,6 +45,8 @@ class VillagePlacementStage(GeneratorStage):
             if hx.habitability <= 0:
                 continue
             if hx.land_cover in _RESISTANT:
+                continue
+            if reachable(coord) < cfg.settlement_min_reachable:
                 continue
 
             on_frontier = hx.cultivated and any(
