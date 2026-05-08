@@ -143,6 +143,58 @@ _DEFAULT_LAYERS = {"terrain", "rivers", "roads", "settlements", "labels", "grid"
 _ALLOWED_LAYERS = _DEFAULT_LAYERS | {"contours"}
 
 
+def _parse_layers_value(value, source: str) -> set[str]:
+    if isinstance(value, str):
+        parsed = [layer.strip() for layer in value.split(",") if layer.strip()]
+    elif isinstance(value, (list, tuple, set)):
+        parsed = []
+        for layer in value:
+            if not isinstance(layer, str):
+                raise click.ClickException(
+                    f"{source} must be a list of strings or a comma-separated string."
+                )
+            stripped = layer.strip()
+            if stripped:
+                parsed.append(stripped)
+    else:
+        raise click.ClickException(
+            f"{source} must be a list of strings or a comma-separated string."
+        )
+
+    unknown = set(parsed) - _ALLOWED_LAYERS
+    if unknown:
+        allowed = ", ".join(sorted(_ALLOWED_LAYERS))
+        raise click.ClickException(
+            f"Unknown layer(s): {', '.join(sorted(unknown))}. Allowed: {allowed}"
+        )
+    return set(parsed)
+
+
+def _load_export_section(config_path: str) -> dict:
+    if config_path.lower().endswith((".yaml", ".yml")):
+        import yaml
+
+        with open(config_path) as f:
+            raw = yaml.safe_load(f)
+    else:
+        import json as _json
+
+        with open(config_path) as f:
+            raw = _json.load(f)
+
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise click.ClickException("Config root must be a mapping/object.")
+
+    export_section = raw.get("export", {})
+    if export_section is None:
+        return {}
+    if not isinstance(export_section, dict):
+        raise click.ClickException("'export' section must be a mapping/object.")
+    return export_section
+
+
 @cli.command(name="export")
 @click.option("--input", "input_path", type=str, required=True, help="Input world.json file")
 @click.option("--output", type=str, required=True, help="Output SVG file")
@@ -196,24 +248,23 @@ def export_svg(
     }
 
     if config_path:
-        if config_path.lower().endswith((".yaml", ".yml")):
-            import yaml
-
-            with open(config_path) as f:
-                raw = yaml.safe_load(f)
-            export_section = raw.get("export", {}) if isinstance(raw, dict) else {}
-        else:
-            import json as _json
-
-            with open(config_path) as f:
-                raw = _json.load(f)
-            export_section = raw.get("export", {}) if isinstance(raw, dict) else {}
-
-        for key in ("style", "color_mode", "hex_size", "padding"):
+        export_section = _load_export_section(config_path)
+        for key in (
+            "style",
+            "color_mode",
+            "hex_size",
+            "padding",
+            "contour_elevation_scale_m",
+            "contour_interval_m",
+            "contour_max_crossings",
+            "contour_max_stroke",
+        ):
             if key in export_section:
                 svg_kwargs[key] = export_section[key]
         if "layers" in export_section:
-            svg_kwargs["layers"] = set(export_section["layers"])
+            svg_kwargs["layers"] = _parse_layers_value(
+                export_section["layers"], "export.layers in config"
+            )
 
     # CLI flags override config file (only when explicitly provided)
     if style is not None:
@@ -225,14 +276,7 @@ def export_svg(
     if padding is not None:
         svg_kwargs["padding"] = padding
     if layers is not None:
-        parsed = [layer.strip() for layer in layers.split(",") if layer.strip()]
-        unknown = set(parsed) - _ALLOWED_LAYERS
-        if unknown:
-            allowed = ", ".join(sorted(_ALLOWED_LAYERS))
-            raise click.ClickException(
-                f"Unknown layer(s): {', '.join(sorted(unknown))}. Allowed: {allowed}"
-            )
-        svg_kwargs["layers"] = set(parsed)
+        svg_kwargs["layers"] = _parse_layers_value(layers, "--layers")
 
     unknown_cfg = svg_kwargs["layers"] - _ALLOWED_LAYERS
     if unknown_cfg:
@@ -266,6 +310,7 @@ def init_config(output: str, force: bool) -> None:
     out = Path(output)
     if out.exists() and not force:
         raise click.ClickException(f"{output} already exists. Use --force to overwrite.")
+    out.parent.mkdir(parents=True, exist_ok=True)
     template = Path(__file__).parent / "default_config.yaml"
     import shutil
 

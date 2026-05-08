@@ -37,6 +37,8 @@ class WorldConfig:
     river_flow_threshold: float = 0.05
 
     def __post_init__(self) -> None:
+        self.wind_direction = _coerce_pair("wind_direction", self.wind_direction)
+        self.elevation_gradient = _coerce_pair("elevation_gradient", self.elevation_gradient)
         if not (0.0 <= self.river_flow_threshold <= 1.0):
             raise ValueError(
                 f"river_flow_threshold must be in [0, 1], got {self.river_flow_threshold}"
@@ -149,6 +151,10 @@ class WorldConfig:
 
         with open(path) as f:
             data = yaml.safe_load(f)
+        if data is None:
+            data = {}
+        if not isinstance(data, dict):
+            raise ValueError("YAML config root must be a mapping/object.")
         data.pop("export", None)
         _coerce_tuples(data)
         return cls(**data)
@@ -167,7 +173,21 @@ class WorldConfig:
 _TUPLE_FIELDS = ("wind_direction", "elevation_gradient")
 
 
+def _coerce_pair(key: str, value: Any) -> tuple[float, float]:
+    if isinstance(value, str) or value is None:
+        raise ValueError(f"{key} must be an iterable of two numbers, got {value!r}")
+    try:
+        pair = tuple(value)
+    except TypeError as exc:
+        raise ValueError(f"{key} must be an iterable of two numbers, got {value!r}") from exc
+    if len(pair) != 2:
+        raise ValueError(f"{key} must have exactly two values, got {len(pair)}")
+    if not all(isinstance(v, int | float) and not isinstance(v, bool) for v in pair):
+        raise ValueError(f"{key} must contain only numbers, got {pair!r}")
+    return (float(pair[0]), float(pair[1]))
+
+
 def _coerce_tuples(data: dict[str, Any]) -> None:
     for key in _TUPLE_FIELDS:
         if key in data:
-            data[key] = tuple(data[key])
+            data[key] = _coerce_pair(key, data[key])

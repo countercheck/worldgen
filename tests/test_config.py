@@ -25,6 +25,20 @@ def test_from_yaml_ignores_export_block(tmp_path):
     assert cfg.width == 32
 
 
+def test_from_yaml_empty_file_uses_defaults(tmp_path):
+    p = tmp_path / "cfg.yaml"
+    p.write_text("")
+    cfg = WorldConfig.from_yaml(str(p))
+    assert cfg.width == WorldConfig().width
+
+
+def test_from_yaml_requires_mapping_root(tmp_path):
+    p = tmp_path / "cfg.yaml"
+    p.write_text("- not\n- a\n- mapping\n")
+    with pytest.raises(ValueError, match="mapping/object"):
+        WorldConfig.from_yaml(str(p))
+
+
 def test_from_yaml_wind_direction_is_tuple(tmp_path):
     data = {"wind_direction": [0.0, 1.0]}
     p = tmp_path / "cfg.yaml"
@@ -49,6 +63,28 @@ def test_from_json_wind_direction_is_tuple(tmp_path):
     p.write_text(json.dumps(data))
     cfg = WorldConfig.from_json(str(p))
     assert isinstance(cfg.wind_direction, tuple)
+
+
+@pytest.mark.parametrize("key", ["wind_direction", "elevation_gradient"])
+def test_yaml_tuple_fields_require_two_numeric_values(tmp_path, key):
+    p = tmp_path / "cfg.yaml"
+    p.write_text(yaml.dump({key: None}))
+    with pytest.raises(ValueError, match=key):
+        WorldConfig.from_yaml(str(p))
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({"wind_direction": (1.0,)}, "wind_direction"),
+        ({"wind_direction": ("east", 0.0)}, "wind_direction"),
+        ({"elevation_gradient": (0.5,)}, "elevation_gradient"),
+        ({"elevation_gradient": (0.1, "north")}, "elevation_gradient"),
+    ],
+)
+def test_world_config_validates_vector_fields(kwargs, message):
+    with pytest.raises(ValueError, match=message):
+        WorldConfig(**kwargs)
 
 
 @pytest.mark.parametrize(
