@@ -68,8 +68,23 @@ def test_rivers_reach_ocean(hydro_state):
         on_border = q == 0 or q == w - 1 or r == 0 or r == h - 1
         reaches_water = any(n in water_set for n in neighbors(mouth)) or mouth in water_set
         # A tributary that stopped at a confluence: its last hex is adjacent to another
-        # river's hex (which will be the hex it was about to enter when it stopped).
-        at_confluence = any(n in all_river_hexes and n not in river.hexes for n in neighbors(mouth))
+        # river's trunk hex that is either explicitly tagged as a confluence or carries
+        # at least as much downstream flow as the tributary mouth (and is not itself a
+        # headwater).
+        mouth_flow = hydro_state.hexes[mouth].river_flow if mouth in hydro_state.hexes else 0.0
+        at_confluence = any(
+            n in all_river_hexes
+            and n not in river.hexes
+            and n in hydro_state.hexes
+            and (
+                "confluence" in hydro_state.hexes[n].tags
+                or (
+                    hydro_state.hexes[n].river_flow >= mouth_flow
+                    and "headwater" not in hydro_state.hexes[n].tags
+                )
+            )
+            for n in neighbors(mouth)
+        )
         assert reaches_water or on_border or at_confluence, (
             f"River mouth {mouth} does not reach water body, grid border, or confluence"
         )
@@ -212,7 +227,7 @@ def test_no_shared_hexes_between_rivers(hydro_state):
     land_terrain = {
         coord
         for coord, hx in hydro_state.hexes.items()
-        if hx.terrain_class.name not in ("OCEAN", "LAKE")
+        if hx.terrain_class not in (TerrainClass.OCEAN, TerrainClass.LAKE)
     }
     for i, river in enumerate(hydro_state.rivers):
         for coord in river.hexes:

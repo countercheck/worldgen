@@ -77,23 +77,25 @@ class HydrologyStage(GeneratorStage):
         )
         if drainage_rivers:
             state.rivers.extend(drainage_rivers)
-            # Re-normalize after any new river hexes were added
-            max_acc = max(acc.values()) if acc else 1.0
-            for coord in river_set:
-                hexes[coord].river_flow = acc.get(coord, 0.0) / max_acc
-            # Clear stale river tags from hexes submerged into lake during drainage
-            # (they were removed from river_set but still carry tags from the first pass)
-            _river_tags = {"headwater", "confluence", "river_mouth"}
-            for coord, hx in hexes.items():
-                if coord not in river_set:
-                    hx.tags -= _river_tags
-            self._tag_hexes(river_set, flow_dir, hexes, ocean, lakes, w, h)
-            # Recompute flow_volume for all rivers now that max_acc is final;
-            # _ensure_lake_drainage may remove land hexes from acc (submerged into lake)
-            # which can change max_acc, making pre-drainage flow_volume values stale.
-            for river in state.rivers:
-                last_land = next((c for c in reversed(river.hexes) if c in acc), river.hexes[0])
-                river.flow_volume = acc.get(last_land, 0.0) / max_acc
+        # _ensure_lake_drainage may mutate acc/river_set even when no new rivers are
+        # appended (e.g., submerging former river land into lake). Always refresh
+        # normalization/tags/flow_volume before confluence splitting.
+        max_acc = max(acc.values()) if acc else 1.0
+        for coord in river_set:
+            hexes[coord].river_flow = acc.get(coord, 0.0) / max_acc
+        # Clear stale river tags from hexes submerged into lake during drainage
+        # (they were removed from river_set but still carry tags from the first pass)
+        _river_tags = {"headwater", "confluence", "river_mouth"}
+        for coord, hx in hexes.items():
+            if coord not in river_set:
+                hx.tags -= _river_tags
+        self._tag_hexes(river_set, flow_dir, hexes, ocean, lakes, w, h)
+        # Recompute flow_volume for all rivers now that max_acc is final;
+        # _ensure_lake_drainage may remove land hexes from acc (submerged into lake)
+        # which can change max_acc, making pre-drainage flow_volume values stale.
+        for river in state.rivers:
+            last_land = next((c for c in reversed(river.hexes) if c in acc), river.hexes[0])
+            river.flow_volume = acc.get(last_land, 0.0) / max_acc
 
         # H — Split source-to-sea paths into source-to-confluence segments.
         # Higher-flow rivers claim their land hexes first; lower-flow tributaries are
