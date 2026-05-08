@@ -1,4 +1,5 @@
 import pytest
+import yaml
 from click.testing import CliRunner
 
 from worldgen.cli import cli
@@ -170,3 +171,118 @@ def test_export_help_shows_layers_option():
     assert result.exit_code == 0, result.output
     assert "--layers" in result.output
     assert "contours" in result.output
+
+
+def test_export_reads_export_block_from_yaml_config(world_json, tmp_path):
+    out = str(tmp_path / "from-config.svg")
+    cfg_path = tmp_path / "cfg.yaml"
+    cfg_path.write_text(
+        yaml.dump(
+            {
+                "export": {
+                    "style": "atlas",
+                    "color_mode": "terrain",
+                    "hex_size": 9.0,
+                    "padding": 7,
+                    "layers": ["terrain", "contours"],
+                    "contour_elevation_scale_m": 2500.0,
+                    "contour_interval_m": 50.0,
+                    "contour_max_crossings": 3,
+                    "contour_max_stroke": 2.0,
+                }
+            }
+        )
+    )
+
+    result = CliRunner().invoke(
+        cli,
+        ["export", "--input", world_json, "--output", out, "--config", str(cfg_path)],
+    )
+    assert result.exit_code == 0, result.output
+    with open(out) as f:
+        content = f.read()
+    assert 'id="layer-contours"' in content
+
+
+def test_export_cli_flags_override_config_values(world_json, tmp_path):
+    out = str(tmp_path / "override.svg")
+    cfg_path = tmp_path / "cfg.yaml"
+    cfg_path.write_text(
+        yaml.dump({"export": {"style": "atlas", "layers": ["terrain", "contours"]}})
+    )
+
+    result = CliRunner().invoke(
+        cli,
+        [
+            "export",
+            "--input",
+            world_json,
+            "--output",
+            out,
+            "--config",
+            str(cfg_path),
+            "--style",
+            "wargame",
+            "--layers",
+            "terrain,grid",
+        ],
+    )
+    assert result.exit_code == 0, result.output
+    with open(out) as f:
+        content = f.read()
+    assert 'id="layer-contours"' not in content
+    assert 'id="layer-grid"' in content
+    assert 'id="layer-roads"' in content
+    assert 'id="layer-settlements"' in content
+
+
+def test_export_config_layers_can_be_comma_separated_string(world_json, tmp_path):
+    out = str(tmp_path / "config-layers-string.svg")
+    cfg_path = tmp_path / "cfg.yaml"
+    cfg_path.write_text(yaml.dump({"export": {"layers": "terrain, contours"}}))
+    result = CliRunner().invoke(
+        cli,
+        ["export", "--input", world_json, "--output", out, "--config", str(cfg_path)],
+    )
+    assert result.exit_code == 0, result.output
+    with open(out) as f:
+        content = f.read()
+    assert 'id="layer-terrain"' in content
+    assert 'id="layer-contours"' in content
+
+
+def test_export_config_layers_must_be_list_or_string(world_json, tmp_path):
+    out = str(tmp_path / "bad.svg")
+    cfg_path = tmp_path / "cfg.yaml"
+    cfg_path.write_text(yaml.dump({"export": {"layers": 123}}))
+    result = CliRunner().invoke(
+        cli,
+        ["export", "--input", world_json, "--output", out, "--config", str(cfg_path)],
+    )
+    assert result.exit_code != 0
+    assert "export.layers in config" in result.output
+
+
+def test_init_config_writes_nested_output(tmp_path):
+    out = tmp_path / "nested" / "worldgen.yaml"
+    result = CliRunner().invoke(cli, ["init-config", "--output", str(out)])
+    assert result.exit_code == 0, result.output
+    assert out.exists()
+    assert "elevation_gradient" in out.read_text()
+
+
+def test_init_config_refuses_overwrite_without_force(tmp_path):
+    out = tmp_path / "worldgen.yaml"
+    out.write_text("original")
+    result = CliRunner().invoke(cli, ["init-config", "--output", str(out)])
+    assert result.exit_code != 0
+    assert "already exists" in result.output
+    assert out.read_text() == "original"
+
+
+def test_init_config_force_overwrites_file(tmp_path):
+    out = tmp_path / "worldgen.yaml"
+    out.write_text("original")
+    result = CliRunner().invoke(cli, ["init-config", "--output", str(out), "--force"])
+    assert result.exit_code == 0, result.output
+    assert "elevation_gradient" in out.read_text()
