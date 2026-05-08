@@ -141,6 +141,7 @@ _STYLES = ["atlas", "topographic", "wargame"]
 _COLOR_MODES = ["biome", "terrain", "land_cover", "elevation"]
 _DEFAULT_LAYERS = {"terrain", "rivers", "roads", "settlements", "labels", "grid"}
 _ALLOWED_LAYERS = _DEFAULT_LAYERS | {"contours"}
+_CONFIG_LAYERS_SOURCE = "export.layers in config"
 
 
 def _parse_layers_value(value: str | list[str] | tuple[str, ...] | set[str], source: str) -> set[str]:
@@ -264,9 +265,7 @@ def export_svg(
             if key in export_section:
                 svg_kwargs[key] = export_section[key]
         if "layers" in export_section:
-            svg_kwargs["layers"] = _parse_layers_value(
-                export_section["layers"], "export.layers in config"
-            )
+            svg_kwargs["layers"] = _parse_layers_value(export_section["layers"], _CONFIG_LAYERS_SOURCE)
 
     # CLI flags override config file (only when explicitly provided)
     if style is not None:

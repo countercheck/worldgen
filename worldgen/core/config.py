@@ -183,7 +183,8 @@ def _coerce_pair(key: str, value: Any) -> tuple[float, float]:
         raise ValueError(f"{key} must be an iterable of two numbers, got {value!r}") from exc
     if len(pair) != 2:
         raise ValueError(f"{key} must have exactly two values, got {len(pair)}")
-    # bool is a subclass of int, but we only want real numeric components here.
+    # bool is a subclass of int; reject True/False so accidental flags do not
+    # silently become numeric vector components (1.0/0.0).
     if not all(isinstance(v, int | float) and not isinstance(v, bool) for v in pair):
         raise ValueError(f"{key} must contain only numbers, got {pair!r}")
     return (float(pair[0]), float(pair[1]))
