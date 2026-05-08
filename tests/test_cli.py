@@ -275,7 +275,7 @@ def test_init_config_refuses_overwrite_without_force(tmp_path):
     out = tmp_path / "worldgen.yaml"
     out.write_text("original")
     result = CliRunner().invoke(cli, ["init-config", "--output", str(out)])
-    assert result.exit_code != 0
+    assert result.exit_code == 1
     assert "already exists" in result.output
     assert out.read_text() == "original"
 
