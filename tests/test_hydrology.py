@@ -48,20 +48,30 @@ def test_river_paths_connected(hydro_state):
 
 
 def test_rivers_reach_ocean(hydro_state):
-    # Rivers may legitimately terminate at ocean, lake, or the grid border.
+    # Each river must terminate at ocean/lake, a grid border, OR a confluence with
+    # another river (tributaries now stop at the first claimed hex rather than
+    # duplicating the downstream trunk).
     water_set = {
         coord
         for coord, h in hydro_state.hexes.items()
         if h.terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE)
     }
+    # Build a set of all hexes that appear in any river so we can detect confluences.
+    all_river_hexes: set = set()
+    for river in hydro_state.rivers:
+        all_river_hexes.update(river.hexes)
+
     w, h = hydro_state.width, hydro_state.height
     for river in hydro_state.rivers:
         mouth = river.hexes[-1]
         q, r = mouth
         on_border = q == 0 or q == w - 1 or r == 0 or r == h - 1
         reaches_water = any(n in water_set for n in neighbors(mouth)) or mouth in water_set
-        assert reaches_water or on_border, (
-            f"River mouth {mouth} does not reach water body or grid border"
+        # A tributary that stopped at a confluence: its last hex is adjacent to another
+        # river's hex (which will be the hex it was about to enter when it stopped).
+        at_confluence = any(n in all_river_hexes and n not in river.hexes for n in neighbors(mouth))
+        assert reaches_water or on_border or at_confluence, (
+            f"River mouth {mouth} does not reach water body, grid border, or confluence"
         )
 
 
@@ -191,3 +201,26 @@ def test_lake_drainage_merges_without_rewiring_existing_river():
     assert flow_dir[spillway] == merge
     assert flow_dir[merge] == downstream
     assert acc[merge] == 5.0
+
+
+def test_no_shared_hexes_between_rivers(hydro_state):
+    # Each land hex must appear in at most one River segment.  Multiple rivers sharing
+    # the same hex meant the downstream trunk was duplicated, causing visual overdraw.
+    from collections import defaultdict
+
+    hex_to_rivers: dict = defaultdict(list)
+    land_terrain = {
+        coord
+        for coord, hx in hydro_state.hexes.items()
+        if hx.terrain_class.name not in ("OCEAN", "LAKE")
+    }
+    for i, river in enumerate(hydro_state.rivers):
+        for coord in river.hexes:
+            if coord in land_terrain:
+                hex_to_rivers[coord].append(i)
+
+    shared = {k: v for k, v in hex_to_rivers.items() if len(v) > 1}
+    assert not shared, (
+        f"{len(shared)} land hexes appear in multiple rivers; "
+        f"first offender: {next(iter(shared))} in rivers {next(iter(shared.values()))}"
+    )
