@@ -95,6 +95,13 @@ class HydrologyStage(GeneratorStage):
                 last_land = next((c for c in reversed(river.hexes) if c in acc), river.hexes[0])
                 river.flow_volume = acc.get(last_land, 0.0) / max_acc
 
+        # H — Split source-to-sea paths into source-to-confluence segments.
+        # Higher-flow rivers claim their land hexes first; lower-flow tributaries are
+        # trimmed at the first already-claimed hex, eliminating duplicate trunk renderings.
+        # This runs after all hydrological computation (river_set, acc, flow_dir) is final
+        # so that per-hex river_flow and lake drainage connectivity are unaffected.
+        state.rivers = _split_at_confluences(state.rivers, land, acc, max_acc)
+
         return state
 
     def _bfs_dist_from_ocean(
@@ -288,6 +295,9 @@ class HydrologyStage(GeneratorStage):
         (flat-area artefact), extend the path via elevation-guided search toward the nearest
         outlet; fallback hexes are added to river_set and flow_dir is updated to keep
         all downstream data consistent.
+
+        Paths are built as full source-to-sea traces; split into source-to-confluence
+        segments by the caller after all drainage rivers are also available.
         """
         rivers: list[River] = []
 
@@ -676,9 +686,57 @@ class HydrologyStage(GeneratorStage):
                 spillway_acc = min(spillway_acc, acc.get(prev, spillway_acc))
             acc[spillway] = spillway_acc
             last_land = next((c for c in reversed(path) if c in acc), spillway)
-            new_rivers.append(River(hexes=path, flow_volume=acc[last_land] / max_acc))
+            if len(path) > 1:
+                new_rivers.append(River(hexes=path, flow_volume=acc[last_land] / max_acc))
 
         return new_rivers
+
+
+def _split_at_confluences(
+    rivers: list[River],
+    land: set[HexCoord],
+    acc: dict[HexCoord, float],
+    max_acc: float,
+) -> list[River]:
+    """Trim each River path to a source-to-confluence segment.
+
+    Higher-flow rivers process first and claim their land hexes.  Each subsequent
+    river is cut at the first land hex already owned by a higher-flow river, converting
+    source-to-sea duplicates into distinct source-to-confluence segments.  Rivers that
+    shrink below 2 hexes are dropped.  Original list order is preserved in the output.
+
+    This runs after all hydrological computation is final so that per-hex river_flow,
+    flow_dir, and lake drainage connectivity are unaffected.
+    """
+    # Sort by descending flow_volume; use hexes[0] as a tie-breaker for determinism.
+    indexed = sorted(enumerate(rivers), key=lambda iv: (-iv[1].flow_volume, iv[1].hexes[0]))
+
+    claimed: set[HexCoord] = set()
+    result: list[tuple[int, River]] = []
+
+    for orig_idx, river in indexed:
+        path = river.hexes
+        # If the headwater itself is already claimed, this river is fully subsumed by a
+        # higher-flow trunk that already covers its start — drop it entirely.
+        if path[0] in land and path[0] in claimed:
+            continue
+        # Find the first claimed land hex after the headwater (index 0 always kept).
+        cut = len(path)
+        for i, coord in enumerate(path[1:], 1):
+            if coord in land and coord in claimed:
+                cut = i
+                break
+        trimmed = path[:cut]
+        if len(trimmed) >= 2:
+            # Recalculate flow_volume from the last exclusive land hex in the trimmed path.
+            last_land = next((c for c in reversed(trimmed) if c in acc), trimmed[0])
+            result.append(
+                (orig_idx, River(hexes=trimmed, flow_volume=acc.get(last_land, 0.0) / max_acc))
+            )
+            claimed.update(c for c in trimmed if c in land)
+
+    result.sort(key=lambda iv: iv[0])
+    return [r for _, r in result]
 
 
 def _get_lake_components(lakes: set[HexCoord], hexes: dict[HexCoord, "Hex"]) -> list[set[HexCoord]]:
