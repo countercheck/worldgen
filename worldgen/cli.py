@@ -143,7 +143,8 @@ _DEFAULT_LAYERS = {"terrain", "rivers", "roads", "settlements", "labels", "grid"
 _ALLOWED_LAYERS = _DEFAULT_LAYERS | {"contours"}
 
 
-def _parse_layers_value(value, source: str) -> set[str]:
+def _parse_layers_value(value: str | list[str] | tuple[str, ...] | set[str], source: str) -> set[str]:
+    """Parse layer config from CSV string or iterable and validate allowed names."""
     if isinstance(value, str):
         parsed = [layer.strip() for layer in value.split(",") if layer.strip()]
     elif isinstance(value, (list, tuple, set)):
@@ -171,6 +172,7 @@ def _parse_layers_value(value, source: str) -> set[str]:
 
 
 def _load_export_section(config_path: str) -> dict:
+    """Load and validate the optional top-level `export` config mapping."""
     if config_path.lower().endswith((".yaml", ".yml")):
         import yaml
 
