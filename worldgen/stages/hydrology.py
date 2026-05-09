@@ -66,9 +66,13 @@ class HydrologyStage(GeneratorStage):
             river_set, flow_dir, hexes, land, ocean, lakes, acc, max_acc, filled, w, h
         )
 
-        # F — Normalize river_flow and tag all river hexes (including any added by fallback)
-        for coord in river_set:
-            hexes[coord].river_flow = acc.get(coord, 0.0) / max_acc
+        # F — Normalize river_flow; headwater/confluence/mouth tags set from river_set
+        if self.config.river_flow_continuous:
+            for coord in land:
+                hexes[coord].river_flow = acc.get(coord, 0.0) / max_acc
+        else:
+            for coord in river_set:
+                hexes[coord].river_flow = acc.get(coord, 0.0) / max_acc
         self._tag_hexes(river_set, flow_dir, hexes, ocean, lakes, w, h)
 
         # G — Ensure every lake has an outflow river (fill-to-spillway enforcement)
@@ -79,11 +83,15 @@ class HydrologyStage(GeneratorStage):
             state.rivers.extend(drainage_rivers)
             # Re-normalize after any new river hexes were added
             max_acc = max(acc.values()) if acc else 1.0
-            for coord in river_set:
-                hexes[coord].river_flow = acc.get(coord, 0.0) / max_acc
+            if self.config.river_flow_continuous:
+                for coord in land:
+                    hexes[coord].river_flow = acc.get(coord, 0.0) / max_acc
+            else:
+                for coord in river_set:
+                    hexes[coord].river_flow = acc.get(coord, 0.0) / max_acc
             # Clear stale river tags from hexes submerged into lake during drainage
             # (they were removed from river_set but still carry tags from the first pass)
-            _river_tags = {"headwater", "confluence", "river_mouth"}
+            _river_tags = {"river", "headwater", "confluence", "river_mouth"}
             for coord, hx in hexes.items():
                 if coord not in river_set:
                     hx.tags -= _river_tags
@@ -94,6 +102,15 @@ class HydrologyStage(GeneratorStage):
             for river in state.rivers:
                 last_land = next((c for c in reversed(river.hexes) if c in acc), river.hexes[0])
                 river.flow_volume = acc.get(last_land, 0.0) / max_acc
+
+        # H — Tag every non-water hex in any River path with "river".
+        # Done after all rivers (including drainage) are finalized, so drainage tail
+        # hexes that aren't in river_set (but are genuine river-path members) are covered.
+        water_classes = {TerrainClass.OCEAN, TerrainClass.LAKE}
+        for river in state.rivers:
+            for coord in river.hexes:
+                if coord in hexes and hexes[coord].terrain_class not in water_classes:
+                    hexes[coord].tags.add("river")
 
         return state
 

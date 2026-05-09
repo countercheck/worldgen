@@ -140,7 +140,7 @@ class SettlementStage(GeneratorStage):
             and hx.settlement is None
         ]
         weights = [
-            2.0 if hexes[c].river_flow > 0 or hexes[c].terrain_class == TerrainClass.COAST else 1.0
+            2.0 if "river" in hexes[c].tags or hexes[c].terrain_class == TerrainClass.COAST else 1.0
             for c in candidates
         ]
         total_w = sum(weights)

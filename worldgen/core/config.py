@@ -35,6 +35,9 @@ class WorldConfig:
 
     # Hydrology
     river_flow_threshold: float = 0.05
+    river_flow_continuous: bool = False  # True: river_flow on all draining land hexes
+    moisture_bleed_passes: int = 0       # 0 = flat river bonus (default); >0 = elevation-gated bleed
+    moisture_bleed_strength: float = 0.3
 
     def __post_init__(self) -> None:
         self.wind_direction = _coerce_pair("wind_direction", self.wind_direction)

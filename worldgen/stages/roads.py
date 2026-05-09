@@ -155,12 +155,12 @@ class RoadStage(GeneratorStage):
                 if c not in hexes:
                     continue
                 hx = hexes[c]
-                if hx.river_flow == 0:
+                if "river" not in hx.tags:
                     continue
                 # Only tag the entry point of each river-crossing run
                 prev_c = path[i - 1] if i > 0 else None
                 prev_hx = hexes.get(prev_c) if prev_c is not None else None
-                if prev_hx is None or prev_hx.river_flow == 0:
+                if prev_hx is None or "river" not in prev_hx.tags:
                     if "ford" not in hx.tags:
                         hx.tags.add("ford")
                     else:
