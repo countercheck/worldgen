@@ -93,13 +93,13 @@ def test_tags_assigned(hydro_state):
 
 def test_river_tag_on_river_set(hydro_state):
     # Every hex in a River path that is a land hex must carry the "river" tag.
-    land_classes = {TerrainClass.OCEAN, TerrainClass.LAKE}
+    water_classes = {TerrainClass.OCEAN, TerrainClass.LAKE}
     for river in hydro_state.rivers:
         for coord in river.hexes:
             if coord not in hydro_state.hexes:
                 continue
             hx = hydro_state.hexes[coord]
-            if hx.terrain_class in land_classes:
+            if hx.terrain_class in water_classes:
                 continue
             assert "river" in hx.tags, f"River path hex {coord} missing 'river' tag"
 
