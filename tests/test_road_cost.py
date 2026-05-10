@@ -232,44 +232,40 @@ def test_astar_avoids_water_when_short_land_detour_available():
 
 
 def test_astar_prefers_low_flow_river_for_crossing():
-    """Two parallel rivers between origin and destination: one a high-flow trunk
-    river, the other a low-flow stream. A* should cross at the stream."""
+    """A single river barrier spans the full grid at row r=2, but the left half
+    (q < 3) is a high-flow trunk and the right half (q >= 3) is a low-flow stream.
+    A path from (0, 0) to (0, 4) must cross r=2 somewhere; A* should detour right
+    to use the cheaper stream crossing rather than the direct but costly trunk crossing."""
     cfg = WorldConfig()
 
-    # Two horizontal rivers at r=1 (flow=1.0, big trunk) and r=3 (flow=0.1, small stream)
     def factory(q, r):
-        if r == 1:
-            return _river_flat((q, r), flow=1.0)
-        if r == 3:
-            return _river_flat((q, r), flow=0.1)
+        if r == 2:
+            flow = 1.0 if q < 3 else 0.1
+            return _river_flat((q, r), flow=flow)
         return _flat((q, r))
 
-    hexes = _build_grid(5, 5, factory)
+    hexes = _build_grid(7, 5, factory)
 
     def node_cost(hx):
-        # No discount here so we isolate edge crossing cost
         return terrain_base_cost(hx, cfg)
 
     def edge_cost(a, b):
         return road_edge_cost(a, b, cfg)
 
-    # Path from (2, 0) to (2, 4) — must cross at least one river
-    path = astar(hexes, (2, 0), (2, 4), node_cost, edge_cost)
+    # Path from (0, 0) to (0, 4) must cross r=2; the crossing column is the choice.
+    # Direct crossing at q=0 (trunk, flow=1.0): 2 × (4 + 12×1.0) = 32 in edge cost
+    #   plus 4 nodes × 1.0 = 36 total.
+    # Detour to q=3 (stream, flow=0.1): 2 × (4 + 12×0.1) = 10.4, plus 10 nodes = 20.4.
+    path = astar(hexes, (0, 0), (0, 4), node_cost, edge_cost)
     assert path is not None
 
-    # Compare against an alternative: force a path that crosses only the trunk river.
-    # Easier sanity check: the chosen path should include at least one r=3 hex
-    # (small stream side) AND not be obstructed at the r=1 side.
-    crosses_stream = any(hexes[c].river_flow == pytest.approx(0.1) for c in path)
-    crosses_trunk = any(hexes[c].river_flow == pytest.approx(1.0) for c in path)
-    # The path must include the small stream (it sits between source and goal)
-    assert crosses_stream, f"Path should pass through stream row r=3, got {path}"
-    # And should also include the trunk row (also between source and goal)
-    assert crosses_trunk, f"Path should pass through trunk row r=1, got {path}"
-    # The actual crossing-cost-reflective property: total path cost should reflect
-    # both crossings, but the model still allows them. Check that path is ≤
-    # naive grid distance × big constant — i.e. A* found something reasonable.
-    assert len(path) <= 8
+    # Find the column(s) where the path crosses the river row.
+    crossing_cols = [c[0] for c in path if c[1] == 2]
+    assert crossing_cols, "Path must cross river row r=2"
+    assert all(q >= 3 for q in crossing_cols), (
+        f"A* should detour to the low-flow stream half (q>=3), "
+        f"but crossed at q={crossing_cols}"
+    )
 
 
 def test_astar_follows_river_when_along_path_available():

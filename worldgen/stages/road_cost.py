@@ -109,8 +109,9 @@ def tag_river_crossings(roads, hexes) -> None:
             prev_c = path[i - 1] if i > 0 else None
             prev_hx = hexes.get(prev_c) if prev_c is not None else None
             if prev_hx is None or prev_hx.river_flow == 0:
-                if "ford" not in hx.tags:
-                    hx.tags.add("ford")
-                else:
-                    hx.tags.discard("ford")
-                    hx.tags.add("bridge")
+                if "bridge" not in hx.tags:
+                    if "ford" not in hx.tags:
+                        hx.tags.add("ford")
+                    else:
+                        hx.tags.discard("ford")
+                        hx.tags.add("bridge")

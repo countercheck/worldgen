@@ -28,9 +28,9 @@ class RoadStage(GeneratorStage):
         # Node cost closure (reads live hex_traffic)
         def node_cost(hx):
             base = terrain_base_cost(hx, cfg)
-            base = max(0.1, base - river_discount(hx, cfg))
+            base = max(0.0, base - river_discount(hx, cfg))
             pheromone = cfg.road_pheromone_factor * hex_traffic[hx.coord]
-            return max(0.1, base - pheromone)
+            return max(0.0, base - pheromone)
 
         # Edge cost: slope + water embark/disembark + river crossing
         def edge_cost(from_hx, to_hx):
