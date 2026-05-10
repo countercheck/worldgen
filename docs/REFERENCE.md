@@ -1102,7 +1102,7 @@ interfere with the cultivation frontier signal used by VillagePlacement.
 
 All defaults live in [worldgen/core/config.py](../worldgen/core/config.py).
 Validation rules are in `__post_init__`
-([config.py:42–113](../worldgen/core/config.py#L42)) and are noted inline
+([config.py:42](../worldgen/core/config.py#L42)) and are noted inline
 below.
 
 ### 4.1 Grid
