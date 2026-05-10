@@ -4,20 +4,14 @@ from ..core.hex import Settlement, SettlementTier, TerrainClass
 from ..core.hex_grid import astar, distance, neighbors
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import Road, RoadTier, WorldState
-from .road_cost import slope_edge_cost
+from .road_cost import (
+    river_discount,
+    road_edge_cost,
+    tag_river_crossings,
+    terrain_base_cost,
+)
 
 _TIER_ORDER = [RoadTier.PRIMARY, RoadTier.SECONDARY, RoadTier.TRACK]
-
-
-def _terrain_base_cost(hx, cfg) -> float:
-    tc = hx.terrain_class
-    if tc in (TerrainClass.OCEAN, TerrainClass.LAKE):
-        return float("inf")
-    if tc == TerrainClass.MOUNTAIN:
-        return cfg.road_mountain_cost
-    if tc == TerrainClass.HILL:
-        return cfg.road_hill_cost
-    return cfg.road_flat_cost
 
 
 class RoadStage(GeneratorStage):
@@ -33,17 +27,14 @@ class RoadStage(GeneratorStage):
 
         # Node cost closure (reads live hex_traffic)
         def node_cost(hx):
-            base = _terrain_base_cost(hx, cfg)
-            if base == float("inf"):
-                return base
-            if "river" in hx.tags:
-                base = max(0.1, base - cfg.road_river_discount)
+            base = terrain_base_cost(hx, cfg)
+            base = max(0.0, base - river_discount(hx, cfg))
             pheromone = cfg.road_pheromone_factor * hex_traffic[hx.coord]
-            return max(0.1, base - pheromone)
+            return max(0.0, base - pheromone)
 
-        # Edge cost: hyperbolic slope penalty
+        # Edge cost: slope + water embark/disembark + river crossing
         def edge_cost(from_hx, to_hx):
-            return slope_edge_cost(from_hx, to_hx, cfg)
+            return road_edge_cost(from_hx, to_hx, cfg)
 
         # Build traveller list
         tier_counts = {
@@ -100,8 +91,15 @@ class RoadStage(GeneratorStage):
             for c in path:
                 hex_traffic[c] += 1.0
 
-        # Threshold traffic into tiers
-        eligible = [c for c, t in hex_traffic.items() if t >= cfg.road_min_traffic]
+        # Threshold traffic into tiers. River hexes use a lower threshold
+        # (`road_river_traffic_min`) so towpath/riverside trails appear with
+        # lighter traffic than required for ordinary land roads.
+        eligible = [
+            c
+            for c, t in hex_traffic.items()
+            if t >= cfg.road_min_traffic
+            or (c in hexes and hexes[c].river_flow > 0 and t >= cfg.road_river_traffic_min)
+        ]
         eligible.sort(key=lambda c: hex_traffic[c], reverse=True)
         n_elig = len(eligible)
         hex_tier: dict = {}
@@ -148,24 +146,8 @@ class RoadStage(GeneratorStage):
                     hexes[a].road_connections.add(b)
                     hexes[b].road_connections.add(a)
 
-        # Ford / bridge tagging — only where a road enters a river hex from a non-river hex
-        for road in roads:
-            path = road.path
-            for i, c in enumerate(path):
-                if c not in hexes:
-                    continue
-                hx = hexes[c]
-                if "river" not in hx.tags:
-                    continue
-                # Only tag the entry point of each river-crossing run
-                prev_c = path[i - 1] if i > 0 else None
-                prev_hx = hexes.get(prev_c) if prev_c is not None else None
-                if prev_hx is None or "river" not in prev_hx.tags:
-                    if "ford" not in hx.tags:
-                        hx.tags.add("ford")
-                    else:
-                        hx.tags.discard("ford")
-                        hx.tags.add("bridge")
+        # Ford / bridge tagging — symbolic (does not feed back into pathfinding cost)
+        tag_river_crossings(roads, hexes)
 
         # Habitability re-score for road adjacency
         road_hex_set = set(hex_tier.keys())
@@ -184,6 +166,8 @@ class RoadStage(GeneratorStage):
             if s.tier != SettlementTier.VILLAGE:
                 continue
             hx = hexes[s.coord]
+            if hx.terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE):
+                continue
             # Must be adjacent to a road hex (road adjacency re-score skips settled hexes)
             if not any(n in road_hex_set for n in neighbors(s.coord)):
                 continue
@@ -312,21 +296,22 @@ class RoadStage(GeneratorStage):
         # Largest component wins
         main = max(components, key=len)
 
-        # Plain terrain cost for gap-filling
+        # Plain terrain cost for gap-filling (no pheromone, no river discount —
+        # fallback paths shouldn't reuse traffic state from the main routing pass)
         def plain_cost(hx):
-            return _terrain_base_cost(hx, cfg)
+            return terrain_base_cost(hx, cfg)
 
-        def slope_edge(from_hx, to_hx):
-            return slope_edge_cost(from_hx, to_hx, cfg)
+        def plain_edge(from_hx, to_hx):
+            return road_edge_cost(from_hx, to_hx, cfg)
 
         def path_total_cost(p):
-            """Compute total movement cost for a path using plain_cost + slope_edge."""
+            """Compute total movement cost for a path using plain_cost + plain_edge."""
             if not p:
                 return float("inf")
             total = plain_cost(hexes[p[0]])
             for i in range(1, len(p)):
                 total += plain_cost(hexes[p[i]])
-                total += slope_edge(hexes[p[i - 1]], hexes[p[i]])
+                total += plain_edge(hexes[p[i - 1]], hexes[p[i]])
             return total
 
         # Connect isolated cities to main component
@@ -342,7 +327,7 @@ class RoadStage(GeneratorStage):
                 best_path = None
                 best_cost = float("inf")
                 for target_coord in main & city_coords:
-                    p = astar(hexes, iso.coord, target_coord, plain_cost, slope_edge)
+                    p = astar(hexes, iso.coord, target_coord, plain_cost, plain_edge)
                     if p:
                         cost = path_total_cost(p)
                         if cost < best_cost:
