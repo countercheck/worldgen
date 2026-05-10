@@ -6,6 +6,9 @@ Hex-based procedural world generator for TTRPGs, worldbuilding, and wargaming.
 - **Reproducible:** any world can be regenerated from a single integer seed
 - **Pipelined:** each generation stage is a pure transformer — swap or extend without touching others
 
+For a full reference of every calculation, formula, and config value, see
+[docs/REFERENCE.md](docs/REFERENCE.md).
+
 ## Status
 
 | Phase | Description | Status |
