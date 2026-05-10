@@ -111,8 +111,26 @@ road_travellers_city: 500    # Simulated daily travellers originating from each 
 road_travellers_town: 100    # Simulated daily travellers originating from each town. Default: 100
 road_travellers_village: 20  # Simulated daily travellers originating from each village. Default: 20
 road_gravity_exponent: 1.5   # Distance-decay exponent for gravity model; higher = traffic stays local. Default: 1.5
-road_river_discount: 0.5     # Cost reduction for hexes adjacent to rivers. Default: 0.5
+road_river_discount: 0.5     # Maximum cost reduction for travelling along a river hex; multiplied by river_flow. Default: 0.5
+road_river_discount_min_flow: 0.2  # Floor on river_flow used in the discount calc; prevents tiny streams losing all their corridor pull. Default: 0.2
 road_pheromone_factor: 0.1   # How strongly existing traffic attracts new routes. Default: 0.1
+
+# ---------------------------------------------------------------------------
+# Roads: water bodies (oceans + lakes are traversable as a single piece of terrain)
+# ---------------------------------------------------------------------------
+# Per-hex cost across water is tiny so distance across a body barely matters;
+# the journey is paid for by the embark + disembark costs at the shores.
+road_water_cost: 0.05    # Per-hex pathfinding cost on OCEAN/LAKE hexes. Default: 0.05
+road_embark_cost: 8.0    # Cost charged on a land→water edge transition. Default: 8.0
+road_disembark_cost: 8.0 # Cost charged on a water→land edge transition. Default: 8.0
+
+# ---------------------------------------------------------------------------
+# Roads: river crossings (charged on each land↔river edge, scales with flow)
+# ---------------------------------------------------------------------------
+# A perpendicular crossing of a 1-hex-wide river is charged twice
+# (entering and leaving), so total ≈ 2 × (base + flow × max_river_flow).
+road_river_crossing_base: 4.0  # Base cost added on each land↔river edge. Default: 4.0
+road_river_crossing_flow: 12.0 # Additional cost × max(river_flow); biggest river adds the full amount. Default: 12.0
 
 # Slope-based cost: grade % = (elevation_delta_m / hex_size_m) * 100
 road_slope_cost: 2.0      # Base multiplier applied to grade-based costs. Default: 2.0
@@ -121,6 +139,7 @@ road_slope_cap_pct: 25.0  # Grade % at which slope cost saturates. Default: 25.0
 road_slope_cap_mult: 10.0 # Cost multiplier at saturation grade. Default: 10.0
 
 road_min_traffic: 3       # Minimum traffic volume required to draw a road. Default: 3
+road_river_traffic_min: 1 # Minimum traffic for a river hex to qualify as a drawn road; lower than road_min_traffic so towpaths/riverside trails appear from light traffic. Default: 1
 road_primary_pct: 0.10    # Top fraction of traffic share classified as primary roads. Default: 0.10
 road_secondary_pct: 0.30  # Next fraction classified as secondary roads. Default: 0.30
 road_track_pct: 0.60      # Remainder classified as tracks. Default: 0.60

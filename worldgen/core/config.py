@@ -76,6 +76,29 @@ class WorldConfig:
             raise ValueError(
                 f"settlement_min_reachable must be >= 1, got {self.settlement_min_reachable}"
             )
+        if not (0.0 <= self.road_river_discount_min_flow <= 1.0):
+            raise ValueError(
+                "road_river_discount_min_flow must be in [0, 1], "
+                f"got {self.road_river_discount_min_flow}"
+            )
+        if self.road_water_cost < 0:
+            raise ValueError(f"road_water_cost must be >= 0, got {self.road_water_cost}")
+        if self.road_embark_cost < 0:
+            raise ValueError(f"road_embark_cost must be >= 0, got {self.road_embark_cost}")
+        if self.road_disembark_cost < 0:
+            raise ValueError(f"road_disembark_cost must be >= 0, got {self.road_disembark_cost}")
+        if self.road_river_crossing_base < 0:
+            raise ValueError(
+                f"road_river_crossing_base must be >= 0, got {self.road_river_crossing_base}"
+            )
+        if self.road_river_crossing_flow < 0:
+            raise ValueError(
+                f"road_river_crossing_flow must be >= 0, got {self.road_river_crossing_flow}"
+            )
+        if self.road_river_traffic_min < 0:
+            raise ValueError(
+                f"road_river_traffic_min must be >= 0, got {self.road_river_traffic_min}"
+            )
 
     # Climate
     wind_direction: tuple[float, float] = (1.0, 0.0)
@@ -118,12 +141,23 @@ class WorldConfig:
     road_travellers_village: int = 20
     road_gravity_exponent: float = 1.5
     road_river_discount: float = 0.5
+    road_river_discount_min_flow: float = 0.2
     road_pheromone_factor: float = 0.1
+
+    # Roads — water bodies (oceans + lakes treated as traversable)
+    road_water_cost: float = 0.05
+    road_embark_cost: float = 8.0
+    road_disembark_cost: float = 8.0
+
+    # Roads — river crossings (perpendicular to flow, charged on each land↔river edge)
+    road_river_crossing_base: float = 4.0
+    road_river_crossing_flow: float = 12.0
     road_slope_cost: float = 2.0
     road_slope_free_pct: float = 3.0  # grade % below which slope costs nothing
     road_slope_cap_pct: float = 25.0  # grade % at which cost saturates
     road_slope_cap_mult: float = 10.0  # saturation multiplier at cap grade
     road_min_traffic: int = 3
+    road_river_traffic_min: int = 1
     road_primary_pct: float = 0.10
     road_secondary_pct: float = 0.30
     road_track_pct: float = 0.60

@@ -1,19 +1,13 @@
-from ..core.hex import SettlementTier, TerrainClass
+from ..core.hex import SettlementTier
 from ..core.hex_grid import astar
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import Road, RoadTier, WorldState
-from .road_cost import slope_edge_cost
-
-
-def _terrain_base_cost(hx, cfg) -> float:
-    tc = hx.terrain_class
-    if tc in (TerrainClass.OCEAN, TerrainClass.LAKE):
-        return float("inf")
-    if tc == TerrainClass.MOUNTAIN:
-        return cfg.road_mountain_cost
-    if tc == TerrainClass.HILL:
-        return cfg.road_hill_cost
-    return cfg.road_flat_cost
+from .road_cost import (
+    river_discount,
+    road_edge_cost,
+    tag_river_crossings,
+    terrain_base_cost,
+)
 
 
 class VillageTrackStage(GeneratorStage):
@@ -38,15 +32,11 @@ class VillageTrackStage(GeneratorStage):
         targets = road_hex_set | settled_major
 
         def node_cost(hx):
-            base = _terrain_base_cost(hx, cfg)
-            if base == float("inf"):
-                return base
-            if hx.river_flow > 0:
-                base = max(0.1, base - cfg.road_river_discount)
-            return base
+            base = terrain_base_cost(hx, cfg)
+            return max(0.1, base - river_discount(hx, cfg))
 
         def edge_cost(from_hx, to_hx):
-            return slope_edge_cost(from_hx, to_hx, cfg)
+            return road_edge_cost(from_hx, to_hx, cfg)
 
         new_roads: list[Road] = []
 
@@ -73,23 +63,7 @@ class VillageTrackStage(GeneratorStage):
                 # Village's hex is now a road endpoint — add to targets for later villages
                 targets.add(village.coord)
 
-        # Tag fords/bridges on new track roads
-        for road in new_roads:
-            path = road.path
-            for i, c in enumerate(path):
-                if c not in hexes:
-                    continue
-                hx = hexes[c]
-                if hx.river_flow == 0:
-                    continue
-                prev_c = path[i - 1] if i > 0 else None
-                prev_hx = hexes.get(prev_c) if prev_c is not None else None
-                if prev_hx is None or prev_hx.river_flow == 0:
-                    if "ford" not in hx.tags:
-                        hx.tags.add("ford")
-                    else:
-                        hx.tags.discard("ford")
-                        hx.tags.add("bridge")
+        tag_river_crossings(new_roads, hexes)
 
         state.roads.extend(new_roads)
         return state

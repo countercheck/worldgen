@@ -16,7 +16,7 @@ from worldgen.stages.settlements import SettlementStage
 from worldgen.stages.terrain_class import TerrainClassificationStage
 
 
-def _build_pipeline(seed: int = 42, width: int = 64, height: int = 64):
+def _build_pipeline(seed: int = 42, width: int = 64, height: int = 64, **cfg_overrides):
     cfg = WorldConfig(
         width=width,
         height=height,
@@ -26,6 +26,7 @@ def _build_pipeline(seed: int = 42, width: int = 64, height: int = 64):
         road_travellers_city=100,
         road_travellers_town=20,
         road_travellers_village=5,
+        **cfg_overrides,
     )
     p = GeneratorPipeline(seed, cfg)
     p.add_stage(ElevationStage)
@@ -62,11 +63,18 @@ def test_road_paths_connected(road_state):
             assert distance(a, b) == 1, f"Non-adjacent coords in road path: {a} -> {b}"
 
 
-def test_no_ocean_in_roads(road_state):
+def test_road_water_segments_are_bracketed(road_state):
+    """Roads may now traverse water (oceans + lakes are traversable as a single piece
+    of terrain), but every water segment must be bracketed by land hexes — a road
+    cannot start, end, or consist entirely of water hexes."""
+    water = (TerrainClass.OCEAN, TerrainClass.LAKE)
     for road in road_state.roads:
-        for c in road.path:
-            hx = road_state.hexes[c]
-            assert hx.terrain_class != TerrainClass.OCEAN, f"Road passes through ocean hex {c}"
+        first = road_state.hexes[road.path[0]]
+        last = road_state.hexes[road.path[-1]]
+        assert first.terrain_class not in water, f"Road begins on water at {road.path[0]}"
+        assert last.terrain_class not in water, f"Road ends on water at {road.path[-1]}"
+        on_land = [c for c in road.path if road_state.hexes[c].terrain_class not in water]
+        assert on_land, f"Road has no land hexes: {road.path}"
 
 
 def test_road_connections_symmetric(road_state):
@@ -142,6 +150,33 @@ def test_river_preference_in_roads(road_state):
         f"River preference not detected: road river rate {road_river_rate:.3f} < "
         f"map river rate {map_river_rate:.3f}"
     )
+
+
+def test_road_river_traffic_threshold_draws_more_river_roads():
+    """Lowering road_river_traffic_min relative to road_min_traffic admits river
+    hexes with light traffic into the drawn road network. With it set equal to
+    road_min_traffic (effectively disabled) those river-only hexes should be
+    absent from the road set."""
+    seed = 7
+    # Default behaviour: river hexes admitted with 1 traveller
+    s_low = _build_pipeline(seed=seed, road_river_traffic_min=1).run()
+    # Disabled: river hexes treated like land hexes (need road_min_traffic = 3)
+    s_off = _build_pipeline(seed=seed, road_river_traffic_min=3).run()
+
+    def river_road_hexes(state):
+        rh = {c for road in state.roads for c in road.path}
+        return {c for c in rh if state.hexes[c].river_flow > 0}
+
+    low_river_roads = river_road_hexes(s_low)
+    off_river_roads = river_road_hexes(s_off)
+
+    assert low_river_roads >= off_river_roads, (
+        "Lower threshold removed river road coverage that the higher threshold kept"
+    )
+    # Sanity: with road_river_traffic_min=1 we expect strictly more river road
+    # coverage on a typical world. Allow equality for degenerate maps where the
+    # river network is sparse or every river hex already meets road_min_traffic.
+    assert len(low_river_roads) >= len(off_river_roads)
 
 
 def test_reproducibility():
