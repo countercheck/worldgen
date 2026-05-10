@@ -57,7 +57,7 @@ def test_rivers_reach_ocean(hydro_state):
         if h.terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE)
     }
     # Build a set of all hexes that appear in any river so we can detect confluences.
-    all_river_hexes: set = set()
+    all_river_hexes: set[tuple[int, int]] = set()
     for river in hydro_state.rivers:
         all_river_hexes.update(river.hexes)
 
@@ -236,7 +236,7 @@ def test_no_shared_hexes_between_rivers(hydro_state):
     # the same hex meant the downstream trunk was duplicated, causing visual overdraw.
     from collections import defaultdict
 
-    hex_to_rivers: dict = defaultdict(list)
+    hex_to_rivers: dict[tuple[int, int], list[int]] = defaultdict(list)
     land_terrain = {
         coord
         for coord, hx in hydro_state.hexes.items()
