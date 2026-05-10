@@ -146,7 +146,9 @@ def test_city_town_port_role_requires_river_tag():
 def test_road_role_requires_river_tag():
     center, river_neighbor, hexes = _make_port_role_test_hexes()
 
-    assert RoadStage._assign_role_simple(None, center.coord, center, hexes) is not SettlementRole.PORT
+    assert (
+        RoadStage._assign_role_simple(None, center.coord, center, hexes) is not SettlementRole.PORT
+    )
 
     river_neighbor.tags.add("river")
     assert RoadStage._assign_role_simple(None, center.coord, center, hexes) is SettlementRole.PORT

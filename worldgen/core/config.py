@@ -36,7 +36,7 @@ class WorldConfig:
     # Hydrology
     river_flow_threshold: float = 0.05
     river_flow_continuous: bool = False  # True: river_flow on all draining land hexes
-    moisture_bleed_passes: int = 0       # 0 = flat river bonus (default); >0 = elevation-gated bleed
+    moisture_bleed_passes: int = 0  # 0 = flat river bonus (default); >0 = elevation-gated bleed
     moisture_bleed_strength: float = 0.3
 
     def __post_init__(self) -> None:
@@ -52,8 +52,7 @@ class WorldConfig:
             )
         if not (0.0 <= self.moisture_bleed_strength <= 1.0):
             raise ValueError(
-                "moisture_bleed_strength must be in [0, 1], "
-                f"got {self.moisture_bleed_strength}"
+                f"moisture_bleed_strength must be in [0, 1], got {self.moisture_bleed_strength}"
             )
         if not (0.0 <= self.base_temperature <= 1.0):
             raise ValueError(f"base_temperature must be in [0, 1], got {self.base_temperature}")

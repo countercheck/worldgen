@@ -263,8 +263,7 @@ def test_astar_prefers_low_flow_river_for_crossing():
     crossing_cols = [c[0] for c in path if c[1] == 2]
     assert crossing_cols, "Path must cross river row r=2"
     assert all(q >= 3 for q in crossing_cols), (
-        f"A* should detour to the low-flow stream half (q>=3), "
-        f"but crossed at q={crossing_cols}"
+        f"A* should detour to the low-flow stream half (q>=3), but crossed at q={crossing_cols}"
     )
 
 
