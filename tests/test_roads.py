@@ -92,11 +92,11 @@ def test_river_crossing_hexes_tagged(road_state):
         path = road.path
         for i, c in enumerate(path):
             hx = road_state.hexes.get(c)
-            if hx is None or hx.river_flow == 0:
+            if hx is None or "river" not in hx.tags:
                 continue
             prev_c = path[i - 1] if i > 0 else None
             prev_hx = road_state.hexes.get(prev_c) if prev_c is not None else None
-            if prev_hx is None or prev_hx.river_flow == 0:
+            if prev_hx is None or "river" not in prev_hx.tags:
                 assert "ford" in hx.tags or "bridge" in hx.tags, (
                     f"River crossing hex {c} on road not tagged ford/bridge"
                 )
@@ -140,8 +140,8 @@ def test_river_preference_in_roads(road_state):
     if not road_hexes or not all_land:
         return
 
-    river_in_roads = sum(1 for c in road_hexes if hexes[c].river_flow > 0)
-    river_in_map = sum(1 for c in all_land if hexes[c].river_flow > 0)
+    river_in_roads = sum(1 for c in road_hexes if "river" in hexes[c].tags)
+    river_in_map = sum(1 for c in all_land if "river" in hexes[c].tags)
 
     road_river_rate = river_in_roads / len(road_hexes) if road_hexes else 0
     map_river_rate = river_in_map / len(all_land) if all_land else 0

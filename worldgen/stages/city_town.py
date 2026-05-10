@@ -9,9 +9,9 @@ def _assign_role(coord, hx, hexes) -> SettlementRole:
     nbrs = [hexes[n] for n in neighbors(coord) if n in hexes]
 
     if (
-        hx.river_flow > 0.5
+        "river" in hx.tags
         or hx.terrain_class == TerrainClass.COAST
-        or any(n.river_flow > 0.5 for n in nbrs)
+        or any("river" in n.tags for n in nbrs)
         or any(n.terrain_class == TerrainClass.COAST for n in nbrs)
     ):
         return SettlementRole.PORT

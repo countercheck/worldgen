@@ -91,8 +91,8 @@ def test_all_water_classified(world):
 
 
 def test_lake_has_outflow_river(world):
-    """Each LAKE must have an outflow: a border river hex whose downstream path
-    (non-decreasing river_flow, not re-entering this lake) reaches ocean or border."""
+    """Each LAKE must have an outflow: a border river hex whose connected river path
+    (without re-entering this lake) reaches ocean, border, or another lake."""
     lake_comps = _water_components(world, TerrainClass.LAKE)
     if not lake_comps:
         pytest.skip("No lakes in this world — nothing to check")
@@ -105,7 +105,7 @@ def test_lake_has_outflow_river(world):
     }
 
     def downstream_reaches_terminal(start, comp_set):
-        """BFS along non-decreasing river_flow from start, not through comp_set."""
+        """BFS along connected river hexes from start, not through comp_set."""
         visited = {start} | comp_set
         queue = deque([start])
         while queue:
@@ -122,12 +122,7 @@ def test_lake_has_outflow_river(world):
                 # Accept reaching a *different* lake as a valid intermediate terminal
                 if nhx.terrain_class == TerrainClass.LAKE and nbr not in comp_set:
                     return True
-                # Follow downstream: non-decreasing river_flow moves toward accumulation
-                if (
-                    nbr in land
-                    and nhx.river_flow >= world.hexes[coord].river_flow
-                    and nhx.river_flow > 0
-                ):
+                if nbr in land and "river" in nhx.tags:
                     visited.add(nbr)
                     queue.append(nbr)
         return False
@@ -138,7 +133,7 @@ def test_lake_has_outflow_river(world):
             nbr
             for c in comp
             for nbr in neighbors(c)
-            if nbr in land and world.hexes[nbr].river_flow > 0
+            if nbr in land and "river" in world.hexes[nbr].tags
         ]
         assert border_rivers, f"LAKE (size {len(comp)}) has no adjacent river hex at all"
         assert any(downstream_reaches_terminal(r, comp_set) for r in border_rivers), (
@@ -183,7 +178,7 @@ def test_lake_chain_terminates(world):
                     return "ocean"
                 if nbr in hex_to_lake_idx:
                     return hex_to_lake_idx[nbr]
-                if nbr in land and nhx.river_flow > 0:
+                if nbr in land and "river" in nhx.tags:
                     visited.add(nbr)
                     queue.append(nbr)
         return None
@@ -200,7 +195,7 @@ def test_lake_chain_terminates(world):
                 nbr
                 for c in comp
                 for nbr in neighbors(c)
-                if nbr in land and world.hexes[nbr].river_flow > 0
+                if nbr in land and "river" in world.hexes[nbr].tags
             ]
             for r in border_rivers:
                 result = follow_river_to_water(r, comp)

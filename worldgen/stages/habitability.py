@@ -35,7 +35,7 @@ class HabitabilityStage(GeneratorStage):
             nbrs = [hexes[n] for n in neighbors(coord) if n in hexes]
 
             # River adjacency: hex itself or any neighbor carries flow
-            if hx.river_flow > 0 or any(n.river_flow > 0 for n in nbrs):
+            if "river" in hx.tags or any("river" in n.tags for n in nbrs):
                 score += 0.35
 
             # Agricultural potential

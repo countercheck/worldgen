@@ -65,7 +65,7 @@ def test_river_hexes_higher_habitability(hab_state):
         if h.biome == Biome.WETLAND:
             continue
         nbrs = [hab_state.hexes[n] for n in neighbors(coord) if n in hab_state.hexes]
-        has_river = h.river_flow > 0 or any(n.river_flow > 0 for n in nbrs)
+        has_river = "river" in h.tags or any("river" in n.tags for n in nbrs)
         has_coast = any(n.terrain_class == TerrainClass.COAST for n in nbrs)
         if has_river:
             river_scores.append(h.habitability)
