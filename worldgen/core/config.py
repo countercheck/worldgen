@@ -46,6 +46,15 @@ class WorldConfig:
             raise ValueError(
                 f"river_flow_threshold must be in [0, 1], got {self.river_flow_threshold}"
             )
+        if self.moisture_bleed_passes < 0:
+            raise ValueError(
+                f"moisture_bleed_passes must be >= 0, got {self.moisture_bleed_passes}"
+            )
+        if not (0.0 <= self.moisture_bleed_strength <= 1.0):
+            raise ValueError(
+                "moisture_bleed_strength must be in [0, 1], "
+                f"got {self.moisture_bleed_strength}"
+            )
         if not (0.0 <= self.base_temperature <= 1.0):
             raise ValueError(f"base_temperature must be in [0, 1], got {self.base_temperature}")
         if not (0.0 <= self.latitude_temp_range <= 1.0):

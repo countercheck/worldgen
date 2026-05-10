@@ -36,7 +36,7 @@ class RoadStage(GeneratorStage):
             base = _terrain_base_cost(hx, cfg)
             if base == float("inf"):
                 return base
-            if hx.river_flow > 0:
+            if "river" in hx.tags:
                 base = max(0.1, base - cfg.road_river_discount)
             pheromone = cfg.road_pheromone_factor * hex_traffic[hx.coord]
             return max(0.1, base - pheromone)
@@ -365,9 +365,9 @@ class RoadStage(GeneratorStage):
 
         nbrs = [hexes[n] for n in neighbors(coord) if n in hexes]
         if (
-            hx.river_flow > 0.5
+            "river" in hx.tags
             or hx.terrain_class == TerrainClass.COAST
-            or any(n.river_flow > 0.5 for n in nbrs)
+            or any("river" in n.tags for n in nbrs)
             or any(n.terrain_class == TerrainClass.COAST for n in nbrs)
         ):
             return SettlementRole.PORT

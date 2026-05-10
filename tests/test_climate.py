@@ -3,6 +3,7 @@ import pytest
 from worldgen.core.config import WorldConfig
 from worldgen.core.hex import TerrainClass
 from worldgen.core.pipeline import GeneratorPipeline
+from worldgen.core.world_state import WorldState
 from worldgen.stages.climate import ClimateStage
 from worldgen.stages.elevation import ElevationStage
 from worldgen.stages.erosion import ErosionStage
@@ -216,6 +217,38 @@ def test_base_moisture_clamps_to_unit_interval():
     state = p.run()
     for h in state.hexes.values():
         assert h.moisture <= 1.0, f"moisture {h.moisture} exceeded 1.0 with base_moisture=1.0"
+
+
+def test_moisture_bleed_requires_river_tag():
+    cfg = WorldConfig(
+        width=3,
+        height=1,
+        sea_level=2.0,
+        moisture_bleed_passes=1,
+        moisture_bleed_strength=0.5,
+    )
+    stage = ClimateStage(cfg, None)
+
+    state = WorldState.empty(seed=1, width=3, height=1)
+    for hx in state.hexes.values():
+        hx.terrain_class = TerrainClass.FLAT
+        hx.elevation = 0.0
+    state.hexes[(0, 0)].elevation = 1.0
+    state.hexes[(0, 0)].river_flow = 1.0
+
+    without_tag = stage.run(state)
+    assert without_tag.hexes[(1, 0)].moisture == pytest.approx(0.0)
+
+    tagged_state = WorldState.empty(seed=1, width=3, height=1)
+    for hx in tagged_state.hexes.values():
+        hx.terrain_class = TerrainClass.FLAT
+        hx.elevation = 0.0
+    tagged_state.hexes[(0, 0)].elevation = 1.0
+    tagged_state.hexes[(0, 0)].river_flow = 1.0
+    tagged_state.hexes[(0, 0)].tags.add("river")
+
+    with_tag = stage.run(tagged_state)
+    assert with_tag.hexes[(1, 0)].moisture > without_tag.hexes[(1, 0)].moisture
 
 
 def test_latitude_temp_range_validation():

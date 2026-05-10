@@ -131,7 +131,11 @@ class ClimateStage(GeneratorStage):
                         nh = state.hexes[n]
                         if nh.terrain_class in water:
                             continue
-                        if nh.elevation >= h.elevation - 1e-6 and nh.river_flow > best:
+                        if (
+                            "river" in nh.tags
+                            and nh.elevation >= h.elevation - 1e-6
+                            and nh.river_flow > best
+                        ):
                             best = nh.river_flow
                     additions[coord] = best
                 for coord, h in state.hexes.items():

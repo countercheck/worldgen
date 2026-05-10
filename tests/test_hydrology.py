@@ -91,7 +91,7 @@ def test_tags_assigned(hydro_state):
     assert "river_mouth" in all_tags, "No river_mouth tags found"
 
 
-def test_river_tag_on_river_set(hydro_state):
+def test_river_tag_on_river_paths(hydro_state):
     # Every hex in a River path that is a land hex must carry the "river" tag.
     water_classes = {TerrainClass.OCEAN, TerrainClass.LAKE}
     for river in hydro_state.rivers:

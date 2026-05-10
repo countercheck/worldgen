@@ -97,6 +97,9 @@ def test_world_config_validates_vector_fields(kwargs, message):
             "road_slope_cap_pct",
         ),
         ({"settlement_min_reachable": 0}, "settlement_min_reachable"),
+        ({"moisture_bleed_passes": -1}, "moisture_bleed_passes"),
+        ({"moisture_bleed_strength": -0.1}, "moisture_bleed_strength"),
+        ({"moisture_bleed_strength": 1.1}, "moisture_bleed_strength"),
     ],
 )
 def test_world_config_validates_new_road_and_settlement_fields(kwargs, message):
