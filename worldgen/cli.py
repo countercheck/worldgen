@@ -144,7 +144,9 @@ _ALLOWED_LAYERS = _DEFAULT_LAYERS | {"contours"}
 _CONFIG_LAYERS_SOURCE = "export.layers in config"
 
 
-def _parse_layers_value(value: str | list[str] | tuple[str, ...] | set[str], source: str) -> set[str]:
+def _parse_layers_value(
+    value: str | list[str] | tuple[str, ...] | set[str], source: str
+) -> set[str]:
     """Parse layer config from CSV string or iterable and validate allowed names."""
     if isinstance(value, str):
         parsed = [layer.strip() for layer in value.split(",") if layer.strip()]
@@ -265,7 +267,9 @@ def export_svg(
             if key in export_section:
                 svg_kwargs[key] = export_section[key]
         if "layers" in export_section:
-            svg_kwargs["layers"] = _parse_layers_value(export_section["layers"], _CONFIG_LAYERS_SOURCE)
+            svg_kwargs["layers"] = _parse_layers_value(
+                export_section["layers"], _CONFIG_LAYERS_SOURCE
+            )
 
     # CLI flags override config file (only when explicitly provided)
     if style is not None:
