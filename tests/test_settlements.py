@@ -118,21 +118,35 @@ def test_reproducibility():
     assert coords1 == coords2, "Settlement coords differ between identical seeds"
 
 
-@pytest.mark.parametrize(
-    "assign_role",
-    [assign_settlement_role, assign_city_town_role, RoadStage._assign_role_simple],
-)
-def test_port_role_requires_river_tag(assign_role):
-    def call_assign_role():
-        if assign_role is RoadStage._assign_role_simple:
-            return assign_role(None, center.coord, center, hexes)
-        return assign_role(center.coord, center, hexes)
-
+def _make_port_role_test_hexes():
     center = Hex(coord=(0, 0), biome=Biome.GRASSLAND)
     river_neighbor = Hex(coord=(1, 0), biome=Biome.GRASSLAND, river_flow=1.0)
     hexes = {center.coord: center, river_neighbor.coord: river_neighbor}
+    return center, river_neighbor, hexes
 
-    assert call_assign_role() is not SettlementRole.PORT
+
+def test_settlement_port_role_requires_river_tag():
+    center, river_neighbor, hexes = _make_port_role_test_hexes()
+
+    assert assign_settlement_role(center.coord, center, hexes) is not SettlementRole.PORT
 
     river_neighbor.tags.add("river")
-    assert call_assign_role() is SettlementRole.PORT
+    assert assign_settlement_role(center.coord, center, hexes) is SettlementRole.PORT
+
+
+def test_city_town_port_role_requires_river_tag():
+    center, river_neighbor, hexes = _make_port_role_test_hexes()
+
+    assert assign_city_town_role(center.coord, center, hexes) is not SettlementRole.PORT
+
+    river_neighbor.tags.add("river")
+    assert assign_city_town_role(center.coord, center, hexes) is SettlementRole.PORT
+
+
+def test_road_role_requires_river_tag():
+    center, river_neighbor, hexes = _make_port_role_test_hexes()
+
+    assert RoadStage._assign_role_simple(None, center.coord, center, hexes) is not SettlementRole.PORT
+
+    river_neighbor.tags.add("river")
+    assert RoadStage._assign_role_simple(None, center.coord, center, hexes) is SettlementRole.PORT
