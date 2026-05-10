@@ -39,7 +39,7 @@ class BiomeStage(GeneratorStage):
             if (
                 h.terrain_class in (TerrainClass.FLAT, TerrainClass.COAST)
                 and h.moisture > wet_moist
-                and h.river_flow > 0
+                and "river" in h.tags
                 and h.elevation <= alpine_elev
             ):
                 h.biome = Biome.WETLAND

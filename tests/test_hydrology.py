@@ -57,7 +57,7 @@ def test_rivers_reach_ocean(hydro_state):
         if h.terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE)
     }
     # Build a set of all hexes that appear in any river so we can detect confluences.
-    all_river_hexes: set = set()
+    all_river_hexes: set[tuple[int, int]] = set()
     for river in hydro_state.rivers:
         all_river_hexes.update(river.hexes)
 
@@ -114,6 +114,19 @@ def test_tags_assigned(hydro_state):
         all_tags.update(h.tags)
     assert "headwater" in all_tags, "No headwater tags found"
     assert "river_mouth" in all_tags, "No river_mouth tags found"
+
+
+def test_river_tag_on_river_paths(hydro_state):
+    # Every hex in a River path that is a land hex must carry the "river" tag.
+    water_classes = {TerrainClass.OCEAN, TerrainClass.LAKE}
+    for river in hydro_state.rivers:
+        for coord in river.hexes:
+            if coord not in hydro_state.hexes:
+                continue
+            hx = hydro_state.hexes[coord]
+            if hx.terrain_class in water_classes:
+                continue
+            assert "river" in hx.tags, f"River path hex {coord} missing 'river' tag"
 
 
 def test_flow_volume(hydro_state):
@@ -223,7 +236,7 @@ def test_no_shared_hexes_between_rivers(hydro_state):
     # the same hex meant the downstream trunk was duplicated, causing visual overdraw.
     from collections import defaultdict
 
-    hex_to_rivers: dict = defaultdict(list)
+    hex_to_rivers: dict[tuple[int, int], list[int]] = defaultdict(list)
     land_terrain = {
         coord
         for coord, hx in hydro_state.hexes.items()

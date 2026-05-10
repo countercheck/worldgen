@@ -97,10 +97,11 @@ class ClimateStage(GeneratorStage):
         for coord, h in state.hexes.items():
             if h.terrain_class in water:
                 continue
-            for n in neighbors(coord):
-                if n in state.hexes and state.hexes[n].river_flow > 0:
-                    h.moisture += 0.15
-                    break
+            if self.config.moisture_bleed_passes == 0:
+                for n in neighbors(coord):
+                    if n in state.hexes and "river" in state.hexes[n].tags:
+                        h.moisture += 0.15
+                        break
             for n in neighbors(coord):
                 if n in state.hexes and state.hexes[n].terrain_class in water:
                     h.moisture += 0.1
@@ -115,6 +116,42 @@ class ClimateStage(GeneratorStage):
             for h in state.hexes.values():
                 if h.terrain_class not in water:
                     h.moisture = (h.moisture - lo) / span
+
+        # Elevation-gated bleed: river moisture spreads to adjacent lower-or-equal hexes
+        if self.config.moisture_bleed_passes > 0:
+            for _ in range(self.config.moisture_bleed_passes):
+                additions: dict = {}
+                for coord, h in state.hexes.items():
+                    if h.terrain_class in water:
+                        continue
+                    best = 0.0
+                    for n in neighbors(coord):
+                        if n not in state.hexes:
+                            continue
+                        nh = state.hexes[n]
+                        if nh.terrain_class in water:
+                            continue
+                        if "river" not in nh.tags:
+                            continue
+                        if nh.elevation < h.elevation - 1e-6:
+                            continue
+                        if nh.river_flow > best:
+                            best = nh.river_flow
+                    additions[coord] = best
+                for coord, h in state.hexes.items():
+                    if h.terrain_class not in water:
+                        h.moisture = min(
+                            1.0, h.moisture + self.config.moisture_bleed_strength * additions[coord]
+                        )
+            # Re-normalize after bleed
+            land_vals = [h.moisture for h in state.hexes.values() if h.terrain_class not in water]
+            if land_vals:
+                lo = min(land_vals)
+                hi = max(land_vals)
+                span = hi - lo if hi > lo else 1.0
+                for h in state.hexes.values():
+                    if h.terrain_class not in water:
+                        h.moisture = (h.moisture - lo) / span
 
         base = self.config.base_moisture
         if base != 0.0:

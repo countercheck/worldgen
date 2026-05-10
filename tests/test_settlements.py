@@ -1,15 +1,18 @@
 import pytest
 
 from worldgen.core.config import WorldConfig
-from worldgen.core.hex import SettlementRole, SettlementTier, TerrainClass
+from worldgen.core.hex import Biome, Hex, SettlementRole, SettlementTier, TerrainClass
 from worldgen.core.pipeline import GeneratorPipeline
 from worldgen.stages.biomes import BiomeStage
+from worldgen.stages.city_town import _assign_role as assign_city_town_role
 from worldgen.stages.climate import ClimateStage
 from worldgen.stages.elevation import ElevationStage
 from worldgen.stages.erosion import ErosionStage
 from worldgen.stages.habitability import HabitabilityStage
 from worldgen.stages.hydrology import HydrologyStage
+from worldgen.stages.roads import RoadStage
 from worldgen.stages.settlements import SettlementStage
+from worldgen.stages.settlements import _assign_role as assign_settlement_role
 from worldgen.stages.terrain_class import TerrainClassificationStage
 
 
@@ -113,3 +116,37 @@ def test_reproducibility():
     coords1 = sorted(s.coord for s in s1.settlements)
     coords2 = sorted(s.coord for s in s2.settlements)
     assert coords1 == coords2, "Settlement coords differ between identical seeds"
+
+
+def _make_port_role_test_hexes():
+    center = Hex(coord=(0, 0), biome=Biome.GRASSLAND)
+    river_neighbor = Hex(coord=(1, 0), biome=Biome.GRASSLAND, river_flow=1.0)
+    hexes = {center.coord: center, river_neighbor.coord: river_neighbor}
+    return center, river_neighbor, hexes
+
+
+def test_settlement_port_role_requires_river_tag():
+    center, river_neighbor, hexes = _make_port_role_test_hexes()
+
+    assert assign_settlement_role(center.coord, center, hexes) is not SettlementRole.PORT
+
+    river_neighbor.tags.add("river")
+    assert assign_settlement_role(center.coord, center, hexes) is SettlementRole.PORT
+
+
+def test_city_town_port_role_requires_river_tag():
+    center, river_neighbor, hexes = _make_port_role_test_hexes()
+
+    assert assign_city_town_role(center.coord, center, hexes) is not SettlementRole.PORT
+
+    river_neighbor.tags.add("river")
+    assert assign_city_town_role(center.coord, center, hexes) is SettlementRole.PORT
+
+
+def test_road_role_requires_river_tag():
+    center, river_neighbor, hexes = _make_port_role_test_hexes()
+
+    assert RoadStage._assign_role_simple(None, center.coord, center, hexes) is not SettlementRole.PORT
+
+    river_neighbor.tags.add("river")
+    assert RoadStage._assign_role_simple(None, center.coord, center, hexes) is SettlementRole.PORT

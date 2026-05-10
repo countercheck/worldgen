@@ -42,7 +42,7 @@ class InterurbanRoadStage(GeneratorStage):
             base = _terrain_base_cost(hx, cfg)
             if base == float("inf"):
                 return base
-            if hx.river_flow > 0:
+            if "river" in hx.tags:
                 base = max(0.1, base - cfg.road_river_discount)
             pheromone = cfg.road_pheromone_factor * hex_traffic[hx.coord]
             return max(0.1, base - pheromone)
@@ -284,11 +284,11 @@ class InterurbanRoadStage(GeneratorStage):
                 if c not in hexes:
                     continue
                 hx = hexes[c]
-                if hx.river_flow == 0:
+                if "river" not in hx.tags:
                     continue
                 prev_c = path[i - 1] if i > 0 else None
                 prev_hx = hexes.get(prev_c) if prev_c is not None else None
-                if prev_hx is None or prev_hx.river_flow == 0:
+                if prev_hx is None or "river" not in prev_hx.tags:
                     if "ford" not in hx.tags:
                         hx.tags.add("ford")
                     else:
