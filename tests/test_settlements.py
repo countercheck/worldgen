@@ -123,19 +123,16 @@ def test_reproducibility():
     [assign_settlement_role, assign_city_town_role, RoadStage._assign_role_simple],
 )
 def test_port_role_requires_river_tag(assign_role):
+    def call_assign_role():
+        if assign_role is RoadStage._assign_role_simple:
+            return assign_role(None, center.coord, center, hexes)
+        return assign_role(center.coord, center, hexes)
+
     center = Hex(coord=(0, 0), biome=Biome.GRASSLAND)
     river_neighbor = Hex(coord=(1, 0), biome=Biome.GRASSLAND, river_flow=1.0)
     hexes = {center.coord: center, river_neighbor.coord: river_neighbor}
 
-    if assign_role is RoadStage._assign_role_simple:
-        role = assign_role(None, center.coord, center, hexes)
-    else:
-        role = assign_role(center.coord, center, hexes)
-    assert role is not SettlementRole.PORT
+    assert call_assign_role() is not SettlementRole.PORT
 
     river_neighbor.tags.add("river")
-    if assign_role is RoadStage._assign_role_simple:
-        role = assign_role(None, center.coord, center, hexes)
-    else:
-        role = assign_role(center.coord, center, hexes)
-    assert role is SettlementRole.PORT
+    assert call_assign_role() is SettlementRole.PORT

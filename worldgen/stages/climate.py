@@ -132,9 +132,9 @@ class ClimateStage(GeneratorStage):
                         if nh.terrain_class in water:
                             continue
                         if (
-                            "river" in nh.tags
-                            and nh.elevation >= h.elevation - 1e-6
+                            nh.elevation >= h.elevation - 1e-6
                             and nh.river_flow > best
+                            and "river" in nh.tags
                         ):
                             best = nh.river_flow
                     additions[coord] = best
