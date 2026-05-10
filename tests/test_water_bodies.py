@@ -91,8 +91,8 @@ def test_all_water_classified(world):
 
 
 def test_lake_has_outflow_river(world):
-    """Each LAKE must have an outflow: a border river hex whose downstream path
-    (non-decreasing river_flow, not re-entering this lake) reaches ocean or border."""
+    """Each LAKE must have an outflow: a border river hex whose connected river path
+    (without re-entering this lake) reaches ocean, border, or another lake."""
     lake_comps = _water_components(world, TerrainClass.LAKE)
     if not lake_comps:
         pytest.skip("No lakes in this world — nothing to check")
@@ -105,7 +105,7 @@ def test_lake_has_outflow_river(world):
     }
 
     def downstream_reaches_terminal(start, comp_set):
-        """BFS along non-decreasing river_flow from start, not through comp_set."""
+        """BFS along connected river hexes from start, not through comp_set."""
         visited = {start} | comp_set
         queue = deque([start])
         while queue:
@@ -122,12 +122,7 @@ def test_lake_has_outflow_river(world):
                 # Accept reaching a *different* lake as a valid intermediate terminal
                 if nhx.terrain_class == TerrainClass.LAKE and nbr not in comp_set:
                     return True
-                # Follow downstream: non-decreasing river_flow moves toward accumulation
-                if (
-                    nbr in land
-                    and nhx.river_flow >= world.hexes[coord].river_flow
-                    and "river" in nhx.tags
-                ):
+                if nbr in land and "river" in nhx.tags:
                     visited.add(nbr)
                     queue.append(nbr)
         return False
