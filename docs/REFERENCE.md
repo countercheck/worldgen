@@ -56,7 +56,7 @@ shape every map.
 - **Coordinates:** axial `(q, r)`, flat-top hexagons.
   Neighbours, distance, ranges, and pixel conversion live in
   [worldgen/core/hex_grid.py](../worldgen/core/hex_grid.py).
-  Hex distance is the standard cube-distance halved:
+  Hex distance uses the standard axial/cube hex-distance formula:
   `(|Δq| + |Δr| + |Δq+Δr|) // 2` ([hex_grid.py:26](../worldgen/core/hex_grid.py#L26)).
 
 ### Reproducibility
@@ -453,7 +453,7 @@ spillway.
 
 **Algorithm**
 
-Eight phases, top to bottom in
+Nine steps, top to bottom in
 [hydrology.py:11–124](../worldgen/stages/hydrology.py#L11):
 
 1. **Priority-Flood** sink-fills closed depressions on land, using a
@@ -597,12 +597,13 @@ Three sub-steps:
    atmospheric moisture; lifting it over higher terrain causes it to
    condense as rain ([climate.py:52–93](../worldgen/stages/climate.py#L52)):
    ```
-   incoming = mean(atm[upwind neighbours]) or 1.0 if none upwind
-   lift     = max(0, hex.elevation - sea_level)
-   fraction = min(1, lift * orographic_strength)
-   hex.moisture = incoming * fraction
-   atm[hex]     = incoming - precip          # depleted moving downwind
-   ```
+    incoming = mean(atm[upwind neighbours]) or 1.0 if none upwind
+    lift     = max(0, hex.elevation - sea_level)
+    fraction = min(1, lift * orographic_strength)
+    precip   = incoming * fraction
+    hex.moisture = precip
+    atm[hex]     = incoming - precip          # depleted moving downwind
+    ```
    Result: windward slopes are wet, lee slopes (rain shadows) dry.
 
 2. **River + coastal bonuses** ([climate.py:96–108](../worldgen/stages/climate.py#L96)).
@@ -619,7 +620,8 @@ Three sub-steps:
    When `moisture_bleed_passes > 0`, the flat `+0.15` river bonus is
    replaced by an iterative diffusion: each pass, a hex gains
    `moisture_bleed_strength * max(neighbour.river_flow)` from any
-   river-tagged neighbour at `≤` its own elevation. This builds a wider
+   river-tagged neighbour at `≥` its own elevation (recipient lower-or-equal
+   to the river hex). This builds a wider
    moisture corridor along big rivers, especially in valleys, but never
    uphill. Re-normalised after the passes.
 
@@ -1039,7 +1041,8 @@ Each candidate's weight starts at `habitability` and is multiplied:
 
 Both can stack (×3.0).
 
-**Stochastic placement** uses the **Gumbel-max trick**
+**Stochastic placement** uses the **Efraimidis–Spirakis weighted-sampling
+without-replacement key**
 ([village_placement.py:80–81](../worldgen/stages/village_placement.py#L80)):
 ```
 u = uniform_random per candidate
@@ -1377,9 +1380,8 @@ hex sizes), see the **SVG export** section of [README.md](../README.md).
 - **Pheromone trail** — Self-reinforcing cost reduction along already-
   used paths, modelled on ant-colony optimisation. Concentrates
   random travellers onto a small number of recognisable highways.
-- **Gumbel-max trick** — Equivalent to weighted-without-replacement
-  sampling: draw `u ~ Uniform(0,1)` per item and sort by
-  `-u^(1/weight)`. Avoids the cost of repeated cumulative-distribution
-  builds.
+- **Efraimidis–Spirakis key sampling** — Weighted sampling without
+  replacement: draw `u ~ Uniform(0,1)` per item, compute `u^(1/weight)`,
+  and sort descending. Avoids repeated cumulative-distribution builds.
 - **Cultivation frontier** — Hexes that are cultivated but border
   uncultivated land. Used as the natural location for new villages.
