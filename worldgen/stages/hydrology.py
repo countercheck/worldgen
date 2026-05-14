@@ -717,13 +717,14 @@ def _split_at_confluences(
     acc: dict[HexCoord, float],
     max_acc: float,
 ) -> list[River]:
-    """Trim each River path to end at the confluence hex.
+    """Trim intersecting tributaries to include their confluence hex.
 
-    Higher-flow rivers process first and claim their land hexes.  Each subsequent
-    river is cut at the first land hex already owned by a higher-flow river; the
-    confluence hex itself is included as the tributary's endpoint so that it visually
-    connects to the trunk.  Rivers that shrink below 2 hexes are dropped.  Original
-    list order is preserved in the output.
+    Higher-flow rivers process first and claim their land hexes.  A subsequent river
+    that intersects claimed land is cut at the first claimed land hex after its
+    headwater, and that confluence hex is kept so the tributary visually connects to
+    the trunk.  Rivers that never intersect claimed land (typically highest-flow
+    trunks) keep their full source-to-mouth path.  Rivers that shrink below 2 hexes
+    are dropped.  Original list order is preserved in the output.
 
     This runs after all hydrological computation is final so that per-hex river_flow,
     flow_dir, and lake drainage connectivity are unaffected.
@@ -744,7 +745,7 @@ def _split_at_confluences(
         cut = len(path)
         for i, coord in enumerate(path[1:], 1):
             if coord in land and coord in claimed:
-                cut = i + 1  # include confluence hex so tributary visually meets the trunk
+                cut = i + 1  # for an intersecting tributary, include the confluence hex
                 break
         trimmed = path[:cut]
         if len(trimmed) >= 2:
