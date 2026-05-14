@@ -49,8 +49,8 @@ def test_river_paths_connected(hydro_state):
 
 def test_rivers_reach_ocean(hydro_state):
     # Each river must terminate at ocean/lake, a grid border, OR a confluence with
-    # another river (tributaries now stop at the first claimed hex rather than
-    # duplicating the downstream trunk).
+    # another river (tributaries end AT the confluence hex, which is also part of the
+    # higher-flow trunk, so the polylines visually connect).
     water_set = {
         coord
         for coord, h in hydro_state.hexes.items()
@@ -232,8 +232,11 @@ def test_lake_drainage_merges_without_rewiring_existing_river():
 
 
 def test_no_shared_hexes_between_rivers(hydro_state):
-    # Each land hex must appear in at most one River segment.  Multiple rivers sharing
-    # the same hex meant the downstream trunk was duplicated, causing visual overdraw.
+    # Each land hex must appear in at most one River segment, EXCEPT confluence hexes.
+    # A confluence hex is the last hex of a tributary and simultaneously an interior
+    # hex of the higher-flow trunk — it is shared by design so the two polylines
+    # visually connect.  Any shared hex that is NOT a tributary endpoint represents
+    # genuine trunk duplication and is a bug.
     from collections import defaultdict
 
     hex_to_rivers: dict[tuple[int, int], list[int]] = defaultdict(list)
@@ -247,8 +250,11 @@ def test_no_shared_hexes_between_rivers(hydro_state):
             if coord in land_terrain:
                 hex_to_rivers[coord].append(i)
 
-    shared = {k: v for k, v in hex_to_rivers.items() if len(v) > 1}
+    tributary_endpoints = {
+        river.hexes[-1] for river in hydro_state.rivers if river.hexes[-1] in land_terrain
+    }
+    shared = {k: v for k, v in hex_to_rivers.items() if len(v) > 1 and k not in tributary_endpoints}
     assert not shared, (
-        f"{len(shared)} land hexes appear in multiple rivers; "
+        f"{len(shared)} land hexes appear in multiple rivers outside confluence endpoints; "
         f"first offender: {next(iter(shared))} in rivers {next(iter(shared.values()))}"
     )
