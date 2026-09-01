@@ -9,7 +9,15 @@ dist/
 build/
 .coverage
 htmlcov/
+
+# Generated worlds and map exports. `output/` is the default --output-dir;
+# my_world/ is a hand-named one. The root-only patterns catch stray exports
+# without blocking images committed under docs/ or assets/.
 output/
+my_world/
+/*.svg
+/*.png
+
 .claude/worktrees/
 .claude/cache/
 .claude/*.local.*
