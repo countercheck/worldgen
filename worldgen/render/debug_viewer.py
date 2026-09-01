@@ -1,9 +1,10 @@
-import numpy as np
-from matplotlib import patches
-from matplotlib import pyplot as plt
+import math
+from pathlib import Path
+
+import matplotlib as mpl
 
 from ..core.hex import Biome, LandCover, SettlementTier, TerrainClass
-from ..core.hex_grid import axial_to_pixel
+from ..core.hex_grid import axial_to_pixel, split_path_on_water
 from ..core.world_state import RoadTier, WorldState
 
 TERRAIN_COLORS = {
@@ -28,15 +29,6 @@ BIOME_COLORS = {
     Biome.ALPINE: (0.7, 0.7, 0.7),
 }
 
-
-def _get_color_biome(h: WorldState) -> tuple[float, float, float]:
-    return BIOME_COLORS.get(h.biome, (0.5, 0.5, 0.5))
-
-
-def _get_color_terrain(h: WorldState) -> tuple[float, float, float]:
-    return TERRAIN_COLORS[h.terrain_class]
-
-
 LAND_COVER_COLORS = {
     LandCover.OPEN_WATER: (0.255, 0.412, 0.882),
     LandCover.BOG: (0.333, 0.420, 0.184),
@@ -52,125 +44,179 @@ LAND_COVER_COLORS = {
 }
 
 _ROAD_STYLE = {
-    RoadTier.PRIMARY: {"color": "#5c3d1e", "lw": 2.0, "zorder": 3},
-    RoadTier.SECONDARY: {"color": "#8b6914", "lw": 1.2, "zorder": 2},
-    RoadTier.TRACK: {"color": "#b8a070", "lw": 0.6, "zorder": 1},
-}
-
-_SETTLEMENT_STYLE = {
-    SettlementTier.CITY: ("*", 14, "gold"),
-    SettlementTier.TOWN: ("s", 8, "white"),
-    SettlementTier.VILLAGE: ("o", 5, "white"),
+    RoadTier.PRIMARY: {"stroke": "#5c3d1e", "stroke-width": "2.0"},
+    RoadTier.SECONDARY: {"stroke": "#8b6914", "stroke-width": "1.2"},
+    RoadTier.TRACK: {"stroke": "#b8a070", "stroke-width": "0.6", "dasharray": "4 2"},
 }
 
 
-def render(state: WorldState, attribute: str, output_path: str, hex_size: float = 20):
-    """Render hex map colored by attribute."""
-    fig, ax = plt.subplots(figsize=(14, 10))
-    ax.set_aspect("equal")
+def _get_color_biome(h) -> tuple[float, float, float]:
+    return BIOME_COLORS.get(h.biome, (0.5, 0.5, 0.5))
 
-    settlement_overlay = False
-    road_overlay = False
 
+def _get_color_terrain(h) -> tuple[float, float, float]:
+    return TERRAIN_COLORS[h.terrain_class]
+
+
+def _hex_vertices(cx: float, cy: float, size: float) -> list[tuple[float, float]]:
+    angles = [0, 60, 120, 180, 240, 300]
+    return [
+        (cx + size * math.cos(math.radians(a)), cy + size * math.sin(math.radians(a)))
+        for a in angles
+    ]
+
+
+def _points_str(pts: list[tuple[float, float]]) -> str:
+    return " ".join(f"{x:.2f},{y:.2f}" for x, y in pts)
+
+
+def _rgb_to_hex(r: float, g: float, b: float) -> str:
+    return f"#{int(r * 255):02x}{int(g * 255):02x}{int(b * 255):02x}"
+
+
+def _star_points(cx: float, cy: float, outer: float, inner: float, n: int = 5) -> str:
+    pts = []
+    for i in range(n * 2):
+        r = outer if i % 2 == 0 else inner
+        angle = math.radians(i * 180 / n - 90)
+        pts.append((cx + r * math.cos(angle), cy + r * math.sin(angle)))
+    return _points_str(pts)
+
+
+def _color_getter(attribute: str):
+    """Returns (get_color, settlement_overlay, road_overlay) for an attribute name."""
     if attribute == "biome":
-        get_color = _get_color_biome
-    elif attribute == "terrain_class":
-        get_color = _get_color_terrain
-    elif attribute == "elevation":
-        cmap = plt.cm.get_cmap("terrain")
+        return _get_color_biome, False, False
+    if attribute == "terrain_class":
+        return _get_color_terrain, False, False
+    if attribute == "elevation":
+        cmap = mpl.colormaps["terrain"]
+        return (lambda h: cmap(h.elevation)), False, False
+    if attribute == "moisture":
+        cmap = mpl.colormaps["Blues"]
+        return (lambda h: cmap(h.moisture)), False, False
+    if attribute == "temperature":
+        cmap = mpl.colormaps["RdYlBu_r"]
+        return (lambda h: cmap(h.temperature)), False, False
+    if attribute == "river_flow":
+        cmap = mpl.colormaps["Blues"]
 
-        def get_color(h: WorldState):  # noqa: F811
-            return cmap(h.elevation)
-    elif attribute == "moisture":
-        cmap = plt.cm.get_cmap("Blues")
-
-        def get_color(h: WorldState):  # noqa: F811
-            return cmap(h.moisture)
-    elif attribute == "temperature":
-        cmap = plt.cm.get_cmap("RdYlBu_r")
-
-        def get_color(h: WorldState):  # noqa: F811
-            return cmap(h.temperature)
-    elif attribute == "river_flow":
-        cmap = plt.cm.get_cmap("Blues")
-
-        def get_color(h: WorldState):  # noqa: F811
+        def get_color(h):
+            if h.terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE):
+                return TERRAIN_COLORS[h.terrain_class]
             return cmap(min(h.river_flow * 3, 1.0))
-    elif attribute == "habitability":
-        cmap = plt.cm.get_cmap("YlGn")
 
-        def get_color(h: WorldState):  # noqa: F811
-            return cmap(h.habitability)
-    elif attribute == "settlements":
-        get_color = _get_color_biome
-        settlement_overlay = True
-    elif attribute == "roads":
-        get_color = _get_color_biome
-        road_overlay = True
-    elif attribute == "land_cover":
+        return get_color, False, False
+    if attribute == "habitability":
+        cmap = mpl.colormaps["YlGn"]
+        return (lambda h: cmap(h.habitability)), False, False
+    if attribute == "settlements":
+        return _get_color_biome, True, False
+    if attribute == "roads":
+        return _get_color_biome, False, True
+    if attribute == "land_cover":
 
-        def get_color(h):  # noqa: F811
+        def get_color(h):
             if h.land_cover is None:
                 return (0.5, 0.5, 0.5)
             return LAND_COVER_COLORS.get(h.land_cover, (0.5, 0.5, 0.5))
-    elif attribute == "cultivation":
-        _CULTIVATED = (0.831, 0.643, 0.298)
 
-        def get_color(h):  # noqa: F811
+        return get_color, False, False
+    if attribute == "cultivation":
+        _cultivated = (0.831, 0.643, 0.298)
+
+        def get_color(h):
             if h.land_cover is None:
                 return (0.5, 0.5, 0.5)
             base = LAND_COVER_COLORS.get(h.land_cover, (0.5, 0.5, 0.5))
-            return _CULTIVATED if h.cultivated else base
-    else:
-        raise ValueError(f"Unknown attribute: {attribute}")
+            return _cultivated if h.cultivated else base
 
-    for hex_item in state.hexes.values():
-        x, y = axial_to_pixel(hex_item.coord, hex_size)
-        color = get_color(hex_item)
+        return get_color, False, False
+    raise ValueError(f"Unknown attribute: {attribute}")
 
-        vertices = _hex_vertices(x, y, hex_size)
-        polygon = patches.Polygon(vertices, facecolor=color, edgecolor="gray", linewidth=0.5)
-        ax.add_patch(polygon)
+
+def render_svg(state: WorldState, attribute: str, hex_size: float = 20) -> str:
+    """Render hex map colored by attribute as an SVG string."""
+    get_color, settlement_overlay, road_overlay = _color_getter(attribute)
+
+    hex_items = list(state.hexes.values())
+    if not hex_items:
+        return '<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0"></svg>'
+
+    pad = hex_size
+    pixels = [axial_to_pixel(h.coord, hex_size) for h in hex_items]
+    min_x = min(p[0] for p in pixels) - pad
+    min_y = min(p[1] for p in pixels) - pad
+    max_x = max(p[0] for p in pixels) + pad
+    max_y = max(p[1] for p in pixels) + pad
+    ox = -min_x
+    oy = -min_y
+    w = math.ceil(max_x - min_x)
+    h = math.ceil(max_y - min_y)
+
+    out = [
+        f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}">',
+        f'  <rect width="{w}" height="{h}" fill="white"/>',
+        '  <g id="layer-hexes">',
+    ]
+    for hex_item, (px, py) in zip(hex_items, pixels, strict=True):
+        verts = _hex_vertices(px + ox, py + oy, hex_size)
+        fill = _rgb_to_hex(*get_color(hex_item)[:3])
+        out.append(
+            f'    <polygon points="{_points_str(verts)}" fill="{fill}"'
+            f' stroke="gray" stroke-width="0.5"/>'
+        )
+    out.append("  </g>")
 
     if settlement_overlay:
+        out.append('  <g id="layer-settlements">')
         for s in state.settlements:
-            x, y = axial_to_pixel(s.coord, hex_size)
-            marker, size, color = _SETTLEMENT_STYLE[s.tier]
-            ax.plot(
-                x,
-                y,
-                marker,
-                markersize=size,
-                color=color,
-                markeredgecolor="black",
-                markeredgewidth=0.8,
-            )
+            px, py = axial_to_pixel(s.coord, hex_size)
+            cx, cy = px + ox, py + oy
+            if s.tier == SettlementTier.CITY:
+                pts = _star_points(cx, cy, outer=7.0, inner=3.0)
+                out.append(
+                    f'    <polygon points="{pts}" fill="gold" stroke="black" stroke-width="0.8"/>'
+                )
+            elif s.tier == SettlementTier.TOWN:
+                r = 4.0
+                out.append(
+                    f'    <rect x="{cx - r:.2f}" y="{cy - r:.2f}" width="{2 * r:.2f}"'
+                    f' height="{2 * r:.2f}" fill="white" stroke="black" stroke-width="0.8"/>'
+                )
+            else:
+                out.append(
+                    f'    <circle cx="{cx:.2f}" cy="{cy:.2f}" r="2.5" fill="white"'
+                    f' stroke="black" stroke-width="0.8"/>'
+                )
+        out.append("  </g>")
 
     if road_overlay:
-        for road in state.roads:
-            pixel_coords = [axial_to_pixel(coord, hex_size) for coord in road.path]
-            if pixel_coords:
-                xs, ys = map(list, zip(*pixel_coords, strict=False))
-            else:
-                xs, ys = [], []
-            style = _ROAD_STYLE[road.tier]
-            ax.plot(
-                xs,
-                ys,
-                color=style["color"],
-                lw=style["lw"],
-                zorder=style["zorder"],
-                solid_capstyle="round",
-            )
+        out.append('  <g id="layer-roads">')
+        for tier in RoadTier:
+            style = _ROAD_STYLE[tier]
+            da = f' stroke-dasharray="{style["dasharray"]}"' if "dasharray" in style else ""
+            for road in state.roads:
+                if road.tier != tier:
+                    continue
+                for leg in split_path_on_water(road.path, state.hexes):
+                    pts = [
+                        (px + ox, py + oy) for px, py in (axial_to_pixel(c, hex_size) for c in leg)
+                    ]
+                    out.append(
+                        f'    <polyline points="{_points_str(pts)}" fill="none"'
+                        f' stroke="{style["stroke"]}" stroke-width="{style["stroke-width"]}"'
+                        f' stroke-linecap="round" stroke-linejoin="round"{da}/>'
+                    )
+        out.append("  </g>")
 
-    ax.autoscale_view()
-    ax.set_title(f"World Map — {attribute}")
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=100, bbox_inches="tight")
-    plt.close()
+    out.append(
+        f'  <text x="8" y="18" font-family="sans-serif" font-size="14">World Map — {attribute}</text>'
+    )
+    out.append("</svg>")
+    return "\n".join(out)
 
 
-def _hex_vertices(x: float, y: float, size: float) -> list[tuple[float, float]]:
-    """Get 6 vertices of flat-top hex."""
-    angles = [0, 60, 120, 180, 240, 300]
-    return [(x + size * np.cos(np.radians(a)), y + size * np.sin(np.radians(a))) for a in angles]
+def render(state: WorldState, attribute: str, output_path: str, hex_size: float = 20) -> None:
+    """Render hex map colored by attribute and write it to output_path as SVG."""
+    Path(output_path).write_text(render_svg(state, attribute, hex_size), encoding="utf-8")

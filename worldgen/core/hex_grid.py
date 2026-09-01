@@ -139,6 +139,27 @@ def astar(
     return None
 
 
+def split_path_on_water(path: list[HexCoord], hexes: dict[HexCoord, Hex]) -> list[list[HexCoord]]:
+    """Split a hex path into contiguous land-only runs, dropping OCEAN/LAKE hexes.
+
+    Roads may path through water (see road_cost.py), but rendering a straight
+    line across open water is misleading, so renderers use this to draw only
+    the land legs of a route."""
+    segments: list[list[HexCoord]] = []
+    current: list[HexCoord] = []
+    for coord in path:
+        hx = hexes.get(coord)
+        if hx is not None and hx.terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE):
+            if len(current) >= 2:
+                segments.append(current)
+            current = []
+        else:
+            current.append(coord)
+    if len(current) >= 2:
+        segments.append(current)
+    return segments
+
+
 def grade_reachable_count(
     start: HexCoord,
     hexes: dict[HexCoord, Hex],

@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from PIL import Image, ImageDraw, ImageFont
 
 from ..core.hex import SettlementTier
-from ..core.hex_grid import axial_to_pixel, neighbors
+from ..core.hex_grid import axial_to_pixel, neighbors, split_path_on_water
 from ..core.world_state import RoadTier, WorldState
 from ..render.debug_viewer import BIOME_COLORS, LAND_COVER_COLORS, TERRAIN_COLORS
 
@@ -181,13 +181,12 @@ def render(ws: WorldState, config: PNGConfig | None = None) -> Image.Image:
 
     if "roads" in layers:
         for road in ws.roads:
-            if len(road.path) < 2:
-                continue
-            pts = []
-            for coord in road.path:
-                px, py = axial_to_pixel(coord, size)
-                pts.append((int(px + ox), int(py + oy)))
-            draw.line(pts, fill=_ROAD_COLOR[road.tier], width=_ROAD_WIDTH[road.tier])
+            for leg in split_path_on_water(road.path, ws.hexes):
+                pts = []
+                for coord in leg:
+                    px, py = axial_to_pixel(coord, size)
+                    pts.append((int(px + ox), int(py + oy)))
+                draw.line(pts, fill=_ROAD_COLOR[road.tier], width=_ROAD_WIDTH[road.tier])
 
     if "settlements" in layers:
         for s in ws.settlements:

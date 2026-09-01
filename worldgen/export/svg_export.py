@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..core.hex import SettlementTier
-from ..core.hex_grid import axial_to_pixel, neighbors
+from ..core.hex_grid import axial_to_pixel, neighbors, split_path_on_water
 from ..core.world_state import RoadTier, WorldState
 from ..render.debug_viewer import BIOME_COLORS, LAND_COVER_COLORS, TERRAIN_COLORS
 
@@ -200,19 +200,18 @@ def render(ws: WorldState, config: SVGConfig | None = None) -> str:
     if "roads" in layers:
         out.append('  <g id="layer-roads">')
         for road in ws.roads:
-            if len(road.path) < 2:
-                continue
-            pts = []
-            for coord in road.path:
-                px, py = axial_to_pixel(coord, size)
-                pts.append((px + ox, py + oy))
             style = _ROAD_SVG[road.tier]
             da = f' stroke-dasharray="{style["dasharray"]}"' if style["dasharray"] else ""
-            out.append(
-                f'    <polyline points="{_points_str(pts)}" fill="none" stroke="{style["stroke"]}"'
-                f' stroke-width="{style["stroke-width"]}" stroke-linecap="round"'
-                f' stroke-linejoin="round"{da}/>'
-            )
+            for leg in split_path_on_water(road.path, ws.hexes):
+                pts = []
+                for coord in leg:
+                    px, py = axial_to_pixel(coord, size)
+                    pts.append((px + ox, py + oy))
+                out.append(
+                    f'    <polyline points="{_points_str(pts)}" fill="none"'
+                    f' stroke="{style["stroke"]}" stroke-width="{style["stroke-width"]}"'
+                    f' stroke-linecap="round" stroke-linejoin="round"{da}/>'
+                )
         out.append("  </g>")
 
     if "settlements" in layers:

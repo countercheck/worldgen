@@ -75,22 +75,23 @@ def land_cover_state():
 def test_render_roads_produces_file(small_state, tmp_path):
     from worldgen.render.debug_viewer import render
 
-    out = tmp_path / "roads.png"
+    out = tmp_path / "roads.svg"
     render(small_state, "roads", str(out))
     assert out.exists() and out.stat().st_size > 0
+    assert out.read_text().startswith("<svg")
 
 
 def test_render_unknown_attribute_raises(small_state, tmp_path):
     from worldgen.render.debug_viewer import render
 
     with pytest.raises(ValueError, match="Unknown attribute"):
-        render(small_state, "nonexistent", str(tmp_path / "x.png"))
+        render(small_state, "nonexistent", str(tmp_path / "x.svg"))
 
 
 def test_render_land_cover_produces_file(land_cover_state, tmp_path):
     from worldgen.render.debug_viewer import render
 
-    out = tmp_path / "land_cover.png"
+    out = tmp_path / "land_cover.svg"
     render(land_cover_state, "land_cover", str(out))
     assert out.exists() and out.stat().st_size > 0
 
@@ -98,6 +99,6 @@ def test_render_land_cover_produces_file(land_cover_state, tmp_path):
 def test_render_cultivation_produces_file(land_cover_state, tmp_path):
     from worldgen.render.debug_viewer import render
 
-    out = tmp_path / "cultivation.png"
+    out = tmp_path / "cultivation.svg"
     render(land_cover_state, "cultivation", str(out))
     assert out.exists() and out.stat().st_size > 0

@@ -29,6 +29,13 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
+Always activate `.venv` before running `worldgen` — the CLI depends on the package being
+installed in the active interpreter's environment. If you see
+`ModuleNotFoundError: No module named 'worldgen'`, it means `worldgen` resolved to a
+different Python (e.g. a global/pyenv interpreter) than the one you installed into. Run
+`which worldgen` to check, then either activate `.venv` or re-run `pip install -e ".[dev]"`
+in the interpreter you intend to use.
+
 ## Usage
 
 ```bash
