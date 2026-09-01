@@ -5,10 +5,10 @@ from worldgen.core.config import WorldConfig
 from worldgen.core.hex import TerrainClass
 from worldgen.core.hex_grid import neighbors
 from worldgen.core.pipeline import GeneratorPipeline
-from worldgen.core.world_state import WorldState
+from worldgen.core.world_state import River, WorldState
 from worldgen.stages.elevation import ElevationStage
 from worldgen.stages.erosion import ErosionStage
-from worldgen.stages.hydrology import HydrologyStage
+from worldgen.stages.hydrology import HydrologyStage, _split_at_confluences
 from worldgen.stages.terrain_class import TerrainClassificationStage
 from worldgen.stages.water_bodies import WaterBodiesStage
 
@@ -258,3 +258,51 @@ def test_no_shared_hexes_between_rivers(hydro_state):
         f"{len(shared)} land hexes appear in multiple rivers outside confluence endpoints; "
         f"first offender: {next(iter(shared))} in rivers {next(iter(shared.values()))}"
     )
+
+
+def _confluence_fixture():
+    """A trunk and a tributary that merge at (2, 0), with hand-set accumulation.
+
+    Accumulation at the confluence (10.0) is deliberately far above the tributary's
+    own pre-merge accumulation (3.0) so the two can be told apart in flow_volume.
+    """
+    trunk = River(hexes=[(0, 0), (1, 0), (2, 0), (3, 0)], flow_volume=1.0)
+    tributary = River(hexes=[(0, 2), (1, 1), (2, 0), (3, 0)], flow_volume=0.3)
+    acc = {
+        (0, 0): 1.0,
+        (1, 0): 2.0,
+        (2, 0): 10.0,
+        (3, 0): 12.0,
+        (0, 2): 1.0,
+        (1, 1): 3.0,
+    }
+    return [trunk, tributary], set(acc), acc, 12.0
+
+
+def test_split_at_confluences_tributary_ends_on_confluence_hex():
+    """A trimmed tributary's last hex is the trunk's confluence hex, and nothing beyond."""
+    rivers, land, acc, max_acc = _confluence_fixture()
+    trunk, tributary = _split_at_confluences(rivers, land, acc, max_acc)
+
+    # Original list order is preserved, and the higher-flow trunk keeps its full path.
+    assert trunk.hexes == [(0, 0), (1, 0), (2, 0), (3, 0)]
+
+    # The tributary now reaches the confluence so the two polylines visually connect.
+    assert tributary.hexes[-1] == (2, 0)
+    assert tributary.hexes == [(0, 2), (1, 1), (2, 0)]
+
+    # ...but it must not duplicate any trunk hex downstream of the confluence.
+    downstream = set(trunk.hexes[trunk.hexes.index((2, 0)) + 1 :])
+    assert not downstream & set(tributary.hexes)
+
+
+def test_split_at_confluences_tributary_keeps_pre_merge_flow_volume():
+    """The shared confluence hex carries combined discharge; the tributary must not."""
+    rivers, land, acc, max_acc = _confluence_fixture()
+    _, tributary = _split_at_confluences(rivers, land, acc, max_acc)
+
+    # acc[(1, 1)] is the last hex the tributary owns exclusively.
+    assert tributary.flow_volume == pytest.approx(3.0 / max_acc)
+    # The confluence's own accumulation already includes the trunk — using it here would
+    # render the whole tributary at post-merge width.
+    assert tributary.flow_volume != pytest.approx(acc[(2, 0)] / max_acc)

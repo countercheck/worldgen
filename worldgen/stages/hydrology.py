@@ -28,14 +28,18 @@ class HydrologyStage(GeneratorStage):
 
         # A — Priority-Flood sink filling
         filled = self._priority_flood(elev, land, ocean, w, h)
-        # Epsilon tilt: hexes farther from ocean/lake get slightly higher filled elevation
-        # so that flat plateau areas have a well-defined gradient toward water.
-        bfs_dist = self._bfs_dist_from_ocean(filled, ocean, lakes, w, h)
-        max_dist = max(bfs_dist.values()) or 1
+        # Epsilon tilt: hexes farther from their plateau's drain point get slightly higher
+        # filled elevation so that flat plateau areas have a well-defined gradient toward
+        # water. Distance is scoped per-plateau (propagated only across equal-elevation
+        # neighbors) rather than raw hex-distance-to-ocean — the latter can rank a cell as
+        # "closer to water" than its own downhill neighbor, creating a false local minimum
+        # that stalls flow_dir in the middle of a plateau.
+        drain_dist = self._plateau_drain_distance(filled, land, ocean, lakes, w, h)
+        max_dist = max(drain_dist.values()) or 1
         eps = 1e-6
         for coord in filled:
             q, r = coord
-            filled[coord] += eps * bfs_dist.get(coord, max_dist) / max_dist + eps * 1e-4 * (
+            filled[coord] += eps * drain_dist.get(coord, max_dist) / max_dist + eps * 1e-4 * (
                 q + r
             ) / (w + h)
 
@@ -123,29 +127,52 @@ class HydrologyStage(GeneratorStage):
 
         return state
 
-    def _bfs_dist_from_ocean(
+    def _plateau_drain_distance(
         self,
         filled: dict[HexCoord, float],
+        land: set[HexCoord],
         ocean: set[HexCoord],
         lakes: set[HexCoord],
         w: int,
         h: int,
     ) -> dict[HexCoord, int]:
-        """BFS distance from ocean/lake/border for every hex in `filled`."""
+        """BFS distance from each plateau's own drain point, propagated only across
+        neighbors with equal filled elevation.
+
+        A drain point is any land hex already adjacent to water/border, or with a
+        neighbor whose filled elevation is strictly lower (i.e. it already has a real
+        downhill direction). Restricting propagation to equal-elevation neighbors keeps
+        the distance scoped to a single flat plateau, so every interior plateau hex is
+        guaranteed a same-elevation neighbor one step closer to its own drain — unlike a
+        raw distance-to-ocean measure, this can never rank a hex as "closer" than a
+        neighbor it cannot actually reach downhill, so it cannot create a false local
+        minimum.
+        """
         dist: dict[HexCoord, int] = {}
         queue: deque[HexCoord] = deque()
         for coord in ocean | lakes:
             dist[coord] = 0
             queue.append(coord)
-        for coord in filled:
+        for coord in land:
+            if coord in dist:
+                continue
             q, r = coord
-            if coord not in dist and (q == 0 or q == w - 1 or r == 0 or r == h - 1):
+            on_border = q == 0 or q == w - 1 or r == 0 or r == h - 1
+            has_lower_nbr = any(
+                nbr in ocean
+                or nbr in lakes
+                or (nbr in filled and filled[nbr] < filled[coord] - 1e-12)
+                for nbr in neighbors(coord)
+            )
+            if on_border or has_lower_nbr:
                 dist[coord] = 0
                 queue.append(coord)
         while queue:
             coord = queue.popleft()
             for nbr in neighbors(coord):
-                if nbr in filled and nbr not in dist:
+                if nbr not in filled or nbr in dist:
+                    continue
+                if abs(filled[nbr] - filled[coord]) < 1e-12:
                     dist[nbr] = dist[coord] + 1
                     queue.append(nbr)
         return dist
@@ -344,6 +371,12 @@ class HydrologyStage(GeneratorStage):
                     break
                 path.append(ds)
                 visited_path.add(ds)
+                # A border hex is a valid map-edge drain even if its own steepest
+                # descent points back inland (see _flow_direction) — stop here rather
+                # than following it back into the interior.
+                dq, dr = ds
+                if dq == 0 or dq == w - 1 or dr == 0 or dr == h - 1:
+                    break
                 current = ds
 
             # If the path stalled without reaching ocean or a grid border, extend via
@@ -637,11 +670,37 @@ class HydrologyStage(GeneratorStage):
             # Try spillways in elevation order; Dijkstra prefers valleys.
             # Use an empty lake set so drainage terminates only at ocean/border —
             # stopping at another lake adjacency would create trivial cyclic routes.
+            # Exclude perimeter hexes that already flow *into* this lake (inflow mouths):
+            # picking one as the "spillway" would reroute its flow_dir away from the lake,
+            # silently severing the inflow without actually producing a usable new
+            # outflow river (the rerouted hex gets reclaimed by the original, higher-flow
+            # inflow river during confluence-splitting and the new path is dropped).
+            outflow_candidates = [c for c in border_land if flow_dir.get(c) not in component]
+            if not outflow_candidates:
+                outflow_candidates = border_land
+            # Prefer candidates that aren't *also* adjacent to a different lake: a
+            # spillway sitting right on another lake's shore makes the two basins
+            # topologically ambiguous (does this hex drain lake A or sit on lake B's
+            # perimeter?), which can produce an outflow path that is real but looks
+            # like it immediately loops back into a neighboring basin.
+            clean_candidates = [
+                c
+                for c in outflow_candidates
+                if not any(nbr in lakes and nbr not in component for nbr in neighbors(c))
+            ]
+            if clean_candidates:
+                outflow_candidates = clean_candidates
+            # Also keep the search from routing *through* any other still-active inflow
+            # hex further along the path — same corruption risk as above, just not at
+            # the very first step.
+            inflow_avoid = {c for c in land if flow_dir.get(c) in component} - {
+                candidate for candidate in outflow_candidates
+            }
             extension: list[HexCoord] = []
             spillway: HexCoord | None = None
-            for candidate in border_land:
+            for candidate in outflow_candidates:
                 extension = self._guided_path_to_ocean(
-                    candidate, filled, land, ocean, frozenset(), set(), w, h
+                    candidate, filled, land, ocean, frozenset(), inflow_avoid, w, h
                 )
                 if extension:
                     spillway = candidate
@@ -649,7 +708,7 @@ class HydrologyStage(GeneratorStage):
 
             # Guaranteed fallback: plain BFS (only border/ocean as terminals)
             if not extension:
-                spillway = border_land[0]
+                spillway = outflow_candidates[0]
                 extension = self._forced_exit_to_border(spillway, hexes, ocean, frozenset(), w, h)
 
             if not extension or spillway is None:
@@ -698,6 +757,11 @@ class HydrologyStage(GeneratorStage):
                     if ds not in land:
                         break
                     acc[ds] = max(acc.get(ds, 0.0), acc.get(tail, 0.0))
+                    # Border hexes are valid map-edge drains even if their own
+                    # steepest descent points back inland (see _flow_direction).
+                    dq, dr = ds
+                    if dq == 0 or dq == w - 1 or dr == 0 or dr == h - 1:
+                        break
                     tail = ds
             river_set.add(spillway)
             spillway_acc = max(acc.get(spillway, 0.0), 1.0)
@@ -743,14 +807,20 @@ def _split_at_confluences(
             continue
         # Find the first claimed land hex after the headwater (index 0 always kept).
         cut = len(path)
+        intersects = False
         for i, coord in enumerate(path[1:], 1):
             if coord in land and coord in claimed:
                 cut = i + 1  # for an intersecting tributary, include the confluence hex
+                intersects = True
                 break
         trimmed = path[:cut]
         if len(trimmed) >= 2:
             # Recalculate flow_volume from the last exclusive land hex in the trimmed path.
-            last_land = next((c for c in reversed(trimmed) if c in acc), trimmed[0])
+            # An intersecting tributary ends on the shared confluence hex, whose accumulation
+            # already includes the trunk and any other branches — excluding it keeps the
+            # tributary rendered at its own pre-merge discharge.
+            exclusive = trimmed[:-1] if intersects else trimmed
+            last_land = next((c for c in reversed(exclusive) if c in acc), trimmed[0])
             result.append(
                 (orig_idx, River(hexes=trimmed, flow_volume=acc.get(last_land, 0.0) / max_acc))
             )
