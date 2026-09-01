@@ -14,6 +14,12 @@ def grade_is_under_cap(from_hx, to_hx, cfg) -> bool:
     return edge_grade_pct(from_hx, to_hx, cfg) < cfg.road_slope_cap_pct
 
 
+def max_grade_cap_delta(cfg) -> float:
+    """Elevation delta equivalent to the slope cap, for fast per-edge comparisons
+    (avoids repeating the grade_is_under_cap division/multiplication per edge)."""
+    return cfg.road_slope_cap_pct * cfg.hex_size_m / (cfg.road_elev_range_m * 100.0)
+
+
 def slope_edge_cost(from_hx, to_hx, cfg) -> float:
     """Grade-aware edge penalty for road pathfinding."""
     grade_pct = edge_grade_pct(from_hx, to_hx, cfg)

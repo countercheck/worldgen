@@ -3,7 +3,7 @@ from ..core.hex_grid import distance, grade_reachable_count, neighbors
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
 from .city_town import _assign_role
-from .road_cost import grade_is_under_cap
+from .road_cost import max_grade_cap_delta
 
 _RESISTANT = {
     LandCover.BOG,
@@ -20,9 +20,10 @@ class VillagePlacementStage(GeneratorStage):
     def run(self, state: WorldState) -> WorldState:
         hexes = state.hexes
         cfg = self.config
+        max_delta = max_grade_cap_delta(cfg)
 
         def grade_ok(a_hx, b_hx):
-            return grade_is_under_cap(a_hx, b_hx, cfg)
+            return abs(a_hx.elevation - b_hx.elevation) < max_delta
 
         reachable_cache: dict[tuple[int, int], int] = {}
 

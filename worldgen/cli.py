@@ -82,17 +82,17 @@ def generate(seed: int, config: str, output_dir: str, width: int, height: int):
 
     save_json(state, str(output_path / "world.json"))
 
-    render_debug(state, "elevation", str(output_path / "elevation.png"))
-    render_debug(state, "terrain_class", str(output_path / "terrain_class.png"))
-    render_debug(state, "river_flow", str(output_path / "river_flow.png"))
-    render_debug(state, "temperature", str(output_path / "temperature.png"))
-    render_debug(state, "moisture", str(output_path / "moisture.png"))
-    render_debug(state, "biome", str(output_path / "biome.png"))
-    render_debug(state, "habitability", str(output_path / "habitability.png"))
-    render_debug(state, "settlements", str(output_path / "settlements.png"))
-    render_debug(state, "roads", str(output_path / "roads.png"))
-    render_debug(state, "land_cover", str(output_path / "land_cover.png"))
-    render_debug(state, "cultivation", str(output_path / "cultivation.png"))
+    render_debug(state, "elevation", str(output_path / "elevation.svg"))
+    render_debug(state, "terrain_class", str(output_path / "terrain_class.svg"))
+    render_debug(state, "river_flow", str(output_path / "river_flow.svg"))
+    render_debug(state, "temperature", str(output_path / "temperature.svg"))
+    render_debug(state, "moisture", str(output_path / "moisture.svg"))
+    render_debug(state, "biome", str(output_path / "biome.svg"))
+    render_debug(state, "habitability", str(output_path / "habitability.svg"))
+    render_debug(state, "settlements", str(output_path / "settlements.svg"))
+    render_debug(state, "roads", str(output_path / "roads.svg"))
+    render_debug(state, "land_cover", str(output_path / "land_cover.svg"))
+    render_debug(state, "cultivation", str(output_path / "cultivation.svg"))
 
     click.echo("✓ Done")
 
@@ -121,7 +121,7 @@ _ATTRIBUTES = [
     show_default=True,
     help="Attribute to render.",
 )
-@click.option("--output", type=str, required=True, help="Output PNG file")
+@click.option("--output", type=str, required=True, help="Output SVG file")
 def render_map(input_path: str, attribute: str, output: str):
     """Render a saved world from world.json."""
     from .export.json_export import load as load_json
