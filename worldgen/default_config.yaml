@@ -160,6 +160,7 @@ export:
     - settlements
     - labels
     - grid
+    - legend
     # - contours      # Uncomment to add topographic contour lines
 
   # Contour settings — only used when "contours" is in the layers list above
@@ -167,3 +168,9 @@ export:
   contour_interval_m: 100.0          # Vertical spacing between contour lines in metres. Default: 100.0
   contour_max_crossings: 5           # Maximum contour lines drawn per hex edge. Default: 5
   contour_max_stroke: 4.0            # Maximum contour stroke width in pixels. Default: 4.0
+
+  # Legend settings — only used when "legend" is in the layers list above.
+  # The hex grid is sheared into a parallelogram, leaving the top-right and
+  # bottom-left of the canvas empty; the legend goes into one of them.
+  legend_corner: top-right  # Which empty corner to use: top-right | bottom-left. Default: top-right
+  legend_scale: 1.0         # Legend size as a multiple of hex_size. Default: 1.0

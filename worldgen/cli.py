@@ -139,7 +139,7 @@ def render_map(input_path: str, attribute: str, output: str):
 
 _STYLES = ["atlas", "topographic", "wargame"]
 _COLOR_MODES = ["biome", "terrain", "land_cover", "elevation"]
-_DEFAULT_LAYERS = {"terrain", "rivers", "roads", "settlements", "labels", "grid"}
+_DEFAULT_LAYERS = {"terrain", "rivers", "roads", "settlements", "labels", "grid", "legend"}
 _ALLOWED_LAYERS = _DEFAULT_LAYERS | {"contours"}
 _CONFIG_LAYERS_SOURCE = "export.layers in config"
 
@@ -263,6 +263,8 @@ def export_svg(
             "contour_interval_m",
             "contour_max_crossings",
             "contour_max_stroke",
+            "legend_corner",
+            "legend_scale",
         ):
             if key in export_section:
                 svg_kwargs[key] = export_section[key]
