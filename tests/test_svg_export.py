@@ -419,3 +419,57 @@ def test_legend_rejects_nonpositive_scale():
 def test_legend_skipped_for_empty_world():
     svg = render(WorldState(seed=1, width=0, height=0))
     assert 'id="layer-legend"' not in svg
+
+
+def test_legend_fits_a_canvas_smaller_than_itself():
+    """A 4x4 map is smaller than its own legend; the canvas must grow to fit the panel.
+
+    Clamping cannot rescue a panel larger than the image it sits in — it just crops the
+    last rows — so the exporter sizes the legend before the canvas.
+    """
+    import re
+
+    ws = _small_world()
+    svg = render(ws)
+    cw, ch = (int(v) for v in re.search(r'width="(\d+)" height="(\d+)"', svg).groups())
+    lx, ly, lw, lh = _legend_panel(svg)
+    assert lx >= 0 and ly >= 0
+    assert lx + lw <= cw, f"panel overflows canvas width by {lx + lw - cw:.1f}px"
+    assert ly + lh <= ch, f"panel overflows canvas height by {ly + lh - ch:.1f}px"
+
+
+@pytest.mark.parametrize("corner", ["top-right", "bottom-left"])
+def test_placement_reserves_the_full_hex_support(corner):
+    """Placement must reserve the hex polygon's own reach past its centre, not its centre.
+
+    Both regions are separated by the diagonal `d = y - x/sqrt(3)`, so they are disjoint
+    exactly when their `d` ranges are — a sharper test than bounding boxes, which
+    overestimate a hexagon and go blunt as the panel shrinks.  A small `legend_scale`
+    shrinks the safety margin so an under-reserved support cannot hide behind it.
+    """
+    import math
+    import re
+
+    ws = _sheared_world()
+    svg = render(ws, SVGConfig(legend_scale=0.15, legend_corner=corner))
+    lx, ly, lw, lh = _legend_panel(svg)
+
+    def d(x, y):
+        return y - x / math.sqrt(3)
+
+    panel_ds = [d(x, y) for x in (lx, lx + lw) for y in (ly, ly + lh)]
+    body = svg.split('<g id="layer-terrain">')[1].split("</g>")[0]
+    hex_ds = [
+        d(float(p.split(",")[0]), float(p.split(",")[1]))
+        for pts in re.findall(r'<polygon points="([^"]+)"', body)
+        for p in pts.split()
+    ]
+
+    if corner == "top-right":
+        assert max(panel_ds) < min(hex_ds), (
+            f"panel reaches d={max(panel_ds):.2f}, terrain starts at d={min(hex_ds):.2f}"
+        )
+    else:
+        assert min(panel_ds) > max(hex_ds), (
+            f"panel reaches d={min(panel_ds):.2f}, terrain ends at d={max(hex_ds):.2f}"
+        )

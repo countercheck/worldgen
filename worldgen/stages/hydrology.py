@@ -7,6 +7,17 @@ from ..core.pipeline import GeneratorStage
 from ..core.world_state import River, WorldState
 
 
+def _on_border(coord: HexCoord, w: int, h: int) -> bool:
+    """True for hexes on the grid edge, which drain off the map.
+
+    A border hex is a valid terminal even when its own steepest descent points back
+    inland (see `_flow_direction`), so path tracing must stop *on* it rather than follow
+    it inward — including when a path starts there.
+    """
+    q, r = coord
+    return q == 0 or q == w - 1 or r == 0 or r == h - 1
+
+
 class HydrologyStage(GeneratorStage):
     def run(self, state: WorldState) -> WorldState:
         w, h = state.width, state.height
@@ -361,6 +372,10 @@ class HydrologyStage(GeneratorStage):
             current = start
 
             while True:
+                # Tested at the top of the loop so a headwater that already sits on the
+                # border terminates too, instead of being traced back inland.
+                if _on_border(current, w, h):
+                    break
                 ds = flow_dir.get(current)
                 if ds is None:
                     break
@@ -371,12 +386,6 @@ class HydrologyStage(GeneratorStage):
                     break
                 path.append(ds)
                 visited_path.add(ds)
-                # A border hex is a valid map-edge drain even if its own steepest
-                # descent points back inland (see _flow_direction) — stop here rather
-                # than following it back into the interior.
-                dq, dr = ds
-                if dq == 0 or dq == w - 1 or dr == 0 or dr == h - 1:
-                    break
                 current = ds
 
             # If the path stalled without reaching ocean or a grid border, extend via
@@ -692,15 +701,16 @@ class HydrologyStage(GeneratorStage):
                 outflow_candidates = clean_candidates
             # Also keep the search from routing *through* any other still-active inflow
             # hex further along the path — same corruption risk as above, just not at
-            # the very first step.
-            inflow_avoid = {c for c in land if flow_dir.get(c) in component} - {
-                candidate for candidate in outflow_candidates
-            }
+            # the very first step.  Only the candidate currently being tried is exempt:
+            # subtracting the whole candidate list would, in the border_land fallback
+            # above, clear every perimeter inflow at once and let a route from one
+            # candidate rewire another.
+            active_inflows = {c for c in land if flow_dir.get(c) in component}
             extension: list[HexCoord] = []
             spillway: HexCoord | None = None
             for candidate in outflow_candidates:
                 extension = self._guided_path_to_ocean(
-                    candidate, filled, land, ocean, frozenset(), inflow_avoid, w, h
+                    candidate, filled, land, ocean, frozenset(), active_inflows - {candidate}, w, h
                 )
                 if extension:
                     spillway = candidate
@@ -749,6 +759,10 @@ class HydrologyStage(GeneratorStage):
                 seen = {prev}
                 tail = prev
                 while True:
+                    # Tested at the top so a merge point already on the border stops
+                    # here, rather than following its inland-pointing flow_dir.
+                    if _on_border(tail, w, h):
+                        break
                     ds = flow_dir.get(tail)
                     if ds is None or ds in seen:
                         break
@@ -757,11 +771,6 @@ class HydrologyStage(GeneratorStage):
                     if ds not in land:
                         break
                     acc[ds] = max(acc.get(ds, 0.0), acc.get(tail, 0.0))
-                    # Border hexes are valid map-edge drains even if their own
-                    # steepest descent points back inland (see _flow_direction).
-                    dq, dr = ds
-                    if dq == 0 or dq == w - 1 or dr == 0 or dr == h - 1:
-                        break
                     tail = ds
             river_set.add(spillway)
             spillway_acc = max(acc.get(spillway, 0.0), 1.0)

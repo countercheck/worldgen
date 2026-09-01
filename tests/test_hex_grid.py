@@ -1,5 +1,12 @@
 from worldgen.core.hex import Hex, TerrainClass
-from worldgen.core.hex_grid import astar, distance, grade_reachable_count, neighbors, ring
+from worldgen.core.hex_grid import (
+    astar,
+    distance,
+    grade_reachable_count,
+    neighbors,
+    ring,
+    split_path_on_water,
+)
 
 
 def test_neighbor_distance():
@@ -93,3 +100,74 @@ def test_grade_reachable_count_start_water():
     grid = {(0, 0): Hex(coord=(0, 0), terrain_class=TerrainClass.OCEAN)}
     count = grade_reachable_count((0, 0), grid, lambda a, b: True, max_count=100)
     assert count == 0
+
+
+# --- split_path_on_water -----------------------------------------------------
+
+
+def _water_grid(water: set, length: int = 6) -> dict:
+    """A straight run of hexes (q, 0), with the given q values made into water."""
+    return {
+        (q, 0): Hex(
+            coord=(q, 0),
+            terrain_class=TerrainClass.OCEAN if q in water else TerrainClass.FLAT,
+        )
+        for q in range(length)
+    }
+
+
+def _path(length: int = 6) -> list:
+    return [(q, 0) for q in range(length)]
+
+
+def test_split_path_no_water_returns_whole_path():
+    grid = _water_grid(set())
+    assert split_path_on_water(_path(), grid) == [_path()]
+
+
+def test_split_path_drops_the_water_hexes():
+    """Water hexes are removed, not merely used as separators."""
+    grid = _water_grid({2, 3})
+    assert split_path_on_water(_path(), grid) == [[(0, 0), (1, 0)], [(4, 0), (5, 0)]]
+
+
+def test_split_path_multiple_water_runs():
+    grid = _water_grid({2, 5}, length=8)
+    segments = split_path_on_water(_path(8), grid)
+    assert segments == [[(0, 0), (1, 0)], [(3, 0), (4, 0)], [(6, 0), (7, 0)]]
+
+
+def test_split_path_leading_and_trailing_water():
+    grid = _water_grid({0, 1, 4, 5})
+    assert split_path_on_water(_path(), grid) == [[(2, 0), (3, 0)]]
+
+
+def test_split_path_drops_single_hex_runs():
+    """A one-hex run cannot be drawn as a polyline, so it is discarded.
+
+    Water at index 1 leaves (0,0) stranded alone; only the longer run survives.
+    """
+    grid = _water_grid({1})
+    assert split_path_on_water(_path(), grid) == [[(2, 0), (3, 0), (4, 0), (5, 0)]]
+
+
+def test_split_path_all_water_returns_nothing():
+    grid = _water_grid({0, 1, 2, 3, 4, 5})
+    assert split_path_on_water(_path(), grid) == []
+
+
+def test_split_path_lake_counts_as_water():
+    grid = _water_grid(set())
+    grid[(2, 0)] = Hex(coord=(2, 0), terrain_class=TerrainClass.LAKE)
+    assert split_path_on_water(_path(), grid) == [[(0, 0), (1, 0)], [(3, 0), (4, 0), (5, 0)]]
+
+
+def test_split_path_keeps_coords_missing_from_the_grid():
+    """An off-grid coord has no terrain to judge, so it is kept rather than cut on."""
+    grid = _water_grid(set())
+    del grid[(2, 0)]
+    assert split_path_on_water(_path(), grid) == [_path()]
+
+
+def test_split_path_empty_input():
+    assert split_path_on_water([], _water_grid(set())) == []

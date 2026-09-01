@@ -24,6 +24,43 @@ CORNERS = ("top-right", "bottom-left")
 
 
 @dataclass(frozen=True)
+class Metrics:
+    """Panel geometry, derived from the row list and the exporter's text measurement.
+
+    Computed before the canvas is sized so an exporter can grow a small canvas to fit the
+    panel; a clamp alone cannot rescue a panel larger than the image it sits in.
+    """
+
+    glyph: float  # side of a row's square glyph box
+    font: float
+    row_h: float
+    inner: float  # padding between the panel border and its content
+    gap: float  # between a glyph and its label
+    title_h: float
+    width: float
+    height: float
+
+
+def metrics(hex_size: float, scale: float, n_rows: int, label_w: float, title_w: float) -> Metrics:
+    """Panel geometry for *n_rows* rows whose widest label measures *label_w*."""
+    g = hex_size * scale
+    font = g * 0.8
+    inner = g * 0.7
+    gap = g * 0.6
+    title_h = font * 2.0
+    return Metrics(
+        glyph=g,
+        font=font,
+        row_h=g * 1.5,
+        inner=inner,
+        gap=gap,
+        title_h=title_h,
+        width=max(inner * 2 + g + gap + label_w, inner * 2 + title_w),
+        height=inner * 2 + title_h + n_rows * g * 1.5,
+    )
+
+
+@dataclass(frozen=True)
 class LegendRow:
     """One legend entry.
 
@@ -130,16 +167,20 @@ def placement(
     """
     root3 = math.sqrt(3)
     offsets = [py - px / root3 for px, py in (axial_to_pixel(c, hex_size) for c in ws.hexes)]
-    half_hex = root3 / 2 * hex_size
+    # How far a hex's own polygon reaches past its centre along d, i.e. the support of a
+    # flat-top hexagon in that direction.  Maximising `sin θ - cos θ / sqrt(3)` over the
+    # vertices at 0°..300° gives 2/sqrt(3), not the sqrt(3)/2 half-height — using the
+    # half-height under-reserves by 0.29 * hex_size and lets small panels clip terrain.
+    hex_support = 2 / root3 * hex_size
 
     if corner == "bottom-left":
         x = float(padding)
         # Binding corner is the panel's top-right: it must clear the lower diagonal.
-        y = oy + (x + panel_w - ox) / root3 + max(offsets) + half_hex + margin
+        y = oy + (x + panel_w - ox) / root3 + max(offsets) + hex_support + margin
     else:  # "top-right"
         x = float(max(padding, canvas_w - padding - panel_w))
         # Binding corner is the panel's bottom-left: it must clear the upper diagonal.
-        y = oy + (x - ox) / root3 + min(offsets) - half_hex - margin - panel_h
+        y = oy + (x - ox) / root3 + min(offsets) - hex_support - margin - panel_h
 
     x = min(max(x, padding), max(padding, canvas_w - padding - panel_w))
     y = min(max(y, padding), max(padding, canvas_h - padding - panel_h))

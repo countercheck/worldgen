@@ -281,3 +281,16 @@ def test_legend_rejects_nonpositive_scale():
 def test_legend_skipped_for_empty_world():
     img = render(WorldState(seed=1, width=0, height=0))
     assert img.size == (1, 1)
+
+
+def test_legend_fits_a_canvas_smaller_than_itself():
+    """A 4x4 map is smaller than its own legend; the canvas must grow to fit the panel."""
+    ws = _small_world()
+    with_legend = render(ws)
+    without = render(ws, PNGConfig(layers=PNGConfig().layers - {"legend"}))
+    box = _panel_bbox(with_legend, without)
+    assert box is not None
+    # getbbox() is clipped to the image, so an overflowing panel shows up as a panel that
+    # runs to the very edge; require the drawn panel to end inside the canvas instead.
+    assert box[2] < with_legend.width and box[3] < with_legend.height
+    assert with_legend.height > without.height  # canvas grew to make room
