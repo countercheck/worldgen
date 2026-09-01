@@ -115,11 +115,27 @@ save(state, "custom.svg", SVGConfig(
 |---|---|---|
 | `style` | `"atlas"` | `"atlas"`, `"topographic"`, `"wargame"` |
 | `color_mode` | `"biome"` | `"biome"`, `"terrain"`, `"land_cover"`, `"elevation"` |
-| `layers` | all | any subset of `{"terrain", "rivers", "roads", "settlements", "labels", "grid"}` |
+| `layers` | all | any subset of `{"terrain", "rivers", "roads", "settlements", "labels", "grid", "legend"}` |
 | `hex_size` | `12.0` | pixels per hex |
 | `padding` | `20` | border padding in pixels |
+| `legend_corner` | `"top-right"` | `"top-right"`, `"bottom-left"` |
+| `legend_scale` | `1.0` | legend size as a multiple of `hex_size` |
 
-`style` is a shortcut that sets `color_mode` and `layers` together: `"topographic"` forces elevation coloring with terrain + rivers + grid; `"wargame"` forces terrain coloring with roads + settlements + grid. For `"topographic"` and `"wargame"`, the `color_mode` and `layers` values are fixed by the style and any explicitly provided values are ignored. Only `"atlas"` (the default) uses the `color_mode` and `layers` you provide.
+`style` is a shortcut that sets `color_mode` and `layers` together: `"topographic"` forces elevation coloring with terrain + rivers + grid; `"wargame"` forces terrain coloring with roads + settlements + grid. Both include the legend. For `"topographic"` and `"wargame"`, the `color_mode` and `layers` values are fixed by the style and any explicitly provided values are ignored. Only `"atlas"` (the default) uses the `color_mode` and `layers` you provide.
+
+### Legend
+
+The `"legend"` layer draws a key for whatever the map actually contains — fill categories
+for the active `color_mode`, plus rows for rivers, each road tier present, and each
+settlement tier present. Symbols are drawn with the same code as the map itself, so they
+always match.
+
+Because the axial-to-pixel transform shears the grid into a parallelogram, a rectangular
+hex map leaves large empty triangles at the top-right and bottom-left of the canvas. The
+legend is placed flush against the map's edge inside one of them (`legend_corner`), so it
+never covers terrain. On maps too narrow for it to fit, the panel is clamped into the
+corner and its opaque backing keeps it readable. The legend scales with `hex_size`; bump
+`legend_scale` to enlarge it on big exports.
 
 ## Presets
 

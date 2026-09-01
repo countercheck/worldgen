@@ -239,3 +239,183 @@ def test_contours_reject_nonpositive_max_crossings():
     ws = _small_world()
     with pytest.raises(ValueError, match="contour_max_crossings must be positive"):
         render(ws, SVGConfig(layers={"contours"}, contour_max_crossings=0))
+
+
+# --- legend ------------------------------------------------------------------
+
+
+def _legend_panel(svg: str) -> tuple[float, float, float, float]:
+    """(x, y, width, height) of the legend's backing panel."""
+    import re
+
+    body = svg.split('<g id="layer-legend">')[1]
+    m = re.search(r'<rect x="([\d.]+)" y="([\d.]+)" width="([\d.]+)" height="([\d.]+)"', body)
+    assert m is not None, "legend panel rect not found"
+    return tuple(float(v) for v in m.groups())  # type: ignore[return-value]
+
+
+def _terrain_boxes(svg: str) -> list[tuple[float, float, float, float]]:
+    """Bounding box per drawn hex, as (min_x, min_y, max_x, max_y)."""
+    import re
+
+    body = svg.split('<g id="layer-terrain">')[1].split("</g>")[0]
+    boxes = []
+    for pts in re.findall(r'<polygon points="([^"]+)"', body):
+        xs = [float(p.split(",")[0]) for p in pts.split()]
+        ys = [float(p.split(",")[1]) for p in pts.split()]
+        boxes.append((min(xs), min(ys), max(xs), max(ys)))
+    return boxes
+
+
+def _sheared_world() -> WorldState:
+    """A world wide enough that the axial shear opens up real corner space."""
+    ws = WorldState.empty(seed=7, width=32, height=32)
+    ws.rivers = [River(hexes=[(0, 0), (1, 0), (2, 0)], flow_volume=1.5)]
+    ws.roads = [Road(path=[(1, 1), (2, 1), (3, 1)], tier=RoadTier.PRIMARY)]
+    ws.settlements = [
+        Settlement(
+            coord=(4, 4),
+            tier=SettlementTier.CITY,
+            role=SettlementRole.MARKET,
+            population=5000,
+            name="Ironhaven",
+        )
+    ]
+    return ws
+
+
+def test_legend_layer_present_by_default():
+    svg = render(_small_world())
+    assert 'id="layer-legend"' in svg
+    assert ">Legend</text>" in svg
+
+
+def test_legend_layer_can_be_disabled():
+    svg = render(_small_world(), SVGConfig(layers={"terrain"}))
+    assert 'id="layer-legend"' not in svg
+
+
+@pytest.mark.parametrize("corner", ["top-right", "bottom-left"])
+def test_legend_sits_in_empty_corner(corner):
+    """The panel must not cover any hex — that is the whole point of corner placement."""
+    ws = _sheared_world()
+    svg = render(ws, SVGConfig(legend_corner=corner))
+    lx, ly, lw, lh = _legend_panel(svg)
+    overlapping = [
+        b
+        for b in _terrain_boxes(svg)
+        if b[2] > lx and b[0] < lx + lw and b[3] > ly and b[1] < ly + lh
+    ]
+    assert not overlapping, f"legend panel covers {len(overlapping)} hexes in the {corner} corner"
+
+
+@pytest.mark.parametrize("corner", ["top-right", "bottom-left"])
+def test_legend_hugs_the_map_edge(corner):
+    """Clearing the diagonal is not enough — the panel must also stay next to the map.
+
+    The empty triangle is enormous on a wide map, so simply jamming the panel into the
+    canvas corner would leave it stranded thousands of pixels from any hex.  The panel is
+    placed flush against the bounding diagonal instead; this pins that gap to roughly the
+    one-hex margin the placement reserves.
+    """
+    ws = _sheared_world()
+    hex_size = 12.0
+    svg = render(ws, SVGConfig(hex_size=hex_size, legend_corner=corner))
+    lx, ly, lw, lh = _legend_panel(svg)
+    # Hexes in the same columns as the panel, i.e. the ones it is placed against.
+    under = [b for b in _terrain_boxes(svg) if b[2] > lx and b[0] < lx + lw]
+    assert under, "no hexes share the legend's columns"
+    gap = (
+        min(b[1] for b in under) - (ly + lh)
+        if corner == "top-right"
+        else ly - max(b[3] for b in under)
+    )
+    assert gap > 0, f"legend panel is not clear of the map ({gap:.1f}px)"
+    assert gap < 4 * hex_size, f"legend panel is adrift, {gap:.1f}px from the nearest hex"
+
+
+@pytest.mark.parametrize("corner", ["top-right", "bottom-left"])
+def test_legend_stays_inside_canvas(corner):
+    import re
+
+    ws = _sheared_world()
+    svg = render(ws, SVGConfig(legend_corner=corner))
+    cw, ch = (int(v) for v in re.search(r'width="(\d+)" height="(\d+)"', svg).groups())
+    lx, ly, lw, lh = _legend_panel(svg)
+    assert lx >= 0 and ly >= 0
+    assert lx + lw <= cw and ly + lh <= ch
+
+
+def test_legend_corners_are_on_opposite_sides():
+    ws = _sheared_world()
+    tr = _legend_panel(render(ws, SVGConfig(legend_corner="top-right")))
+    bl = _legend_panel(render(ws, SVGConfig(legend_corner="bottom-left")))
+    assert tr[0] > bl[0]  # top-right is further right
+    assert tr[1] < bl[1]  # top-right is further up
+
+
+def test_legend_lists_only_road_tiers_present():
+    ws = _small_world()  # PRIMARY only
+    body = render(ws).split('<g id="layer-legend">')[1]
+    assert "Primary road" in body
+    assert "Secondary road" not in body
+    assert "Track road" not in body
+
+
+def test_legend_lists_settlement_tiers_present():
+    body = render(_small_world()).split('<g id="layer-legend">')[1]
+    for label in ("City", "Town", "Village"):
+        assert f">{label}</text>" in body
+
+
+def test_legend_omits_rows_for_disabled_layers():
+    ws = _small_world()
+    body = render(ws, SVGConfig(layers={"terrain", "legend"})).split('<g id="layer-legend">')[1]
+    assert "Primary road" not in body
+    assert ">River</text>" not in body
+    assert ">City</text>" not in body
+
+
+def test_legend_uses_elevation_ramp_in_topographic_style():
+    ws = _small_world()
+    body = render(ws, SVGConfig(style="topographic")).split('<g id="layer-legend">')[1]
+    assert "elevation" in body  # the ramp row, not per-category swatches
+    assert ">Grassland</text>" not in body
+
+
+def test_legend_biome_categories_reflect_world_content():
+    ws = _small_world()
+    body = render(ws).split('<g id="layer-legend">')[1]
+    assert ">Grassland</text>" in body  # the one biome set in _small_world
+    assert ">Desert</text>" not in body
+
+
+def test_legend_scale_grows_the_panel():
+    ws = _sheared_world()
+    small = _legend_panel(render(ws, SVGConfig(legend_scale=1.0)))
+    large = _legend_panel(render(ws, SVGConfig(legend_scale=2.0)))
+    assert large[2] > small[2] and large[3] > small[3]
+
+
+def test_legend_symbols_match_map_symbols():
+    """Legend glyphs come from the same helper as the map, so a city is a gold star."""
+    ws = _small_world()
+    body = render(ws).split('<g id="layer-legend">')[1]
+    assert 'fill="gold"' in body  # city star
+    assert "#5c3d1e" in body  # PRIMARY road color, same as the roads layer
+    assert "#3a78c9" in body  # river blue, same as the rivers layer
+
+
+def test_legend_rejects_unknown_corner():
+    with pytest.raises(ValueError, match="legend_corner must be"):
+        render(_small_world(), SVGConfig(legend_corner="middle"))
+
+
+def test_legend_rejects_nonpositive_scale():
+    with pytest.raises(ValueError, match="legend_scale must be positive"):
+        render(_small_world(), SVGConfig(legend_scale=0))
+
+
+def test_legend_skipped_for_empty_world():
+    svg = render(WorldState(seed=1, width=0, height=0))
+    assert 'id="layer-legend"' not in svg
