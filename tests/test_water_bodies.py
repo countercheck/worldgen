@@ -162,26 +162,36 @@ def test_lake_chain_terminates(world):
     hex_to_lake_idx = {c: i for i, comp in enumerate(lake_comps) for c in comp}
 
     def follow_river_to_water(start, current_comp):
-        """BFS from *start* through river hexes; return 'ocean', 'border', lake_idx, or None."""
+        """BFS from *start* through river hexes toward water.
+
+        Returns ("ocean"/"border", set()) on reaching an unambiguous terminal, or
+        (None, lake_indices) with every other lake reached along the way. A hex can
+        sit right on the shore of more than one lake at once (small lakes are often
+        clustered together) — treating the first such sighting as a hard stop would
+        prematurely abandon a path that actually continues on to a real terminal, so
+        exploration keeps going instead of returning immediately on the first lake hit.
+        """
         visited = set(current_comp) | {start}
         queue = deque([start])
+        found_lakes: set[int] = set()
         while queue:
             coord = queue.popleft()
             cq, cr = coord
             if cq == 0 or cq == w - 1 or cr == 0 or cr == h - 1:
-                return "border"
+                return "border", found_lakes
             for nbr in neighbors(coord):
                 if nbr not in world.hexes or nbr in visited:
                     continue
                 nhx = world.hexes[nbr]
                 if nhx.terrain_class == TerrainClass.OCEAN:
-                    return "ocean"
+                    return "ocean", found_lakes
                 if nbr in hex_to_lake_idx:
-                    return hex_to_lake_idx[nbr]
+                    found_lakes.add(hex_to_lake_idx[nbr])
+                    continue
                 if nbr in land and "river" in nhx.tags:
                     visited.add(nbr)
                     queue.append(nbr)
-        return None
+        return None, found_lakes
 
     for start_idx, start_comp in enumerate(lake_comps):
         visited_lakes: set[int] = {start_idx}
@@ -198,13 +208,14 @@ def test_lake_chain_terminates(world):
                 if nbr in land and "river" in world.hexes[nbr].tags
             ]
             for r in border_rivers:
-                result = follow_river_to_water(r, comp)
+                result, found_lakes = follow_river_to_water(r, comp)
                 if result in ("ocean", "border"):
                     found_terminal = True
                     break
-                if isinstance(result, int) and result not in visited_lakes:
-                    visited_lakes.add(result)
-                    queue.append(result)
+                for lake_idx in found_lakes:
+                    if lake_idx not in visited_lakes:
+                        visited_lakes.add(lake_idx)
+                        queue.append(lake_idx)
 
         assert found_terminal, (
             f"LAKE component {start_idx} (size {len(start_comp)}) outflow chain "
