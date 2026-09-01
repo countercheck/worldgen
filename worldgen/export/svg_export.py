@@ -151,11 +151,29 @@ def _legend_glyph(row: legend.LegendRow, cx: float, cy: float, g: float, color_m
     )
 
 
+def _legend_metrics(config: SVGConfig, rows: list[legend.LegendRow]) -> legend.Metrics:
+    """Panel geometry from an advance-width estimate.
+
+    Measured against DejaVu Sans, the widest legend labels come in around 0.55 em/char;
+    0.6 leaves headroom for a wider substitute font rather than letting text spill past
+    the panel edge.  (The PNG exporter measures glyphs exactly instead.)
+    """
+    font = config.hex_size * config.legend_scale * 0.8
+    return legend.metrics(
+        config.hex_size,
+        config.legend_scale,
+        len(rows),
+        label_w=max(len(row.label) for row in rows) * font * 0.6,
+        title_w=len("Legend") * font * 0.62,
+    )
+
+
 def _legend_svg(
     ws: WorldState,
     config: SVGConfig,
+    rows: list[legend.LegendRow],
+    m: legend.Metrics,
     color_mode: str,
-    layers: set[str],
     ox: float,
     oy: float,
     w: int,
@@ -163,27 +181,8 @@ def _legend_svg(
 ) -> list[str]:
     """Legend panel tucked into one of the two empty corners of the canvas.
 
-    Row selection and panel placement live in `legend`; this only draws them.
+    Row selection, panel geometry and placement live in `legend`; this only draws them.
     """
-    legend.validate(config.legend_corner, config.legend_scale)
-    rows = legend.rows(ws, color_mode, layers)
-    if not rows:
-        return []
-
-    g = config.hex_size * config.legend_scale  # glyph box side
-    font = g * 0.8
-    row_h = g * 1.5
-    inner = g * 0.7
-    gap = g * 0.6
-    title_h = font * 2.0
-
-    # Advance-width estimate. Measured against DejaVu Sans, the widest legend labels come
-    # in around 0.55 em/char; 0.6 leaves headroom for a wider substitute font rather than
-    # letting text spill past the panel edge.
-    text_w = max(len(row.label) for row in rows) * font * 0.6
-    pw = max(inner * 2 + g + gap + text_w, inner * 2 + len("Legend") * font * 0.62)
-    ph = inner * 2 + title_h + len(rows) * row_h
-
     x, y = legend.placement(
         ws,
         config.hex_size,
@@ -193,25 +192,26 @@ def _legend_svg(
         oy,
         w,
         h,
-        pw,
-        ph,
-        margin=g,
+        m.width,
+        m.height,
+        margin=m.glyph,
         axial_to_pixel=axial_to_pixel,
     )
 
     out = [
         '  <g id="layer-legend">',
-        f'    <rect x="{x:.2f}" y="{y:.2f}" width="{pw:.2f}" height="{ph:.2f}" rx="{g / 3:.2f}"'
+        f'    <rect x="{x:.2f}" y="{y:.2f}" width="{m.width:.2f}" height="{m.height:.2f}"'
+        f' rx="{m.glyph / 3:.2f}"'
         f' fill="#ffffff" fill-opacity="0.92" stroke="#333333" stroke-width="1"/>',
-        f'    <text x="{x + inner:.2f}" y="{y + inner + font:.2f}" font-family="sans-serif"'
-        f' font-size="{font:.2f}" font-weight="bold" fill="black">Legend</text>',
+        f'    <text x="{x + m.inner:.2f}" y="{y + m.inner + m.font:.2f}" font-family="sans-serif"'
+        f' font-size="{m.font:.2f}" font-weight="bold" fill="black">Legend</text>',
     ]
     for i, row in enumerate(rows):
-        cy = y + inner + title_h + i * row_h + row_h / 2
-        out.append(f"    {_legend_glyph(row, x + inner + g / 2, cy, g, color_mode)}")
+        cy = y + m.inner + m.title_h + i * m.row_h + m.row_h / 2
+        out.append(f"    {_legend_glyph(row, x + m.inner + m.glyph / 2, cy, m.glyph, color_mode)}")
         out.append(
-            f'    <text x="{x + inner + g + gap:.2f}" y="{cy + font * 0.35:.2f}"'
-            f' font-family="sans-serif" font-size="{font:.2f}" fill="black">'
+            f'    <text x="{x + m.inner + m.glyph + m.gap:.2f}" y="{cy + m.font * 0.35:.2f}"'
+            f' font-family="sans-serif" font-size="{m.font:.2f}" fill="black">'
             f"{_xml_escape(row.label)}</text>"
         )
     out.append("  </g>")
@@ -249,6 +249,18 @@ def render(ws: WorldState, config: SVGConfig | None = None) -> str:
     oy = -min_y + pad
     w = math.ceil(max_x - min_x + 2 * pad)
     h = math.ceil(max_y - min_y + 2 * pad)
+
+    # Size the legend before the canvas: on a small map the panel can be larger than the
+    # map itself, and clamping alone would just crop it. Grow the canvas to fit instead.
+    legend_rows: list[legend.LegendRow] = []
+    legend_m: legend.Metrics | None = None
+    if "legend" in layers:
+        legend.validate(config.legend_corner, config.legend_scale)
+        legend_rows = legend.rows(ws, color_mode, layers)
+        if legend_rows:
+            legend_m = _legend_metrics(config, legend_rows)
+            w = max(w, math.ceil(legend_m.width + 2 * pad))
+            h = max(h, math.ceil(legend_m.height + 2 * pad))
 
     out = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}">'
@@ -371,8 +383,8 @@ def render(ws: WorldState, config: SVGConfig | None = None) -> str:
         out.append("  </g>")
 
     # Legend last so it paints over anything that reaches into the corner.
-    if "legend" in layers:
-        out.extend(_legend_svg(ws, config, color_mode, layers, ox, oy, w, h))
+    if legend_m is not None:
+        out.extend(_legend_svg(ws, config, legend_rows, legend_m, color_mode, ox, oy, w, h))
 
     out.append("</svg>")
     return "\n".join(out)

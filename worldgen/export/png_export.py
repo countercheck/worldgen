@@ -145,12 +145,40 @@ def _draw_legend_glyph(draw: ImageDraw.ImageDraw, row, cx, cy, g: float, color_m
         draw.line([(cx - g / 2, cy), (cx + g / 2, cy)], fill=(58, 120, 201), width=2)
 
 
+def _legend_font(config: PNGConfig):
+    font_px = max(8, round(config.hex_size * config.legend_scale * 0.8))
+    try:
+        return ImageFont.load_default(size=font_px)
+    except (TypeError, AttributeError, OSError):
+        # Pillow < 10.1 has no scalable default; fall back to the fixed bitmap font.
+        return ImageFont.load_default()
+
+
+def _legend_metrics(config: PNGConfig, rows: list[legend.LegendRow], font) -> legend.Metrics:
+    """Panel geometry from exact glyph measurement — PIL can measure, so no estimate."""
+    scratch = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+
+    def text_w(text: str) -> float:
+        bbox = scratch.textbbox((0, 0), text, font=font)
+        return bbox[2] - bbox[0]
+
+    return legend.metrics(
+        config.hex_size,
+        config.legend_scale,
+        len(rows),
+        label_w=max(text_w(row.label) for row in rows),
+        title_w=text_w("Legend"),
+    )
+
+
 def _draw_legend(
     draw: ImageDraw.ImageDraw,
     ws: WorldState,
     config: PNGConfig,
+    rows: list[legend.LegendRow],
+    m: legend.Metrics,
+    font,
     color_mode: str,
-    layers: set[str],
     ox: float,
     oy: float,
     pad: float,
@@ -159,36 +187,8 @@ def _draw_legend(
 ) -> None:
     """Legend panel tucked into one of the two empty corners of the canvas.
 
-    Row selection and panel placement live in `legend`; this only draws them.  Unlike the
-    SVG exporter this can measure text exactly, so the panel is sized to fit rather than
-    to an advance-width estimate.
+    Row selection, panel geometry and placement live in `legend`; this only draws them.
     """
-    legend.validate(config.legend_corner, config.legend_scale)
-    rows = legend.rows(ws, color_mode, layers)
-    if not rows:
-        return
-
-    g = config.hex_size * config.legend_scale  # glyph box side
-    font_px = max(8, round(g * 0.8))
-    try:
-        font = ImageFont.load_default(size=font_px)
-    except (TypeError, AttributeError, OSError):
-        # Pillow < 10.1 has no scalable default; fall back to the fixed bitmap font.
-        font = ImageFont.load_default()
-
-    row_h = g * 1.5
-    inner = g * 0.7
-    gap = g * 0.6
-    title_h = font_px * 2.0
-
-    def measure(text: str) -> tuple[float, float]:
-        bbox = draw.textbbox((0, 0), text, font=font)
-        return bbox[2] - bbox[0], bbox[3] - bbox[1]
-
-    text_w = max(measure(row.label)[0] for row in rows)
-    pw = max(inner * 2 + g + gap + text_w, inner * 2 + measure("Legend")[0])
-    ph = inner * 2 + title_h + len(rows) * row_h
-
     x, y = legend.placement(
         ws,
         config.hex_size,
@@ -198,20 +198,22 @@ def _draw_legend(
         oy,
         width,
         height,
-        pw,
-        ph,
-        margin=g,
+        m.width,
+        m.height,
+        margin=m.glyph,
         axial_to_pixel=axial_to_pixel,
     )
 
-    draw.rectangle([x, y, x + pw, y + ph], fill=(255, 255, 255), outline=(51, 51, 51), width=1)
-    draw.text((x + inner, y + inner), "Legend", fill=(0, 0, 0), font=font)
+    draw.rectangle(
+        [x, y, x + m.width, y + m.height], fill=(255, 255, 255), outline=(51, 51, 51), width=1
+    )
+    draw.text((x + m.inner, y + m.inner), "Legend", fill=(0, 0, 0), font=font)
     for i, row in enumerate(rows):
-        cy = y + inner + title_h + i * row_h + row_h / 2
-        _draw_legend_glyph(draw, row, x + inner + g / 2, cy, g, color_mode)
+        cy = y + m.inner + m.title_h + i * m.row_h + m.row_h / 2
+        _draw_legend_glyph(draw, row, x + m.inner + m.glyph / 2, cy, m.glyph, color_mode)
         bbox = draw.textbbox((0, 0), row.label, font=font)
         draw.text(
-            (x + inner + g + gap, cy - (bbox[3] - bbox[1]) / 2 - bbox[1]),
+            (x + m.inner + m.glyph + m.gap, cy - (bbox[3] - bbox[1]) / 2 - bbox[1]),
             row.label,
             fill=(0, 0, 0),
             font=font,
@@ -249,6 +251,20 @@ def render(ws: WorldState, config: PNGConfig | None = None) -> Image.Image:
     oy = -min_y + pad
     width = math.ceil(max_x - min_x + 2 * pad)
     height = math.ceil(max_y - min_y + 2 * pad)
+
+    # Size the legend before the canvas: on a small map the panel can be larger than the
+    # map itself, and clamping alone would just crop it. Grow the canvas to fit instead.
+    legend_rows: list[legend.LegendRow] = []
+    legend_m: legend.Metrics | None = None
+    legend_font = None
+    if "legend" in layers:
+        legend.validate(config.legend_corner, config.legend_scale)
+        legend_rows = legend.rows(ws, color_mode, layers)
+        if legend_rows:
+            legend_font = _legend_font(config)
+            legend_m = _legend_metrics(config, legend_rows, legend_font)
+            width = max(width, math.ceil(legend_m.width + 2 * pad))
+            height = max(height, math.ceil(legend_m.height + 2 * pad))
 
     img = Image.new("RGB", (width, height), (255, 255, 255))
     draw = ImageDraw.Draw(img)
@@ -346,8 +362,21 @@ def render(ws: WorldState, config: PNGConfig | None = None) -> Image.Image:
             draw.text((cx - tw // 2, cy - int(size) - th - 2), s.name, fill=(0, 0, 0), font=font)
 
     # Legend last so it paints over anything that reaches into the corner.
-    if "legend" in layers:
-        _draw_legend(draw, ws, config, color_mode, layers, ox, oy, pad, width, height)
+    if legend_m is not None:
+        _draw_legend(
+            draw,
+            ws,
+            config,
+            legend_rows,
+            legend_m,
+            legend_font,
+            color_mode,
+            ox,
+            oy,
+            pad,
+            width,
+            height,
+        )
 
     return img
 

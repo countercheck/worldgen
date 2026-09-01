@@ -50,23 +50,23 @@ Outputs go to `./output/` by default:
 output/
 ├── config.json          # WorldConfig used for this run
 ├── world.json           # full WorldState (JSON round-trip)
-├── elevation.png
-├── terrain_class.png
-├── river_flow.png
-├── temperature.png
-├── moisture.png
-├── biome.png
-├── habitability.png
-├── settlements.png
-├── roads.png
-├── land_cover.png
-└── cultivation.png
+├── elevation.svg
+├── terrain_class.svg
+├── river_flow.svg
+├── temperature.svg
+├── moisture.svg
+├── biome.svg
+├── habitability.svg
+├── settlements.svg
+├── roads.svg
+├── land_cover.svg
+└── cultivation.svg
 ```
 
 Re-render any attribute from a saved world without re-running the pipeline:
 
 ```bash
-worldgen render --input output/world.json --attribute biome --output biome.png
+worldgen render --input output/world.json --attribute biome --output biome.svg
 ```
 
 Available attributes: `elevation`, `terrain_class`, `river_flow`, `temperature`, `moisture`,
