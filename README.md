@@ -137,6 +137,10 @@ never covers terrain. On maps too narrow for it to fit, the panel is clamped int
 corner and its opaque backing keeps it readable. The legend scales with `hex_size`; bump
 `legend_scale` to enlarge it on big exports.
 
+`PNGConfig` takes the same `legend_corner` and `legend_scale` options, and also has
+`"legend"` in its default layers. Row selection and panel placement are shared between the
+two exporters in `worldgen/export/legend.py`; each one only draws the rows.
+
 ## Presets
 
 Presets are JSON files that override any subset of `WorldConfig` fields. Place them in a `presets/` directory and load with `--config`:
