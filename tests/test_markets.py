@@ -167,13 +167,10 @@ def test_market_count_tracks_the_surplus_on_offer():
     produces — the market count must rise with it.  The classic model would place exactly
     `target_town_count` on all five.
 
-    Deliberately phrased as "monotone in food" rather than naming which climate is
-    richest.  That ranking is a property of `food_value`, not of this stage, and the
-    surface currently rates an arid map above a temperate one: temperate land sits at
-    median moisture 0.68, past the wet edge of the agricultural tent at
-    `biome_wet_moist`, and its wetness pushes cover into dense forest, which scores
-    marginal.  Whether that is right is a question about the food surface; what this
-    stage owes is that it follows whatever surface it is given.
+    Phrased against measured food rather than against a list of climates in an assumed
+    order.  The ranking is a property of `food_value`, not of this stage, and what this
+    stage owes is that it follows whatever surface it is given — so the surface is
+    measured and the counts checked against it.
     """
     from worldgen.stages.habitability import food_value
 

@@ -60,19 +60,33 @@ class HydrologyStage(GeneratorStage):
         # C — Flow accumulation (topological sort)
         acc = self._flow_accumulation(flow_dir, land)
 
-        # D — Extract river hexes: top threshold fraction by flow accumulation count.
-        # Sorting by accumulation and slicing avoids tie-boundary over-selection that
-        # quantile + >= causes when many cells share the cutoff value.
+        # D — Extract river hexes: everywhere enough water passes to cut a channel.
+        #
+        # This used to take the top 5% of land by accumulation, which is a rank and not a
+        # threshold at all despite the name: every map came out with exactly 5.6% of its
+        # land under channel, desert and rainforest alike, and the smallest stream on both
+        # drained a single square kilometre. Rainfall had no bearing on how much of a
+        # region drained.
+        #
+        # A channel forms where discharge is enough to keep one open, and discharge is
+        # catchment area times runoff depth. Runoff is what is left of the rain after the
+        # ground and its plants have taken their share, which is why the relationship with
+        # climate is so much sharper than rainfall alone: a region getting 200 mm loses
+        # nearly all of it to evapotranspiration and supports almost no perennial channel,
+        # while one getting 2000 mm sheds most of it.
         land_acc_vals = list(acc.values())
         if not land_acc_vals:
             return state
-        threshold = max(0.0, min(1.0, self.config.river_flow_threshold))
-        if threshold == 0.0:
+        runoff_mm = self.config.runoff_mm(self.config.mean_precip_mm)
+        if runoff_mm <= 0.0 or self.config.channel_min_discharge <= 0.0:
             state.rivers = []
             return state
-        n_river = max(1, round(len(land_acc_vals) * threshold))
-        sorted_by_acc = sorted(acc.keys(), key=lambda c: acc[c], reverse=True)
-        river_set: set[HexCoord] = set(sorted_by_acc[:n_river])
+        min_catchment = self.config.channel_min_discharge / runoff_mm
+        river_set: set[HexCoord] = {c for c, a in acc.items() if a >= min_catchment}
+        if not river_set:
+            # However dry, the map keeps its single largest drainage line so that lakes
+            # still have somewhere to spill and the coast still has a river mouth.
+            river_set = {max(acc, key=lambda c: acc[c])}
 
         max_acc = max(land_acc_vals)
 

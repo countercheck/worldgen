@@ -77,7 +77,17 @@ erosion_delta_min_load: 0.15 # Sediment a droplet must still carry when it reach
 # ---------------------------------------------------------------------------
 # Hydrology
 # ---------------------------------------------------------------------------
-river_flow_threshold: 0.05  # Minimum flow volume (0–1) for a hex to be a river. Default: 0.05
+# A channel forms where enough water passes to keep one open: catchment area times runoff
+# depth. This replaced a threshold that was really a rank — the top 5% of land by
+# accumulation — which gave desert and rainforest alike 5.6% of their land under channel.
+channel_min_discharge: 20000.0   # Catchment km2 x runoff mm needed to cut a channel. Default: 20000
+navigable_min_discharge: 150000.0 # ...and to float a boat. Default: 150000
+# Rain the ground and its plants take before anything runs off. Rises with temperature,
+# which is why cold country sheds nearly all its rain and the taiga is full of rivers.
+evapotranspiration_base_mm: 50.0  # Taken even at freezing. Default: 50
+evapotranspiration_per_c_mm: 30.0 # ...plus this much per degree of mean temperature. Default: 30
+min_runoff_mm: 25.0               # Floor, so even a desert drains its largest valleys. Default: 25
+wetland_min_runoff_mm: 300.0      # Runoff above which flat riverside ground waterlogs. Default: 300
 
 # Lake drainage. Every lake is filled to its spillway and given an outflow, so water
 # that enters a basin has somewhere to go instead of accumulating forever.

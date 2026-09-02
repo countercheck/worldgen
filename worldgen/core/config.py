@@ -110,7 +110,29 @@ class WorldConfig:
     erosion_delta_min_load: float = 0.15
 
     # Hydrology
-    river_flow_threshold: float = 0.05
+    # A channel forms where enough water passes to keep one open. Discharge is
+    # catchment area times runoff depth, so this is in km2 x mm — the product of the
+    # two. It replaced a threshold that was really a rank: the top 5% of land by
+    # accumulation, which gave every map the same 5.6% of its land under channel
+    # whether it was desert or rainforest.
+    channel_min_discharge: float = 20000.0
+    # Rain the ground and its plants take before anything runs off. Evapotranspiration
+    # rises with temperature — that is most of what it is — so it is expressed as a base
+    # plus a rate per degree rather than a flat figure. A flat one gave a boreal region
+    # the same runoff as a desert, when cold country in fact sheds nearly all its rain;
+    # that is why the taiga is full of rivers on modest rainfall.
+    #   boreal      1 C   ->  80 mm taken of 450  ->  370 mm runs off
+    #   temperate  10 C   -> 350 mm taken of 800  ->  450 mm
+    #   arid       21 C   -> 680 mm taken of 200  ->  nothing but the floor
+    evapotranspiration_base_mm: float = 50.0
+    evapotranspiration_per_c_mm: float = 30.0
+    # A floor on runoff, so even a desert drains its largest valleys after a storm
+    # rather than having no watercourses at all.
+    min_runoff_mm: float = 25.0
+    # Runoff above which flat ground beside a river waterlogs into bog or marsh. A
+    # runoff test rather than a rainfall one: peat forms in cold country on modest rain,
+    # because so little of it evaporates away again.
+    wetland_min_runoff_mm: float = 300.0
     river_flow_continuous: bool = False  # True: river_flow on all draining land hexes
     moisture_bleed_passes: int = 0  # 0 = flat river bonus (default); >0 = elevation-gated bleed
     moisture_bleed_strength: float = 0.3
@@ -125,9 +147,26 @@ class WorldConfig:
     def __post_init__(self) -> None:
         self.wind_direction = _coerce_pair("wind_direction", self.wind_direction)
         self.elevation_gradient = _coerce_pair("elevation_gradient", self.elevation_gradient)
-        if not (0.0 <= self.river_flow_threshold <= 1.0):
+        if self.channel_min_discharge < 0:
             raise ValueError(
-                f"river_flow_threshold must be in [0, 1], got {self.river_flow_threshold}"
+                f"channel_min_discharge must be >= 0, got {self.channel_min_discharge}"
+            )
+        if self.evapotranspiration_base_mm < 0 or self.evapotranspiration_per_c_mm < 0:
+            raise ValueError(
+                "evapotranspiration terms must be >= 0, got "
+                f"{self.evapotranspiration_base_mm} and {self.evapotranspiration_per_c_mm}"
+            )
+        if self.wetland_min_runoff_mm < 0:
+            raise ValueError(
+                f"wetland_min_runoff_mm must be >= 0, got {self.wetland_min_runoff_mm}"
+            )
+        if self.min_runoff_mm < 0:
+            raise ValueError(f"min_runoff_mm must be >= 0, got {self.min_runoff_mm}")
+        if self.navigable_min_discharge < self.channel_min_discharge:
+            raise ValueError(
+                "navigable_min_discharge must be at least channel_min_discharge — a river "
+                "cannot float a boat where there is not enough water for a channel, got "
+                f"{self.navigable_min_discharge} and {self.channel_min_discharge}"
             )
         if not (0.0 <= self.moisture_resupply_per_hex <= 1.0):
             raise ValueError(
@@ -282,10 +321,6 @@ class WorldConfig:
                 "haulage_range_water_mult must be >= 1 (water cannot carry bulk less far "
                 f"than land), got {self.haulage_range_water_mult}"
             )
-        if not (0.0 <= self.navigable_river_flow <= 1.0):
-            raise ValueError(
-                f"navigable_river_flow must be in [0, 1], got {self.navigable_river_flow}"
-            )
         if not (0.0 < self.marketable_surplus_fraction <= 1.0):
             raise ValueError(
                 "marketable_surplus_fraction must be in (0, 1], got "
@@ -378,7 +413,10 @@ class WorldConfig:
     haulage_range_water_mult: float = 15.0
     # river_flow at or above which a river floats a boat. Below it a river is something
     # you ford, not something you ship grain down.
-    navigable_river_flow: float = 0.35
+    # Discharge at which a river will float a boat, in the same km2 x mm as
+    # channel_min_discharge. Well above it: most of a drainage net is wadeable
+    # headwater, and only the trunk carries cargo.
+    navigable_min_discharge: float = 150000.0
     # A farming household eats most of what it grows; only this share can leave for a
     # market. Sizing markets off the *surplus* rather than the production is why the tier
     # ratios come out right without target counts anywhere.
@@ -550,6 +588,21 @@ class WorldConfig:
     # Settlement placement
     settlement_min_reachable: int = 100  # min hexes reachable below cap grade
 
+    def runoff_mm(self, precip_mm: float, temp_c: float | None = None) -> float:
+        """How much of a year's rain runs off, rather than returning to the air.
+
+        What is left after evapotranspiration, floored so even a desert drains its
+        largest valleys after a storm. This is the term that makes drainage far more
+        climate-sensitive than rainfall alone, in both directions: the ground takes its
+        share off the top, and how big that share is depends on how warm it is. A cold
+        region sheds nearly everything that falls on it, which is why the taiga is full of
+        rivers on rainfall a Mediterranean hillside would call meagre.
+        """
+        if temp_c is None:
+            temp_c = self.mean_temperature_c
+        et = self.evapotranspiration_base_mm + self.evapotranspiration_per_c_mm * max(0.0, temp_c)
+        return max(self.min_runoff_mm, precip_mm - et)
+
     @classmethod
     def from_json(cls, path: str) -> "WorldConfig":
         """Load config from JSON file."""
@@ -633,6 +686,13 @@ _RETIRED_FIELDS: dict[str, str] = {
     "endorheic_marsh_min_moisture": (
         "moisture is measured in millimetres of annual rainfall now; use "
         "endorheic_marsh_min_precip_mm (try 300)"
+    ),
+    "river_flow_threshold": (
+        "channels are decided by discharge now, not by taking the top fraction of land by "
+        "accumulation; use channel_min_discharge (catchment km2 times runoff mm)"
+    ),
+    "navigable_river_flow": (
+        "navigability is decided by discharge now; use navigable_min_discharge"
     ),
     "erosion_iterations": (
         "erosion is now dosed per land hex so it means the same thing at any map size; "

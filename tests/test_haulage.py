@@ -28,10 +28,15 @@ def _strip(length, terrain=TerrainClass.FLAT):
     return {(q, 0): _hex((q, 0), terrain) for q in range(length)}
 
 
-def _river(hx, flow):
-    hx.river_flow = flow
+def _river(hx, catchment_km2):
+    hx.catchment_km2 = catchment_km2
     hx.tags.add("river")
     return hx
+
+
+def _catchment_for(cfg, discharge):
+    """The catchment area that yields *discharge* under this config's climate."""
+    return discharge / cfg.runoff_mm(cfg.mean_precip_mm)
 
 
 # --- usable_fraction ---------------------------------------------------------
@@ -77,18 +82,32 @@ def test_open_water_is_navigable():
 
 def test_a_big_river_floats_a_boat_and_a_headwater_does_not():
     cfg = WorldConfig()
-    big = _river(_hex((0, 0)), cfg.navigable_river_flow + 0.1)
-    trickle = _river(_hex((1, 0)), cfg.navigable_river_flow - 0.1)
+    big = _river(_hex((0, 0)), _catchment_for(cfg, cfg.navigable_min_discharge * 2))
+    trickle = _river(_hex((1, 0)), _catchment_for(cfg, cfg.navigable_min_discharge * 0.5))
     assert navigable(big, cfg)
     assert not navigable(trickle, cfg)
 
 
-def test_flow_without_the_river_tag_is_not_a_channel():
-    """`river_flow_continuous` puts flow on every draining hex; only the tag means channel."""
+def test_catchment_without_the_river_tag_is_not_a_channel():
+    """Every hex drains something; only the tag says a channel runs through it."""
     cfg = WorldConfig()
     hx = _hex((0, 0))
-    hx.river_flow = 1.0
+    hx.catchment_km2 = 1e6
     assert not navigable(hx, cfg)
+
+
+def test_a_dry_region_cannot_float_a_boat_on_the_same_river():
+    """The point of judging navigability on discharge rather than on rank.
+
+    The same catchment in an arid region sheds a fraction of what it sheds in a wet one,
+    and a rank-based test could never say so: every map has a widest river by
+    construction, so every map had a navigable one.
+    """
+    wet = WorldConfig(regional_climate="tropical")
+    dry = WorldConfig(regional_climate="arid")
+    hx = _river(_hex((0, 0)), _catchment_for(wet, wet.navigable_min_discharge * 1.5))
+    assert navigable(hx, wet)
+    assert not navigable(hx, dry)
 
 
 def test_water_multiplies_reach():

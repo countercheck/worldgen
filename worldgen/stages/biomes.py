@@ -59,12 +59,21 @@ class BiomeStage(GeneratorStage):
                 else:
                     h.biome = pick(Biome.TEMPERATE_FOREST, Biome.BOREAL, Biome.GRASSLAND)
 
-        # Assign WETLAND to flat or coastal river hexes with very high moisture (below alpine
-        # elevation).  FLAT → BOG, COAST → MARSH in LandCoverStage.
+        # Assign WETLAND to flat or coastal river hexes that cannot shed what falls on
+        # them.  FLAT → BOG, COAST → MARSH in LandCoverStage.
+        #
+        # Tested on runoff rather than on rainfall.  Waterlogging is not a question of how
+        # much rain arrives but of whether the ground can get rid of it: flat land beside
+        # a river, where what the sky delivers exceeds what the air takes back, holds a
+        # water table at the surface.  A rainfall test asked for more than the wet biome
+        # band, which on a temperate map at 800 mm almost nothing reaches, so bogs
+        # vanished entirely; and it would have called a cold region dry when cold country
+        # is exactly where peat forms, because so little of its rain evaporates away.
+        min_runoff = self.config.wetland_min_runoff_mm
         for h in state.hexes.values():
             if (
                 h.terrain_class in (TerrainClass.FLAT, TerrainClass.COAST)
-                and h.moisture > wet_moist
+                and self.config.runoff_mm(h.moisture, h.temperature) > min_runoff
                 and "river" in h.tags
                 and h.elevation <= alpine_elev
             ):

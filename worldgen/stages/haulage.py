@@ -45,12 +45,19 @@ def usable_fraction(cost: float, range_limit: float) -> float:
 def navigable(hx, cfg) -> bool:
     """True where a boat can carry bulk: open water, or a river big enough to float one.
 
-    Headwaters are not navigable at any period; the flow threshold is what separates a
-    stream you ford from a river you ship grain down.
+    Judged on discharge — catchment area times runoff depth — rather than on `river_flow`,
+    which is normalised against the largest accumulation on the map and so says only how
+    this river compares with its neighbours.  On the old test every map had a navigable
+    trunk by construction, however small its rivers really were.  Discharge means the same
+    thing everywhere: an arid region's biggest watercourse can now simply fail to float a
+    boat, which is the point.
     """
     if hx.terrain_class in WATER:
         return True
-    return is_river(hx) and hx.river_flow >= cfg.navigable_river_flow
+    if not is_river(hx):
+        return False
+    discharge = hx.catchment_km2 * cfg.runoff_mm(cfg.mean_precip_mm)
+    return discharge >= cfg.navigable_min_discharge
 
 
 def haulage_range(hx, cfg) -> float:

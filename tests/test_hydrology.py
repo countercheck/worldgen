@@ -306,3 +306,57 @@ def test_split_at_confluences_tributary_keeps_pre_merge_flow_volume():
     # The confluence's own accumulation already includes the trunk — using it here would
     # render the whole tributary at post-merge width.
     assert tributary.flow_volume != pytest.approx(acc[(2, 0)] / max_acc)
+
+
+def test_drainage_follows_the_climate():
+    """The defect this replaced: every map drained the same fraction of its land.
+
+    River hexes used to be the top 5% by flow accumulation — a rank wearing a threshold's
+    name — so a desert and a rainforest each came out with 5.6% of their land under
+    channel, and the smallest stream on both drained a single square kilometre. Rainfall
+    had no bearing on it at all.
+    """
+    from worldgen.core.pipeline import GeneratorPipeline
+    from worldgen.stages import default_stages
+    from worldgen.stages.road_cost import is_river
+
+    water = (TerrainClass.OCEAN, TerrainClass.LAKE)
+
+    def river_share(climate):
+        cfg = WorldConfig(width=64, height=64, regional_climate=climate)
+        p = GeneratorPipeline(42, cfg)
+        for stage in default_stages("classic"):
+            p.add_stage(stage)
+            if stage.__name__ == "HydrologyStage":
+                break
+        state = p.run()
+        land = [h for h in state.hexes.values() if h.terrain_class not in water]
+        return sum(1 for h in land if is_river(h)) / len(land)
+
+    arid = river_share("arid")
+    temperate = river_share("temperate")
+    tropical = river_share("tropical")
+
+    assert arid < temperate < tropical, (
+        f"drainage does not follow rainfall: arid {arid:.1%}, temperate {temperate:.1%}, "
+        f"tropical {tropical:.1%}"
+    )
+    assert tropical > 3 * arid, (
+        "a rainforest should be far better watered than a desert, not marginally so"
+    )
+
+
+def test_cold_country_drains_well_on_modest_rain():
+    """Evapotranspiration rises with temperature, and that is most of what it is.
+
+    A flat figure gave a boreal region the same runoff as a desert. Cold country in fact
+    sheds nearly all its rain, which is why the taiga is full of rivers on rainfall a
+    Mediterranean hillside would call meagre.
+    """
+    boreal = WorldConfig(regional_climate="boreal")
+    med = WorldConfig(regional_climate="mediterranean")
+
+    assert boreal.mean_precip_mm < med.mean_precip_mm, "boreal should get less rain here"
+    assert boreal.runoff_mm(boreal.mean_precip_mm) > med.runoff_mm(med.mean_precip_mm), (
+        "the colder region should still shed more of it"
+    )
