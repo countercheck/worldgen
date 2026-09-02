@@ -63,7 +63,15 @@ def build_world(
     get different worlds — but the common 64x64 seed-42 case is generated once.  Callers
     must not mutate the result; anything that needs to mutate should build its own.
     """
-    key = (seed, width, height, model, until, tuple(sorted(cfg_overrides.items())))
+    def _freeze(value):
+        if isinstance(value, list):
+            return tuple(_freeze(v) for v in value)
+        if isinstance(value, dict):
+            return tuple((k, _freeze(v)) for k, v in sorted(value.items()))
+        return value
+
+    frozen_overrides = tuple(sorted((k, _freeze(v)) for k, v in cfg_overrides.items()))
+    key = (seed, width, height, model, until, frozen_overrides)
     if key not in _WORLD_CACHE:
         _WORLD_CACHE[key] = build_pipeline(
             seed=seed,
