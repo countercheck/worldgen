@@ -8,7 +8,7 @@
 # ---------------------------------------------------------------------------
 width: 128    # Map width in hexes. Default: 128
 height: 128   # Map height in hexes. Default: 128
-sea_level: 0.45  # Water level threshold (0–1). Lower = more ocean. Default: 0.45
+sea_level: 0.25  # Water level threshold (0–1) on normalised elevation. Lower = more land. Default: 0.25
 
 # ---------------------------------------------------------------------------
 # Elevation noise (Fractal Brownian Motion)
@@ -18,7 +18,18 @@ noise_persistence: 0.5    # Amplitude decay per octave (0–1). Default: 0.5
 noise_lacunarity: 2.0     # Frequency multiplier per octave. Default: 2.0
 noise_scale: 3.0          # Coordinate scale for noise sampling. Default: 3.0
 domain_warp_strength: 0.3 # Displacement magnitude for domain warping; higher = more organic coastlines. Default: 0.3
-continent_falloff: true   # Apply radial edge falloff to create a continent/island shape. Default: true
+continent_falloff: true   # Apply edge falloff so the sea rings the map and every river has a coast to reach. Set false for a landlocked map: no falloff is applied, the interior basin becomes the world's terminal sink, and it is endorheic by geometry. Default: true
+# Which edges the sea comes in from. Drop an edge to let the land run off the map on
+# that side instead of ending in a coast — the world continues past the border there.
+# [] is the same as continent_falloff: false. Rivers can still drain off any border,
+# ocean or not, so a partly-open map is not a trapped one.
+#   [north, south, east, west]  →  an island, sea on all sides
+#   [west]                      →  a west coast, land running inland to the east
+#   [north, west]               →  a north-west corner of a larger continent
+continent_falloff_edges: [north, south, east, west]
+continent_shelf_variance: 0.35 # How much the shelf's inner edge wanders, 0–1. 0 gives a coast of even width; higher makes bays and headlands. The terrain noise already moves the shoreline a good deal on its own, so this is a nudge, not the main shaping. Default: 0.35
+continent_shelf_hexes: 10 # Width in hexes (km) of the coastal shelf over which land drops away to the sea. In hexes rather than a fraction of the map, so the coastal gradient is the same per km at any size. Narrower = steeper, cliffier coasts. Capped at a quarter of the shorter side. Only used when continent_falloff is true. Default: 10
+continent_seabed: 0.15    # Elevation the shelf descends to at the map edge. Must be below sea_level so the border is always under water. Nearer sea_level = a shallower, gentler shelf; nearer 0 = a steep drop into deep water, which makes cliff coasts common. Default: 0.15
 
 # Directional tilt [east_bias, south_bias] added to raw elevation before normalization.
 # Positive x raises the east edge; negative x raises the west edge.
@@ -26,7 +37,7 @@ continent_falloff: true   # Apply radial edge falloff to create a continent/isla
 # Values around ±0.5 produce a clear slope across the map.
 # Examples:
 #   [0.0, -0.5]  →  north is highest, map runs downhill to the south
-#   [-0.5, 0.0]  →  east is highest, map runs downhill to the west
+#   [-0.5, 0.0]  →  west is highest, map runs downhill to the east
 #   [0.0, 0.0]   →  no tilt (default)
 elevation_gradient: [0.0, 0.0]
 
@@ -46,18 +57,34 @@ erosion_deposition: 0.3                # Rate of sediment deposition. Default: 0
 erosion_erosion_rate: 0.3              # Rate of terrain erosion. Default: 0.3
 erosion_channel_affinity_gain: 0.5     # Affinity gain per deposition event; higher = deeper channels. Default: 0.5
 erosion_affinity_update_interval: 500  # Update channel affinity every N droplets. Default: 500
+erosion_delta_min_load: 0.15 # Sediment a droplet must still carry when it reaches the sea for it to build anything. Below this the load is treated as carried away along the shore rather than settling. Without it every droplet that trickled off a nearby hillside deposited where it entered the water, silting the shelf evenly instead of building deltas at the river mouths. Default: 0.15
 
 # ---------------------------------------------------------------------------
 # Hydrology
 # ---------------------------------------------------------------------------
 river_flow_threshold: 0.05  # Minimum flow volume (0–1) for a hex to be a river. Default: 0.05
 
+# Lake drainage. Every lake is filled to its spillway and given an outflow, so water
+# that enters a basin has somewhere to go instead of accumulating forever.
+lake_chaining: true             # Allow a lake to spill into a strictly lower lake, not just the sea. Chains of lakes stepping down to the coast are the only outlet on a landlocked map. Default: true
+endorheic_marsh_radius: 1       # Where a basin genuinely has no outlet it is endorheic: water leaves by evaporation. This many hexes of its shore become wetland. 0 disables. Default: 1
+endorheic_marsh_min_moisture: 0.4 # A closed basin drier than this is a salt pan, not a marsh, and gets no wetland shore. Default: 0.4
+
 # ---------------------------------------------------------------------------
 # Climate
 # ---------------------------------------------------------------------------
+# The map is a region, not a world — 500 km at 1 hex = 1 km is about 4.5 degrees of
+# latitude, some 3 C. Altitude does far more over the same distance (3000 m of relief is
+# nearly 20 C) and rain shadow more again. So the region has one climate, named here, and
+# the variety within it comes from terrain: elevation via the lapse rate, moisture via the
+# orographic term. Each climate has a palette of biomes it can produce, so an arid region
+# runs desert to steppe to alpine with altitude but never grows a jungle three valleys over.
+#   boreal | temperate | mediterranean | arid | tropical
+regional_climate: temperate
+regional_moisture:        # Mean land moisture (0–1). Blank = take it from regional_climate. The orographic pass gives a relative wet/dry pattern; this says where that pattern is centred.
 wind_direction: [1.0, 0.0]  # Wind vector [x, y] driving moisture transport. Default: [1.0, 0.0] (eastward)
 base_temperature: 0.5       # Map's mean temperature (0=arctic, 1=tropical). Default: 0.5
-latitude_temp_range: 0.1    # Pole-to-equator temperature variation. Default: 0.1
+latitude_temp_range: 0.0    # Pole-to-equator temperature variation. Negligible across a region; raise only if mapping something continental. Default: 0.0
 altitude_lapse_rate: 0.4    # Temperature drop per unit of elevation. Default: 0.4
 orographic_strength: 2.0    # Wind-driven precipitation intensity; higher = drier leeward slopes. Default: 2.0
 
@@ -198,6 +225,14 @@ export:
   river_max_width: 4.0      # Stroke width in pixels at the mouth of the largest river. Default: 4.0
   river_width_steps: 0      # 0 scales width continuously; a positive value quantises into that many discrete widths (fewer polylines, stream-order look); 1 draws every river at river_max_width. Default: 0
   river_width_exponent: 0.5 # Curve applied to flow before it is mapped onto the width range. Flow is power-law distributed, so 1.0 (linear) draws nine tenths of the network at river_min_width; 0.5 is the square root, matching hydraulic geometry. Lower widens small streams further. Default: 0.5
+
+  # Rivers and roads are what a reader traces across the map, so each is drawn twice:
+  # a dark casing, then the line itself on top. Without the casing a brown road
+  # disappears into scrub and a blue river into dark forest.
+  feature_outline: 0.9        # Casing width in pixels on each side. 0 draws flat, uncased lines. Default: 0.9
+  river_color: "#2f6fbf"      # River line colour. The legend key uses this too, so the two cannot diverge. Default: "#2f6fbf"
+  river_casing_color: "#0e2a50" # Colour of the casing under rivers. Default: "#0e2a50"
+  road_casing_color: "#20140a"  # Colour of the casing under roads. Default: "#20140a"
 
   # Contour settings — only used when "contours" is in the layers list above
   contour_elevation_scale_m: 3000.0  # Elevation span in metres for contour scaling. Default: 3000.0

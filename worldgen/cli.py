@@ -284,6 +284,10 @@ def export_svg(
             "river_max_width",
             "river_width_steps",
             "river_width_exponent",
+            "feature_outline",
+            "river_color",
+            "river_casing_color",
+            "road_casing_color",
         ):
             if key in export_section:
                 svg_kwargs[key] = export_section[key]

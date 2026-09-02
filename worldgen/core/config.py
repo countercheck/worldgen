@@ -3,13 +3,53 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 
+@dataclass(frozen=True)
+class ClimateContext:
+    """The climate of the region as a whole.
+
+    `base_temperature` and `moisture_target` set where the region sits on the temperature
+    and moisture axes; `palette` is the set of biomes that can occur there.  The palette
+    is what keeps a region coherent: an arid region varies from desert to steppe to
+    alpine with altitude, but never produces jungle three valleys over.
+    """
+
+    base_temperature: float
+    moisture_target: float
+    palette: frozenset
+
+
+def _palette(*names: str) -> frozenset:
+    from .hex import Biome
+
+    return frozenset(getattr(Biome, n) for n in names)
+
+
+# Biomes every region can produce regardless of climate, because they are made by
+# terrain rather than by climate: bare peaks, and waterlogged ground beside rivers.
+_ALWAYS = ("ALPINE", "WETLAND", "OCEAN")
+
+CLIMATE_CONTEXTS: dict[str, ClimateContext] = {
+    "boreal": ClimateContext(0.22, 0.55, _palette("TUNDRA", "BOREAL", "GRASSLAND", *_ALWAYS)),
+    "temperate": ClimateContext(
+        0.50, 0.55, _palette("TEMPERATE_FOREST", "GRASSLAND", "BOREAL", "SHRUBLAND", *_ALWAYS)
+    ),
+    "mediterranean": ClimateContext(
+        0.62, 0.35, _palette("SHRUBLAND", "GRASSLAND", "TEMPERATE_FOREST", *_ALWAYS)
+    ),
+    "arid": ClimateContext(0.68, 0.15, _palette("DESERT", "SHRUBLAND", "GRASSLAND", *_ALWAYS)),
+    "tropical": ClimateContext(
+        0.85, 0.75, _palette("TROPICAL", "GRASSLAND", "SHRUBLAND", *_ALWAYS)
+    ),
+}
+
+
 @dataclass
 class WorldConfig:
     """All tunable parameters for world generation."""
 
     width: int = 128
     height: int = 128
-    sea_level: float = 0.45
+    sea_level: float = 0.25
 
     # Elevation
     noise_octaves: int = 6
@@ -18,6 +58,13 @@ class WorldConfig:
     noise_scale: float = 3.0
     domain_warp_strength: float = 0.3
     continent_falloff: bool = True
+    continent_shelf_hexes: int = 10
+    # Which map edges the sea comes in from.  An edge left out of this list gets no
+    # shelf, so the land simply runs off the map there — the world continues past the
+    # border rather than ending in a coast.
+    continent_falloff_edges: tuple[str, ...] = ("north", "south", "east", "west")
+    continent_shelf_variance: float = 0.35
+    continent_seabed: float = 0.15
     elevation_gradient: tuple[float, float] = (0.0, 0.0)
 
     # Terrain classification
@@ -32,12 +79,18 @@ class WorldConfig:
     erosion_erosion_rate: float = 0.3
     erosion_channel_affinity_gain: float = 0.5
     erosion_affinity_update_interval: int = 500
+    erosion_delta_min_load: float = 0.15
 
     # Hydrology
     river_flow_threshold: float = 0.05
     river_flow_continuous: bool = False  # True: river_flow on all draining land hexes
     moisture_bleed_passes: int = 0  # 0 = flat river bonus (default); >0 = elevation-gated bleed
     moisture_bleed_strength: float = 0.3
+
+    # Lake drainage
+    lake_chaining: bool = True  # Let a lake spill into a strictly lower lake, not only the sea
+    endorheic_marsh_radius: int = 1  # Shore band (hexes) turned to wetland around a closed basin
+    endorheic_marsh_min_moisture: float = 0.40  # Below this a closed basin is arid, not marshy
 
     def __post_init__(self) -> None:
         self.wind_direction = _coerce_pair("wind_direction", self.wind_direction)
@@ -50,15 +103,54 @@ class WorldConfig:
             raise ValueError(
                 f"moisture_bleed_passes must be >= 0, got {self.moisture_bleed_passes}"
             )
+        self.continent_falloff_edges = _coerce_edges(self.continent_falloff_edges)
+        if not (0.0 <= self.continent_shelf_variance <= 1.0):
+            raise ValueError(
+                f"continent_shelf_variance must be in [0, 1], got {self.continent_shelf_variance}"
+            )
+        if self.continent_shelf_hexes < 1:
+            raise ValueError(
+                f"continent_shelf_hexes must be >= 1, got {self.continent_shelf_hexes}"
+            )
+        if not (0.0 <= self.continent_seabed < self.sea_level):
+            raise ValueError(
+                "continent_seabed must be in [0, sea_level) so the map edge is under "
+                f"water, got seabed={self.continent_seabed}, sea_level={self.sea_level}"
+            )
+        if self.endorheic_marsh_radius < 0:
+            raise ValueError(
+                f"endorheic_marsh_radius must be >= 0, got {self.endorheic_marsh_radius}"
+            )
+        if not (0.0 <= self.endorheic_marsh_min_moisture <= 1.0):
+            raise ValueError(
+                "endorheic_marsh_min_moisture must be in [0, 1], "
+                f"got {self.endorheic_marsh_min_moisture}"
+            )
         if not (0.0 <= self.moisture_bleed_strength <= 1.0):
             raise ValueError(
                 f"moisture_bleed_strength must be in [0, 1], got {self.moisture_bleed_strength}"
             )
+        if self.regional_climate not in CLIMATE_CONTEXTS:
+            raise ValueError(
+                f"unknown regional_climate {self.regional_climate!r}; "
+                f"choose from {', '.join(sorted(CLIMATE_CONTEXTS))}"
+            )
+        context = CLIMATE_CONTEXTS[self.regional_climate]
+        if self.base_temperature is None:
+            self.base_temperature = context.base_temperature
+        if self.regional_moisture is None:
+            self.regional_moisture = context.moisture_target
+        if not (0.0 < self.regional_moisture < 1.0):
+            raise ValueError(f"regional_moisture must be in (0, 1), got {self.regional_moisture}")
         if not (0.0 <= self.base_temperature <= 1.0):
             raise ValueError(f"base_temperature must be in [0, 1], got {self.base_temperature}")
         if not (0.0 <= self.latitude_temp_range <= 1.0):
             raise ValueError(
                 f"latitude_temp_range must be in [0, 1], got {self.latitude_temp_range}"
+            )
+        if self.erosion_delta_min_load < 0:
+            raise ValueError(
+                f"erosion_delta_min_load must be >= 0, got {self.erosion_delta_min_load}"
             )
         if self.erosion_affinity_update_interval < 1:
             raise ValueError(
@@ -141,12 +233,20 @@ class WorldConfig:
             )
 
     # Climate
+    # The map is a region, not a world: 500 km at 1 hex = 1 km is about 4.5 degrees of
+    # latitude, some 3 C of mean annual temperature.  Altitude does far more than that
+    # over the same distance — 3000 m of relief is nearly 20 C — and rain shadow more
+    # again.  So the region has one climate, named here, and the variety inside it comes
+    # from terrain: elevation via the lapse rate, and moisture via the orographic term.
+    # This is what stops the biome mix from being an accident of the average elevation.
+    regional_climate: str = "temperate"
     wind_direction: tuple[float, float] = (1.0, 0.0)
-    base_temperature: float = 0.5  # map's central temperature (0=arctic, 1=tropical)
-    latitude_temp_range: float = 0.1  # pole-to-equator spread (was 0.6; tiny at 1 hex=1 km)
+    base_temperature: float | None = None  # None = take it from regional_climate
+    latitude_temp_range: float = 0.0  # negligible across a region; raise only for a continent
     altitude_lapse_rate: float = 0.4
     orographic_strength: float = 2.0
-    base_moisture: float = 0.0
+    base_moisture: float = 0.0  # flat bias added to land moisture after anchoring
+    regional_moisture: float | None = None  # mean land moisture; None = from regional_climate
 
     # Biome thresholds
     biome_alpine_elev: float = 0.85
@@ -267,13 +367,41 @@ class WorldConfig:
         import yaml
 
         d = asdict(self)
-        for key in _TUPLE_FIELDS:
-            d[key] = list(d[key])
+        # Every tuple field, not just the numeric pairs: yaml.dump writes a bare tuple
+        # as !!python/tuple, which safe_load then refuses to read back.
+        for key, value in d.items():
+            if isinstance(value, tuple):
+                d[key] = list(value)
         with open(path, "w") as f:
             yaml.dump(d, f, default_flow_style=False, sort_keys=False)
 
 
 _TUPLE_FIELDS = ("wind_direction", "elevation_gradient")
+_EDGES = ("north", "south", "east", "west")
+
+
+def _coerce_edges(value: Any) -> tuple[str, ...]:
+    """Normalise the falloff-edge list, keeping a stable order and rejecting typos."""
+    if isinstance(value, str):
+        value = [part.strip() for part in value.split(",") if part.strip()]
+    try:
+        given = list(value)
+    except TypeError as exc:
+        raise ValueError(
+            f"continent_falloff_edges must be a list of edge names, got {value!r}"
+        ) from exc
+    lowered = []
+    for edge in given:
+        if not isinstance(edge, str):
+            raise ValueError(f"continent_falloff_edges entries must be strings, got {edge!r}")
+        name = edge.strip().lower()
+        if name not in _EDGES:
+            raise ValueError(
+                f"unknown edge {edge!r} in continent_falloff_edges; choose from {', '.join(_EDGES)}"
+            )
+        lowered.append(name)
+    # Deduplicate but keep _EDGES order so the value is canonical and comparable.
+    return tuple(e for e in _EDGES if e in set(lowered))
 
 
 def _coerce_pair(key: str, value: Any) -> tuple[float, float]:

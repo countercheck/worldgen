@@ -115,7 +115,7 @@ def test_road_stroke_present():
     ws = _small_world()
     svg = render(ws)
     assert 'id="layer-roads"' in svg
-    assert "#5c3d1e" in svg  # PRIMARY road color
+    assert "#4a2f14" in svg  # PRIMARY road color
 
 
 def test_empty_world_returns_valid_svg():
@@ -402,8 +402,8 @@ def test_legend_symbols_match_map_symbols():
     ws = _small_world()
     body = render(ws).split('<g id="layer-legend">')[1]
     assert 'fill="gold"' in body  # city star
-    assert "#5c3d1e" in body  # PRIMARY road color, same as the roads layer
-    assert "#3a78c9" in body  # river blue, same as the rivers layer
+    assert "#4a2f14" in body  # PRIMARY road color, same as the roads layer
+    assert "#2f6fbf" in body  # river blue, same as the rivers layer
 
 
 def test_legend_rejects_unknown_corner():
@@ -479,7 +479,9 @@ def test_placement_reserves_the_full_hex_support(corner):
 
 
 def _roads_group(svg: str) -> str:
-    return svg.split('<g id="layer-roads">')[1].split("</g>")[0]
+    # The line subgroup, not the whole layer: the layer now opens with a casing subgroup
+    # drawn under every road, and these tests are about the roads as drawn on top of it.
+    return svg.split('<g id="roads-line">')[1].split("</g>")[0]
 
 
 def _water_crossing_world() -> WorldState:
@@ -516,7 +518,7 @@ def test_shared_road_segments_drawn_once():
 def test_primary_road_drawn_after_the_track_that_branches_off_it():
     """Paint order is the fix for overdraw — the primary road has to land on top."""
     body = _roads_group(render(_branching_world()))
-    assert body.index('stroke="#b8a070"') < body.index('stroke="#5c3d1e"')
+    assert body.index('stroke="#8a6a34"') < body.index('stroke="#4a2f14"')
 
 
 def test_anchorage_layer_marks_both_shores():
@@ -700,7 +702,7 @@ def _flowing_river_world() -> WorldState:
 def _river_widths(svg: str) -> list[float]:
     import re
 
-    body = svg.split('<g id="layer-rivers">')[1].split("</g>")[0]
+    body = svg.split('<g id="rivers-line">')[1].split("</g>")[0]
     return [float(w) for w in re.findall(r'stroke-width="([\d.]+)"', body)]
 
 
@@ -793,8 +795,8 @@ def test_track_dashes_scale_with_hex_size():
 def test_reference_hex_size_leaves_widths_unchanged():
     """12px is the reference the widths are written for, so it must scale by exactly 1."""
     body = _roads_group(render(_branching_world(), SVGConfig(hex_size=12.0)))
-    assert 'stroke-width="2.00"' in body  # PRIMARY, as configured
-    assert 'stroke-width="0.60"' in body  # TRACK
+    assert 'stroke-width="3.00"' in body  # PRIMARY, as configured
+    assert 'stroke-width="1.20"' in body  # TRACK
 
 
 def test_legend_line_glyphs_scale_with_legend_scale():

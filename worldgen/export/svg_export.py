@@ -39,16 +39,24 @@ class SVGConfig:
     # that many discrete widths, giving the stepped look of a stream-order map. The
     # exponent shapes the curve — flow is power-law distributed, so mapping it linearly
     # (1.0) draws almost every river at the minimum width.
-    river_min_width: float = 0.5
-    river_max_width: float = 4.0
+    river_min_width: float = 1.0
+    river_max_width: float = 5.0
     river_width_steps: int = 0
     river_width_exponent: float = 0.5
+    # Rivers and roads are the features a reader traces across the map, so they are drawn
+    # twice: a dark casing first, then the line itself on top of it.  The casing is what
+    # makes them legible over terrain of any colour — an unoutlined brown road vanishes
+    # into scrub and a blue river into deep forest.  Set to 0.0 for flat, uncased lines.
+    feature_outline: float = 0.9
+    river_color: str = "#2f6fbf"
+    river_casing_color: str = "#0e2a50"
+    road_casing_color: str = "#20140a"
 
 
 _ROAD_SVG = {
-    RoadTier.PRIMARY: {"stroke": "#5c3d1e", "stroke-width": "2.0", "dasharray": None},
-    RoadTier.SECONDARY: {"stroke": "#8b6914", "stroke-width": "1.2", "dasharray": None},
-    RoadTier.TRACK: {"stroke": "#b8a070", "stroke-width": "0.6", "dasharray": "4 2"},
+    RoadTier.PRIMARY: {"stroke": "#4a2f14", "stroke-width": "3.0", "dasharray": None},
+    RoadTier.SECONDARY: {"stroke": "#7a5a10", "stroke-width": "2.0", "dasharray": None},
+    RoadTier.TRACK: {"stroke": "#8a6a34", "stroke-width": "1.2", "dasharray": "4 2"},
 }
 
 
@@ -176,7 +184,14 @@ def _settlement_marker(tier: SettlementTier, cx: float, cy: float, scale: float 
     )
 
 
-def _legend_glyph(row: legend.LegendRow, cx: float, cy: float, g: float, color_mode: str) -> str:
+def _legend_glyph(
+    row: legend.LegendRow,
+    cx: float,
+    cy: float,
+    g: float,
+    color_mode: str,
+    river_color: str = "#2f6fbf",
+) -> str:
     """SVG markup for one legend row's symbol, in a square box of side *g* centred on (cx, cy)."""
     if row.kind == "ramp":
         sw = g / len(legend.ELEVATION_RAMP)
@@ -218,8 +233,8 @@ def _legend_glyph(row: legend.LegendRow, cx: float, cy: float, g: float, color_m
         width = f"{float(style['stroke-width']) * glyph_scale:.2f}"
         if dash:
             dash = " ".join(f"{float(v) * glyph_scale:.2f}" for v in dash.split())
-    else:  # "river" — matches the rivers layer's colour
-        stroke, width, dash = "#3a78c9", f"{2.0 * glyph_scale:.2f}", None
+    else:  # "river" — the configured colour, so key and map can never diverge
+        stroke, width, dash = river_color, f"{2.0 * glyph_scale:.2f}", None
     da = f' stroke-dasharray="{dash}"' if dash else ""
     return (
         f'<line x1="{cx - g / 2:.2f}" y1="{cy:.2f}" x2="{cx + g / 2:.2f}" y2="{cy:.2f}"'
@@ -284,7 +299,12 @@ def _legend_svg(
     ]
     for i, row in enumerate(rows):
         cy = y + m.inner + m.title_h + i * m.row_h + m.row_h / 2
-        out.append(f"    {_legend_glyph(row, x + m.inner + m.glyph / 2, cy, m.glyph, color_mode)}")
+        out.append(
+            "    "
+            + _legend_glyph(
+                row, x + m.inner + m.glyph / 2, cy, m.glyph, color_mode, config.river_color
+            )
+        )
         out.append(
             f'    <text x="{x + m.inner + m.glyph + m.gap:.2f}" y="{cy + m.font * 0.35:.2f}"'
             f' font-family="sans-serif" font-size="{m.font:.2f}" fill="black">'
@@ -432,6 +452,11 @@ def render(ws: WorldState, config: SVGConfig | None = None) -> str:
 
     if "rivers" in layers:
         out.append('  <g id="layer-rivers">')
+        # Every casing first, then every line.  Drawing each river's casing immediately
+        # under its own line would let a later river's casing paint over an earlier
+        # river's line wherever two run close together, which is exactly the confluence
+        # the reader most needs to follow.
+        bands = []
         for river in ws.rivers:
             # Banded by per-hex flow, so a river grows downstream instead of being drawn
             # at one width taken from its mouth.
@@ -447,17 +472,35 @@ def render(ws: WorldState, config: SVGConfig | None = None) -> str:
                 for coord in run:
                     px, py = axial_to_pixel(coord, size)
                     pts.append((px + ox, py + oy))
+                bands.append((pts, sw * line_scale))
+
+        outline = config.feature_outline * line_scale
+        if outline > 0.0:
+            out.append('    <g id="rivers-casing">')
+            for pts, sw in bands:
                 out.append(
-                    f'    <polyline points="{_points_str(pts)}" fill="none" stroke="#3a78c9"'
-                    f' stroke-width="{sw * line_scale:.2f}"'
+                    f'      <polyline points="{_points_str(pts)}" fill="none"'
+                    f' stroke="{config.river_casing_color}"'
+                    f' stroke-width="{sw + 2.0 * outline:.2f}"'
                     f' stroke-linecap="round" stroke-linejoin="round"/>'
                 )
+            out.append("    </g>")
+        out.append('    <g id="rivers-line">')
+        for pts, sw in bands:
+            out.append(
+                f'      <polyline points="{_points_str(pts)}" fill="none"'
+                f' stroke="{config.river_color}"'
+                f' stroke-width="{sw:.2f}"'
+                f' stroke-linecap="round" stroke-linejoin="round"/>'
+            )
+        out.append("    </g>")
         out.append("  </g>")
 
     if "roads" in layers:
         out.append('  <g id="layer-roads">')
         # Deduped and ordered by tier, so shared trunk segments are drawn once and a
         # track never paints over the primary road it branches from.
+        legs = []
         for road, leg in dedupe_road_paths(ws.roads, ws.hexes, lambda r: ROAD_TIER_RANK[r.tier]):
             style = _ROAD_SVG[road.tier]
             da = ""
@@ -472,12 +515,32 @@ def render(ws: WorldState, config: SVGConfig | None = None) -> str:
             for coord in leg:
                 px, py = axial_to_pixel(coord, size)
                 pts.append((px + ox, py + oy))
+            legs.append((pts, float(style["stroke-width"]) * line_scale, style["stroke"], da))
+
+        outline = config.feature_outline * line_scale
+        if outline > 0.0:
+            # Casings for every road before any road line, for the same reason as the
+            # rivers: at a junction the branch's casing must not cut the trunk in half.
+            # The casing is solid even under a dashed track — a dashed outline would
+            # leave the track's own gaps unoutlined and it would break up again.
+            out.append('    <g id="roads-casing">')
+            for pts, lw, _stroke, _da in legs:
+                out.append(
+                    f'      <polyline points="{_points_str(pts)}" fill="none"'
+                    f' stroke="{config.road_casing_color}"'
+                    f' stroke-width="{lw + 2.0 * outline:.2f}"'
+                    f' stroke-linecap="round" stroke-linejoin="round"/>'
+                )
+            out.append("    </g>")
+        out.append('    <g id="roads-line">')
+        for pts, lw, stroke, da in legs:
             out.append(
-                f'    <polyline points="{_points_str(pts)}" fill="none"'
-                f' stroke="{style["stroke"]}"'
-                f' stroke-width="{float(style["stroke-width"]) * line_scale:.2f}"'
+                f'      <polyline points="{_points_str(pts)}" fill="none"'
+                f' stroke="{stroke}"'
+                f' stroke-width="{lw:.2f}"'
                 f' stroke-linecap="round" stroke-linejoin="round"{da}/>'
             )
+        out.append("    </g>")
         out.append("  </g>")
 
     if "crossings" in layers:
