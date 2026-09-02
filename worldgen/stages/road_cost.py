@@ -57,6 +57,19 @@ def terrain_base_cost(hx, cfg) -> float:
     return cfg.road_flat_cost
 
 
+def is_river(hx) -> bool:
+    """True when this hex is a river channel.
+
+    The "river" tag, not `river_flow > 0`.  With `river_flow_continuous` the hydrology
+    stage writes a flow value onto every draining land hex, so a flow test calls the
+    whole map a river: every land-to-land edge reads as channel travel and prices at
+    infinity, which leaves the road network unroutable rather than merely mis-costed.
+    Everything here that asks "is this the channel?" wants the tag; only the terms that
+    scale by *how much* water flows should read `river_flow` itself.
+    """
+    return "river" in hx.tags
+
+
 def bank_discount(hx, hexes, cfg) -> float:
     """Scaled along-river discount, applied to the *bank* rather than the channel.
 
@@ -69,12 +82,12 @@ def bank_discount(hx, hexes, cfg) -> float:
     same `min_flow` floor as before so small headwater rivers keep a usable discount.
     River hexes themselves get nothing; visiting one is a crossing, not a route.
     """
-    if hx.river_flow > 0:
+    if is_river(hx):
         return 0.0
     flow = 0.0
     for n in neighbors(hx.coord):
         n_hx = hexes.get(n)
-        if n_hx is not None and n_hx.river_flow > flow:
+        if n_hx is not None and is_river(n_hx) and n_hx.river_flow > flow:
             flow = n_hx.river_flow
     if flow <= 0:
         return 0.0
@@ -91,7 +104,7 @@ def river_hex_cost(hx, cfg) -> float:
     a crossing pays it once and stays affordable, travelling the channel pays it every
     step and stops being worth it.
     """
-    return cfg.road_river_hex_cost if hx.river_flow > 0 else 0.0
+    return cfg.road_river_hex_cost if is_river(hx) else 0.0
 
 
 def water_edge_cost(from_hx, to_hx, cfg) -> float:
@@ -110,8 +123,8 @@ def river_crossing_edge_cost(from_hx, to_hx, cfg) -> float:
     and leaving), so the configured base+flow values represent half of the
     total perpendicular crossing cost.
     """
-    from_river = from_hx.river_flow > 0
-    to_river = to_hx.river_flow > 0
+    from_river = is_river(from_hx)
+    to_river = is_river(to_hx)
     if from_river == to_river:
         return 0.0
     flow = max(from_hx.river_flow, to_hx.river_flow)
@@ -150,9 +163,9 @@ def _settlement_exempt(hexes, settled, a, b) -> bool:
     the channel one hex at a time.
     """
     a_hx, b_hx = hexes.get(a), hexes.get(b)
-    if a in settled and b_hx is not None and b_hx.river_flow <= 0:
+    if a in settled and b_hx is not None and not is_river(b_hx):
         return True
-    return b in settled and a_hx is not None and a_hx.river_flow <= 0
+    return b in settled and a_hx is not None and not is_river(a_hx)
 
 
 def make_road_edge_cost(cfg, blocked_edges=None, exempt_coords=frozenset()):
@@ -181,15 +194,15 @@ def make_road_edge_cost(cfg, blocked_edges=None, exempt_coords=frozenset()):
         # or two rivers run side by side, the two hexes are adjacent without being
         # consecutive on either path — and a road stepping between them still reads as
         # running down the water, which is the thing the exclusion exists to stop.
-        along_channel = from_hx.river_flow > 0 and to_hx.river_flow > 0
+        along_channel = is_river(from_hx) and is_river(to_hx)
         if along_channel or (
             blocked_edges and frozenset((from_hx.coord, to_hx.coord)) in blocked_edges
         ):
             exempt = (
                 from_hx.coord in exempt_coords
-                and to_hx.river_flow <= 0
+                and not is_river(to_hx)
                 or to_hx.coord in exempt_coords
-                and from_hx.river_flow <= 0
+                and not is_river(from_hx)
             )
             if not exempt:
                 return float("inf")
@@ -275,7 +288,7 @@ def ferry_link(hexes, origin, label, main, cfg, blocked, settled, plain_cost, pl
             for c in coords
             if (hx := hexes.get(c)) is not None
             and hx.terrain_class not in WATER
-            and hx.river_flow <= 0
+            and not is_river(hx)
         )
 
     near_landings, far_landings = landings(near), landings(far)

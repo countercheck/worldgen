@@ -579,10 +579,13 @@ class HydrologyStage(GeneratorStage):
         middle of its own basin once the two merge, which reads as a lake that drains
         into itself.  Pass B therefore runs on settled components only.
 
-        Within Pass B basins are handled from the highest water surface downwards, and
-        a basin may only spill into a strictly lower one.  That makes the lake-to-lake
-        graph acyclic by construction: an outflow only ever moves water downhill, so no
-        chain of them can return to its source.
+        Within Pass B basins are handled from the lowest water surface upwards: the
+        terminal sink has nowhere lower to spill into and must reach the sea or the map
+        edge on its own, so it is settled before anything is allowed to drain towards
+        it, and every basin above it then chains into an outflow that already
+        terminates.  Acyclicity comes not from that order but from the rule that a basin
+        may only spill into a *strictly lower* one — an outflow only ever moves water
+        downhill, so no chain of them can return to its source.
         """
         outlet_of: dict[HexCoord, HexCoord | None] = {}
         if not lakes:
@@ -839,7 +842,11 @@ class HydrologyStage(GeneratorStage):
             # return path, and only avoiding the immediate shore lets the route merge
             # into a river that curls back into the same lake.
             catchment: set[HexCoord] = set()
-            stack = [c for c in land if flow_dir.get(c) in component]
+            # Seeded from the shore rather than by scanning every land hex: flow_dir
+            # points at a neighbour, so anything draining *directly* into the basin is
+            # already on its perimeter.  Scanning the whole land set found the same
+            # hexes at the cost of a full-map sweep for every basin.
+            stack = [c for c in border_land if flow_dir.get(c) in component]
             while stack:
                 c = stack.pop()
                 if c in catchment:
