@@ -10,7 +10,7 @@ from worldgen.core.hex import (
     TerrainClass,
 )
 from worldgen.core.world_state import Ferry, River, Road, RoadTier, WorldState
-from worldgen.export.png_export import _ROAD_COLOR, PNGConfig, render, save
+from worldgen.export.png_export import _RIVER_COLOR, _ROAD_COLOR, PNGConfig, render, save
 
 
 def _small_world() -> WorldState:
@@ -425,7 +425,9 @@ def test_wargame_style_draws_crossings():
 
 # --- river widths ------------------------------------------------------------
 
-_RIVER_BLUE = (58, 120, 201)
+# Taken from the module rather than repeated here, so a change to the river colour
+# cannot silently leave these pixel counts measuring nothing.
+_RIVER_BLUE = _RIVER_COLOR
 
 
 def _flowing_river_world() -> WorldState:

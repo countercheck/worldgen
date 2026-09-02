@@ -236,22 +236,38 @@ def test_the_three_scores_rank_sites_differently():
 
 
 def test_a_wider_catchment_is_smoother():
-    """A radius-8 mean varies less between neighbours than a radius-2 one."""
-    from worldgen.core.hex_grid import neighbors
+    """A radius-8 mean varies less between neighbours than a radius-2 one.
 
+    Measured on the catchment means themselves, not on the habitability scores derived
+    from them.  Each tier is normalised against its own best site, and the wide
+    catchment has the narrower raw spread, so dividing by its smaller maximum inflates
+    its neighbour deltas right back — comparing the normalised scores tests the
+    normalisation, not the smoothing, and gives an answer that flips with the seed.
+    """
+    from worldgen.core.hex_grid import neighbors
+    from worldgen.stages.habitability import catchment_means, food_value
+
+    cfg = WorldConfig(width=48, height=48, erosion_iterations=500)
     state = _build_pipeline().run()
     hexes = state.hexes
 
-    def mean_neighbour_delta(field):
+    food = {
+        coord: food_value(hx, cfg, cfg.biome_dry_moist, cfg.biome_wet_moist)
+        for coord, hx in hexes.items()
+    }
+    wide, narrow = cfg.cultivation_city_radius, cfg.cultivation_village_radius
+    means = catchment_means(hexes.keys(), food, [wide, narrow])
+
+    def mean_neighbour_delta(table):
         deltas = []
-        for coord, h in hexes.items():
-            own = getattr(h, field)
+        for coord in hexes:
+            own = table[coord]
             for n in neighbors(coord):
                 if n in hexes:
-                    deltas.append(abs(own - getattr(hexes[n], field)))
+                    deltas.append(abs(own - table[n]))
         return sum(deltas) / len(deltas)
 
-    assert mean_neighbour_delta("habitability_city") < mean_neighbour_delta("habitability_village")
+    assert mean_neighbour_delta(means[wide]) < mean_neighbour_delta(means[narrow])
 
 
 def test_reproducibility():

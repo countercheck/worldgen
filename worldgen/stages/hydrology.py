@@ -91,7 +91,7 @@ class HydrologyStage(GeneratorStage):
         self._tag_hexes(river_set, flow_dir, hexes, ocean, lakes, w, h)
 
         # G — Ensure every lake has an outflow river (fill-to-spillway enforcement)
-        drainage_rivers = self._ensure_lake_drainage(
+        drainage_rivers, outlet_of = self._ensure_lake_drainage(
             river_set, flow_dir, hexes, land, ocean, lakes, acc, filled, w, h
         )
         if drainage_rivers:
@@ -135,6 +135,30 @@ class HydrologyStage(GeneratorStage):
             for coord in river.hexes:
                 if coord in hexes and hexes[coord].terrain_class not in water_classes:
                     hexes[coord].tags.add("river")
+
+        # I — Mark basins that still have no way out.  Not every lake can be drained:
+        # a bowl ringed by higher ground with no lower lake to spill into is a closed
+        # basin, and forcing a river out of it would be a lie about the terrain.  Water
+        # leaves such a basin by evaporation instead, so its shore is tagged for
+        # BiomeStage to turn into wetland — that is the "percolates out into marshes"
+        # outlet, and it keeps the map honest about where the water goes.
+        for comp in _endorheic_components(hexes, lakes, ocean, flow_dir, outlet_of, w, h):
+            for coord in comp:
+                hexes[coord].tags.add("endorheic")
+            shore = set(comp)
+            frontier = set(comp)
+            for _ in range(self.config.endorheic_marsh_radius):
+                frontier = {
+                    n
+                    for c in frontier
+                    for n in neighbors(c)
+                    if n in hexes and n not in shore and n in land
+                }
+                if not frontier:
+                    break
+                shore |= frontier
+                for coord in frontier:
+                    hexes[coord].tags.add("endorheic_shore")
 
         return state
 
@@ -532,42 +556,87 @@ class HydrologyStage(GeneratorStage):
         filled: dict[HexCoord, float],
         w: int,
         h: int,
-    ) -> list[River]:
+    ) -> tuple[list[River], dict[HexCoord, HexCoord | None]]:
         """Raise each lake to its natural spillway, expand into submerged land, then
         route an outflow river.
 
-        Phase 1 — fill & expand: the lake's water level rises to the elevation of the
+        Returns the new rivers together with an outlet map: every lake hex maps to the
+        land hex its basin drains through, or to None where no outlet could be found at
+        all.  The caller uses that map to decide which basins are endorheic.
+
+        Pass A — fill & expand: each lake's water level rises to the elevation of its
         lowest perimeter land hex (the natural spillway).  Any land hex reachable from
         the lake whose raw elevation is below that level is submerged and converted to
         LAKE.  If the expanded body reaches the map edge it becomes OCEAN instead.
 
-        Phase 2 — outflow: after expansion, perimeter hexes are retried in ascending
-        elevation order; elevation-guided Dijkstra finds the outflow path, with plain
-        BFS as a guaranteed fallback.
+        Pass B — outflow: perimeter hexes are tried in ascending elevation order and an
+        elevation-guided Dijkstra finds the outflow path, with plain BFS as a fallback.
 
-        Components are derived live from the `lakes` set (not a stale snapshot) so that
-        lake–lake merges caused by expansion are handled correctly.  Seeds are processed
-        in deterministic coordinate order to ensure reproducibility.
+        The two passes are kept separate, rather than interleaved per basin, because
+        expansion merges basins.  Routing a basin before every basin has finished
+        expanding means routing against a component that is about to grow — an outflow
+        aimed at what was then a lower neighbouring lake ends up pointing into the
+        middle of its own basin once the two merge, which reads as a lake that drains
+        into itself.  Pass B therefore runs on settled components only.
+
+        Within Pass B basins are handled from the highest water surface downwards, and
+        a basin may only spill into a strictly lower one.  That makes the lake-to-lake
+        graph acyclic by construction: an outflow only ever moves water downhill, so no
+        chain of them can return to its source.
         """
+        outlet_of: dict[HexCoord, HexCoord | None] = {}
         if not lakes:
-            return []
+            return [], outlet_of
 
         def on_border(coord: HexCoord) -> bool:
             q, r = coord
             return q == 0 or q == w - 1 or r == 0 or r == h - 1
 
-        def reaches_terminal(coord: HexCoord) -> bool:
+        def reaches_terminal(
+            coord: HexCoord,
+            component: set[HexCoord] | None = None,
+            level: float | None = None,
+        ) -> bool:
+            """True if water at *coord* already has somewhere to go.
+
+            A lake counts as a terminal, not just the sea or the map edge.  Pass B gives
+            every basin its own outlet, so water arriving in one is water this path no
+            longer has to carry — and on a landlocked map, where there is no ocean at
+            all, insisting on sea-or-border makes this return False for practically
+            every river.  That is not a cosmetic difference: the caller uses this to
+            decide whether to merge into an existing channel or to rewire it, so a
+            false negative makes a lake outflow seize a trunk river's flow_dir and
+            reverse the trunk's own course.
+
+            *component* is the basin being drained, and is excluded: a channel that runs
+            back into it is a cycle, not an outlet.  *level* is that basin's water
+            surface, and a lake at or above it does not count either — Pass A raised
+            every lake to its spillway, which can leave an old flow_dir pointing at what
+            is now higher water, and accepting that would have a lake drain uphill into
+            a puddle above it.  Requiring a strictly lower terminal is also what makes
+            the basin graph acyclic, so the escape analysis always settles.
+            """
+
+            def is_open_lake(c: HexCoord) -> bool:
+                if c not in lakes:
+                    return False
+                if component is not None and c in component:
+                    return False
+                return level is None or hexes[c].elevation < level - 1e-12
+
             seen: set[HexCoord] = set()
             cur = coord
             while cur not in seen:
                 seen.add(cur)
                 if cur in ocean or on_border(cur):
                     return True
+                if is_open_lake(cur):
+                    return True
                 ds = flow_dir.get(cur)
                 if ds is None:
-                    return any(n in ocean for n in neighbors(cur))
+                    return any(n in ocean or is_open_lake(n) for n in neighbors(cur))
                 if ds not in land:
-                    return ds in ocean or on_border(ds)
+                    return ds in ocean or on_border(ds) or is_open_lake(ds)
                 cur = ds
             return False
 
@@ -587,15 +656,14 @@ class HydrologyStage(GeneratorStage):
         new_rivers: list[River] = []
         processed: set[HexCoord] = set()
 
-        # Sort seeds for deterministic processing order regardless of set hash randomization
+        # --- Pass A: fill every basin to its spillway and expand into submerged land ---
+        # Sorted for determinism regardless of set iteration order.
         for seed in sorted(lakes):
             if seed in processed:
                 continue
 
             # Derive the current connected component from the live lakes set
             component = bfs_component({seed})
-
-            # --- Phase 1: fill lake to spillway level, expand into submerged land ---
 
             # Sort by raw elevation so we find the true geographic spillway, not the
             # priority-flood-adjusted one.
@@ -605,6 +673,7 @@ class HydrologyStage(GeneratorStage):
             )
             if not border_land:
                 processed |= component
+                outlet_of.update(dict.fromkeys(component))
                 continue
 
             spillway_hex = border_land[0]
@@ -658,22 +727,59 @@ class HydrologyStage(GeneratorStage):
                     lakes.discard(c)
                 continue
 
-            # --- Phase 2: route outflow river from the spillway ---
+        # --- Pass B: route an outflow for every settled basin ---
+        # Components are re-derived now that Pass A has finished merging them, so a
+        # basin can no longer be handed an outlet that expansion later swallows.
+        components = _get_lake_components(lakes, hexes)
+        # Pass A left every hex of a basin at the same water level, so any one of them
+        # reports it.  Lowest basin first: the terminal sink is the one basin that has
+        # nowhere lower to spill into and must reach the sea or the map edge on its own,
+        # so it is settled before anything is allowed to drain towards it.  Every basin
+        # above it then chains into an outflow that already terminates, instead of
+        # aiming at a neighbour whose own fate is still unknown.  Acyclicity comes from
+        # the strictly-lower rule below, not from the order, so this is safe.
+        components.sort(key=lambda comp: (hexes[min(comp)].elevation, min(comp)))
+        basin_index = {c: i for i, comp in enumerate(components) for c in comp}
 
-            # Recompute perimeter after expansion (newly submerged hexes change the boundary)
+        for basin_id, component in enumerate(components):
+            water_level = hexes[min(component)].elevation
+
             border_land = sorted(
                 {nbr for c in component for nbr in neighbors(c) if nbr in land},
                 key=lambda c: filled.get(c, float("inf")),
             )
             if not border_land:
+                outlet_of.update(dict.fromkeys(component))
                 continue
 
-            # Check if a natural outflow already exists (river leaving the lake)
-            outflow_exists = any(
-                c in river_set and flow_dir.get(c) not in component and flow_dir.get(c) is not None
-                for c in border_land
+            # Check if a natural outflow already exists (river leaving the lake).
+            # Following flow_dir a single step is not enough: a perimeter hex belonging
+            # to an *inflow* river also points at a land hex outside the component (the
+            # next hex on its way to the shore), which reads as an outflow and skips
+            # drainage for the basin entirely.  Walk the full flow path instead, and
+            # require that it actually escapes rather than merely leaving the component.
+            def drains_out_of(
+                start: HexCoord,
+                component: set[HexCoord] = component,
+                level: float = water_level,
+            ) -> bool:
+                seen: set[HexCoord] = set()
+                cur = start
+                while cur not in seen:
+                    seen.add(cur)
+                    if cur in component:
+                        return False  # returns to the lake: an inflow, not an outflow
+                    ds = flow_dir.get(cur)
+                    if ds is None:
+                        break
+                    cur = ds
+                return reaches_terminal(start, component, level)
+
+            natural_outlet = next(
+                (c for c in border_land if c in river_set and drains_out_of(c)), None
             )
-            if outflow_exists:
+            if natural_outlet is not None:
+                outlet_of.update(dict.fromkeys(component, natural_outlet))
                 continue
 
             # Try spillways in elevation order; Dijkstra prefers valleys.
@@ -686,7 +792,28 @@ class HydrologyStage(GeneratorStage):
             # inflow river during confluence-splitting and the new path is dropped).
             outflow_candidates = [c for c in border_land if flow_dir.get(c) not in component]
             if not outflow_candidates:
-                outflow_candidates = border_land
+                # Closed bowl: every rim hex drains inward, so there is no rim hex that
+                # is not an inflow.  Taking the lowest one (the old fallback) picks the
+                # *trunk* inflow mouth, because the biggest river carves the lowest gap
+                # in the rim.  Routing an outflow from there rewires that hex's flow_dir
+                # away from the lake, severing the inflow, and the resulting river is
+                # then dropped by confluence-splitting when the trunk reclaims the hex —
+                # leaving the basin with rivers flowing in and nothing flowing out.
+                # Prefer a rim hex carrying little or no flow instead: it is nearly as
+                # low, and routing through it destroys no existing channel.
+                clean_rim = [c for c in border_land if c not in river_set]
+                if not clean_rim:
+                    # Every rim hex already carries a river into the lake.  There is no
+                    # hex left that an outflow could use without taking over a channel
+                    # that flows the other way, and a hex cannot carry water both in and
+                    # out.  This basin is closed: record it as having no outlet and let
+                    # the endorheic pass turn its shore to marsh.
+                    outlet_of.update(dict.fromkeys(component))
+                    continue
+                outflow_candidates = sorted(
+                    clean_rim,
+                    key=lambda c: (acc.get(c, 0.0), filled.get(c, float("inf")), c),
+                )
             # Prefer candidates that aren't *also* adjacent to a different lake: a
             # spillway sitting right on another lake's shore makes the two basins
             # topologically ambiguous (does this hex drain lake A or sit on lake B's
@@ -705,12 +832,45 @@ class HydrologyStage(GeneratorStage):
             # subtracting the whole candidate list would, in the border_land fallback
             # above, clear every perimeter inflow at once and let a route from one
             # candidate rewire another.
-            active_inflows = {c for c in land if flow_dir.get(c) in component}
+            # Every land hex that drains into this basin, found by walking flow_dir
+            # backwards from the shore.  Routing the outflow through any of them would
+            # send the water straight back where it came from: one step upstream of the
+            # lake is obvious, but a hex twenty steps up a tributary is just as much a
+            # return path, and only avoiding the immediate shore lets the route merge
+            # into a river that curls back into the same lake.
+            catchment: set[HexCoord] = set()
+            stack = [c for c in land if flow_dir.get(c) in component]
+            while stack:
+                c = stack.pop()
+                if c in catchment:
+                    continue
+                catchment.add(c)
+                stack.extend(
+                    n
+                    for n in neighbors(c)
+                    if n in land and n not in catchment and flow_dir.get(n) == c
+                )
+
+            # Basins that this one may legitimately spill into: any lake whose surface
+            # sits strictly below this lake's water level.  Draining into a lower basin
+            # is a real drainage pattern (a chain of lakes stepping down to the sea) and
+            # is the only outlet available at all on a landlocked map.  The strict
+            # elevation test is what keeps the lake-to-lake graph acyclic — an outflow
+            # can only ever move water downhill, so it can never route back into a basin
+            # upstream of itself.
+            lower_lakes: frozenset[HexCoord] = frozenset()
+            if self.config.lake_chaining:
+                lower_lakes = frozenset(
+                    c
+                    for c in lakes
+                    if basin_index.get(c) != basin_id and hexes[c].elevation < water_level - 1e-12
+                )
+
             extension: list[HexCoord] = []
             spillway: HexCoord | None = None
             for candidate in outflow_candidates:
                 extension = self._guided_path_to_ocean(
-                    candidate, filled, land, ocean, frozenset(), active_inflows - {candidate}, w, h
+                    candidate, filled, land, ocean, lower_lakes, catchment - {candidate}, w, h
                 )
                 if extension:
                     spillway = candidate
@@ -719,10 +879,12 @@ class HydrologyStage(GeneratorStage):
             # Guaranteed fallback: plain BFS (only border/ocean as terminals)
             if not extension:
                 spillway = outflow_candidates[0]
-                extension = self._forced_exit_to_border(spillway, hexes, ocean, frozenset(), w, h)
+                extension = self._forced_exit_to_border(spillway, hexes, ocean, lower_lakes, w, h)
 
             if not extension or spillway is None:
+                outlet_of.update(dict.fromkeys(component))
                 continue
+            outlet_of.update(dict.fromkeys(component, spillway))
 
             path = [spillway]
             prev = spillway
@@ -733,18 +895,26 @@ class HydrologyStage(GeneratorStage):
                 if coord not in land:
                     path.append(coord)
                     continue
-                if prev in river_set and reaches_terminal(prev):
+                if coord in river_set:
+                    # The route has reached a channel that already carries water.  Join
+                    # it here and stop.  Continuing would rewire this hex's flow_dir to
+                    # point along our route instead of its own, which does not add an
+                    # outflow so much as reverse an existing river: everything below the
+                    # stolen hex loses its upstream, and a trunk hex downstream of it is
+                    # left looking like a headwater carrying the whole catchment.
+                    # Whether this channel ultimately escapes is not decided here — the
+                    # endorheic pass settles that once every basin has been routed.
                     merged_into_existing = True
-                    merge_acc = acc.get(prev, running_acc)
+                    flow_dir[prev] = coord
+                    path.append(coord)
+                    merge_acc = acc.get(coord, running_acc)
                     if running_acc > merge_acc:
-                        # If the merged river already carries less flow than the
-                        # new tributary path, clamp newly added upstream cells down
-                        # to the merge value so downstream accumulation never decreases.
+                        # If the channel we joined already carries less flow than this
+                        # path, clamp the newly added upstream cells down to the merge
+                        # value so downstream accumulation never decreases.
                         for added in added_land:
-                            if added in acc:
-                                acc[added] = min(acc[added], merge_acc)
-                            else:
-                                acc[added] = merge_acc
+                            acc[added] = min(acc.get(added, merge_acc), merge_acc)
+                    prev = coord
                     break
                 flow_dir[prev] = coord
                 path.append(coord)
@@ -772,6 +942,19 @@ class HydrologyStage(GeneratorStage):
                         break
                     acc[ds] = max(acc.get(ds, 0.0), acc.get(tail, 0.0))
                     tail = ds
+            # _guided_path_to_ocean walks over land only, so a path that stopped because
+            # it reached a lower lake ends on the shore hex beside it.  Append the lake
+            # hex itself so the river visually enters the basin it feeds, and point
+            # flow_dir at it so the chain is walkable for the escape analysis below.
+            if lower_lakes and path[-1] in land:
+                touching = sorted(
+                    (n for n in neighbors(path[-1]) if n in lower_lakes),
+                    key=lambda n: (hexes[n].elevation, n),
+                )
+                if touching:
+                    flow_dir[path[-1]] = touching[0]
+                    path.append(touching[0])
+
             river_set.add(spillway)
             spillway_acc = max(acc.get(spillway, 0.0), 1.0)
             if merged_into_existing:
@@ -781,7 +964,7 @@ class HydrologyStage(GeneratorStage):
             if len(path) > 1:
                 new_rivers.append(River(hexes=path, flow_volume=acc[last_land] / max_acc))
 
-        return new_rivers
+        return new_rivers, outlet_of
 
 
 def _split_at_confluences(
@@ -837,6 +1020,71 @@ def _split_at_confluences(
 
     result.sort(key=lambda iv: iv[0])
     return [r for _, r in result]
+
+
+def _endorheic_components(
+    hexes: dict[HexCoord, "Hex"],
+    lakes: set[HexCoord],
+    ocean: set[HexCoord],
+    flow_dir: dict[HexCoord, HexCoord | None],
+    outlet_of: dict[HexCoord, HexCoord | None],
+    w: int,
+    h: int,
+) -> list[set[HexCoord]]:
+    """Return the lake components that have no outlet at all.
+
+    A basin is endorheic when nothing drains out of it: `_ensure_lake_drainage` found no
+    outlet, or the one it found leads back into the same basin.  Rivers run in and
+    nothing runs out, so the water leaves by evaporation instead — the caller marks the
+    shore as wetland to show where it goes.  Real basins do this (the Caspian, the Great
+    Salt Lake, Lake Chad), so they are reported rather than forced open.
+
+    Having an outlet is the whole test; where that outlet's water ends up is not.  A
+    lake that drains into a closed basin still has a river flowing out of it and is not
+    itself endorheic, any more than the Volga is endorheic for ending in the Caspian.
+    Requiring the chain to reach the sea or the map edge would mark every lake upstream
+    of a closed basin as closed too, which on a landlocked map is every lake there is.
+    """
+    components = _get_lake_components(lakes, hexes)
+    index = {c: i for i, comp in enumerate(components) for c in comp}
+
+    def follow(start: HexCoord) -> int | None:
+        """Walk flow_dir from *start*; return -1 for escape, else the basin reached."""
+        seen: set[HexCoord] = set()
+        cur: HexCoord | None = start
+        while cur is not None and cur not in seen:
+            seen.add(cur)
+            if cur in ocean or _on_border(cur, w, h):
+                return -1
+            if cur in index:
+                return index[cur]
+            cur = flow_dir.get(cur)
+        return None
+
+    drains = [False] * len(components)
+    for i, comp in enumerate(components):
+        if any(_on_border(c, w, h) for c in comp) or any(
+            n in ocean for c in comp for n in neighbors(c)
+        ):
+            drains[i] = True
+            continue
+        outlet = next((outlet_of.get(c) for c in sorted(comp) if outlet_of.get(c)), None)
+        if outlet is None:
+            continue
+        reached = follow(outlet)
+        if reached == -1:  # the sea or the map edge
+            drains[i] = True
+        elif reached is not None and reached != i:
+            # Spilling into another basin only counts if that basin is genuinely lower.
+            # Routing and merging both enforce this, but without the same test here an
+            # outlet that ends uphill is scored as drainage, and the terminal sink — the
+            # one basin that really has nowhere to go — is recorded as draining into a
+            # neighbour perched above it.
+            here = hexes[min(comp)].elevation
+            there = hexes[min(components[reached])].elevation
+            drains[i] = there < here - 1e-12
+
+    return [comp for i, comp in enumerate(components) if not drains[i]]
 
 
 def _get_lake_components(lakes: set[HexCoord], hexes: dict[HexCoord, "Hex"]) -> list[set[HexCoord]]:

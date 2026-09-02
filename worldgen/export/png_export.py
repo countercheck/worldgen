@@ -40,22 +40,28 @@ class PNGConfig:
     # that many discrete widths, giving the stepped look of a stream-order map. The
     # exponent shapes the curve — flow is power-law distributed, so mapping it linearly
     # (1.0) draws almost every river at the minimum width.
-    river_min_width: float = 1.0
-    river_max_width: float = 4.0
+    river_min_width: float = 1.5
+    river_max_width: float = 5.0
     river_width_steps: int = 0
     river_width_exponent: float = 0.5
+    # Rivers and roads are drawn twice: a dark casing, then the line on top.  Without it
+    # a brown road disappears into scrub and a blue river into deep forest.  0 disables.
+    feature_outline: float = 0.9
 
 
 _ROAD_COLOR = {
-    RoadTier.PRIMARY: (92, 61, 30),
-    RoadTier.SECONDARY: (139, 105, 20),
-    RoadTier.TRACK: (184, 160, 112),
+    RoadTier.PRIMARY: (74, 47, 20),
+    RoadTier.SECONDARY: (122, 90, 16),
+    RoadTier.TRACK: (138, 106, 52),
 }
 _ROAD_WIDTH = {
-    RoadTier.PRIMARY: 2,
+    RoadTier.PRIMARY: 3,
     RoadTier.SECONDARY: 2,
-    RoadTier.TRACK: 1,
+    RoadTier.TRACK: 2,
 }
+_RIVER_COLOR = (47, 111, 191)
+_RIVER_CASING = (14, 42, 80)
+_ROAD_CASING = (32, 20, 10)
 
 
 def _rgb_int(r: float, g: float, b: float) -> tuple[int, int, int]:
@@ -427,6 +433,9 @@ def render(ws: WorldState, config: PNGConfig | None = None) -> Image.Image:
                 draw.line([(x1, y1), (x2, y2)], fill=(v, v, v), width=stroke)
 
     if "rivers" in layers:
+        # Every casing first, then every line, so that where two rivers run close
+        # together one river's casing cannot paint over the other's line.
+        bands = []
         for river in ws.rivers:
             # Banded by per-hex flow, so a river grows downstream instead of being drawn
             # at one width taken from its mouth.
@@ -442,21 +451,32 @@ def render(ws: WorldState, config: PNGConfig | None = None) -> Image.Image:
                 for coord in run:
                     px, py = axial_to_pixel(coord, size)
                     pts.append((int(px + ox), int(py + oy)))
-                draw.line(pts, fill=(58, 120, 201), width=max(1, round(sw * line_scale)))
+                bands.append((pts, max(1, round(sw * line_scale))))
+        outline = config.feature_outline * line_scale
+        if outline > 0.0:
+            for pts, lw in bands:
+                draw.line(pts, fill=_RIVER_CASING, width=lw + max(1, round(2.0 * outline)))
+        for pts, lw in bands:
+            draw.line(pts, fill=_RIVER_COLOR, width=lw)
 
     if "roads" in layers:
         # Deduped and ordered by tier, so shared trunk segments are drawn once and a
         # track never paints over the primary road it branches from.
+        legs = []
         for road, leg in dedupe_road_paths(ws.roads, ws.hexes, lambda r: ROAD_TIER_RANK[r.tier]):
             pts = []
             for coord in leg:
                 px, py = axial_to_pixel(coord, size)
                 pts.append((int(px + ox), int(py + oy)))
-            draw.line(
-                pts,
-                fill=_ROAD_COLOR[road.tier],
-                width=max(1, round(_ROAD_WIDTH[road.tier] * line_scale)),
-            )
+            legs.append((pts, max(1, round(_ROAD_WIDTH[road.tier] * line_scale)), road.tier))
+        outline = config.feature_outline * line_scale
+        if outline > 0.0:
+            # Casings for every road before any road line, or a branch's casing would
+            # cut the trunk it joins in half at the junction.
+            for pts, lw, _tier in legs:
+                draw.line(pts, fill=_ROAD_CASING, width=lw + max(1, round(2.0 * outline)))
+        for pts, lw, tier in legs:
+            draw.line(pts, fill=_ROAD_COLOR[tier], width=lw)
 
     if "crossings" in layers:
         for coord, kind, angle in legend.crossings(ws, axial_to_pixel, size):

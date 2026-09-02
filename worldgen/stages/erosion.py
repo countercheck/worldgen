@@ -20,6 +20,74 @@ _EVAPORATION = 0.99
 
 
 @_jit
+def _deposit_delta(
+    arr: np.ndarray,
+    ci: int,
+    cj: int,
+    sediment: float,
+    w: int,
+    h: int,
+    sea_level: float,
+    min_load: float,
+) -> None:
+    """Spread a droplet's load as a fan from where its channel meets the sea.
+
+    A river drops most of its load right at the mouth — the plume loses competence
+    within a few kilometres — so a delta is a small steep fan, not an even blanket along
+    the shore.  Emptying the whole load into the single hex of entry instead built
+    isolated spikes, and since droplets cross the waterline wherever they happen to
+    reach it, those spikes smeared along the entire coastline: only a third of the
+    infilled sea hexes were within three hexes of a river mouth and a fifth were more
+    than twenty away.  Fanning each load out with a sharp radial falloff lets the many
+    droplets funnelled down one channel superpose into a delta at its mouth, while a
+    lone droplet arriving off a hillside leaves almost nothing.
+
+    Nothing is lifted above the waterline: a delta progrades to sea level and then
+    builds seaward, it does not pile into hills.  That is also what stops sediment from
+    sealing the map edge back up into dry land far from any river.
+    """
+    if sediment < min_load:
+        # Too little to build anything.  A droplet that trickled off a nearby hillside
+        # reaches the sea carrying almost nothing, and that sediment is carried away
+        # along the shore rather than settling where it entered.  Letting every such
+        # arrival deposit is what smeared the shelf: with one droplet per cell of map,
+        # the whole coastline silts up evenly and no delta stands out anywhere.  Only a
+        # load that came down a channel is enough to build.
+        return
+
+    for radius in range(3):
+        if radius == 0:
+            weight = 0.6
+        elif radius == 1:
+            weight = 0.3
+        else:
+            weight = 0.1
+
+        count = 0
+        for di in range(-radius, radius + 1):
+            for dj in range(-radius, radius + 1):
+                if di > -radius and di < radius and dj > -radius and dj < radius:
+                    continue  # interior of the box: belongs to a smaller ring
+                i = ci + di
+                j = cj + dj
+                if 0 <= i < w and 0 <= j < h and arr[i, j] < sea_level:
+                    count += 1
+        if count == 0:
+            continue
+
+        share = sediment * weight / count
+        for di in range(-radius, radius + 1):
+            for dj in range(-radius, radius + 1):
+                if di > -radius and di < radius and dj > -radius and dj < radius:
+                    continue
+                i = ci + di
+                j = cj + dj
+                if 0 <= i < w and 0 <= j < h and arr[i, j] < sea_level:
+                    raised = arr[i, j] + share
+                    arr[i, j] = raised if raised < sea_level else sea_level
+
+
+@_jit
 def _drop_particle(
     arr: np.ndarray,
     channel_affinity: np.ndarray,
@@ -33,6 +101,7 @@ def _drop_particle(
     deposition: float,
     erosion_rate: float,
     affinity_gain: float,
+    delta_min_load: float,
 ) -> None:
     dir_x, dir_y = 0.0, 0.0
     speed = 1.0
@@ -45,7 +114,7 @@ def _drop_particle(
         if ci < 0 or ci >= w or cj < 0 or cj >= h:
             break
         if arr[ci, cj] < sea_level:
-            arr[ci, cj] += sediment
+            _deposit_delta(arr, ci, cj, sediment, w, h, sea_level, delta_min_load)
             break
 
         # Gradient from 4 neighbors (clamp at edges)
@@ -130,6 +199,7 @@ class ErosionStage(GeneratorStage):
                     cfg.erosion_deposition,
                     cfg.erosion_erosion_rate,
                     cfg.erosion_channel_affinity_gain,
+                    cfg.erosion_delta_min_load,
                 )
 
                 # Periodically re-weight remaining indices toward established channels

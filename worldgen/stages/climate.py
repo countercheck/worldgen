@@ -117,6 +117,32 @@ class ClimateStage(GeneratorStage):
                 if h.terrain_class not in water:
                     h.moisture = (h.moisture - lo) / span
 
+            # Anchor the pattern to the region's climate.  What the orographic pass
+            # produces is a *relative* map — which slopes catch the rain and which sit in
+            # a shadow — and stretching it to [0, 1] says nothing about whether the
+            # region is wet or dry.  Its mean lands near 0.15 because precipitation falls
+            # off sharply inland, so against a dry threshold of 0.2 almost every hex read
+            # as arid whatever climate was asked for, and every region came out
+            # shrubland.  A gamma keeps the ordering and the [0, 1] bounds intact while
+            # moving the mean onto the value the region's climate calls for, so rain
+            # shadow still decides which parts are wetter — just around the right centre.
+            target = self.config.regional_moisture
+            vals = np.array(
+                [h.moisture for h in state.hexes.values() if h.terrain_class not in water]
+            )
+            if len(vals) and 0.0 < target < 1.0 and vals.max() > 0.0:
+                lo_g, hi_g = 0.01, 25.0
+                for _ in range(40):
+                    mid = (lo_g + hi_g) / 2.0
+                    if float((vals**mid).mean()) > target:
+                        lo_g = mid
+                    else:
+                        hi_g = mid
+                gamma = (lo_g + hi_g) / 2.0
+                for h in state.hexes.values():
+                    if h.terrain_class not in water:
+                        h.moisture = float(h.moisture**gamma)
+
         # Elevation-gated bleed: river moisture spreads to adjacent lower-or-equal hexes
         if self.config.moisture_bleed_passes > 0:
             for _ in range(self.config.moisture_bleed_passes):
