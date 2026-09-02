@@ -144,7 +144,9 @@ class InterurbanRoadStage(GeneratorStage):
 
         tag_river_crossings(roads, hexes)
 
-        # Re-score habitability near roads so VillagePlacementStage benefits
+        # Re-score habitability near roads so VillagePlacementStage benefits.  Only the
+        # village score: cities and towns are already sited by this point, and a road
+        # they caused should not retroactively flatter the ground it runs over.
         road_hex_set = set(hex_tier.keys())
         for coord, hx in hexes.items():
             if hx.settlement is not None:
@@ -152,7 +154,7 @@ class InterurbanRoadStage(GeneratorStage):
             if hx.terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE):
                 continue
             if any(n in road_hex_set for n in neighbors(coord)):
-                hx.habitability = min(1.0, hx.habitability + 0.2)
+                hx.habitability_village = min(1.0, hx.habitability_village + 0.2)
 
         state.roads = roads
         return state

@@ -26,20 +26,26 @@ def distance(a: HexCoord, b: HexCoord) -> int:
     return (abs(qa - qb) + abs(ra - rb) + abs((qa + ra) - (qb + rb))) // 2
 
 
+_DIRECTIONS = [(1, 0), (1, -1), (0, -1), (-1, 0), (-1, 1), (0, 1)]
+
+
 def ring(center: HexCoord, radius: int) -> list[HexCoord]:
-    """All hexes at exactly radius distance from center."""
-    if radius == 0:
+    """All hexes at exactly radius distance from center.
+
+    Walks the ring one corner at a time: start `radius` steps along one direction, then
+    take `radius` steps along each of the six in turn, which closes the loop exactly.
+    """
+    if radius <= 0:
         return [center]
 
-    results = []
-    qc, rc = center
-    q, r = qc + radius, rc - radius
+    q = center[0] + _DIRECTIONS[4][0] * radius
+    r = center[1] + _DIRECTIONS[4][1] * radius
 
-    for _ in range(6):
+    results = []
+    for dq, dr in _DIRECTIONS:
         for _ in range(radius):
             results.append((q, r))
-            q, r = q - 1, r + 1
-        q, r = q + 1, r
+            q, r = q + dq, r + dr
 
     return results
 

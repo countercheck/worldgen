@@ -78,6 +78,30 @@ biome_wet_moist: 0.5     # Moisture above which climate is considered wet. Defau
 # ---------------------------------------------------------------------------
 # Settlements
 # ---------------------------------------------------------------------------
+# Habitability: how good a settlement site each hex is.  A site is scored on the land it
+# can actually feed itself from — the mean food value of every hex within the tier's
+# cultivation radius — plus flat bonuses for the site itself.  Because reach depends on
+# tier, every hex gets three scores, and each tier is placed on its own.
+#
+# Food value of one hex, by land cover:
+#   fertile   = open ground, woodland          marginal = scrub, dense forest
+#   wetland   = bog, marsh                     water    = ocean, lake (fishing)
+#   tundra, desert, alpine and bare rock are always 0
+food_fertile_value: 1.0    # Prime arable. Default: 1.0
+food_marginal_value: 0.4   # Grazing and hard-to-clear forest. Default: 0.4
+food_wetland_value: 0.15   # Neither good fishing nor good ploughing; below water on purpose. Default: 0.15
+food_water_value: 0.4      # Fishing. Non-zero so a coastal site is not penalised for having sea in its catchment. Default: 0.4
+
+# Fertile and marginal hexes are additionally scaled by a moisture curve peaking across
+# the [biome_dry_moist, biome_wet_moist] band and falling to 0 at both extremes — too dry
+# is desert, too wet is waterlogged. Water and wetland ignore it.
+
+habitability_agri_weight: 0.40      # Weight on the catchment mean. Default: 0.40
+habitability_river_bonus: 0.25      # Flat bonus if the hex or a neighbour carries a river. Default: 0.25
+habitability_coast_bonus: 0.25      # Flat bonus if the hex or a neighbour is coast. Default: 0.25
+habitability_hill_bonus: 0.15       # Flat bonus for a hill overlooking a plain. Default: 0.15
+habitability_confluence_bonus: 0.10 # Flat bonus on a river junction (this hex only). Default: 0.10
+
 target_city_count: 6    # Number of cities to place. Default: 6
 target_town_count: 24   # Number of towns to place. Default: 24
 city_min_separation: 20 # Minimum hexes between any two cities. Default: 20
