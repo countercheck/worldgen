@@ -22,6 +22,7 @@ import heapq
 
 from ..core.hex import TerrainClass
 from ..core.hex_grid import neighbors
+from .crossings import river_span
 from .road_cost import WATER, is_river
 
 
@@ -86,8 +87,9 @@ def make_travel_cost(hexes, cfg):
     difference is the point.  A road's crossing cost is dominated by its `_base` term —
     the fixed capital of building any bridge at all, which is what stops bridges being
     thrown across every stream.  Somebody walking to market pays no capital: the crossing
-    either exists or they ford it, and what decides that is how much water is in the way.
-    So travel drops the base and keeps only the term that scales with flow.
+    either exists or they ford it, and what decides that is how much water is in the way
+    and how steep the ground is around it.  So travel drops the base and keeps only what
+    scales with the reach itself.
 
     `terrain_base_cost` is left out too, and this is the one that actually mattered.  It
     charges 3x on a hill and 10x on a mountain — the cost of *cutting a road* through
@@ -122,32 +124,30 @@ def make_travel_cost(hexes, cfg):
     def edge_cost(from_hx, to_hx) -> float:
         if to_hx.terrain_class in WATER or from_hx.terrain_class in WATER:
             return float("inf")
-        return ascent_cost(from_hx, to_hx, cfg) + ford_cost(from_hx, to_hx, cfg)
+        return ascent_cost(from_hx, to_hx, cfg) + ford_cost(from_hx, to_hx, hexes, cfg)
 
     return node_cost, edge_cost
 
 
-def ford_cost(from_hx, to_hx, cfg) -> float:
+def ford_cost(from_hx, to_hx, hexes, cfg) -> float:
     """What it costs to get across a watercourse on foot.
 
     Charged on each land-river edge, so a perpendicular crossing pays twice — the same
     shape as `river_crossing_edge_cost`, and for the same reason.
 
     Where `CrossingStage` has already put a ford or a bridge, this is nearly nothing: the
-    crossing exists and you walk over it.  Everywhere else it scales with discharge and
-    has no fixed term, because somebody walking to market pays no capital — a headwater is
-    a step across and barely registers, a trunk river is most of a day each way.  That is
-    what makes a big river bound a catchment along its length while the district still
-    reaches across at the one place it can.
+    crossing exists and you walk over it.  Everywhere else it scales with `river_span` and
+    has no fixed term, because somebody walking to market pays no capital — a slack
+    headwater is a step across and barely registers, a big or fast-running reach is most of
+    a day each way.  That is what makes a river bound a catchment along its length while
+    the district still reaches across at the one place it can.
     """
     if is_river(from_hx) == is_river(to_hx):
         return 0.0
     channel = from_hx if is_river(from_hx) else to_hx
     if "ford" in channel.tags or "bridge" in channel.tags:
         return cfg.crossing_use_cost
-    from .crossings import river_span
-
-    return cfg.travel_ford_cost * river_span(channel, cfg)
+    return cfg.travel_ford_cost * river_span(channel, hexes, cfg)
 
 
 def ascent_cost(from_hx, to_hx, cfg) -> float:

@@ -330,6 +330,12 @@ class WorldConfig:
     # draining a few tens of km2 is ankle deep and a step across; one draining thousands
     # is not.
     ford_max_catchment_km2: float = 60.0
+    # Local relief, in metres, that doubles how hard a reach is to get across. Fast water
+    # takes your feet from under you whatever its depth, and at a kilometre to the hex it
+    # is the approaches rather than the span that defeat a bridge — both scale with how
+    # steep the ground is, so relief makes a reach behave like a bigger river for fording
+    # and for building alike. A floodplain has a few metres of it; a gorge has hundreds.
+    crossing_relief_m: float = 60.0
     # A bridge is capital, so it appears only where enough traffic will use it: the
     # surplus a site needs within reach, per multiple of the widest wadeable span. A river
     # twice that width needs twice the traffic to be worth the structure. This is

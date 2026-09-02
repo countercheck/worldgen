@@ -26,7 +26,7 @@ market catchment instead of being invisible to it.
 """
 
 from ..core.hex import TerrainClass
-from ..core.hex_grid import hex_range
+from ..core.hex_grid import hex_range, neighbors
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
 from .habitability import food_value
@@ -36,23 +36,54 @@ FORD = "ford"
 BRIDGE = "bridge"
 
 
-def river_span(hx, cfg) -> float:
-    """How wide the water is, in multiples of the widest that can be waded.
+def channel_drop_m(hx, hexes, cfg) -> float:
+    """How far the water falls over this reach, in metres per kilometre of channel.
 
-    Catchment area is the physical input — 1.0 means a stream at the very limit of
-    wading, 4.0 a river four times that width.  Width goes as the square root of
-    discharge by hydraulic geometry, which is the same exponent the river renderer uses
-    (`river_width_exponent: 0.5`), so the two agree about what a big river looks like.
+    Measured *along* the channel — the drop to the lowest neighbouring river hex — because
+    that is what sets the velocity, and velocity is what decides whether a reach can be
+    waded.  Slack water spreads and braids into shallows; the same discharge running fast
+    will take your feet from under you at half the depth.
 
-    Deliberately not built on `river_flow`.  That is normalised against the largest
-    accumulation on the map, so it is a rank: every map has a 1.0 however small its rivers
-    really are, and a threshold on it meant different things at different sizes — 0.15
-    caught almost no river at 64x64 (median flow 0.31) and over half at 128x128 (median
-    0.08), on the same landscape.  Catchment area says the same thing on any map.
+    Deliberately not the spread of the surrounding ground.  An earlier version measured
+    highest neighbour against lowest, which sounds like the same question and is not: a
+    river runs in a valley, so that figure reports how tall the valley sides are.  It came
+    out at a median of 255 m on a 64x64 map and called all but two reaches unfordable —
+    but a river winding down a broad vale with hills either side is perfectly wadeable at
+    the water's edge.  What the crossing cares about is the channel, not the skyline.
+    """
+    lowest = hx.elevation
+    for n in neighbors(hx.coord):
+        n_hx = hexes.get(n)
+        if n_hx is not None and is_river(n_hx):
+            lowest = min(lowest, n_hx.elevation)
+    return max(0.0, hx.elevation - lowest) * cfg.road_elev_range_m
+
+
+def river_span(hx, hexes, cfg) -> float:
+    """How hard this reach is to get across, in multiples of the easiest wadeable one.
+
+    Two things make it hard, and they multiply rather than compete.
+
+    **How much water.**  Catchment area is the physical input, and width goes as the
+    square root of discharge by hydraulic geometry — the same exponent the river renderer
+    uses (`river_width_exponent: 0.5`), so the two agree about what a big river looks like.
+    Deliberately not `river_flow`: that is normalised against the largest accumulation on
+    the map, so it is a rank rather than a quantity, and a threshold on it meant different
+    things at different map sizes.
+
+    **How fast it runs.**  A slack reach spreads and braids into shallows you can wade;
+    the same discharge falling steeply concentrates into water that will take your feet
+    from under you at half the depth.  A steep reach is also an incised one, and at a
+    kilometre to the hex what defeats a bridge is rarely the span but the approaches,
+    which then have to be cut.  So gradient makes a reach behave like a bigger river for
+    both purposes, which is why one number serves fording, bridging, and the cost of
+    getting across where there is no crossing at all.
     """
     if cfg.ford_max_catchment_km2 <= 0:
         return 0.0
-    return (hx.catchment_km2 / cfg.ford_max_catchment_km2) ** 0.5
+    width = (hx.catchment_km2 / cfg.ford_max_catchment_km2) ** 0.5
+    drop = channel_drop_m(hx, hexes, cfg)
+    return width * (1.0 + drop / cfg.crossing_relief_m)
 
 
 def crossing_pressure(coord, surplus: dict, radius: int) -> float:
@@ -86,7 +117,9 @@ class CrossingStage(GeneratorStage):
         if not river:
             return state
 
-        fords = [c for c in river if hexes[c].catchment_km2 <= cfg.ford_max_catchment_km2]
+        # A ford is any reach no harder to cross than the limit case: a stream at the
+        # wading size on level ground. Steep water of the same size does not qualify.
+        fords = [c for c in river if river_span(hexes[c], hexes, cfg) <= 1.0]
         for coord in fords:
             hexes[coord].tags.add(FORD)
 
@@ -101,7 +134,7 @@ class CrossingStage(GeneratorStage):
         for coord in river:
             if coord in taken or FORD in hexes[coord].tags:
                 continue
-            needed = cfg.bridge_pressure_per_span * river_span(hexes[coord], cfg)
+            needed = cfg.bridge_pressure_per_span * river_span(hexes[coord], hexes, cfg)
             pressure = crossing_pressure(coord, surplus, cfg.crossing_pressure_radius)
             if pressure >= needed:
                 candidates.append((pressure - needed, coord))

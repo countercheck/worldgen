@@ -83,38 +83,116 @@ def test_bigger_maps_really_do_have_bigger_rivers():
 # --- river_span --------------------------------------------------------------
 
 
+def _reach(catchment, drop_m=0.0, elevation=0.5):
+    """A river hex with a downstream neighbour *drop_m* below it, and dry banks alongside.
+
+    The drop is along the channel, which is what sets velocity. The banks are left level
+    on purpose: a river winds down a valley, so the ground beside it is nearly always
+    higher, and that says nothing about whether the water can be waded.
+    """
+    cfg = WorldConfig()
+    hx = Hex(coord=(0, 0), catchment_km2=catchment, elevation=elevation)
+    hx.tags.add("river")
+    hexes = {(0, 0): hx}
+    for n in neighbors((0, 0)):
+        hexes[n] = Hex(coord=n, elevation=elevation)
+    downstream = neighbors((0, 0))[0]
+    hexes[downstream].elevation = elevation - drop_m / cfg.road_elev_range_m
+    hexes[downstream].tags.add("river")
+    return hx, hexes
+
+
 def test_span_is_one_at_the_wading_limit():
     cfg = WorldConfig()
-    hx = Hex(coord=(0, 0), catchment_km2=cfg.ford_max_catchment_km2)
-    assert river_span(hx, cfg) == pytest.approx(1.0)
+    hx, hexes = _reach(cfg.ford_max_catchment_km2)
+    assert river_span(hx, hexes, cfg) == pytest.approx(1.0)
 
 
 def test_span_follows_the_square_root_of_area():
     """Width goes as the root of discharge — the same exponent the river renderer uses."""
     cfg = WorldConfig()
-    quad = Hex(coord=(0, 0), catchment_km2=cfg.ford_max_catchment_km2 * 4)
-    assert river_span(quad, cfg) == pytest.approx(2.0)
+    hx, hexes = _reach(cfg.ford_max_catchment_km2 * 4)
+    assert river_span(hx, hexes, cfg) == pytest.approx(2.0)
 
 
-def test_span_depends_only_on_the_river_not_on_the_map():
-    """The whole point: the same stream reads the same on any map."""
+def test_span_depends_only_on_the_reach_not_on_the_map():
+    """The whole point: the same stream on the same ground reads the same on any map."""
     cfg = WorldConfig()
-    hx = Hex(coord=(0, 0), catchment_km2=300.0)
-    assert river_span(hx, cfg) == river_span(Hex(coord=(9, 9), catchment_km2=300.0), cfg)
+    a, a_hexes = _reach(300.0, drop_m=15.0)
+    b, b_hexes = _reach(300.0, drop_m=15.0)
+    assert river_span(a, a_hexes, cfg) == river_span(b, b_hexes, cfg)
+
+
+# --- steep ground is harder to cross -----------------------------------------
+
+
+def test_fast_water_is_harder_to_cross_than_slack_water():
+    """Same discharge, different gradient: velocity is what takes your feet."""
+    cfg = WorldConfig()
+    slack, slack_hexes = _reach(cfg.ford_max_catchment_km2, drop_m=0.0)
+    fast, fast_hexes = _reach(cfg.ford_max_catchment_km2, drop_m=120.0)
+    assert river_span(fast, fast_hexes, cfg) > river_span(slack, slack_hexes, cfg)
+
+
+def test_a_high_valley_side_does_not_make_a_river_uncrossable():
+    """The distinction that a first attempt got wrong.
+
+    Measuring the spread of surrounding ground reports how tall the valley is, not how
+    fast the water runs — it called all but two reaches on a 64x64 map unfordable. A
+    river winding down a broad vale is wadeable at the water's edge whatever stands above
+    it.
+    """
+    cfg = WorldConfig()
+    plain, plain_hexes = _reach(cfg.ford_max_catchment_km2)
+    valley, valley_hexes = _reach(cfg.ford_max_catchment_km2)
+    for n in neighbors((0, 0))[1:]:
+        valley_hexes[n].elevation = valley.elevation + 250.0 / cfg.road_elev_range_m
+
+    assert river_span(valley, valley_hexes, cfg) == pytest.approx(
+        river_span(plain, plain_hexes, cfg)
+    )
+
+
+def test_gradient_scales_the_span_as_configured():
+    """One `crossing_relief_m` of fall per kilometre doubles the difficulty."""
+    cfg = WorldConfig()
+    hx, hexes = _reach(cfg.ford_max_catchment_km2, drop_m=cfg.crossing_relief_m)
+    assert river_span(hx, hexes, cfg) == pytest.approx(2.0)
+
+
+def test_a_steep_trickle_can_be_harder_than_a_slack_river():
+    """Size alone does not decide it — which is the point of folding relief in."""
+    cfg = WorldConfig()
+    slack, slack_hexes = _reach(cfg.ford_max_catchment_km2 * 2, drop_m=0.0)
+    torrent, torrent_hexes = _reach(cfg.ford_max_catchment_km2 * 0.5, drop_m=200.0)
+    assert river_span(torrent, torrent_hexes, cfg) > river_span(slack, slack_hexes, cfg)
 
 
 # --- fords are physical ------------------------------------------------------
 
 
-def test_fords_are_exactly_the_wadeable_reaches(crossed):
-    limit = crossed.metadata["config"]["ford_max_catchment_km2"]
+def test_fords_are_exactly_the_reaches_that_can_be_waded(crossed):
+    """A ford is any reach no harder than the limit case: wading size on level ground."""
+    cfg = WorldConfig(**crossed.metadata["config"])
     for hx in crossed.hexes.values():
         if not is_river(hx):
             continue
+        span = river_span(hx, crossed.hexes, cfg)
         if FORD in hx.tags:
-            assert hx.catchment_km2 <= limit, "tagged a ford on water too big to wade"
-        elif hx.catchment_km2 <= limit:
-            raise AssertionError(f"wadeable reach at {hx.coord} was not tagged a ford")
+            assert span <= 1.0, f"ford at {hx.coord} on a reach of span {span:.2f}"
+        else:
+            assert span > 1.0, f"wadeable reach at {hx.coord} was not tagged a ford"
+
+
+def test_some_small_water_is_still_unfordable_because_it_is_steep(crossed):
+    """If size alone decided it, folding relief into the span would be doing nothing."""
+    cfg = WorldConfig(**crossed.metadata["config"])
+    steep_and_small = [
+        hx
+        for hx in crossed.hexes.values()
+        if is_river(hx) and FORD not in hx.tags and hx.catchment_km2 <= cfg.ford_max_catchment_km2
+    ]
+    assert steep_and_small, "every unfordable reach is unfordable purely on size"
 
 
 def test_a_ford_needs_nobody_to_want_it(crossed):
@@ -129,11 +207,11 @@ def test_a_ford_needs_nobody_to_want_it(crossed):
 # --- bridges are capital -----------------------------------------------------
 
 
-def test_bridges_only_span_water_too_big_to_wade(crossed):
-    limit = crossed.metadata["config"]["ford_max_catchment_km2"]
+def test_bridges_only_span_reaches_that_cannot_be_waded(crossed):
+    cfg = WorldConfig(**crossed.metadata["config"])
     for hx in crossed.hexes.values():
         if BRIDGE in hx.tags:
-            assert hx.catchment_km2 > limit, "bridged a stream that could be waded"
+            assert river_span(hx, crossed.hexes, cfg) > 1.0, "bridged a wadeable reach"
 
 
 def test_a_dearer_bridge_needs_more_traffic():
@@ -149,8 +227,9 @@ def test_a_dearer_bridge_needs_more_traffic():
 
     assert len(bridges(strict)) < len(bridges(lenient))
     # And the ones that survive are the better-served, not merely the smaller.
-    assert max(river_span(h, WorldConfig()) for h in bridges(lenient)) >= max(
-        river_span(h, WorldConfig()) for h in bridges(strict)
+    cfg = WorldConfig()
+    assert max(river_span(h, lenient.hexes, cfg) for h in bridges(lenient)) >= max(
+        river_span(h, strict.hexes, cfg) for h in bridges(strict)
     )
 
 
