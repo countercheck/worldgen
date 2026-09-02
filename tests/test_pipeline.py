@@ -26,8 +26,11 @@ def test_cli_and_tests_share_one_stage_list():
     """The regression this file exists for.
 
     Five copies of the stage list used to be maintained by hand — one in the CLI and one
-    in each of four test modules. Both now read `default_stages`, so this asserts the CLI
-    has not quietly grown a private list again.
+    in each of four test modules. Both now read the shared registry, so this asserts the
+    CLI has not quietly grown a private list again.
+
+    Either entry point counts: `stages_for` is `default_stages` resolved against a config,
+    and both bottom out in the same tuple.
     """
     import inspect
 
@@ -35,7 +38,9 @@ def test_cli_and_tests_share_one_stage_list():
 
     # `generate` is a click Command; the function it wraps is its callback.
     source = inspect.getsource(cli.generate.callback)
-    assert "default_stages(" in source, "cli.generate no longer builds from default_stages"
+    assert "stages_for(" in source or "default_stages(" in source, (
+        "cli.generate no longer builds from the shared stage registry"
+    )
     assert ".add_stage(ElevationStage)" not in source, "cli.generate has an inline stage list"
 
 

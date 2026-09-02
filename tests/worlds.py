@@ -3,8 +3,9 @@
 Four test modules each carried a private `_build_pipeline` that restated the production
 stage list, stage for stage.  Five copies of one ordering meant a stage added to the CLI
 but missed in a fixture would leave those tests asserting about a pipeline nobody runs.
-Everything here builds on `worldgen.stages.default_stages`, which is the same list the CLI
-uses.
+Everything here builds on `worldgen.stages.stages_for`, which is the same list the CLI
+uses — `default_stages` resolved against the config, so a fixture that sets a heightmap
+gets the image importer in place of the noise stage exactly as a real run would.
 
 Worlds are memoised for the session.  Several modules want the same 64x64 seed-42 world,
 and generating it once rather than once per module is what keeps the suite fast enough to
@@ -13,7 +14,7 @@ run on every commit.
 
 from worldgen.core.config import WorldConfig
 from worldgen.core.pipeline import GeneratorPipeline
-from worldgen.stages import default_stages
+from worldgen.stages import stages_for
 
 
 def build_pipeline(
@@ -33,7 +34,7 @@ def build_pipeline(
     defaults = {"erosion_iterations": 500}
     cfg = WorldConfig(width=width, height=height, **{**defaults, **cfg_overrides})
 
-    stages = default_stages(model)
+    stages = stages_for(cfg, model)
     if until is not None:
         names = [s.__name__ for s in stages]
         if until not in names:
