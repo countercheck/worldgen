@@ -106,12 +106,16 @@ save(state, "topo.svg", SVGConfig(style="topographic"))
 save(state, "wargame.svg", SVGConfig(style="wargame", hex_size=8.0))
 
 # fully custom
-save(state, "custom.svg", SVGConfig(
-    color_mode="land_cover",
-    layers={"terrain", "rivers", "settlements", "labels"},
-    hex_size=16.0,
-    padding=30,
-))
+save(
+    state,
+    "custom.svg",
+    SVGConfig(
+        color_mode="land_cover",
+        layers={"terrain", "rivers", "settlements", "labels"},
+        hex_size=16.0,
+        padding=30,
+    ),
+)
 ```
 
 `SVGConfig` options:
@@ -352,8 +356,9 @@ from worldgen.stages.hydrology import HydrologyStage
 
 cfg = WorldConfig(width=128, height=128)
 pipeline = GeneratorPipeline(seed=42, config=cfg)
-pipeline.add_stage(ElevationStage).add_stage(ErosionStage) \
-        .add_stage(TerrainClassificationStage).add_stage(HydrologyStage)
+pipeline.add_stage(ElevationStage).add_stage(ErosionStage).add_stage(
+    TerrainClassificationStage
+).add_stage(HydrologyStage)
 state = pipeline.run()
 ```
 
@@ -363,15 +368,16 @@ All parameters are in `WorldConfig`. Key knobs:
 
 ```python
 WorldConfig(
-    width=128, height=128,
-    sea_level=0.45,              # fraction of hexes below sea
-    noise_octaves=6,             # fBm detail levels
-    erosion_iterations=15000,    # more = sharper valleys
-    river_flow_threshold=0.05,   # top N% of flow accumulation becomes rivers
-    base_temperature=0.5,        # 0 = arctic, 1 = tropical
+    width=128,
+    height=128,
+    sea_level=0.45,  # fraction of hexes below sea
+    noise_octaves=6,  # fBm detail levels
+    erosion_iterations=15000,  # more = sharper valleys
+    river_flow_threshold=0.05,  # top N% of flow accumulation becomes rivers
+    base_temperature=0.5,  # 0 = arctic, 1 = tropical
     target_city_count=6,
     target_town_count=24,
-    road_mountain_cost=10.0,     # cost multiplier for mountain hexes
+    road_mountain_cost=10.0,  # cost multiplier for mountain hexes
 )
 ```
 

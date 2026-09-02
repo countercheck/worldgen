@@ -199,6 +199,33 @@ class WorldConfig:
         ):
             if getattr(self, name) < 0:
                 raise ValueError(f"{name} must be >= 0, got {getattr(self, name)}")
+        for name in ("haulage_range_land", "rural_field_radius", "market_day_radius"):
+            if getattr(self, name) <= 0:
+                raise ValueError(f"{name} must be > 0, got {getattr(self, name)}")
+        # The regime ordering is the model's central claim: a farmer's daily walk is
+        # shorter than a day's return to market, which is shorter than the distance bulk
+        # grain survives overland. Invert any of these and the hierarchy stops meaning
+        # anything, so it is checked rather than assumed.
+        if not (self.rural_field_radius < self.market_day_radius < self.haulage_range_land):
+            raise ValueError(
+                "haulage ranges must increase: rural_field_radius < market_day_radius < "
+                f"haulage_range_land, got {self.rural_field_radius} < "
+                f"{self.market_day_radius} < {self.haulage_range_land}"
+            )
+        if self.haulage_range_water_mult < 1.0:
+            raise ValueError(
+                "haulage_range_water_mult must be >= 1 (water cannot carry bulk less far "
+                f"than land), got {self.haulage_range_water_mult}"
+            )
+        if not (0.0 <= self.navigable_river_flow <= 1.0):
+            raise ValueError(
+                f"navigable_river_flow must be in [0, 1], got {self.navigable_river_flow}"
+            )
+        if not (0.0 < self.marketable_surplus_fraction <= 1.0):
+            raise ValueError(
+                "marketable_surplus_fraction must be in (0, 1], got "
+                f"{self.marketable_surplus_fraction}"
+            )
         if self.biome_dry_moist > self.biome_wet_moist:
             raise ValueError(
                 "biome_dry_moist must be <= biome_wet_moist, got "
@@ -248,6 +275,36 @@ class WorldConfig:
     base_moisture: float = 0.0  # flat bias added to land moisture after anchoring
     regional_moisture: float | None = None  # mean land moisture; None = from regional_climate
 
+    # ---- Haulage economics -------------------------------------------------
+    # The ranges the settlement hierarchy is built on.  Each is a *travel-cost* budget,
+    # not a distance, so terrain shortens it: at 1 hex = 1 km these are calibrated to give
+    # the historical figure on flat ground, and less across hills.
+    #
+    #   rural_field_radius  ~2 km   the daily walk out to the fields.  Chisholm: cropping
+    #                               intensity falls off past ~1 km, land past 3-4 km is
+    #                               grazing or waste, and by ~5 km founding a daughter
+    #                               settlement beats continuing to walk.
+    #   market_day_radius   ~10 km  out to market, business done, and home inside a day.
+    #                               Bracton held markets should stand 6 2/3 miles apart,
+    #                               being a third of a twenty-mile day out and a third
+    #                               back; English market towns do cluster at 10-15 km.
+    #   haulage_range_land  ~40 km  bulk grain overland before the team has eaten the
+    #                               cargo.  The softest number here — what is actually
+    #                               well attested is the ratio below, not this absolute.
+    haulage_range_land: float = 40.0
+    # Diocletian's Price Edict prices land carriage at roughly 55x sea and 11x river for
+    # the same tonne-kilometre.  This multiplier is why large pre-industrial cities sit on
+    # navigable water and inland ones stay small: nothing gates a city, water simply
+    # extends what can feed it.
+    haulage_range_water_mult: float = 15.0
+    # river_flow at or above which a river floats a boat. Below it a river is something
+    # you ford, not something you ship grain down.
+    navigable_river_flow: float = 0.35
+    # A farming household eats most of what it grows; only this share can leave for a
+    # market. Sizing markets off the *surplus* rather than the production is why the tier
+    # ratios come out right without target counts anywhere.
+    marketable_surplus_fraction: float = 0.20
+
     # Biome thresholds
     biome_alpine_elev: float = 0.85
     biome_cold_temp: float = 0.25
@@ -255,11 +312,36 @@ class WorldConfig:
     biome_dry_moist: float = 0.2
     biome_wet_moist: float = 0.5
 
-    # Settlements
+    # Settlements — the classic model (ranked placement against fixed counts)
     city_min_separation: int = 20
     town_min_separation: int = 8
     target_city_count: int = 6
     target_town_count: int = 24
+
+    # ---- Settlements: the haulage model ------------------------------------
+    # Counts here are emergent, not configured.  What is set is how far people travel and
+    # how poor a site may be before nobody bothers; the map decides how many result.
+
+    # The rural surface. The countryside is a continuous productive surface rather than a
+    # list of hamlets: a market's draw is the surplus of its catchment, and integrating
+    # over the food field gives the same number as enumerating ~900 hamlets on a 128x128
+    # map, almost none of which would carry military or administrative weight.
+    rural_field_radius: float = 2.5  # the daily walk to the fields; sets cultivated extent
+    people_per_food: float = 120.0  # people per unit of haulage-weighted food
+
+    # Market centres. A market goes where it can gather the most surplus inside a day's
+    # return — central-place logic with a real transport cost rather than an abstract one.
+    market_day_radius: float = 10.0
+    market_kernel_decay: float = 4.0  # d0 in the 1/(1 + d/d0) depletion share
+    # A suppression disc only, to stop two markets sharing a hexside. Real spacing comes
+    # from competition for surplus, which is what makes it dense on rich ground and sparse
+    # on poor — a fixed separation cannot express that.
+    market_min_separation: int = 5
+    # The one density knob, replacing target_city_count and target_town_count both: stop
+    # planting once the best remaining site scores below this. Calibrated against ~70-85
+    # markets at 128x128 (England had ~700 markets in ~130,000 km2; this map is about an
+    # eighth of that).
+    market_viability_floor: float = 6.0
 
     # Cultivation radii — also the catchment each tier is scored on by HabitabilityStage
     cultivation_city_radius: int = 8

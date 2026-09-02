@@ -149,6 +149,7 @@ Several tunable thresholds are hardcoded in `stages/city_town.py` and `stages/se
 @classmethod
 def from_json(cls, path: str) -> "WorldState":
     from worldgen.export.json_export import load
+
     return load(path)
 ```
 
@@ -177,6 +178,7 @@ The canonical stage sequence is defined only inside the `generate()` function in
 ```python
 from .stages.biomes import BiomeStage
 from .stages.city_town import CityTownStage
+
 # ... 13 more
 pipeline.add_stage(ElevationStage)
 # ... 14 more add_stage calls
@@ -223,10 +225,10 @@ This is lower priority than the items above because the code is correct and well
 Multiple stage files use unparameterised type annotations:
 
 ```python
-hex_traffic: dict = defaultdict(float)        # should be dict[HexCoord, float]
-canonical_routes: dict = {}                    # should be dict[tuple, list[HexCoord]]
-hex_tier: dict = {}                            # should be dict[HexCoord, RoadTier]
-metadata: dict = field(default_factory=dict)   # should be dict[str, Any]
+hex_traffic: dict = defaultdict(float)  # should be dict[HexCoord, float]
+canonical_routes: dict = {}  # should be dict[tuple, list[HexCoord]]
+hex_tier: dict = {}  # should be dict[HexCoord, RoadTier]
+metadata: dict = field(default_factory=dict)  # should be dict[str, Any]
 ```
 
 These are legal Python 3.11 but suppress type-checker warnings that would catch bugs (e.g., passing a `HexCoord` key where a `str` is expected).
