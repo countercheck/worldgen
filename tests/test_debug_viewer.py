@@ -12,8 +12,6 @@ from worldgen.stages.habitability import HabitabilityStage
 from worldgen.stages.hydrology import HydrologyStage
 from worldgen.stages.interurban_roads import InterurbanRoadStage
 from worldgen.stages.land_cover import LandCoverStage
-from worldgen.stages.roads import RoadStage
-from worldgen.stages.settlements import SettlementStage
 from worldgen.stages.terrain_class import TerrainClassificationStage
 
 
@@ -37,9 +35,10 @@ def small_state():
         .add_stage(HydrologyStage)
         .add_stage(ClimateStage)
         .add_stage(BiomeStage)
+        .add_stage(LandCoverStage)
         .add_stage(HabitabilityStage)
-        .add_stage(SettlementStage)
-        .add_stage(RoadStage)
+        .add_stage(CityTownStage)
+        .add_stage(InterurbanRoadStage)
     )
     return p.run()
 

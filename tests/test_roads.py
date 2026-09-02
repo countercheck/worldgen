@@ -5,15 +5,20 @@ from worldgen.core.hex import Hex, SettlementTier, TerrainClass
 from worldgen.core.pipeline import GeneratorPipeline
 from worldgen.core.world_state import RoadTier
 from worldgen.stages.biomes import BiomeStage
+from worldgen.stages.city_town import CityTownStage
 from worldgen.stages.climate import ClimateStage
+from worldgen.stages.cultivation import CultivationStage, VillageCultivationStage
 from worldgen.stages.elevation import ElevationStage
 from worldgen.stages.erosion import ErosionStage
 from worldgen.stages.habitability import HabitabilityStage
 from worldgen.stages.hydrology import HydrologyStage
+from worldgen.stages.interurban_roads import InterurbanRoadStage
+from worldgen.stages.land_cover import LandCoverStage
 from worldgen.stages.road_cost import slope_edge_cost
-from worldgen.stages.roads import RoadStage
-from worldgen.stages.settlements import SettlementStage
 from worldgen.stages.terrain_class import TerrainClassificationStage
+from worldgen.stages.village_placement import VillagePlacementStage
+from worldgen.stages.village_tracks import VillageTrackStage
+from worldgen.stages.water_bodies import WaterBodiesStage
 
 
 def _build_pipeline(seed: int = 42, width: int = 64, height: int = 64, **cfg_overrides):
@@ -28,15 +33,23 @@ def _build_pipeline(seed: int = 42, width: int = 64, height: int = 64, **cfg_ove
     # Overrides win, so a fixture can vary any of these — including the ones above.
     cfg = WorldConfig(width=width, height=height, **{**defaults, **cfg_overrides})
     p = GeneratorPipeline(seed, cfg)
+    # The production pipeline, stage for stage — see worldgen/cli.py. Road invariants
+    # have to be asserted about the stages that actually generate worlds.
     p.add_stage(ElevationStage)
     p.add_stage(ErosionStage)
     p.add_stage(TerrainClassificationStage)
+    p.add_stage(WaterBodiesStage)
     p.add_stage(HydrologyStage)
     p.add_stage(ClimateStage)
     p.add_stage(BiomeStage)
+    p.add_stage(LandCoverStage)
     p.add_stage(HabitabilityStage)
-    p.add_stage(SettlementStage)
-    p.add_stage(RoadStage)
+    p.add_stage(CityTownStage)
+    p.add_stage(InterurbanRoadStage)
+    p.add_stage(CultivationStage)
+    p.add_stage(VillagePlacementStage)
+    p.add_stage(VillageTrackStage)
+    p.add_stage(VillageCultivationStage)
     return p
 
 

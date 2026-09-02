@@ -5,7 +5,7 @@ from ..core.hex import TerrainClass
 from ..core.hex_grid import astar, distance, neighbors
 from ..core.world_state import Ferry
 
-_WATER = (TerrainClass.OCEAN, TerrainClass.LAKE)
+WATER = (TerrainClass.OCEAN, TerrainClass.LAKE)
 
 
 def edge_grade_pct(from_hx, to_hx, cfg) -> float:
@@ -48,7 +48,7 @@ def terrain_base_cost(hx, cfg) -> float:
     where embark/disembark costs (charged on edges) dominate the journey.
     """
     tc = hx.terrain_class
-    if tc in _WATER:
+    if tc in WATER:
         return cfg.road_water_cost
     if tc == TerrainClass.MOUNTAIN:
         return cfg.road_mountain_cost
@@ -96,8 +96,8 @@ def river_hex_cost(hx, cfg) -> float:
 
 def water_edge_cost(from_hx, to_hx, cfg) -> float:
     """Embark/disembark cost for transitions between land and water hexes."""
-    from_water = from_hx.terrain_class in _WATER
-    to_water = to_hx.terrain_class in _WATER
+    from_water = from_hx.terrain_class in WATER
+    to_water = to_hx.terrain_class in WATER
     if from_water == to_water:
         return 0.0
     return cfg.road_embark_cost if to_water else cfg.road_disembark_cost
@@ -266,7 +266,7 @@ def ferry_link(hexes, origin, label, main, cfg, blocked, settled, plain_cost, pl
             c
             for c in coords
             if (hx := hexes.get(c)) is not None
-            and hx.terrain_class not in _WATER
+            and hx.terrain_class not in WATER
             and hx.river_flow <= 0
         )
 

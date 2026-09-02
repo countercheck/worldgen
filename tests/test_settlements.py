@@ -4,16 +4,20 @@ from worldgen.core.config import WorldConfig
 from worldgen.core.hex import Biome, Hex, SettlementRole, SettlementTier, TerrainClass
 from worldgen.core.pipeline import GeneratorPipeline
 from worldgen.stages.biomes import BiomeStage
+from worldgen.stages.city_town import CityTownStage
 from worldgen.stages.city_town import _assign_role as assign_city_town_role
 from worldgen.stages.climate import ClimateStage
+from worldgen.stages.cultivation import CultivationStage, VillageCultivationStage
 from worldgen.stages.elevation import ElevationStage
 from worldgen.stages.erosion import ErosionStage
 from worldgen.stages.habitability import HabitabilityStage
 from worldgen.stages.hydrology import HydrologyStage
-from worldgen.stages.roads import RoadStage
-from worldgen.stages.settlements import SettlementStage
-from worldgen.stages.settlements import _assign_role as assign_settlement_role
+from worldgen.stages.interurban_roads import InterurbanRoadStage
+from worldgen.stages.land_cover import LandCoverStage
 from worldgen.stages.terrain_class import TerrainClassificationStage
+from worldgen.stages.village_placement import VillagePlacementStage
+from worldgen.stages.village_tracks import VillageTrackStage
+from worldgen.stages.water_bodies import WaterBodiesStage
 
 
 def _build_pipeline(seed: int = 42, width: int = 64, height: int = 64):
@@ -25,14 +29,24 @@ def _build_pipeline(seed: int = 42, width: int = 64, height: int = 64):
         target_town_count=12,
     )
     p = GeneratorPipeline(seed, cfg)
+    # The production pipeline, stage for stage — see worldgen/cli.py.  Villages need
+    # roads and cultivation to exist before VillagePlacementStage will site them, so
+    # a settlement test cannot stop short of the full run.
     p.add_stage(ElevationStage)
     p.add_stage(ErosionStage)
     p.add_stage(TerrainClassificationStage)
+    p.add_stage(WaterBodiesStage)
     p.add_stage(HydrologyStage)
     p.add_stage(ClimateStage)
     p.add_stage(BiomeStage)
+    p.add_stage(LandCoverStage)
     p.add_stage(HabitabilityStage)
-    p.add_stage(SettlementStage)
+    p.add_stage(CityTownStage)
+    p.add_stage(InterurbanRoadStage)
+    p.add_stage(CultivationStage)
+    p.add_stage(VillagePlacementStage)
+    p.add_stage(VillageTrackStage)
+    p.add_stage(VillageCultivationStage)
     return p
 
 
@@ -125,30 +139,11 @@ def _make_port_role_test_hexes():
     return center, river_neighbor, hexes
 
 
-def test_settlement_port_role_requires_river_tag():
-    center, river_neighbor, hexes = _make_port_role_test_hexes()
-
-    assert assign_settlement_role(center.coord, center, hexes) is not SettlementRole.PORT
-
-    river_neighbor.tags.add("river")
-    assert assign_settlement_role(center.coord, center, hexes) is SettlementRole.PORT
-
-
 def test_city_town_port_role_requires_river_tag():
+    """Adjacency to water alone is not a port — the neighbour must carry the river tag."""
     center, river_neighbor, hexes = _make_port_role_test_hexes()
 
     assert assign_city_town_role(center.coord, center, hexes) is not SettlementRole.PORT
 
     river_neighbor.tags.add("river")
     assert assign_city_town_role(center.coord, center, hexes) is SettlementRole.PORT
-
-
-def test_road_role_requires_river_tag():
-    center, river_neighbor, hexes = _make_port_role_test_hexes()
-
-    assert (
-        RoadStage._assign_role_simple(None, center.coord, center, hexes) is not SettlementRole.PORT
-    )
-
-    river_neighbor.tags.add("river")
-    assert RoadStage._assign_role_simple(None, center.coord, center, hexes) is SettlementRole.PORT
