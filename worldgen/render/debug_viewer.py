@@ -7,6 +7,10 @@ from ..core.hex import Biome, LandCover, SettlementTier, TerrainClass
 from ..core.hex_grid import axial_to_pixel, dedupe_road_paths
 from ..core.world_state import ROAD_TIER_RANK, RoadTier, WorldState
 
+# Degrees Celsius spanned by the temperature ramp. Fixed rather than per-map so two
+# worlds can be compared by eye.
+TEMPERATURE_RAMP_C = (-20.0, 35.0)
+
 TERRAIN_COLORS = {
     TerrainClass.OCEAN: (0.2, 0.4, 0.8),
     TerrainClass.LAKE: (0.35, 0.6, 0.85),
@@ -99,8 +103,13 @@ def _color_getter(attribute: str):
         cmap = mpl.colormaps["Blues"]
         return (lambda h: cmap(h.moisture)), False, False
     if attribute == "temperature":
+        # Temperature is degrees Celsius, so it has to be put on a 0-1 ramp for drawing.
+        # The span is fixed rather than taken from the map's own range: a fixed scale lets
+        # two maps be compared by eye, where a per-map stretch would paint a mild region
+        # and a frozen one in exactly the same colours.
         cmap = mpl.colormaps["RdYlBu_r"]
-        return (lambda h: cmap(h.temperature)), False, False
+        lo, hi = TEMPERATURE_RAMP_C
+        return (lambda h: cmap((h.temperature - lo) / (hi - lo))), False, False
     if attribute == "river_flow":
         cmap = mpl.colormaps["Blues"]
 

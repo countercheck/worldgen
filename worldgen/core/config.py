@@ -13,7 +13,7 @@ class ClimateContext:
     alpine with altitude, but never produces jungle three valleys over.
     """
 
-    base_temperature: float
+    mean_temperature_c: float
     moisture_target: float
     palette: frozenset
 
@@ -29,16 +29,18 @@ def _palette(*names: str) -> frozenset:
 _ALWAYS = ("ALPINE", "WETLAND", "OCEAN")
 
 CLIMATE_CONTEXTS: dict[str, ClimateContext] = {
-    "boreal": ClimateContext(0.22, 0.55, _palette("TUNDRA", "BOREAL", "GRASSLAND", *_ALWAYS)),
+    # Mean annual temperature at sea level, in degrees Celsius — real figures for the
+    # regions these name, rather than positions on an abstract 0-1 axis.
+    "boreal": ClimateContext(1.0, 0.55, _palette("TUNDRA", "BOREAL", "GRASSLAND", *_ALWAYS)),
     "temperate": ClimateContext(
-        0.50, 0.55, _palette("TEMPERATE_FOREST", "GRASSLAND", "BOREAL", "SHRUBLAND", *_ALWAYS)
+        10.0, 0.55, _palette("TEMPERATE_FOREST", "GRASSLAND", "BOREAL", "SHRUBLAND", *_ALWAYS)
     ),
     "mediterranean": ClimateContext(
-        0.62, 0.35, _palette("SHRUBLAND", "GRASSLAND", "TEMPERATE_FOREST", *_ALWAYS)
+        16.0, 0.35, _palette("SHRUBLAND", "GRASSLAND", "TEMPERATE_FOREST", *_ALWAYS)
     ),
-    "arid": ClimateContext(0.68, 0.15, _palette("DESERT", "SHRUBLAND", "GRASSLAND", *_ALWAYS)),
+    "arid": ClimateContext(21.0, 0.15, _palette("DESERT", "SHRUBLAND", "GRASSLAND", *_ALWAYS)),
     "tropical": ClimateContext(
-        0.85, 0.75, _palette("TROPICAL", "GRASSLAND", "SHRUBLAND", *_ALWAYS)
+        26.0, 0.75, _palette("TROPICAL", "GRASSLAND", "SHRUBLAND", *_ALWAYS)
     ),
 }
 
@@ -162,17 +164,27 @@ class WorldConfig:
                 f"choose from {', '.join(sorted(CLIMATE_CONTEXTS))}"
             )
         context = CLIMATE_CONTEXTS[self.regional_climate]
-        if self.base_temperature is None:
-            self.base_temperature = context.base_temperature
+        if self.mean_temperature_c is None:
+            self.mean_temperature_c = context.mean_temperature_c
         if self.regional_moisture is None:
             self.regional_moisture = context.moisture_target
         if not (0.0 < self.regional_moisture < 1.0):
             raise ValueError(f"regional_moisture must be in (0, 1), got {self.regional_moisture}")
-        if not (0.0 <= self.base_temperature <= 1.0):
-            raise ValueError(f"base_temperature must be in [0, 1], got {self.base_temperature}")
-        if not (0.0 <= self.latitude_temp_range <= 1.0):
+        if not (-60.0 <= self.mean_temperature_c <= 50.0):
             raise ValueError(
-                f"latitude_temp_range must be in [0, 1], got {self.latitude_temp_range}"
+                "mean_temperature_c must be a plausible mean annual temperature in "
+                f"Celsius, got {self.mean_temperature_c}"
+            )
+        if self.latitude_temp_range_c < 0.0:
+            raise ValueError(
+                f"latitude_temp_range_c must be >= 0, got {self.latitude_temp_range_c}"
+            )
+        if self.lapse_rate_c_per_km < 0.0:
+            raise ValueError(f"lapse_rate_c_per_km must be >= 0, got {self.lapse_rate_c_per_km}")
+        if self.biome_cold_temp_c >= self.biome_warm_temp_c:
+            raise ValueError(
+                "biome_cold_temp_c must be below biome_warm_temp_c, got "
+                f"{self.biome_cold_temp_c} and {self.biome_warm_temp_c}"
             )
         if self.erosion_delta_min_load < 0:
             raise ValueError(
@@ -302,9 +314,16 @@ class WorldConfig:
     # This is what stops the biome mix from being an accident of the average elevation.
     regional_climate: str = "temperate"
     wind_direction: tuple[float, float] = (1.0, 0.0)
-    base_temperature: float | None = None  # None = take it from regional_climate
-    latitude_temp_range: float = 0.0  # negligible across a region; raise only for a continent
-    altitude_lapse_rate: float = 0.4
+    # Mean annual temperature at sea level, in degrees Celsius. None takes it from
+    # regional_climate. Real degrees rather than a 0-1 axis, so a threshold set against it
+    # means what it says and cannot shift when the axis is reinterpreted.
+    mean_temperature_c: float | None = None
+    # Degrees between the pole-ward and equator-ward edges. Negligible across a region:
+    # 128 km is about a degree of latitude, worth a few tenths of a degree.
+    latitude_temp_range_c: float = 0.0
+    # The environmental lapse rate: how fast air cools with height. 6.5 C/km is the
+    # standard figure, and being a real rate it stays right whatever the map's relief.
+    lapse_rate_c_per_km: float = 6.5
     orographic_strength: float = 2.0
     base_moisture: float = 0.0  # flat bias added to land moisture after anchoring
     regional_moisture: float | None = None  # mean land moisture; None = from regional_climate
@@ -383,8 +402,11 @@ class WorldConfig:
 
     # Biome thresholds
     biome_alpine_elev: float = 0.85
-    biome_cold_temp: float = 0.25
-    biome_warm_temp: float = 0.6
+    # Mean annual temperature bounding the cold and warm biome bands, in Celsius. Taiga
+    # gives way to broadleaf woodland around 5 C; the warm band begins where subtropical
+    # vegetation takes over, around 18 C.
+    biome_cold_temp_c: float = 5.0
+    biome_warm_temp_c: float = 18.0
     biome_dry_moist: float = 0.2
     biome_wet_moist: float = 0.5
 
@@ -543,6 +565,23 @@ _EDGES = ("north", "south", "east", "west")
 # Settings that used to exist. A key here is dropped with a warning naming what replaced
 # it, so a config written against an older version still loads instead of crashing.
 _RETIRED_FIELDS: dict[str, str] = {
+    "base_temperature": (
+        "temperature is in degrees Celsius now, not on a 0-1 axis; use mean_temperature_c "
+        "(temperate is 10.0)"
+    ),
+    "latitude_temp_range": (
+        "temperature is in degrees Celsius now; use latitude_temp_range_c, the spread in "
+        "degrees between the map's pole-ward and equator-ward edges"
+    ),
+    "altitude_lapse_rate": (
+        "the lapse rate is a real rate now; use lapse_rate_c_per_km (6.5 is standard)"
+    ),
+    "biome_cold_temp": (
+        "biome temperature bands are in Celsius now; use biome_cold_temp_c (try 5.0)"
+    ),
+    "biome_warm_temp": (
+        "biome temperature bands are in Celsius now; use biome_warm_temp_c (try 18.0)"
+    ),
     "erosion_iterations": (
         "erosion is now dosed per land hex so it means the same thing at any map size; "
         "use erosion_droplets_per_hex (try 8.0, which is 15000 droplets on a 48x48 map)"

@@ -27,9 +27,11 @@ def climate_state():
     return _build_pipeline().run()
 
 
-def test_temperature_in_range(climate_state):
+def test_temperature_is_a_plausible_annual_mean(climate_state):
     for h in climate_state.hexes.values():
-        assert 0.0 <= h.temperature <= 1.0, f"temperature {h.temperature} out of [0, 1]"
+        assert -60.0 <= h.temperature <= 50.0, (
+            f"temperature {h.temperature:.1f} C is not a plausible mean annual value"
+        )
 
 
 def test_moisture_in_range(climate_state):
@@ -115,11 +117,11 @@ def _mean_land_temperature(state) -> float:
     return sum(temps) / len(temps) if temps else 0.0
 
 
-def test_base_temperature_shifts_mean_upward():
-    """Higher base_temperature should produce a higher mean land temperature."""
+def test_mean_temperature_shifts_the_map():
+    """A warmer region should come out warmer."""
 
     def run_with_base(base: float):
-        cfg = WorldConfig(width=32, height=32, base_temperature=base)
+        cfg = WorldConfig(width=32, height=32, mean_temperature_c=base)
         p = GeneratorPipeline(42, cfg)
         p.add_stage(ElevationStage)
         p.add_stage(ErosionStage)
@@ -131,20 +133,20 @@ def test_base_temperature_shifts_mean_upward():
     cold_state = run_with_base(0.2)
     warm_state = run_with_base(0.8)
     assert _mean_land_temperature(cold_state) < _mean_land_temperature(warm_state), (
-        "Higher base_temperature did not produce higher mean land temperature"
+        "a higher mean_temperature_c did not produce a warmer map"
     )
 
 
-def test_base_temperature_preserves_latitude_shape():
-    """Changing base_temperature should shift temperatures but preserve the
+def test_mean_temperature_preserves_latitude_shape():
+    """Changing mean_temperature_c should shift temperatures but preserve the
     relative latitude ordering — equatorial hexes warmer than polar ones."""
 
     def run_with_base(base: float):
         cfg = WorldConfig(
             width=32,
             height=32,
-            base_temperature=base,
-            latitude_temp_range=0.3,  # large enough to distinguish rows
+            mean_temperature_c=base,
+            latitude_temp_range_c=8.0,  # large enough to distinguish rows
         )
         p = GeneratorPipeline(42, cfg)
         p.add_stage(ElevationStage)
@@ -170,15 +172,15 @@ def test_base_temperature_preserves_latitude_shape():
         if polar_temps and equatorial_temps:
             assert sum(equatorial_temps) / len(equatorial_temps) > sum(polar_temps) / len(
                 polar_temps
-            ), f"With base_temperature={base}, equatorial hexes are not warmer than polar hexes"
+            ), f"With mean_temperature_c={base}, equatorial hexes are not warmer than polar hexes"
 
 
-def test_base_temperature_validation():
-    """base_temperature outside [0, 1] should raise ValueError."""
-    with pytest.raises(ValueError, match="base_temperature"):
-        WorldConfig(base_temperature=-0.1)
-    with pytest.raises(ValueError, match="base_temperature"):
-        WorldConfig(base_temperature=1.1)
+def test_mean_temperature_validation():
+    """A mean annual temperature outside anything Earth offers should raise."""
+    with pytest.raises(ValueError, match="mean_temperature_c"):
+        WorldConfig(mean_temperature_c=-99.0)
+    with pytest.raises(ValueError, match="mean_temperature_c"):
+        WorldConfig(mean_temperature_c=120.0)
 
 
 def _mean_land_moisture(state) -> float:
@@ -260,11 +262,18 @@ def test_moisture_bleed_requires_river_tag():
 
 
 def test_latitude_temp_range_validation():
-    """latitude_temp_range outside [0, 1] should raise ValueError."""
-    with pytest.raises(ValueError, match="latitude_temp_range"):
-        WorldConfig(latitude_temp_range=-0.01)
-    with pytest.raises(ValueError, match="latitude_temp_range"):
-        WorldConfig(latitude_temp_range=1.1)
+    """A negative spread between the map's edges is meaningless."""
+    with pytest.raises(ValueError, match="latitude_temp_range_c"):
+        WorldConfig(latitude_temp_range_c=-0.01)
+
+
+def test_the_old_zero_to_one_temperature_settings_still_load(tmp_path):
+    """A config written against the 0-1 axis must say so, not fail obscurely."""
+    path = tmp_path / "old.yaml"
+    path.write_text("base_temperature: 0.5\naltitude_lapse_rate: 0.4\nbiome_cold_temp: 0.25\n")
+    with pytest.warns(DeprecationWarning, match="Celsius"):
+        cfg = WorldConfig.from_yaml(str(path))
+    assert cfg.mean_temperature_c == 10.0, "should fall back to the climate's real mean"
 
 
 def test_erosion_dose_does_not_wash_the_rain_shadow_away():

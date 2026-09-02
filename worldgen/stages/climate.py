@@ -18,18 +18,26 @@ class ClimateStage(GeneratorStage):
     def _compute_temperature(self, state: WorldState) -> None:
         w, h = state.width, state.height
         height = state.height
-        base = self.config.base_temperature
-        lat_range = self.config.latitude_temp_range
-        lapse = self.config.altitude_lapse_rate
+        cfg = self.config
+        base = cfg.mean_temperature_c
+        lat_range = cfg.latitude_temp_range_c
+        # The environmental lapse rate is quoted per kilometre of ascent, so the drop is
+        # the hex's height in kilometres times that. Elevation is still a fraction of the
+        # range here, hence the conversion through road_elev_range_m; when elevation
+        # itself becomes metres this term simplifies.
+        lapse_per_elev = cfg.lapse_rate_c_per_km * (cfg.road_elev_range_m / 1000.0)
 
         for (_, r), hx in state.hexes.items():
             row_frac = r / max(height - 1, 1)
             lat_temp = math.sin(row_frac * math.pi)
             # Subtract the mean of sin over [0, π] (= 2/π ≈ 0.637) so that
-            # base_temperature is the true map mean temperature.
+            # mean_temperature_c is the true map mean.
             temp = base + (lat_temp - 2.0 / math.pi) * lat_range
-            temp -= hx.elevation * lapse
-            hx.temperature = max(0.0, min(1.0, temp))
+            # Measured from sea level: a hex at the waterline gets no lapse, which is what
+            # makes the figure a real temperature rather than one relative to the map's
+            # own lowest point.
+            temp -= max(0.0, hx.elevation - cfg.sea_level) * lapse_per_elev
+            hx.temperature = temp
 
         # Smooth temperature with gaussian_filter (replaces 5 manual neighbor-average passes)
         temp_arr = np.array([[state.hexes[(q, r)].temperature for r in range(h)] for q in range(w)])

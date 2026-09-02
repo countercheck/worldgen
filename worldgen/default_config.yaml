@@ -98,9 +98,9 @@ endorheic_marsh_min_moisture: 0.4 # A closed basin drier than this is a salt pan
 regional_climate: temperate
 regional_moisture:        # Mean land moisture (0–1). Blank = take it from regional_climate. The orographic pass gives a relative wet/dry pattern; this says where that pattern is centred.
 wind_direction: [1.0, 0.0]  # Wind vector [x, y] driving moisture transport. Default: [1.0, 0.0] (eastward)
-base_temperature: 0.5       # Map's mean temperature (0=arctic, 1=tropical). Default: 0.5
-latitude_temp_range: 0.0    # Pole-to-equator temperature variation. Negligible across a region; raise only if mapping something continental. Default: 0.0
-altitude_lapse_rate: 0.4    # Temperature drop per unit of elevation. Default: 0.4
+mean_temperature_c: 10.0    # Mean annual temperature at sea level, in Celsius. Blank = take it from regional_climate. Default: from climate (temperate = 10)
+latitude_temp_range_c: 0.0  # Degrees between the map's pole-ward and equator-ward edges. Negligible across a region — 128 km is about a degree of latitude. Default: 0.0
+lapse_rate_c_per_km: 6.5    # How fast air cools with height, in Celsius per km. 6.5 is the standard environmental lapse rate. Default: 6.5
 orographic_strength: 2.0    # Wind-driven precipitation intensity; higher = drier leeward slopes. Default: 2.0
 
 # Flat moisture bias added to all land hexes after normalization.
@@ -112,8 +112,8 @@ base_moisture: 0.0
 # Biome thresholds
 # ---------------------------------------------------------------------------
 biome_alpine_elev: 0.85  # Elevation above which terrain becomes alpine. Default: 0.85
-biome_cold_temp: 0.25    # Temperature below which climate is considered cold. Default: 0.25
-biome_warm_temp: 0.6     # Temperature above which climate is considered warm. Default: 0.6
+biome_cold_temp_c: 5.0   # Mean annual Celsius below which the cold biomes take over — taiga gives way to broadleaf around here. Default: 5.0
+biome_warm_temp_c: 18.0  # Mean annual Celsius above which the warm biomes take over. Default: 18.0
 biome_dry_moist: 0.2     # Moisture below which climate is considered dry. Default: 0.2
 biome_wet_moist: 0.5     # Moisture above which climate is considered wet. Default: 0.5
 
