@@ -15,6 +15,14 @@ class RoadTier(Enum):
 ROAD_TIER_RANK = {RoadTier.TRACK: 0, RoadTier.SECONDARY: 1, RoadTier.PRIMARY: 2}
 
 
+# Serialised schema version.  1.1 replaced the single "habitability" key with one score
+# per settlement tier; a 1.0 file still loads, its lone value read into all three.  The
+# bump exists so the schema cannot change shape under a fixed version string — an old
+# reader handed a 1.1 file fails with a clear message instead of silently missing fields.
+SCHEMA_VERSION = "1.1"
+SUPPORTED_SCHEMA_VERSIONS = frozenset({"1.0", "1.1"})
+
+
 @dataclass
 class River:
     hexes: list[HexCoord]
@@ -101,7 +109,7 @@ class WorldState:
     def to_dict(self) -> dict:
         """Serialize to a JSON-compatible dict."""
         return {
-            "version": "1.0",
+            "version": SCHEMA_VERSION,
             "seed": self.seed,
             "width": self.width,
             "height": self.height,
@@ -160,8 +168,9 @@ class WorldState:
         )
 
         version = data.get("version")
-        if version is not None and version != "1.0":
-            raise ValueError(f"Unsupported WorldState version '{version}'. Expected '1.0'.")
+        if version is not None and version not in SUPPORTED_SCHEMA_VERSIONS:
+            supported = ", ".join(sorted(SUPPORTED_SCHEMA_VERSIONS))
+            raise ValueError(f"Unsupported WorldState version '{version}'. Supported: {supported}.")
 
         ws = cls(
             seed=data["seed"],

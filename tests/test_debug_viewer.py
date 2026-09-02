@@ -13,6 +13,7 @@ from worldgen.stages.hydrology import HydrologyStage
 from worldgen.stages.interurban_roads import InterurbanRoadStage
 from worldgen.stages.land_cover import LandCoverStage
 from worldgen.stages.terrain_class import TerrainClassificationStage
+from worldgen.stages.water_bodies import WaterBodiesStage
 
 
 @pytest.fixture(scope="module")
@@ -32,6 +33,7 @@ def small_state():
         p.add_stage(ElevationStage)
         .add_stage(ErosionStage)
         .add_stage(TerrainClassificationStage)
+        .add_stage(WaterBodiesStage)
         .add_stage(HydrologyStage)
         .add_stage(ClimateStage)
         .add_stage(BiomeStage)
@@ -59,6 +61,7 @@ def land_cover_state():
         p.add_stage(ElevationStage)
         .add_stage(ErosionStage)
         .add_stage(TerrainClassificationStage)
+        .add_stage(WaterBodiesStage)
         .add_stage(HydrologyStage)
         .add_stage(ClimateStage)
         .add_stage(BiomeStage)
