@@ -2,10 +2,10 @@ from pathlib import Path
 
 import click
 
-from .core.config import WorldConfig
+from .core.config import HEIGHTMAP_MODES, WorldConfig
 from .core.hex_grid import GRID_LAYOUTS
 from .core.pipeline import GeneratorPipeline
-from .stages import MODELS, default_stages
+from .stages import MODELS, stages_for
 
 
 @click.group()
@@ -36,6 +36,24 @@ def cli():
     show_default=True,
     help="Settlement and road model to run.",
 )
+@click.option(
+    "--heightmap",
+    type=str,
+    default=None,
+    help=(
+        "Read the terrain from an image instead of generating it. Replaces the noise "
+        "elevation stage; everything downstream is unchanged."
+    ),
+)
+@click.option(
+    "--heightmap-mode",
+    type=click.Choice(HEIGHTMAP_MODES, case_sensitive=False),
+    default=None,
+    help=(
+        "How to read --heightmap. 'elevation' treats it as a greyscale heightmap; "
+        "'coastline' treats it as a land/sea stencil and fills it with generated terrain."
+    ),
+)
 def generate(
     seed: int,
     config: str,
@@ -44,6 +62,8 @@ def generate(
     height: int,
     grid_layout: str,
     model: str,
+    heightmap: str,
+    heightmap_mode: str,
 ):
     """Generate a world."""
     output_path = Path(output_dir)
@@ -63,15 +83,24 @@ def generate(
         cfg.height = height
     if grid_layout:
         cfg.grid_layout = grid_layout.lower()
+    if heightmap:
+        cfg.heightmap_path = heightmap
+    if heightmap_mode:
+        cfg.heightmap_mode = heightmap_mode.lower()
 
     click.echo(f"Generating world with seed {seed}...")
     click.echo(f"  Size: {cfg.width}×{cfg.height} ({cfg.grid_layout})")
     click.echo(f"  Model: {model}")
+    if cfg.heightmap_path:
+        click.echo(f"  Heightmap: {cfg.heightmap_path} ({cfg.heightmap_mode})")
 
     pipeline = GeneratorPipeline(seed, cfg)
-    for stage in default_stages(model):
+    for stage in stages_for(cfg, model):
         pipeline.add_stage(stage)
-    state = pipeline.run()
+    try:
+        state = pipeline.run()
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
 
     click.echo("Writing output...")
     cfg.to_json(str(output_path / "config.json"))
@@ -326,6 +355,106 @@ def export_svg(
     except ValueError as exc:
         raise click.ClickException(f"Bad export setting: {exc}") from exc
     click.echo(f"✓ Saved to {output}")
+
+
+@cli.command(name="import-heightmap")
+@click.option("--input", "input_path", type=str, required=True, help="Input image file")
+@click.option("--output-dir", type=str, default="./output", help="Output directory")
+@click.option("--config", "config_path", type=str, default=None, help="Config YAML/JSON file")
+@click.option(
+    "--mode",
+    type=click.Choice(HEIGHTMAP_MODES, case_sensitive=False),
+    default=None,
+    help=(
+        "'elevation' reads the image as a greyscale heightmap; 'coastline' reads it as a "
+        "land/sea stencil and fills it with generated terrain. Defaults to the config's "
+        "heightmap_mode, itself 'elevation'."
+    ),
+)
+@click.option("--width", type=int, default=None, help="Map width in hexes")
+@click.option("--height", type=int, default=None, help="Map height in hexes")
+@click.option(
+    "--grid-layout",
+    type=click.Choice(GRID_LAYOUTS, case_sensitive=False),
+    default=None,
+    help=(
+        "Grid shape. 'offset' is usually the one you want here: it draws a rectangle, so "
+        "an imported image is not sheared into a parallelogram."
+    ),
+)
+@click.option(
+    "--seed",
+    type=int,
+    default=42,
+    show_default=True,
+    help=(
+        "Seeds the terrain in 'coastline' mode. In 'elevation' mode the image decides "
+        "everything and this only stamps the world's seed."
+    ),
+)
+def import_heightmap(
+    input_path: str,
+    output_dir: str,
+    config_path: str,
+    mode: str,
+    width: int,
+    height: int,
+    grid_layout: str,
+    seed: int,
+) -> None:
+    """Convert an image into elevation, without generating anything else.
+
+    Runs the import and terrain classification alone, so you can check where the coast
+    actually landed before paying for a full world.  Erosion does not run, which means
+    this is also the faithful path: the elevations written here are exactly what the
+    image says, where `generate` would renormalise them.
+    """
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+
+    try:
+        if config_path:
+            if config_path.lower().endswith((".yaml", ".yml")):
+                cfg = WorldConfig.from_yaml(config_path)
+            else:
+                cfg = WorldConfig.from_json(config_path)
+        else:
+            cfg = WorldConfig()
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    if width:
+        cfg.width = width
+    if height:
+        cfg.height = height
+    if grid_layout:
+        cfg.grid_layout = grid_layout.lower()
+    cfg.heightmap_path = input_path
+    if mode:
+        # Only when actually given, so a `heightmap_mode` from --config is not silently
+        # overwritten by this option's default — the same rule `generate` follows.
+        cfg.heightmap_mode = mode.lower()
+
+    click.echo(f"Importing {input_path} as {cfg.heightmap_mode}...")
+    click.echo(f"  Size: {cfg.width}×{cfg.height} ({cfg.grid_layout})")
+
+    from .stages.image_elevation import ImageElevationStage
+    from .stages.terrain_class import TerrainClassificationStage
+
+    pipeline = GeneratorPipeline(seed, cfg)
+    pipeline.add_stage(ImageElevationStage).add_stage(TerrainClassificationStage)
+    try:
+        state = pipeline.run()
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    from .export.json_export import save as save_json
+    from .render.debug_viewer import render as render_debug
+
+    save_json(state, str(output_path / "world.json"))
+    render_debug(state, "elevation", str(output_path / "elevation.svg"))
+    render_debug(state, "terrain_class", str(output_path / "terrain_class.svg"))
+    click.echo(f"✓ Written to {output_dir}")
 
 
 @cli.command(name="init-config")

@@ -167,3 +167,56 @@ def test_shipped_default_config_loads():
 
     shipped = Path(worldgen.__file__).parent / "default_config.yaml"
     assert WorldConfig.from_yaml(str(shipped)).width > 0
+
+
+# --- heightmap import --------------------------------------------------------
+
+
+def test_heightmap_fields_roundtrip_through_yaml(tmp_path):
+    cfg = WorldConfig(
+        heightmap_path="maps/coast.png",
+        heightmap_mode="coastline",
+        heightmap_land_threshold=0.4,
+        heightmap_invert=True,
+        heightmap_coast_falloff=True,
+    )
+    out = str(tmp_path / "hm.yaml")
+    cfg.to_yaml(out)
+    loaded = WorldConfig.from_yaml(out)
+
+    assert loaded.heightmap_path == "maps/coast.png"
+    assert loaded.heightmap_mode == "coastline"
+    assert loaded.heightmap_land_threshold == pytest.approx(0.4)
+    assert loaded.heightmap_invert is True
+    assert loaded.heightmap_coast_falloff is True
+
+
+def test_unset_heightmap_path_roundtrips_as_null(tmp_path):
+    out = str(tmp_path / "none.yaml")
+    WorldConfig().to_yaml(out)
+    assert WorldConfig.from_yaml(out).heightmap_path is None
+
+
+def test_heightmap_path_accepts_a_path_object():
+    """A programmatic caller reaches for Path; every dump downstream wants a string."""
+    from pathlib import Path
+
+    cfg = WorldConfig(heightmap_path=Path("a") / "b.png")
+    assert cfg.heightmap_path == str(Path("a") / "b.png")
+    # `metadata["config"]` is the dataclass dict, serialised verbatim into world.json.
+    json.dumps(cfg.__dict__)
+
+
+@pytest.mark.parametrize(
+    "kwargs,message",
+    [
+        ({"heightmap_mode": "nonsense"}, "heightmap_mode"),
+        ({"heightmap_land_threshold": 1.5}, "heightmap_land_threshold"),
+        ({"heightmap_land_threshold": -0.1}, "heightmap_land_threshold"),
+        ({"heightmap_path": ""}, "heightmap_path"),
+        ({"heightmap_path": 3}, "heightmap_path"),
+    ],
+)
+def test_world_config_validates_heightmap_fields(kwargs, message):
+    with pytest.raises(ValueError, match=message):
+        WorldConfig(**kwargs)

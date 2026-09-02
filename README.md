@@ -85,6 +85,60 @@ Available attributes: `elevation`, `terrain_class`, `river_flow`, `temperature`,
 shorthand for `habitability_city` — the widest catchment, and the one that decides where
 the map's anchor settlements go.
 
+## Importing a map
+
+You can hand the generator a picture instead of letting it invent the terrain. The image
+replaces the elevation stage; erosion, rivers, climate, biomes, settlements and roads all
+run on top of it unchanged.
+
+```bash
+# the image is a greyscale heightmap
+worldgen generate --heightmap dem.png --grid-layout offset --width 256 --height 222
+
+# the image is only a land/sea stencil; the generator fills in the terrain
+worldgen generate --heightmap coast.png --heightmap-mode coastline --seed 42
+```
+
+| Mode | The image is | Elevation comes from |
+| --- | --- | --- |
+| `elevation` (default) | a greyscale heightmap | the image — luminance maps linearly onto 0–1, black lowest, white highest |
+| `coastline` | a land/sea stencil | the usual noise, shaped so that land sits above `sea_level` and sea below it |
+
+`coastline` is the one you want for a hand-drawn continent: you supply the outline and the
+generator invents plausible mountains, valleys and coasts inside it. Land is decided by
+the alpha channel where a real share of the image is transparent — drawing on a
+transparent background just works — and otherwise by brightness against
+`heightmap_land_threshold`, which `heightmap_invert` flips. The stencil is authoritative,
+so land drawn running off the edge of the map stays land; set `heightmap_coast_falloff` to
+also ring the map with sea, which guarantees every river a coast to reach. Leave some sea
+in the stencil: an all-land image has no coastline to anchor, and erosion will flood part
+of it (you get a warning).
+
+To check a conversion on its own, before paying for a full world:
+
+```bash
+worldgen import-heightmap --input coast.png --mode coastline \
+    --output-dir ./out --grid-layout offset --width 128 --height 111
+```
+
+That writes `world.json`, `elevation.svg` and `terrain_class.svg` and runs nothing else.
+It is also the faithful path: erosion does not run, so the elevations are exactly what the
+image says.
+
+A few things worth knowing:
+
+- **Sizing.** The image is stretched to fill the grid on each axis, and each hex averages
+  the pixels its footprint covers. "Stretch" is measured in grid indices, so use
+  `--grid-layout offset` with `height ~= 0.87 * width` or the map is sheared into a
+  parallelogram. Give an image at least as large as the grid; a smaller one is upsampled
+  into blocks of equal elevation, which flattens terrain classification, and you get a
+  warning.
+- **Erosion still runs** under `generate`, and it renormalises elevation to span 0–1. In
+  `elevation` mode that stretches a low-contrast heightmap's contrast and moves its coast;
+  use `import-heightmap` when you need the image reproduced exactly. `coastline` mode is
+  built to span the full range already, so its coastline is unaffected.
+- The heightmap path is recorded in `world.json` as part of the config dump.
+
 ## SVG export
 
 ```bash

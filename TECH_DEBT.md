@@ -158,6 +158,24 @@ def from_json(cls, path: str) -> "WorldState":
 
 ---
 
+### 8a — `ImageElevationStage` imports a reader from `export/`
+**Category:** Architecture debt | **Priority: 8** | **Effort: S (half-day)**
+
+```python
+# worldgen/stages/image_elevation.py, inside run()
+from ..export.heightmap_import import load_luminance
+```
+
+The same tension as item 8, from the other side. `CLAUDE.md` says `stages/` are pure transformers and that all file I/O lives in `export/`. The `Image.open` does live in `export/`, which is the half of the rule that matters, but a stage now triggers a file read where every other stage is a pure function of `WorldState`.
+
+The alternative was rejected on balance, and the reasoning is worth keeping: `GeneratorPipeline` registers stage *classes* and discards the `stage_config` dict `add_stage` accepts, so injecting a pre-loaded array would mean reviving that parameter, giving two sources of truth (config names the file, the injected array holds the pixels) and forcing every pipeline assembler — CLI, `import-heightmap`, `tests/worlds.py`, any notebook — to remember to pre-load. Stashing the array on `state.metadata` is worse still, since that dict is serialised verbatim into `world.json`.
+
+One concrete cost today: `worldgen/export/__init__.py` eagerly imports `png_export` and `svg_export`, so this pulls matplotlib into any programmatic pipeline that uses the stage. The import is inside `run()`, so `worldgen --help` is unaffected.
+
+**Fix (if it becomes a problem):** make `export/__init__.py` lazy, which removes the matplotlib cost and leaves only the layering question. Only revive `stage_config` if a second stage needs injected data too; otherwise the honest cleanup is to *delete* the dead parameter.
+
+---
+
 ### 9 — `WorldConfig.__post_init__` references `wind_direction` before it is declared
 **Category:** Code debt | **Priority: 15** | **Effort: XS (5 minutes)**
 
