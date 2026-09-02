@@ -199,6 +199,24 @@ class InterurbanRoadStage(GeneratorStage):
         )
 
     def _path_min_tier(self, path, hex_tier) -> RoadTier | None:
+        """The *weakest* tier along the path — the name is literal, not a typo.
+
+        `order` is deliberately the reverse of `ROAD_TIER_RANK` in world_state.py, which
+        ranks by importance for draw precedence.  Here lower means more important, so
+        `max` returns the least important tier the path touches.  Read them together and
+        one looks like a sign error; they answer different questions.
+
+        A route is drawn primary only where every qualifying hex on it is primary, so a
+        long route that merely clips a busy corridor is not painted as a highway end to
+        end.  The corridor still reads as primary, because the short route that *is*
+        uniformly busy claims those shared edges in `dedupe_road_paths`, which awards each
+        edge to its highest-ranked user.  Per-edge tier is emergent from that pairing
+        rather than decided here.
+
+        Note `hex_tier` only ever holds PRIMARY or SECONDARY: hexes below the secondary
+        cut get no entry at all, and TRACK comes solely from VillageTrackStage.  So this
+        chooses between two tiers, never three.
+        """
         tiers = [hex_tier[c] for c in path if c in hex_tier]
         if not tiers:
             return None
