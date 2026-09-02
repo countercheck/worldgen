@@ -170,7 +170,9 @@ def make_road_edge_cost(cfg, blocked_edges=None, exempt_coords=frozenset()):
     town never needs a channel hexside anyway — a town with no dry neighbour at all is
     the sealed-off case, and ferries cover that.
 
-    Pass `blocked_edges=None` for the unconstrained cost used by ferry-fallback routing.
+    `blocked_edges=None` (or an empty set) drops the channel exclusion entirely, leaving
+    only the ordinary node and edge costs.  Every stage passes the river's hexsides; the
+    default exists for callers pricing a route where the exclusion does not apply.
     """
 
     def edge_cost(from_hx, to_hx) -> float:
@@ -240,21 +242,45 @@ def ferry_link(hexes, origin, label, main, cfg, blocked, settled, plain_cost, pl
     on the origin's side.  Endpoints are chosen by hex distance over sorted candidates,
     so the result is reproducible from the seed.
 
+    Both landings must be dry land off the channel: a ferry is drawn as a pair of
+    anchorages, and an anchorage means a shore you can stand a road end on.  Roads
+    traverse ocean and lake hexes, and river hexes are road hexes wherever a road crosses
+    one, so both components hold candidates that would put an anchor mid-channel or out
+    at sea.  They are filtered out here rather than left to the renderer.
+
     Raises `RoutingError` when the gap exceeds `road_ferry_max_hop`: at that width a
     ferry is not a plausible reading of the map, and a silent long-haul boat link would
     be worse than a loud failure.
     """
     near = reachable_under_constraint(hexes, origin, blocked, settled)
-    far = sorted(main - near)
+    far = main - near
     if not far:
         raise RoutingError(
             f"{label} at {origin} is cut off and the road network has no hex outside "
             "its own component to ferry to."
         )
 
+    def landings(coords):
+        """Candidate endpoints: dry land, off the channel, so an anchorage can sit there."""
+        return sorted(
+            c
+            for c in coords
+            if (hx := hexes.get(c)) is not None
+            and hx.terrain_class not in _WATER
+            and hx.river_flow <= 0
+        )
+
+    near_landings, far_landings = landings(near), landings(far)
+    if not near_landings or not far_landings:
+        side = "its own side" if not near_landings else "the road network's side"
+        raise RoutingError(
+            f"{label} at {origin} is cut off by a river channel and {side} offers no dry "
+            "land off the channel to land a ferry on."
+        )
+
     best = None
-    for a in sorted(near):
-        for b in far:
+    for a in near_landings:
+        for b in far_landings:
             d = distance(a, b)
             if d <= cfg.road_ferry_max_hop and (best is None or d < best[0]):
                 best = (d, a, b)

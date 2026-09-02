@@ -467,19 +467,74 @@ def test_ferry_link_picks_the_shortest_hop():
         assert p[0] == (0, 0) and p[-1] == ferry.a
 
 
+def test_ferry_lands_on_dry_land_off_the_channel():
+    """A ferry is drawn as two anchorages, so neither may sit in the channel.
+
+    Both components hold river hexes here — (2, 0) on the near side, (3, 0) on the far —
+    and they are the closest pair of all, so an unfiltered shortest-hop search picks a
+    crossing whose anchors both land mid-river.
+    """
+    cfg = WorldConfig()
+    hexes, river = _cut_grid()
+    blocked = river_edges([river])
+    near = reachable_under_constraint(hexes, (0, 0), blocked, frozenset())
+    far = set(hexes) - near
+    assert (2, 0) in near and (3, 0) in far, "the tempting mid-channel pair must be on offer"
+
+    ferry, _ = ferry_link(
+        hexes,
+        (0, 0),
+        "City Testburg",
+        far,
+        cfg,
+        blocked,
+        frozenset(),
+        lambda hx: terrain_base_cost(hx, cfg),
+        make_road_edge_cost(cfg, blocked),
+    )
+    for landing in (ferry.a, ferry.b):
+        hx = hexes[landing]
+        assert hx.terrain_class not in (TerrainClass.OCEAN, TerrainClass.LAKE)
+        assert hx.river_flow <= 0, f"anchorage at {landing} sits in the channel"
+
+
+def test_ferry_link_raises_when_every_landing_is_wet():
+    """No shore on one side is a routing failure, not a ferry moored in open water."""
+    cfg = WorldConfig()
+    hexes, river = _cut_grid()
+    blocked = river_edges([river])
+    for coord in ((4, 0), (5, 0)):
+        hexes[coord].terrain_class = TerrainClass.OCEAN
+    near = reachable_under_constraint(hexes, (0, 0), blocked, frozenset())
+
+    with pytest.raises(RoutingError, match="no dry land off the channel"):
+        ferry_link(
+            hexes,
+            (0, 0),
+            "City Testburg",
+            set(hexes) - near,
+            cfg,
+            blocked,
+            frozenset(),
+            lambda hx: terrain_base_cost(hx, cfg),
+            make_road_edge_cost(cfg, blocked),
+        )
+
+
 def test_ferry_link_raises_when_no_plausible_hop_exists():
     """Beyond road_ferry_max_hop a ferry is not a plausible reading of the map."""
     cfg = WorldConfig(road_ferry_max_hop=1)
     hexes, river = _cut_grid()
     blocked = river_edges([river])
-    faraway = {(99, 99)}
+    near = reachable_under_constraint(hexes, (0, 0), blocked, frozenset())
 
+    # The nearest dry landings are (1, 0) and (4, 0), three hexes apart.
     with pytest.raises(RoutingError, match="no plausible ferry"):
         ferry_link(
             hexes,
             (0, 0),
             "City Testburg",
-            faraway,
+            set(hexes) - near,
             cfg,
             blocked,
             frozenset(),
