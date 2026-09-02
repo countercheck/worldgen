@@ -63,6 +63,7 @@ def build_world(
     get different worlds — but the common 64x64 seed-42 case is generated once.  Callers
     must not mutate the result; anything that needs to mutate should build its own.
     """
+
     def _freeze(value):
         if isinstance(value, list):
             return tuple(_freeze(v) for v in value)

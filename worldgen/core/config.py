@@ -45,46 +45,6 @@ CLIMATE_CONTEXTS: dict[str, ClimateContext] = {
 }
 
 
-@dataclass(frozen=True)
-class ClimateContext:
-    """The climate of the region as a whole.
-
-    `base_temperature` and `moisture_target` set where the region sits on the temperature
-    and moisture axes; `palette` is the set of biomes that can occur there.  The palette
-    is what keeps a region coherent: an arid region varies from desert to steppe to
-    alpine with altitude, but never produces jungle three valleys over.
-    """
-
-    base_temperature: float
-    moisture_target: float
-    palette: frozenset
-
-
-def _palette(*names: str) -> frozenset:
-    from .hex import Biome
-
-    return frozenset(getattr(Biome, n) for n in names)
-
-
-# Biomes every region can produce regardless of climate, because they are made by
-# terrain rather than by climate: bare peaks, and waterlogged ground beside rivers.
-_ALWAYS = ("ALPINE", "WETLAND", "OCEAN")
-
-CLIMATE_CONTEXTS: dict[str, ClimateContext] = {
-    "boreal": ClimateContext(0.22, 0.55, _palette("TUNDRA", "BOREAL", "GRASSLAND", *_ALWAYS)),
-    "temperate": ClimateContext(
-        0.50, 0.55, _palette("TEMPERATE_FOREST", "GRASSLAND", "BOREAL", "SHRUBLAND", *_ALWAYS)
-    ),
-    "mediterranean": ClimateContext(
-        0.62, 0.35, _palette("SHRUBLAND", "GRASSLAND", "TEMPERATE_FOREST", *_ALWAYS)
-    ),
-    "arid": ClimateContext(0.68, 0.15, _palette("DESERT", "SHRUBLAND", "GRASSLAND", *_ALWAYS)),
-    "tropical": ClimateContext(
-        0.85, 0.75, _palette("TROPICAL", "GRASSLAND", "SHRUBLAND", *_ALWAYS)
-    ),
-}
-
-
 @dataclass
 class WorldConfig:
     """All tunable parameters for world generation."""
