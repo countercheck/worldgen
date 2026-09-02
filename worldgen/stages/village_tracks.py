@@ -3,6 +3,7 @@ from ..core.hex_grid import astar
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import Road, RoadTier, WorldState
 from .road_cost import (
+    WATER,
     bank_discount,
     make_road_edge_cost,
     river_edges,
@@ -23,8 +24,14 @@ class VillageTrackStage(GeneratorStage):
         if not villages:
             return state
 
-        # Road hexes already placed by InterurbanRoadStage
-        road_hex_set = {c for c, hx in hexes.items() if hx.road_connections}
+        # Road hexes already placed by InterurbanRoadStage.  Roads traverse ocean and
+        # lake hexes, so a mid-crossing water hex carries road connections and would
+        # otherwise be a legal target — leaving a track that runs into the water and
+        # stops there.  A track has to join the network on dry land; the route it takes
+        # to get there may still cross water, which stays bracketed by its own endpoints.
+        road_hex_set = {
+            c for c, hx in hexes.items() if hx.road_connections and hx.terrain_class not in WATER
+        }
         # Also include city/town coords as valid targets
         settled_major = {
             s.coord
