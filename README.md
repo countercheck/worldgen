@@ -73,7 +73,9 @@ worldgen render --input output/world.json --attribute biome --output biome.svg
 
 Available attributes: `elevation`, `terrain_class`, `river_flow`, `temperature`, `moisture`,
 `biome`, `habitability_city`, `habitability_town`, `habitability_village`,
-`settlements`, `roads`, `land_cover`, `cultivation`.
+`settlements`, `roads`, `land_cover`, `cultivation`. `habitability` is accepted as a
+shorthand for `habitability_city` — the widest catchment, and the one that decides where
+the map's anchor settlements go.
 
 ## SVG export
 

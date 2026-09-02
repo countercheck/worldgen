@@ -80,24 +80,54 @@ def test_hex_fields_preserved(tmp_path):
     assert s2.population == 5000
 
 
-def test_pre_split_habitability_still_loads(tmp_path):
-    """Worlds saved before habitability was split per tier must still open."""
+def _downgrade_to_v1_0(path):
+    """Rewrite a saved world as the pre-split 1.0 schema."""
     import json
 
-    ws = _small_world()
-    path = tmp_path / "world.json"
-    json_export.save(ws, path)
     data = json.loads(path.read_text())
+    data["version"] = "1.0"
     for hd in data["hexes"]:
         for key in ("habitability_city", "habitability_town", "habitability_village"):
             hd.pop(key, None)
         hd["habitability"] = 0.6
     path.write_text(json.dumps(data))
 
+
+def test_pre_split_habitability_still_loads(tmp_path):
+    """Worlds saved before habitability was split per tier must still open."""
+    ws = _small_world()
+    path = tmp_path / "world.json"
+    json_export.save(ws, path)
+    _downgrade_to_v1_0(path)
+
     h = json_export.load(path).hexes[(0, 0)]
     assert h.habitability_city == 0.6
     assert h.habitability_town == 0.6
     assert h.habitability_village == 0.6
+
+
+def test_new_saves_carry_the_bumped_version(tmp_path):
+    """The schema changed shape, so it must not keep claiming to be 1.0."""
+    import json
+
+    path = tmp_path / "world.json"
+    json_export.save(_small_world(), path)
+    assert json.loads(path.read_text())["version"] == "1.1"
+
+
+def test_an_unknown_version_is_rejected_by_name(tmp_path):
+    import json
+
+    import pytest
+
+    path = tmp_path / "world.json"
+    json_export.save(_small_world(), path)
+    data = json.loads(path.read_text())
+    data["version"] = "2.0"
+    path.write_text(json.dumps(data))
+
+    with pytest.raises(ValueError, match="Supported: 1.0, 1.1"):
+        json_export.load(path)
 
 
 def test_settlement_linked_on_hex(tmp_path):

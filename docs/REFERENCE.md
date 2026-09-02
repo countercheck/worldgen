@@ -1399,7 +1399,7 @@ shape map output. Change these by editing the source file.
 | Village road-adjacent bonus | `× 1.5` | [village_placement.py:69](../worldgen/stages/village_placement.py#L69) | |
 | Road-adjacent habitability boost | `+0.2` (cap 1.0) | [interurban_roads.py:147](../worldgen/stages/interurban_roads.py#L147) | Applied to `habitability_village` only, after road tiers are decided; feeds VillagePlacement |
 | Cultivation `RESISTANT` set | `{BOG, MARSH, BARE_ROCK, ALPINE, TUNDRA, DESERT, OPEN_WATER}` | [cultivation.py:6–16](../worldgen/stages/cultivation.py#L6) | Land covers immune to cultivation, used by both Cultivation and VillagePlacement |
-| WorldState JSON schema version | `"1.0"` | [world_state.py:84, 140](../worldgen/core/world_state.py#L84) | Round-trip compatibility check |
+| WorldState JSON schema version | `"1.1"` | [world_state.py:22–23](../worldgen/core/world_state.py#L22) | Written by `to_dict`. `from_dict` accepts `1.0` and `1.1`; a `1.0` file's single `habitability` is read into all three tier scores. Anything else is rejected by name |
 
 ---
 
