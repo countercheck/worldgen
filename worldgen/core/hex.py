@@ -5,12 +5,42 @@ HexCoord = tuple[int, int]
 
 
 class TerrainClass(Enum):
+    """How the ground lies underfoot — a gradient, not a landform.
+
+    These used to be FLAT / HILL / MOUNTAIN, which read as altitude and were partly
+    computed that way: anything above four fifths of the elevation range was called a
+    mountain however level it was, so nearly a third of "mountain" hexes on a 128x128 map
+    were gentler than 75 m/km.  A high plateau is walkable, ploughable ground and should
+    not be priced like a peak.
+
+    So every name here describes slope, and the thresholds are in metres of rise per
+    kilometre rather than a fraction of the map's elevation range.  Absolute figures mean
+    the same thing whatever `road_elev_range_m` is set to; the old fractions silently
+    became nonsense at any other span, calling a 20 m/km rise a mountain on a 500 m map.
+
+        FLAT        under 3%    level going: plough it, cart across it
+        ROLLING     3 to 10%    undulating; farmed, and a laden cart manages
+        STEEP       10 to 25%   pack animals, terraces, no wheels
+        ESCARPMENT  over 25%    a break of slope; on foot and with effort
+
+    Altitude still matters, but it is asked about where it belongs: `biome_alpine_elev`
+    decides where the treeline is, and roles read `elevation` directly.
+    """
+
     OCEAN = "ocean"
     LAKE = "lake"
     COAST = "coast"
     FLAT = "flat"
-    HILL = "hill"
-    MOUNTAIN = "mountain"
+    ROLLING = "rolling"
+    STEEP = "steep"
+    ESCARPMENT = "escarpment"
+
+
+# Ground too steep to plough, settle, or take a cart across. Several stages ask this
+# question and they must agree: before ESCARPMENT existed each of them tested MOUNTAIN
+# alone, and adding a steeper band without this would have quietly let settlements onto
+# the steepest ground on the map.
+STEEP_LAND = frozenset({TerrainClass.STEEP, TerrainClass.ESCARPMENT})
 
 
 class LandCover(Enum):

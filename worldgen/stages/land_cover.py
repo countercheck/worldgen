@@ -19,7 +19,12 @@ def _derive(h, wet_moist: float) -> LandCover:
 
     if tc in (TerrainClass.OCEAN, TerrainClass.LAKE):
         return LandCover.OPEN_WATER
-    if tc == TerrainClass.MOUNTAIN:
+    # Only a genuine break of slope is bare. STEEP ground — a tenth to a quarter — holds
+    # soil perfectly well: it is where terraces, vineyards and hanging woods go. Stripping
+    # it to rock put a third of a 128x128 map under bare stone. Above the treeline it
+    # comes out ALPINE on the next line anyway, which is the honest reason high steep
+    # ground looks barren.
+    if tc == TerrainClass.ESCARPMENT:
         return LandCover.BARE_ROCK
     if b == Biome.ALPINE:
         return LandCover.ALPINE

@@ -28,6 +28,13 @@ SCHEMA_VERSION = "1.2"
 SUPPORTED_SCHEMA_VERSIONS = frozenset({"1.0", "1.1", "1.2"})
 
 
+# Terrain classes before they were reframed as bands of gradient. "hill" and "mountain"
+# named landforms and were partly decided on altitude; the bands that replaced them are
+# named for slope and measured in metres per kilometre. The mapping is the closest
+# equivalent, so a world saved earlier still loads.
+_TERRAIN_ALIASES = {"hill": "rolling", "mountain": "steep"}
+
+
 @dataclass
 class River:
     hexes: list[HexCoord]
@@ -202,13 +209,16 @@ class WorldState:
 
         for hd in data.get("hexes", []):
             coord = (hd["q"], hd["r"])
+            # Terrain classes were renamed when they stopped meaning landform and started
+            # meaning gradient. The stored strings carry over so older worlds still open.
+            terrain = _TERRAIN_ALIASES.get(hd["terrain_class"], hd["terrain_class"])
             h = Hex(
                 coord=coord,
                 elevation=hd["elevation"],
                 moisture=hd["moisture"],
                 temperature=hd["temperature"],
                 biome=Biome(hd["biome"]) if hd.get("biome") is not None else None,
-                terrain_class=TerrainClass(hd["terrain_class"]),
+                terrain_class=TerrainClass(terrain),
                 land_cover=LandCover(hd["land_cover"])
                 if hd.get("land_cover") is not None
                 else None,

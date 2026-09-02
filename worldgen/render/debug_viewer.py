@@ -11,9 +11,12 @@ TERRAIN_COLORS = {
     TerrainClass.OCEAN: (0.2, 0.4, 0.8),
     TerrainClass.LAKE: (0.35, 0.6, 0.85),
     TerrainClass.COAST: (0.9, 0.8, 0.4),
+    # Four bands of gradient, darkening as the ground steepens, so the relief reads as a
+    # ramp rather than as four unrelated categories.
     TerrainClass.FLAT: (0.4, 0.8, 0.4),
-    TerrainClass.HILL: (0.7, 0.6, 0.3),
-    TerrainClass.MOUNTAIN: (0.5, 0.5, 0.5),
+    TerrainClass.ROLLING: (0.7, 0.6, 0.3),
+    TerrainClass.STEEP: (0.5, 0.5, 0.5),
+    TerrainClass.ESCARPMENT: (0.32, 0.29, 0.28),
 }
 
 BIOME_COLORS = {

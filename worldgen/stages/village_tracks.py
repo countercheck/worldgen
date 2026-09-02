@@ -47,7 +47,7 @@ class VillageTrackStage(GeneratorStage):
 
         def node_cost(hx):
             base = terrain_base_cost(hx, cfg) + river_hex_cost(hx, cfg)
-            return max(0.0, base - bank_discount(hx, hexes, cfg))
+            return base * (1.0 - bank_discount(hx, hexes, cfg))
 
         edge_cost = make_road_edge_cost(cfg, blocked, settled)
 

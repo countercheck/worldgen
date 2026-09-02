@@ -10,7 +10,7 @@ hex gets three scores, one per cultivation radius.  Each tier's placement stage 
 on its own.
 """
 
-from ..core.hex import Biome, LandCover, TerrainClass
+from ..core.hex import STEEP_LAND, Biome, LandCover, TerrainClass
 from ..core.hex_grid import neighbors, ring
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
@@ -88,7 +88,7 @@ def site_bonus(coord, hx, hexes, cfg) -> float:
     ):
         bonus += cfg.habitability_coast_bonus
 
-    if hx.terrain_class == TerrainClass.HILL and any(
+    if hx.terrain_class == TerrainClass.ROLLING and any(
         n.terrain_class == TerrainClass.FLAT for n in nbrs
     ):
         bonus += cfg.habitability_hill_bonus
@@ -157,7 +157,7 @@ class HabitabilityStage(GeneratorStage):
         for coord, hx in hexes.items():
             if (
                 hx.terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE)
-                or hx.terrain_class == TerrainClass.MOUNTAIN
+                or hx.terrain_class in STEEP_LAND
                 or hx.biome == Biome.WETLAND
             ):
                 for tier in radii:

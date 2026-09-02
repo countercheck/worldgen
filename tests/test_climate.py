@@ -52,7 +52,7 @@ def test_mountains_colder_than_flat(climate_state):
         mid = height * 0.3 < r < height * 0.7
         if not mid:
             continue
-        if h.terrain_class == TerrainClass.MOUNTAIN:
+        if h.terrain_class == TerrainClass.STEEP:
             mountain_temps.append(h.temperature)
         elif h.terrain_class == TerrainClass.FLAT:
             flat_temps.append(h.temperature)
@@ -70,7 +70,7 @@ def test_rain_shadow_present(climate_state):
     windward_avg = []
     leeward_avg = []
     for (q, r), h in climate_state.hexes.items():
-        if h.terrain_class != TerrainClass.MOUNTAIN:
+        if h.terrain_class != TerrainClass.STEEP:
             continue
         windward = climate_state.hexes.get((q - 1, r))
         leeward = climate_state.hexes.get((q + 1, r))

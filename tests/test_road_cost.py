@@ -39,11 +39,11 @@ def _lake(coord):
 
 
 def _mountain(coord):
-    return Hex(coord=coord, elevation=0.9, terrain_class=TerrainClass.MOUNTAIN)
+    return Hex(coord=coord, elevation=0.9, terrain_class=TerrainClass.STEEP)
 
 
 def _hill(coord):
-    return Hex(coord=coord, elevation=0.7, terrain_class=TerrainClass.HILL)
+    return Hex(coord=coord, elevation=0.7, terrain_class=TerrainClass.ROLLING)
 
 
 def _river_flat(coord, flow=1.0):
@@ -71,8 +71,8 @@ def test_terrain_base_cost_water_is_finite():
 def test_terrain_base_cost_land_classes():
     cfg = WorldConfig()
     assert terrain_base_cost(_flat((0, 0)), cfg) == cfg.road_flat_cost
-    assert terrain_base_cost(_hill((0, 0)), cfg) == cfg.road_hill_cost
-    assert terrain_base_cost(_mountain((0, 0)), cfg) == cfg.road_mountain_cost
+    assert terrain_base_cost(_hill((0, 0)), cfg) == cfg.road_rolling_cost
+    assert terrain_base_cost(_mountain((0, 0)), cfg) == cfg.road_steep_cost
 
 
 # ---------- bank_discount --------------------------------------------------

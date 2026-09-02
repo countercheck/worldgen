@@ -42,7 +42,7 @@ class InterurbanRoadStage(GeneratorStage):
 
         def node_cost(hx):
             base = terrain_base_cost(hx, cfg) + river_hex_cost(hx, cfg)
-            base = max(0.0, base - bank_discount(hx, hexes, cfg))
+            base *= 1.0 - bank_discount(hx, hexes, cfg)
             pheromone = cfg.road_pheromone_factor * hex_traffic[hx.coord]
             return max(0.0, base - pheromone)
 

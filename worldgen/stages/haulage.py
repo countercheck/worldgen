@@ -20,7 +20,6 @@ mutation, so it can be unit-tested on synthetic grids.
 
 import heapq
 
-from ..core.hex import TerrainClass
 from ..core.hex_grid import neighbors
 from .crossings import river_span
 from .road_cost import WATER, is_river
@@ -262,12 +261,12 @@ def settleable(hexes, cfg) -> set:
     The same exclusions `HabitabilityStage` scores to zero — you do not found a village on
     open water, a mountain face, or a bog — kept in one place so the two cannot drift.
     """
-    from ..core.hex import Biome
+    from ..core.hex import STEEP_LAND, Biome
 
     return {
         coord
         for coord, hx in hexes.items()
         if hx.terrain_class not in WATER
-        and hx.terrain_class != TerrainClass.MOUNTAIN
+        and hx.terrain_class not in STEEP_LAND
         and hx.biome is not Biome.WETLAND
     }

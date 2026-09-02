@@ -154,7 +154,7 @@ def test_unsettleable_terrain_scores_zero(hab_state, field):
     """You cannot found a town on open water, a mountain face, or a bog."""
     for h in hab_state.hexes.values():
         if (
-            h.terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE, TerrainClass.MOUNTAIN)
+            h.terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE, TerrainClass.STEEP)
             or h.biome == Biome.WETLAND
         ):
             assert getattr(h, field) == 0.0
@@ -173,7 +173,7 @@ def test_river_hexes_score_higher(hab_state, field):
     river_scores = []
     plain_scores = []
     for coord, h in hab_state.hexes.items():
-        if h.terrain_class in (TerrainClass.OCEAN, TerrainClass.MOUNTAIN):
+        if h.terrain_class in (TerrainClass.OCEAN, TerrainClass.STEEP):
             continue
         if h.biome == Biome.WETLAND:
             continue

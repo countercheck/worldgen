@@ -1,4 +1,4 @@
-from ..core.hex import Biome, Settlement, SettlementRole, SettlementTier, TerrainClass
+from ..core.hex import STEEP_LAND, Biome, Settlement, SettlementRole, SettlementTier, TerrainClass
 from ..core.hex_grid import distance, grade_reachable_count, hex_range, neighbors
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
@@ -16,9 +16,9 @@ def _assign_role(coord, hx, hexes) -> SettlementRole:
     ):
         return SettlementRole.PORT
 
-    mountain_nbrs = [n for n in nbrs if n.terrain_class == TerrainClass.MOUNTAIN]
-    if mountain_nbrs:
-        if any(n.elevation > 0.70 for n in mountain_nbrs):
+    steep_nbrs = [n for n in nbrs if n.terrain_class in STEEP_LAND]
+    if steep_nbrs:
+        if any(n.elevation > 0.70 for n in steep_nbrs):
             return SettlementRole.MINING
         return SettlementRole.FORTRESS
 
@@ -136,7 +136,7 @@ class CityTownStage(GeneratorStage):
         # Pass tags for mountain passes
         all_coords = set(city_coords + town_coords)
         for coord, hx in hexes.items():
-            if hx.terrain_class != TerrainClass.HILL:
+            if hx.terrain_class != TerrainClass.ROLLING:
                 continue
             if coord in all_coords:
                 continue

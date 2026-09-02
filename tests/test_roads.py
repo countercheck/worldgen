@@ -198,14 +198,48 @@ def test_river_corridor_preference_in_roads(road_state):
         return
 
     river = {c for c in all_land if "river" in hexes[c].tags}
-    corridor = river | {n for c in river for n in neighbors(c) if n in all_land}
+    # The banks, not the corridor. Measuring the corridor — banks *and* channel — asks
+    # two questions at once and fails on the answer to the wrong one: roads decline river
+    # hexes on purpose, at `road_river_hex_cost` and with channel travel excluded
+    # outright, so a corridor measure demands they over-use the banks by enough to make
+    # up for never touching the water. What `bank_discount` actually claims is narrower
+    # and is what is checked here: given dry land, a road prefers the bank beside a river
+    # to dry land away from one.
+    dry = all_land - river
+    banks = {n for c in river for n in neighbors(c) if n in dry}
 
-    road_rate = len(road_hexes & corridor) / len(road_hexes)
-    map_rate = len(corridor & all_land) / len(all_land)
+    road_dry = road_hexes & dry
+    if not road_dry or not banks:
+        return
+
+    road_rate = len(road_dry & banks) / len(road_dry)
+    map_rate = len(banks) / len(dry)
 
     assert road_rate >= map_rate, (
-        f"River corridor preference not detected: road corridor rate {road_rate:.3f} < "
-        f"map corridor rate {map_rate:.3f}"
+        f"Riverbank preference not detected: roads run on a bank {road_rate:.3f} of the "
+        f"time against {map_rate:.3f} of the dry land being bank"
+    )
+
+
+def test_roads_decline_the_channel_itself(road_state):
+    """The other half of what the corridor measure used to conflate.
+
+    A road beside a river is following the valley; a road *in* it has nowhere to be a
+    bank of. So river hexes should be markedly under-used relative to how much of the
+    land they make up.
+    """
+    hexes = road_state.hexes
+    road_hexes = {c for road in road_state.roads for c in road.path if c in hexes}
+    all_land = {c for c, h in hexes.items() if h.terrain_class != TerrainClass.OCEAN}
+    river = {c for c in all_land if "river" in hexes[c].tags}
+    if not road_hexes or not river:
+        return
+
+    road_rate = len(road_hexes & river) / len(road_hexes)
+    map_rate = len(river) / len(all_land)
+    assert road_rate < map_rate, (
+        f"roads sit on the channel {road_rate:.3f} of the time against {map_rate:.3f} "
+        "of the land being river — the channel is not being declined"
     )
 
 

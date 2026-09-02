@@ -67,9 +67,17 @@ class WorldConfig:
     continent_seabed: float = 0.15
     elevation_gradient: tuple[float, float] = (0.0, 0.0)
 
-    # Terrain classification
-    terrain_hill_gradient: float = 0.02
-    terrain_mountain_gradient: float = 0.04
+    # Terrain classification — bands of gradient, in metres of rise per kilometre.
+    # Absolute, not a fraction of the elevation range: the old fractional thresholds moved
+    # with road_elev_range_m, so what counted as a mountain was 120 m/km at the 3000 m
+    # default and 20 m/km on a 500 m map, where it called rolling downland a peak.
+    #   under 30    FLAT        level going: plough it, cart across it
+    #   30 to 100   ROLLING     undulating; farmed, and a laden cart manages
+    #   100 to 250  STEEP       pack animals, terraces, no wheels
+    #   over 250    ESCARPMENT  a break of slope; on foot and with effort
+    terrain_rolling_gradient_m: float = 30.0
+    terrain_steep_gradient_m: float = 100.0
+    terrain_escarpment_gradient_m: float = 250.0
 
     # Erosion
     erosion_iterations: int = 15000
@@ -200,6 +208,9 @@ class WorldConfig:
             if getattr(self, name) < 0:
                 raise ValueError(f"{name} must be >= 0, got {getattr(self, name)}")
         for name in (
+            "terrain_rolling_gradient_m",
+            "terrain_steep_gradient_m",
+            "terrain_escarpment_gradient_m",
             "haulage_range_land",
             "rural_field_radius",
             "market_day_radius",
@@ -417,8 +428,9 @@ class WorldConfig:
     road_elev_range_m: float = 3000.0  # metres for full 0→1 elevation span
 
     # Roads — base terrain costs
-    road_mountain_cost: float = 10.0
-    road_hill_cost: float = 3.0
+    road_escarpment_cost: float = 20.0
+    road_steep_cost: float = 10.0
+    road_rolling_cost: float = 3.0
     road_flat_cost: float = 1.0
 
     # Roads — traveller simulation
@@ -512,7 +524,23 @@ _EDGES = ("north", "south", "east", "west")
 
 # Settings that used to exist. A key here is dropped with a warning naming what replaced
 # it, so a config written against an older version still loads instead of crashing.
-_RETIRED_FIELDS: dict[str, str] = {}
+_RETIRED_FIELDS: dict[str, str] = {
+    "terrain_hill_gradient": (
+        "terrain classes are now bands of absolute gradient; use "
+        "terrain_rolling_gradient_m, in metres of rise per kilometre"
+    ),
+    "terrain_mountain_gradient": (
+        "terrain classes are now bands of absolute gradient; use "
+        "terrain_steep_gradient_m, in metres of rise per kilometre"
+    ),
+}
+
+# Settings that were renamed rather than dropped. The value carries over, so a config
+# written against an older version keeps working and keeps meaning what it meant.
+_RENAMED_FIELDS: dict[str, str] = {
+    "road_hill_cost": "road_rolling_cost",
+    "road_mountain_cost": "road_steep_cost",
+}
 
 
 def _construct(cls: type, data: dict) -> "WorldConfig":
@@ -524,6 +552,16 @@ def _construct(cls: type, data: dict) -> "WorldConfig":
     `ValueError`; this makes an unrecognised key one too.
     """
     import warnings
+
+    for old in sorted(set(data) & set(_RENAMED_FIELDS)):
+        new = _RENAMED_FIELDS[old]
+        warnings.warn(
+            f"Config setting {old!r} has been renamed to {new!r}; carrying the value over.",
+            DeprecationWarning,
+            stacklevel=3,
+        )
+        data.setdefault(new, data.pop(old))
+        data.pop(old, None)
 
     for name in sorted(set(data) & set(_RETIRED_FIELDS)):
         warnings.warn(

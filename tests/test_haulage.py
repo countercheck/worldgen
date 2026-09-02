@@ -292,8 +292,8 @@ def test_settleable_excludes_water_mountain_and_bog():
         (0, 0): _hex((0, 0)),
         (1, 0): _hex((1, 0), TerrainClass.OCEAN),
         (2, 0): _hex((2, 0), TerrainClass.LAKE),
-        (3, 0): _hex((3, 0), TerrainClass.MOUNTAIN),
+        (3, 0): _hex((3, 0), TerrainClass.STEEP),
         (4, 0): _hex((4, 0), biome=Biome.WETLAND),
-        (5, 0): _hex((5, 0), TerrainClass.HILL, land_cover=LandCover.OPEN),
+        (5, 0): _hex((5, 0), TerrainClass.ROLLING, land_cover=LandCover.OPEN),
     }
     assert settleable(hexes, WorldConfig()) == {(0, 0), (5, 0)}
