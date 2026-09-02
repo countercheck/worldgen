@@ -7,13 +7,13 @@ from worldgen.core.config import WorldConfig
 
 
 def test_yaml_roundtrip(tmp_path):
-    cfg = WorldConfig(width=64, height=48, base_moisture=0.1, elevation_gradient=(0.3, -0.2))
+    cfg = WorldConfig(width=64, height=48, base_precip_mm=50.0, elevation_gradient=(0.3, -0.2))
     out = str(tmp_path / "cfg.yaml")
     cfg.to_yaml(out)
     loaded = WorldConfig.from_yaml(out)
     assert loaded.width == 64
     assert loaded.height == 48
-    assert loaded.base_moisture == pytest.approx(0.1)
+    assert loaded.base_precip_mm == pytest.approx(50.0)
     assert loaded.elevation_gradient == pytest.approx((0.3, -0.2))
 
 

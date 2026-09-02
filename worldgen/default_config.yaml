@@ -83,7 +83,7 @@ river_flow_threshold: 0.05  # Minimum flow volume (0–1) for a hex to be a rive
 # that enters a basin has somewhere to go instead of accumulating forever.
 lake_chaining: true             # Allow a lake to spill into a strictly lower lake, not just the sea. Chains of lakes stepping down to the coast are the only outlet on a landlocked map. Default: true
 endorheic_marsh_radius: 1       # Where a basin genuinely has no outlet it is endorheic: water leaves by evaporation. This many hexes of its shore become wetland. 0 disables. Default: 1
-endorheic_marsh_min_moisture: 0.4 # A closed basin drier than this is a salt pan, not a marsh, and gets no wetland shore. Default: 0.4
+endorheic_marsh_min_precip_mm: 300.0 # A closed basin drier than this is a salt pan, not a marsh, and gets no wetland shore. Default: 300
 
 # ---------------------------------------------------------------------------
 # Climate
@@ -96,17 +96,18 @@ endorheic_marsh_min_moisture: 0.4 # A closed basin drier than this is a salt pan
 # runs desert to steppe to alpine with altitude but never grows a jungle three valleys over.
 #   boreal | temperate | mediterranean | arid | tropical
 regional_climate: temperate
-regional_moisture:        # Mean land moisture (0–1). Blank = take it from regional_climate. The orographic pass gives a relative wet/dry pattern; this says where that pattern is centred.
+mean_precip_mm:           # Mean annual rainfall over land, in millimetres. Blank = take it from regional_climate (temperate 800, arid 200, tropical 2000). The orographic pass gives a relative wet/dry pattern; this says what it is worth in real rain.
 wind_direction: [1.0, 0.0]  # Wind vector [x, y] driving moisture transport. Default: [1.0, 0.0] (eastward)
 mean_temperature_c: 10.0    # Mean annual temperature at sea level, in Celsius. Blank = take it from regional_climate. Default: from climate (temperate = 10)
 latitude_temp_range_c: 0.0  # Degrees between the map's pole-ward and equator-ward edges. Negligible across a region — 128 km is about a degree of latitude. Default: 0.0
 lapse_rate_c_per_km: 6.5    # How fast air cools with height, in Celsius per km. 6.5 is the standard environmental lapse rate. Default: 6.5
 orographic_strength: 2.0    # Wind-driven precipitation intensity; higher = drier leeward slopes. Default: 2.0
+moisture_resupply_per_hex: 0.08 # How much of its moisture deficit the air makes back each km, by evaporation. Without it a rain shadow would run from the first hill to the map edge. Default: 0.08
 
 # Flat moisture bias added to all land hexes after normalization.
 # Positive = uniformly wetter; negative = uniformly drier. Clipped to [0, 1].
 # Default: 0.0 (no adjustment)
-base_moisture: 0.0
+base_precip_mm: 0.0
 
 # ---------------------------------------------------------------------------
 # Biome thresholds
@@ -114,8 +115,9 @@ base_moisture: 0.0
 biome_alpine_elev: 0.85  # Elevation above which terrain becomes alpine. Default: 0.85
 biome_cold_temp_c: 5.0   # Mean annual Celsius below which the cold biomes take over — taiga gives way to broadleaf around here. Default: 5.0
 biome_warm_temp_c: 18.0  # Mean annual Celsius above which the warm biomes take over. Default: 18.0
-biome_dry_moist: 0.2     # Moisture below which climate is considered dry. Default: 0.2
-biome_wet_moist: 0.5     # Moisture above which climate is considered wet. Default: 0.5
+biome_dry_precip_mm: 400.0   # Annual rainfall below which the dry biomes take over — steppe and desert. Default: 400
+biome_wet_precip_mm: 1000.0  # Annual rainfall above which the wet biomes take over — closed forest. Default: 1000
+food_drowned_precip_mm: 3000.0 # Annual rainfall at which ground is leached and waterlogged and grows nothing. Default: 3000
 
 # ---------------------------------------------------------------------------
 # Settlements

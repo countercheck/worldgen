@@ -24,25 +24,28 @@ WETLAND_COVER = frozenset({LandCover.BOG, LandCover.MARSH})
 # TUNDRA, DESERT, ALPINE and BARE_ROCK feed nobody and are worth zero.
 
 
-def moisture_factor(moisture: float, dry: float, wet: float) -> float:
-    """Agricultural suitability of a moisture value, as a factor in [0, 1].
+def moisture_factor(precip_mm: float, dry: float, wet: float, drowned: float = 3000.0) -> float:
+    """Agricultural suitability of an annual rainfall, as a factor in [0, 1].
 
-    Moisture is not monotonic for farming — desert at one end, waterlogged at the other —
-    so this is a tent, not a ramp: full value across the temperate band `[dry, wet]`,
-    falling to zero at both extremes.  The band is the same pair of thresholds
+    Rainfall is not monotonic for farming — desert at one end, waterlogged at the other —
+    so this is a tent, not a ramp: full value across the band `[dry, wet]`, falling to
+    zero at nothing and again at *drowned*.  The band is the same pair of thresholds
     `BiomeStage` classifies on, so the two systems cannot drift.
 
-    Land cover already buckets moisture coarsely, so this discriminates *within* a band —
-    the wet end of grassland is better farmland than the dry end — rather than
-    re-deciding what the cover already settled.
+    The wet arm used to fall away to zero at 1.0, which was the ceiling of the old
+    normalised moisture scale rather than a fact about farming.  In millimetres there is
+    no such ceiling, so the point where ground drowns has to be stated: `drowned` is where
+    leaching and waterlogging have taken the yield to nothing, around 3000 mm a year.
+    Leaving the old 1.0 in place would have zeroed the food value of every hex on the map,
+    since all of them get more than a millimetre of rain.
     """
-    if moisture <= 0.0 or moisture >= 1.0:
+    if precip_mm <= 0.0 or precip_mm >= drowned:
         return 0.0
-    if moisture < dry:
-        return moisture / dry if dry > 0.0 else 1.0
-    if moisture <= wet:
+    if precip_mm < dry:
+        return precip_mm / dry if dry > 0.0 else 1.0
+    if precip_mm <= wet:
         return 1.0
-    return (1.0 - moisture) / (1.0 - wet) if wet < 1.0 else 1.0
+    return (drowned - precip_mm) / (drowned - wet) if wet < drowned else 1.0
 
 
 def food_value(hx, cfg, dry: float, wet: float) -> float:
@@ -66,7 +69,7 @@ def food_value(hx, cfg, dry: float, wet: float) -> float:
         base = cfg.food_marginal_value
     else:
         return 0.0
-    return base * moisture_factor(hx.moisture, dry, wet)
+    return base * moisture_factor(hx.moisture, dry, wet, cfg.food_drowned_precip_mm)
 
 
 def site_bonus(coord, hx, hexes, cfg) -> float:
@@ -140,7 +143,7 @@ class HabitabilityStage(GeneratorStage):
     def run(self, state: WorldState) -> WorldState:
         hexes = state.hexes
         cfg = self.config
-        dry, wet = cfg.biome_dry_moist, cfg.biome_wet_moist
+        dry, wet = cfg.biome_dry_precip_mm, cfg.biome_wet_precip_mm
 
         # One food value per hex, computed once — every catchment reads this table rather
         # than re-deriving the value for each of its ~217 members.

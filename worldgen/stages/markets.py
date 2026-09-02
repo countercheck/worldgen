@@ -58,7 +58,7 @@ class MarketStage(GeneratorStage):
         cfg = self.config
 
         food = {
-            coord: food_value(hx, cfg, cfg.biome_dry_moist, cfg.biome_wet_moist)
+            coord: food_value(hx, cfg, cfg.biome_dry_precip_mm, cfg.biome_wet_precip_mm)
             for coord, hx in hexes.items()
         }
         surplus = {c: v * cfg.marketable_surplus_fraction for c, v in food.items()}

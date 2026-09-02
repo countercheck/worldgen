@@ -20,35 +20,40 @@ def _build_pipeline(seed: int = 42, width: int = 48, height: int = 48):
 
 
 def test_moisture_factor_is_full_across_the_temperate_band():
-    for m in (0.2, 0.3, 0.4, 0.5):
-        assert moisture_factor(m, 0.2, 0.5) == pytest.approx(1.0)
+    for mm in (400, 600, 800, 1000):
+        assert moisture_factor(mm, 400, 1000, 3000) == pytest.approx(1.0)
 
 
 def test_moisture_factor_falls_off_both_ends():
     """Not a ramp: a swamp must not outrank a meadow."""
-    assert moisture_factor(0.0, 0.2, 0.5) == 0.0
-    assert moisture_factor(1.0, 0.2, 0.5) == 0.0
-    assert 0.0 < moisture_factor(0.1, 0.2, 0.5) < 1.0
-    assert 0.0 < moisture_factor(0.75, 0.2, 0.5) < 1.0
+    assert moisture_factor(0, 400, 1000, 3000) == 0.0
+    assert moisture_factor(3000, 400, 1000, 3000) == 0.0, "drowned ground feeds nobody"
+    assert 0.0 < moisture_factor(200, 400, 1000, 3000) < 1.0
+    assert 0.0 < moisture_factor(2000, 400, 1000, 3000) < 1.0
 
 
 def test_moisture_factor_is_monotonic_toward_the_band():
-    dry_side = [moisture_factor(m / 100, 0.2, 0.5) for m in range(1, 20)]
-    wet_side = [moisture_factor(0.5 + m / 100, 0.2, 0.5) for m in range(1, 50)]
+    dry_side = [moisture_factor(mm, 400, 1000, 3000) for mm in range(20, 400, 20)]
+    wet_side = [moisture_factor(mm, 400, 1000, 3000) for mm in range(1020, 3000, 100)]
     assert dry_side == sorted(dry_side), "drier than the band should only improve"
     assert wet_side == sorted(wet_side, reverse=True), "wetter than the band should only worsen"
 
 
 def test_moisture_factor_stays_in_unit_range():
     for m in range(0, 101):
-        assert 0.0 <= moisture_factor(m / 100, 0.2, 0.5) <= 1.0
+        assert 0.0 <= moisture_factor(m * 40, 400, 1000, 3000) <= 1.0
 
 
 # --- the food bands ----------------------------------------------------------
 
 
-def _hex(cover, moisture=0.35):
-    return Hex(coord=(0, 0), land_cover=cover, moisture=moisture)
+# Rainfall in millimetres a year. 700 sits inside the agricultural band, so a cover's own
+# value is what these tests are reading.
+_BAND = (400, 1000)
+
+
+def _hex(cover, precip_mm=700):
+    return Hex(coord=(0, 0), land_cover=cover, moisture=precip_mm)
 
 
 def test_barren_covers_feed_nobody():
@@ -59,37 +64,37 @@ def test_barren_covers_feed_nobody():
         LandCover.ALPINE,
         LandCover.BARE_ROCK,
     ):
-        assert food_value(_hex(cover), cfg, 0.2, 0.5) == 0.0
+        assert food_value(_hex(cover), cfg, *_BAND) == 0.0
 
 
 def test_water_is_worth_something_because_a_coast_fishes():
     """The whole point of the band: sea in a catchment is not waste ground."""
     cfg = WorldConfig()
-    assert food_value(_hex(LandCover.OPEN_WATER), cfg, 0.2, 0.5) == cfg.food_water_value
+    assert food_value(_hex(LandCover.OPEN_WATER), cfg, *_BAND) == cfg.food_water_value
     assert cfg.food_water_value > 0
 
 
 def test_wetland_ranks_below_open_water():
     """A marsh is neither good fishing nor good ploughing."""
     cfg = WorldConfig()
-    marsh = food_value(_hex(LandCover.MARSH), cfg, 0.2, 0.5)
-    water = food_value(_hex(LandCover.OPEN_WATER), cfg, 0.2, 0.5)
+    marsh = food_value(_hex(LandCover.MARSH), cfg, *_BAND)
+    water = food_value(_hex(LandCover.OPEN_WATER), cfg, *_BAND)
     assert 0 < marsh < water
 
 
 def test_fertile_outranks_marginal():
     cfg = WorldConfig()
-    fertile = food_value(_hex(LandCover.OPEN), cfg, 0.2, 0.5)
-    marginal = food_value(_hex(LandCover.SCRUB), cfg, 0.2, 0.5)
+    fertile = food_value(_hex(LandCover.OPEN), cfg, *_BAND)
+    marginal = food_value(_hex(LandCover.SCRUB), cfg, *_BAND)
     assert fertile > marginal > 0
 
 
 def test_moisture_discriminates_within_a_band():
     """The detail land cover throws away: same cover, different ground."""
     cfg = WorldConfig()
-    in_band = food_value(_hex(LandCover.OPEN, moisture=0.35), cfg, 0.2, 0.5)
-    parched = food_value(_hex(LandCover.OPEN, moisture=0.05), cfg, 0.2, 0.5)
-    drowned = food_value(_hex(LandCover.OPEN, moisture=0.98), cfg, 0.2, 0.5)
+    in_band = food_value(_hex(LandCover.OPEN, precip_mm=700), cfg, *_BAND)
+    parched = food_value(_hex(LandCover.OPEN, precip_mm=120), cfg, *_BAND)
+    drowned = food_value(_hex(LandCover.OPEN, precip_mm=2600), cfg, *_BAND)
     assert in_band > parched
     assert in_band > drowned
 
@@ -98,8 +103,8 @@ def test_water_and_wetland_ignore_moisture():
     """Fishing does not care about rainfall, and a bog is saturated by definition."""
     cfg = WorldConfig()
     for cover in (LandCover.OPEN_WATER, LandCover.BOG):
-        dry = food_value(_hex(cover, moisture=0.01), cfg, 0.2, 0.5)
-        wet = food_value(_hex(cover, moisture=0.99), cfg, 0.2, 0.5)
+        dry = food_value(_hex(cover, precip_mm=80), cfg, *_BAND)
+        wet = food_value(_hex(cover, precip_mm=2800), cfg, *_BAND)
         assert dry == wet
 
 
@@ -226,7 +231,7 @@ def test_a_wider_catchment_is_smoother():
     hexes = state.hexes
 
     food = {
-        coord: food_value(hx, cfg, cfg.biome_dry_moist, cfg.biome_wet_moist)
+        coord: food_value(hx, cfg, cfg.biome_dry_precip_mm, cfg.biome_wet_precip_mm)
         for coord, hx in hexes.items()
     }
     wide, narrow = cfg.cultivation_city_radius, cfg.cultivation_village_radius

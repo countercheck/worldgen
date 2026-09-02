@@ -9,8 +9,8 @@ class BiomeStage(GeneratorStage):
         alpine_elev = self.config.biome_alpine_elev
         cold_temp = self.config.biome_cold_temp_c
         warm_temp = self.config.biome_warm_temp_c
-        dry_moist = self.config.biome_dry_moist
-        wet_moist = self.config.biome_wet_moist
+        dry_moist = self.config.biome_dry_precip_mm
+        wet_moist = self.config.biome_wet_precip_mm
 
         palette = CLIMATE_CONTEXTS[self.config.regional_climate].palette
 
@@ -76,7 +76,7 @@ class BiomeStage(GeneratorStage):
         # running off.  The moisture floor keeps arid basins as salt pans — a closed
         # basin in a desert is a playa, not a swamp — and the terrain and elevation
         # tests match the river-wetland rule above so the two look consistent.
-        marsh_min_moisture = self.config.endorheic_marsh_min_moisture
+        marsh_min_moisture = self.config.endorheic_marsh_min_precip_mm
         for h in state.hexes.values():
             if (
                 "endorheic_shore" in h.tags

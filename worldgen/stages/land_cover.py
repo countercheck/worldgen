@@ -5,7 +5,7 @@ from ..core.world_state import WorldState
 
 class LandCoverStage(GeneratorStage):
     def run(self, state: WorldState) -> WorldState:
-        wet_moist = self.config.biome_wet_moist
+        wet_moist = self.config.biome_wet_precip_mm
 
         for h in state.hexes.values():
             h.land_cover = _derive(h, wet_moist)
@@ -39,7 +39,11 @@ def _derive(h, wet_moist: float) -> LandCover:
     # Split TEMPERATE_FOREST into dense (very wet) vs woodland (moderately wet).
     # All TEMPERATE_FOREST hexes have moisture >= wet_moist, so we need a higher
     # threshold here to ensure both cover types actually appear.
-    dense_thresh = (wet_moist + 1.0) / 2.0
+    # Closed canopy wants markedly more rain than the wet band's floor. This used to sit
+    # midway between that floor and the old normalised ceiling of 1.0; millimetres have no
+    # ceiling, so it is expressed as a multiple of the band instead and means the same
+    # thing on a dry map as on a wet one.
+    dense_thresh = wet_moist * 1.5
     if b == Biome.TEMPERATE_FOREST and h.moisture > dense_thresh:
         return LandCover.DENSE_FOREST
     if b in (Biome.TEMPERATE_FOREST, Biome.TROPICAL):

@@ -14,7 +14,7 @@ class ClimateContext:
     """
 
     mean_temperature_c: float
-    moisture_target: float
+    mean_precip_mm: float
     palette: frozenset
 
 
@@ -31,16 +31,16 @@ _ALWAYS = ("ALPINE", "WETLAND", "OCEAN")
 CLIMATE_CONTEXTS: dict[str, ClimateContext] = {
     # Mean annual temperature at sea level, in degrees Celsius — real figures for the
     # regions these name, rather than positions on an abstract 0-1 axis.
-    "boreal": ClimateContext(1.0, 0.55, _palette("TUNDRA", "BOREAL", "GRASSLAND", *_ALWAYS)),
+    "boreal": ClimateContext(1.0, 450.0, _palette("TUNDRA", "BOREAL", "GRASSLAND", *_ALWAYS)),
     "temperate": ClimateContext(
-        10.0, 0.55, _palette("TEMPERATE_FOREST", "GRASSLAND", "BOREAL", "SHRUBLAND", *_ALWAYS)
+        10.0, 800.0, _palette("TEMPERATE_FOREST", "GRASSLAND", "BOREAL", "SHRUBLAND", *_ALWAYS)
     ),
     "mediterranean": ClimateContext(
-        16.0, 0.35, _palette("SHRUBLAND", "GRASSLAND", "TEMPERATE_FOREST", *_ALWAYS)
+        16.0, 550.0, _palette("SHRUBLAND", "GRASSLAND", "TEMPERATE_FOREST", *_ALWAYS)
     ),
-    "arid": ClimateContext(21.0, 0.15, _palette("DESERT", "SHRUBLAND", "GRASSLAND", *_ALWAYS)),
+    "arid": ClimateContext(21.0, 200.0, _palette("DESERT", "SHRUBLAND", "GRASSLAND", *_ALWAYS)),
     "tropical": ClimateContext(
-        26.0, 0.75, _palette("TROPICAL", "GRASSLAND", "SHRUBLAND", *_ALWAYS)
+        26.0, 2000.0, _palette("TROPICAL", "GRASSLAND", "SHRUBLAND", *_ALWAYS)
     ),
 }
 
@@ -118,7 +118,9 @@ class WorldConfig:
     # Lake drainage
     lake_chaining: bool = True  # Let a lake spill into a strictly lower lake, not only the sea
     endorheic_marsh_radius: int = 1  # Shore band (hexes) turned to wetland around a closed basin
-    endorheic_marsh_min_moisture: float = 0.40  # Below this a closed basin is arid, not marshy
+    # Below this much annual rainfall a closed basin evaporates to a salt pan rather
+    # than holding a marshy shore.
+    endorheic_marsh_min_precip_mm: float = 300.0
 
     def __post_init__(self) -> None:
         self.wind_direction = _coerce_pair("wind_direction", self.wind_direction)
@@ -126,6 +128,10 @@ class WorldConfig:
         if not (0.0 <= self.river_flow_threshold <= 1.0):
             raise ValueError(
                 f"river_flow_threshold must be in [0, 1], got {self.river_flow_threshold}"
+            )
+        if not (0.0 <= self.moisture_resupply_per_hex <= 1.0):
+            raise ValueError(
+                f"moisture_resupply_per_hex must be in [0, 1], got {self.moisture_resupply_per_hex}"
             )
         if self.moisture_bleed_passes < 0:
             raise ValueError(
@@ -149,10 +155,10 @@ class WorldConfig:
             raise ValueError(
                 f"endorheic_marsh_radius must be >= 0, got {self.endorheic_marsh_radius}"
             )
-        if not (0.0 <= self.endorheic_marsh_min_moisture <= 1.0):
+        if self.endorheic_marsh_min_precip_mm < 0.0:
             raise ValueError(
-                "endorheic_marsh_min_moisture must be in [0, 1], "
-                f"got {self.endorheic_marsh_min_moisture}"
+                "endorheic_marsh_min_precip_mm must be >= 0, "
+                f"got {self.endorheic_marsh_min_precip_mm}"
             )
         if not (0.0 <= self.moisture_bleed_strength <= 1.0):
             raise ValueError(
@@ -166,10 +172,23 @@ class WorldConfig:
         context = CLIMATE_CONTEXTS[self.regional_climate]
         if self.mean_temperature_c is None:
             self.mean_temperature_c = context.mean_temperature_c
-        if self.regional_moisture is None:
-            self.regional_moisture = context.moisture_target
-        if not (0.0 < self.regional_moisture < 1.0):
-            raise ValueError(f"regional_moisture must be in (0, 1), got {self.regional_moisture}")
+        if self.mean_precip_mm is None:
+            self.mean_precip_mm = context.mean_precip_mm
+        if not (0.0 < self.mean_precip_mm <= 12000.0):
+            raise ValueError(
+                "mean_precip_mm must be a plausible annual rainfall in millimetres, "
+                f"got {self.mean_precip_mm}"
+            )
+        if self.food_drowned_precip_mm <= self.biome_wet_precip_mm:
+            raise ValueError(
+                "food_drowned_precip_mm must be above biome_wet_precip_mm, got "
+                f"{self.food_drowned_precip_mm} and {self.biome_wet_precip_mm}"
+            )
+        if self.biome_dry_precip_mm >= self.biome_wet_precip_mm:
+            raise ValueError(
+                "biome_dry_precip_mm must be below biome_wet_precip_mm, got "
+                f"{self.biome_dry_precip_mm} and {self.biome_wet_precip_mm}"
+            )
         if not (-60.0 <= self.mean_temperature_c <= 50.0):
             raise ValueError(
                 "mean_temperature_c must be a plausible mean annual temperature in "
@@ -272,11 +291,6 @@ class WorldConfig:
                 "marketable_surplus_fraction must be in (0, 1], got "
                 f"{self.marketable_surplus_fraction}"
             )
-        if self.biome_dry_moist > self.biome_wet_moist:
-            raise ValueError(
-                "biome_dry_moist must be <= biome_wet_moist, got "
-                f"{self.biome_dry_moist} > {self.biome_wet_moist}"
-            )
         if not (0.0 <= self.road_bank_discount_min_flow <= 1.0):
             raise ValueError(
                 "road_bank_discount_min_flow must be in [0, 1], "
@@ -325,8 +339,20 @@ class WorldConfig:
     # standard figure, and being a real rate it stays right whatever the map's relief.
     lapse_rate_c_per_km: float = 6.5
     orographic_strength: float = 2.0
-    base_moisture: float = 0.0  # flat bias added to land moisture after anchoring
-    regional_moisture: float | None = None  # mean land moisture; None = from regional_climate
+    # How much of its moisture deficit the air makes back over each kilometre it travels,
+    # by evaporation from the ground it crosses. Without it the orographic sweep is a
+    # one-way drying and the far side of the map gets no rain at all: a rain shadow would
+    # extend from the first hill to the border rather than being the local feature it is.
+    # At 0.08 the air is most of the way recovered after twenty kilometres or so.
+    moisture_resupply_per_hex: float = 0.08
+    # A flat bias in millimetres a year, added after the pattern is anchored. Positive
+    # wets the whole region, negative dries it.
+    base_precip_mm: float = 0.0
+    # Mean annual precipitation over land, in millimetres. None takes it from
+    # regional_climate. The orographic pass gives a relative wet/dry pattern — which
+    # slopes catch the rain and which sit in a shadow — and this says what that pattern
+    # is worth in real rainfall.
+    mean_precip_mm: float | None = None
 
     # ---- Haulage economics -------------------------------------------------
     # The ranges the settlement hierarchy is built on.  Each is a *travel-cost* budget,
@@ -407,8 +433,15 @@ class WorldConfig:
     # vegetation takes over, around 18 C.
     biome_cold_temp_c: float = 5.0
     biome_warm_temp_c: float = 18.0
-    biome_dry_moist: float = 0.2
-    biome_wet_moist: float = 0.5
+    # Annual rainfall bounding the dry and wet biome bands, in millimetres. Below about
+    # 400 mm you get steppe and desert; above about 1000 mm, closed wet forest.
+    biome_dry_precip_mm: float = 400.0
+    biome_wet_precip_mm: float = 1000.0
+    # Annual rainfall at which ground is drowned for farming — leached, waterlogged, and
+    # worth nothing. The wet arm of the agricultural curve falls to zero here. It used to
+    # fall away to a normalised 1.0, which was the ceiling of the old moisture scale
+    # rather than anything about growing food.
+    food_drowned_precip_mm: float = 3000.0
 
     # Settlements — the classic model (ranked placement against fixed counts)
     city_min_separation: int = 20
@@ -581,6 +614,25 @@ _RETIRED_FIELDS: dict[str, str] = {
     ),
     "biome_warm_temp": (
         "biome temperature bands are in Celsius now; use biome_warm_temp_c (try 18.0)"
+    ),
+    "base_moisture": (
+        "moisture is measured in millimetres of annual rainfall now; use base_precip_mm"
+    ),
+    "regional_moisture": (
+        "moisture is measured in millimetres of annual rainfall now; use mean_precip_mm "
+        "(temperate is 800)"
+    ),
+    "biome_dry_moist": (
+        "biome moisture bands are in millimetres of annual rainfall now; use "
+        "biome_dry_precip_mm (try 400)"
+    ),
+    "biome_wet_moist": (
+        "biome moisture bands are in millimetres of annual rainfall now; use "
+        "biome_wet_precip_mm (try 1000)"
+    ),
+    "endorheic_marsh_min_moisture": (
+        "moisture is measured in millimetres of annual rainfall now; use "
+        "endorheic_marsh_min_precip_mm (try 300)"
     ),
     "erosion_iterations": (
         "erosion is now dosed per land hex so it means the same thing at any map size; "

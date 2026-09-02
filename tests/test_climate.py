@@ -34,15 +34,19 @@ def test_temperature_is_a_plausible_annual_mean(climate_state):
         )
 
 
-def test_moisture_in_range(climate_state):
+def test_moisture_is_a_plausible_annual_rainfall(climate_state):
     for h in climate_state.hexes.values():
-        assert 0.0 <= h.moisture <= 1.0, f"moisture {h.moisture} out of [0, 1]"
+        assert 0.0 <= h.moisture <= 12000.0, (
+            f"moisture {h.moisture:.0f} mm is not a plausible annual rainfall"
+        )
 
 
-def test_ocean_moisture_is_one(climate_state):
+def test_standing_water_is_not_short_of_rain(climate_state):
     for h in climate_state.hexes.values():
         if h.terrain_class == TerrainClass.OCEAN:
-            assert h.moisture == 1.0, f"ocean hex moisture {h.moisture} != 1.0"
+            assert h.moisture == pytest.approx(
+                climate_state.metadata["config"]["mean_precip_mm"]
+            ), f"water hex has {h.moisture:.0f} mm — it should not read as the driest ground"
 
 
 def test_mountains_colder_than_flat(climate_state):
@@ -93,10 +97,12 @@ def test_rain_shadow_present(climate_state):
 
     wet = sum(exposed) / len(exposed)
     dry = sum(sheltered) / len(sheltered)
-    assert wet > dry + 0.05, (
-        f"Rain shadow not detected: land behind high ground averages {dry:.2f} moisture "
-        f"against {wet:.2f} in front of it. Erosion wearing the barriers down is the "
-        f"usual cause — see erosion_droplets_per_hex."
+    # As a ratio rather than a difference in millimetres, so the test says the same thing
+    # about a desert as about a rainforest.
+    assert dry < 0.9 * wet, (
+        f"Rain shadow not detected: land behind high ground averages {dry:.0f} mm against "
+        f"{wet:.0f} mm in front of it. Erosion wearing the barriers down is the usual "
+        f"cause — see erosion_droplets_per_hex."
     )
 
 
@@ -130,8 +136,8 @@ def test_mean_temperature_shifts_the_map():
         p.add_stage(ClimateStage)
         return p.run()
 
-    cold_state = run_with_base(0.2)
-    warm_state = run_with_base(0.8)
+    cold_state = run_with_base(2.0)
+    warm_state = run_with_base(22.0)
     assert _mean_land_temperature(cold_state) < _mean_land_temperature(warm_state), (
         "a higher mean_temperature_c did not produce a warmer map"
     )
@@ -156,7 +162,7 @@ def test_mean_temperature_preserves_latitude_shape():
         p.add_stage(ClimateStage)
         return p.run()
 
-    for base in (0.3, 0.7):
+    for base in (2.0, 22.0):
         state = run_with_base(base)
         height = state.height
         polar_temps = [
@@ -194,11 +200,11 @@ def _mean_land_moisture(state) -> float:
     return sum(vals) / len(vals) if vals else 0.0
 
 
-def test_base_moisture_shifts_mean_upward():
-    """Positive base_moisture should raise mean land moisture."""
+def test_base_precip_shifts_mean_upward():
+    """A positive rainfall bias should make the region wetter."""
 
     def run(base: float):
-        cfg = WorldConfig(width=32, height=32, base_moisture=base)
+        cfg = WorldConfig(width=32, height=32, base_precip_mm=base)
         p = GeneratorPipeline(42, cfg)
         p.add_stage(ElevationStage)
         p.add_stage(ErosionStage)
@@ -208,16 +214,20 @@ def test_base_moisture_shifts_mean_upward():
         return p.run()
 
     dry = run(0.0)
-    wet = run(0.3)
+    wet = run(300.0)
     assert _mean_land_moisture(dry) < _mean_land_moisture(wet), (
-        "Positive base_moisture did not raise mean land moisture"
+        "a positive base_precip_mm did not raise mean land rainfall"
     )
 
 
-def test_base_moisture_clamps_to_unit_interval():
-    """base_moisture = 1.0 should not push moisture above 1.0."""
+def test_base_precip_has_no_artificial_ceiling():
+    """Rainfall in millimetres has no upper bound to clamp to.
 
-    cfg = WorldConfig(width=32, height=32, base_moisture=1.0)
+    It used to be clipped at a normalised 1.0, which silently swallowed any bias that
+    would have pushed a wet region wetter.
+    """
+
+    cfg = WorldConfig(width=32, height=32, base_precip_mm=600.0)
     p = GeneratorPipeline(42, cfg)
     p.add_stage(ElevationStage)
     p.add_stage(ErosionStage)
@@ -226,7 +236,9 @@ def test_base_moisture_clamps_to_unit_interval():
     p.add_stage(ClimateStage)
     state = p.run()
     for h in state.hexes.values():
-        assert h.moisture <= 1.0, f"moisture {h.moisture} exceeded 1.0 with base_moisture=1.0"
+        assert h.moisture >= 600.0, (
+            f"a 600 mm bias left a hex at {h.moisture:.0f} mm — the bias was clipped away"
+        )
 
 
 def test_moisture_bleed_requires_river_tag():
@@ -309,12 +321,16 @@ def test_erosion_dose_does_not_wash_the_rain_shadow_away():
                 barrier = max(barrier, h.elevation)
         if not sheltered or not exposed:
             return 0.0
-        return sum(exposed) / len(exposed) - sum(sheltered) / len(sheltered)
+        wet = sum(exposed) / len(exposed)
+        dry = sum(sheltered) / len(sheltered)
+        # How much drier the sheltered side is, as a fraction. Unit-independent, so this
+        # keeps meaning the same thing whatever units moisture is carried in.
+        return (wet - dry) / wet if wet > 0 else 0.0
 
     at_default = shadow(WorldConfig().erosion_droplets_per_hex)
-    assert at_default > 0.10, (
-        f"the default erosion dose leaves only a {at_default:.2f} moisture contrast "
-        "across high ground; the rain shadow has been eroded away"
+    assert at_default > 0.15, (
+        f"the default erosion dose leaves the sheltered side only {at_default:.0%} drier "
+        "than the exposed one; the rain shadow has been eroded away"
     )
     assert at_default > shadow(8.0), (
         "a heavier dose should weaken the shadow — if it does not, this test is no "

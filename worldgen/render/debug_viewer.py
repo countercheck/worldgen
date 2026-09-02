@@ -11,6 +11,10 @@ from ..core.world_state import ROAD_TIER_RANK, RoadTier, WorldState
 # worlds can be compared by eye.
 TEMPERATURE_RAMP_C = (-20.0, 35.0)
 
+# Millimetres of annual rainfall spanned by the moisture ramp — desert to rainforest.
+# Fixed for the same reason as the temperature ramp: so two maps can be compared.
+PRECIP_RAMP_MM = (0.0, 2500.0)
+
 TERRAIN_COLORS = {
     TerrainClass.OCEAN: (0.2, 0.4, 0.8),
     TerrainClass.LAKE: (0.35, 0.6, 0.85),
@@ -101,7 +105,8 @@ def _color_getter(attribute: str):
         return (lambda h: cmap(h.elevation)), False, False
     if attribute == "moisture":
         cmap = mpl.colormaps["Blues"]
-        return (lambda h: cmap(h.moisture)), False, False
+        lo, hi = PRECIP_RAMP_MM
+        return (lambda h: cmap(min(1.0, (h.moisture - lo) / (hi - lo)))), False, False
     if attribute == "temperature":
         # Temperature is degrees Celsius, so it has to be put on a 0-1 ramp for drawing.
         # The span is fixed rather than taken from the map's own range: a fixed scale lets

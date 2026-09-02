@@ -105,7 +105,7 @@ class CrossingStage(GeneratorStage):
         cfg = self.config
 
         surplus = {
-            coord: food_value(hx, cfg, cfg.biome_dry_moist, cfg.biome_wet_moist)
+            coord: food_value(hx, cfg, cfg.biome_dry_precip_mm, cfg.biome_wet_precip_mm)
             * cfg.marketable_surplus_fraction
             for coord, hx in hexes.items()
             if hx.terrain_class not in (TerrainClass.OCEAN, TerrainClass.LAKE)
