@@ -185,6 +185,36 @@ def test_cities_mutually_reachable(road_state):
         )
 
 
+def test_roads_route_when_river_flow_is_continuous():
+    """river_flow_continuous must not change what counts as a river channel.
+
+    In that mode HydrologyStage writes a flow value onto every draining land hex, not
+    just the channels.  Anything in the road costs that identifies a river by
+    `river_flow > 0` then calls the whole map a river: every land-to-land edge reads as
+    channel travel and prices at infinity, and the network does not merely route badly,
+    it fails to route at all.  The costs identify a channel by the "river" tag for this
+    reason, so the two modes must produce the same roads.
+    """
+    plain = _build_pipeline(seed=42).run()
+    continuous = _build_pipeline(seed=42, river_flow_continuous=True).run()
+
+    assert continuous.roads, "no roads generated with river_flow_continuous"
+    flowing = [h for h in continuous.hexes.values() if h.river_flow > 0]
+    tagged = [h for h in continuous.hexes.values() if "river" in h.tags]
+    assert len(flowing) > len(tagged) * 2, (
+        "continuous mode should put flow on far more hexes than are tagged as river; "
+        "if it does not, this test is no longer exercising the case it was written for"
+    )
+
+    def paths(ws):
+        return sorted(tuple(r.path) for r in ws.roads)
+
+    assert paths(continuous) == paths(plain), (
+        "roads differ between flow modes: something is still identifying a river channel "
+        "by river_flow rather than by the tag"
+    )
+
+
 def test_river_corridor_preference_in_roads(road_state):
     """Roads still follow river valleys — but along the corridor, not down the channel.
 

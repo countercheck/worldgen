@@ -49,6 +49,11 @@ def _hill(coord):
 def _river_flat(coord, flow=1.0):
     h = _flat(coord)
     h.river_flow = flow
+    # HydrologyStage sets both on every channel hex, and the road costs identify a river
+    # by the tag — flow alone is written on all draining land when river_flow_continuous
+    # is on, so it cannot be the identity. A fixture setting only the flow would be
+    # describing a hex that production never produces.
+    h.tags.add("river")
     return h
 
 
@@ -195,10 +200,14 @@ def test_road_edge_cost_combines_water_and_river():
     """An edge that both crosses a shoreline AND a river edge accumulates both costs."""
     cfg = WorldConfig()
     # Match elevations to neutralise slope_edge_cost; isolate water + river contributions.
-    flat = Hex(coord=(0, 0), elevation=0.5, terrain_class=TerrainClass.FLAT)
-    river_at_shore = Hex(coord=(1, 0), elevation=0.5, terrain_class=TerrainClass.OCEAN)
-    river_at_shore.river_flow = 0.5  # river mouth
-    cost = road_edge_cost(flat, river_at_shore, cfg)
+    # The river is the last *land* hex of its course, with the sea beyond it: hydrology
+    # never puts flow or a river tag on a water hex, so a river mouth is this shape, not
+    # an ocean hex carrying flow.  Stepping from it to the sea both embarks and leaves
+    # the channel, which is the combination under test.
+    river_mouth = _river_flat((0, 0), flow=0.5)
+    river_mouth.elevation = 0.5
+    sea = Hex(coord=(1, 0), elevation=0.5, terrain_class=TerrainClass.OCEAN)
+    cost = road_edge_cost(river_mouth, sea, cfg)
     expected = (
         cfg.road_embark_cost + cfg.road_river_crossing_base + 0.5 * cfg.road_river_crossing_flow
     )
