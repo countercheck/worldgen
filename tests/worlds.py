@@ -30,6 +30,12 @@ def build_pipeline(
     *until* stops after the stage of that class name, for tests that only care about an
     early attribute and should not pay for settlement and road generation.  Overrides win
     over the defaults, so a caller can vary anything including `erosion_iterations`.
+
+    The two elevation stages are interchangeable as far as *until* is concerned: a caller
+    that sets `heightmap_path` gets `ImageElevationStage` in the slot, and asking to stop
+    after "ElevationStage" means the same thing either way.  Without that, adding a
+    heightmap to an existing `until="ElevationStage"` call would fail on a name that is
+    an implementation detail of the swap.
     """
     defaults = {"erosion_iterations": 500}
     cfg = WorldConfig(width=width, height=height, **{**defaults, **cfg_overrides})
@@ -38,7 +44,12 @@ def build_pipeline(
     if until is not None:
         names = [s.__name__ for s in stages]
         if until not in names:
-            raise ValueError(f"No stage named {until!r} in the {model} pipeline: {names}")
+            aliases = {"ElevationStage", "ImageElevationStage"}
+            swapped = aliases - {until} if until in aliases else set()
+            match = next((n for n in names if n in swapped), None)
+            if match is None:
+                raise ValueError(f"No stage named {until!r} in the {model} pipeline: {names}")
+            until = match
         stages = stages[: names.index(until) + 1]
 
     pipeline = GeneratorPipeline(seed, cfg)

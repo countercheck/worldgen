@@ -335,6 +335,47 @@ def test_import_heightmap_writes_a_loadable_world(tmp_path, mode):
     assert len(elevations) > 1, "every hex came out identical — nothing was imported"
 
 
+def test_import_heightmap_mode_defaults_to_the_config(tmp_path):
+    """`--mode` used to carry a non-None default and overwrite the config unconditionally,
+    so `heightmap_mode: coastline` in a config file was silently ignored — and `generate`
+    disagreed with `import-heightmap` about the same setting."""
+    cfg = tmp_path / "cfg.yaml"
+    cfg.write_text(yaml.safe_dump({"heightmap_mode": "coastline", "width": 16, "height": 16}))
+    img = _heightmap(tmp_path, "modes.png")
+
+    from_config = CliRunner().invoke(
+        cli,
+        [
+            "import-heightmap",
+            "--input",
+            img,
+            "--config",
+            str(cfg),
+            "--output-dir",
+            str(tmp_path / "a"),
+        ],
+    )
+    assert from_config.exit_code == 0, from_config.output
+    assert "as coastline" in from_config.output
+
+    overridden = CliRunner().invoke(
+        cli,
+        [
+            "import-heightmap",
+            "--input",
+            img,
+            "--config",
+            str(cfg),
+            "--mode",
+            "elevation",
+            "--output-dir",
+            str(tmp_path / "b"),
+        ],
+    )
+    assert overridden.exit_code == 0, overridden.output
+    assert "as elevation" in overridden.output, "an explicit --mode must still win"
+
+
 def test_import_heightmap_reports_a_bad_path_cleanly(tmp_path):
     """A missing file is a message, not a traceback."""
     missing = tmp_path / "nope.png"

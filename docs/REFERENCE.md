@@ -336,9 +336,21 @@ imported terrain exactly as it does a generated one.
   preserve. Erosion will stretch a low-contrast heightmap's contrast and move its
   coast. Use `worldgen import-heightmap`, which skips erosion, when the image must be
   reproduced exactly.
+- The range is re-anchored again after `heightmap_coast_falloff`, since that blend moves
+  the waterline and takes the field back off `[0, 1]`. Without it the opt-in path walks
+  straight back into the renormalisation the anchoring exists to defuse.
 - Nothing forces an imported field below `sea_level`, so a stencil with no sea in it
   produces a world with no ocean. "Rivers reach the ocean" stops being an invariant
-  there.
+  there, and the range cannot be anchored at both ends — no all-land field both stays
+  above `sea_level` and reaches zero — so erosion will flood part of the map. The stage
+  warns.
+- Alpha is only taken as the stencil when a real share of the image (≥1%) is transparent.
+  A single antialiased or lossily-round-tripped pixel would otherwise outrank the
+  brightness threshold and carry the whole map with it.
+- Mode `"I"` (32-bit integer) is the one ambiguous case: a DEM stored in metres is
+  indistinguishable from 16-bit-scaled data, and `0–3000 / 65535` is a map entirely below
+  sea level. Scaling by the observed peak would be the histogram stretch this importer
+  refuses to do, so a suspiciously low peak warns instead.
 - An image smaller than the grid is upsampled by replication — a box filter has
   nothing else to do — giving blocks of equal elevation that read as `FLAT` to terrain
   classification. The stage warns.

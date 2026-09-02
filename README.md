@@ -106,11 +106,13 @@ worldgen generate --heightmap coast.png --heightmap-mode coastline --seed 42
 
 `coastline` is the one you want for a hand-drawn continent: you supply the outline and the
 generator invents plausible mountains, valleys and coasts inside it. Land is decided by
-the alpha channel where the image has a meaningful one — drawing on a transparent
-background just works — and otherwise by brightness against `heightmap_land_threshold`,
-which `heightmap_invert` flips. The stencil is authoritative, so land drawn running off
-the edge of the map stays land; set `heightmap_coast_falloff` to also ring the map with
-sea, which guarantees every river a coast to reach.
+the alpha channel where a real share of the image is transparent — drawing on a
+transparent background just works — and otherwise by brightness against
+`heightmap_land_threshold`, which `heightmap_invert` flips. The stencil is authoritative,
+so land drawn running off the edge of the map stays land; set `heightmap_coast_falloff` to
+also ring the map with sea, which guarantees every river a coast to reach. Leave some sea
+in the stencil: an all-land image has no coastline to anchor, and erosion will flood part
+of it (you get a warning).
 
 To check a conversion on its own, before paying for a full world:
 

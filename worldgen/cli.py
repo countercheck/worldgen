@@ -364,11 +364,11 @@ def export_svg(
 @click.option(
     "--mode",
     type=click.Choice(HEIGHTMAP_MODES, case_sensitive=False),
-    default="elevation",
-    show_default=True,
+    default=None,
     help=(
         "'elevation' reads the image as a greyscale heightmap; 'coastline' reads it as a "
-        "land/sea stencil and fills it with generated terrain."
+        "land/sea stencil and fills it with generated terrain. Defaults to the config's "
+        "heightmap_mode, itself 'elevation'."
     ),
 )
 @click.option("--width", type=int, default=None, help="Map width in hexes")
@@ -430,7 +430,10 @@ def import_heightmap(
     if grid_layout:
         cfg.grid_layout = grid_layout.lower()
     cfg.heightmap_path = input_path
-    cfg.heightmap_mode = mode.lower()
+    if mode:
+        # Only when actually given, so a `heightmap_mode` from --config is not silently
+        # overwritten by this option's default — the same rule `generate` follows.
+        cfg.heightmap_mode = mode.lower()
 
     click.echo(f"Importing {input_path} as {cfg.heightmap_mode}...")
     click.echo(f"  Size: {cfg.width}×{cfg.height} ({cfg.grid_layout})")

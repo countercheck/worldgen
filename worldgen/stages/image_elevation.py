@@ -141,27 +141,37 @@ def shape_to_mask(noise: np.ndarray, mask: np.ndarray, cfg) -> np.ndarray:
         ceiling = sea_level - margin
         out[sea] = (ceiling * (1.0 - s))[sea]
 
-    return _fill_range(out, mask, sea_level)
+    return fill_range(out, sea_level)
 
 
-def _fill_range(arr: np.ndarray, mask: np.ndarray, sea_level: float) -> np.ndarray:
+def fill_range(arr: np.ndarray, sea_level: float) -> np.ndarray:
     """Stretch *arr* to span [0, 1] with `sea_level` held where it is.
 
     Each side of the waterline is scaled independently, so no hex crosses it: the deepest
     sea lands on 0, the highest land on 1, and the coastline is exactly where it was.
+
+    The waterline is read back off the field rather than passed in, so this is correct
+    wherever it is applied — including after the edge falloff, which moves the coast.
+
+    Reaching [0, 1] needs the field to have both sea and land in it.  A stencil that is
+    all one or the other cannot be anchored at both ends, and the caller is expected to
+    say so; there is no arrangement of an all-land map that both keeps every hex above
+    sea level and puts something at zero.
     """
     out = arr.copy()
 
-    sea = ~mask
+    land = out >= sea_level
+    sea = ~land
+
     if sea.any():
         depth = sea_level - out[sea].min()
         if depth > 0.0:
             out[sea] = sea_level - (sea_level - out[sea]) * (sea_level / depth)
 
-    if mask.any():
-        relief = out[mask].max() - sea_level
+    if land.any():
+        relief = out[land].max() - sea_level
         if relief > 0.0:
-            out[mask] = sea_level + (out[mask] - sea_level) * ((1.0 - sea_level) / relief)
+            out[land] = sea_level + (out[land] - sea_level) * ((1.0 - sea_level) / relief)
 
     return out
 
@@ -216,6 +226,21 @@ class ImageElevationStage(GeneratorStage):
                 # reach at the cost of eating a landmass that ran off the edge.
                 t = falloff_ramp(cfg, coast_gen, w, h)
                 arr = arr * t + cfg.continent_seabed * (1.0 - t)
+                # The blend pulls the field back off the [0, 1] span `shape_to_mask` gave
+                # it and moves the waterline inward, so re-anchor against the coast the
+                # falloff has just drawn.  Without this the opt-in path walks straight
+                # back into the erosion renormalisation that `fill_range` exists to
+                # defuse, and drowns the land it did not mean to take.
+                arr = fill_range(arr, cfg.sea_level)
+
+            if not (arr < cfg.sea_level).any():
+                warnings.warn(
+                    "the coastline stencil has no sea in it, so the elevation field "
+                    "cannot span [0, 1]; erosion's renormalisation will flood part of "
+                    "the map. Leave some sea in the stencil, or set "
+                    "heightmap_coast_falloff to ring the map with it.",
+                    stacklevel=2,
+                )
         else:
             arr = resample_to_grid(lum, w, h)
 

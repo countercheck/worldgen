@@ -91,6 +91,53 @@ def test_alpha_read_only_when_it_varies(tmp_path):
     assert alpha is None, "a uniformly opaque band says nothing about where the land is"
 
 
+def test_a_stray_translucent_pixel_does_not_become_the_stencil(tmp_path):
+    """Coastline mode prefers alpha over brightness, so "has alpha" must mean something.
+
+    One pixel a shade off opaque — an antialiased edge, a lossy round-trip — used to
+    promote the alpha band over the brightness threshold and take the whole map with it:
+    a 9% land stencil imported as 100% land.
+    """
+    rgba = np.zeros((32, 32, 4), np.uint8)
+    rgba[:3, :, :3] = 255  # a thin bright strip: 9% of the image
+    rgba[..., 3] = 255
+    rgba[0, 0, 3] = 254
+
+    lum, alpha = load_luminance(_save(tmp_path, rgba, "stray.png"))
+    assert alpha is None, "one near-opaque pixel is not a land/sea stencil"
+
+    used = land_mask(lum, alpha, 0.5, False)
+    assert used.mean() == pytest.approx((lum >= 0.5).mean()), (
+        f"brightness said {(lum >= 0.5).mean():.1%} land, mask used {used.mean():.1%}"
+    )
+
+
+def test_a_real_transparent_background_is_still_the_stencil(tmp_path):
+    """The other half of that: a continent drawn on transparency must still work."""
+    rgba = np.zeros((32, 32, 4), np.uint8)
+    rgba[..., :3] = 255
+    rgba[8:24, 8:24, 3] = 255  # opaque continent, transparent sea
+
+    lum, alpha = load_luminance(_save(tmp_path, rgba, "drawn.png"))
+    assert alpha is not None
+    assert land_mask(lum, alpha, 0.5, False).mean() == pytest.approx(0.25)
+
+
+def test_ambiguous_int32_depth_warns(tmp_path):
+    """A DEM in metres is 32-bit integer too, and 0-3000 / 65535 is an all-ocean map.
+
+    Rescaling by the observed peak would be the histogram stretch this importer refuses
+    to do, so the ambiguity gets reported rather than guessed at.
+    """
+    metres = (np.random.default_rng(0).random((32, 32)) * 3000).astype(np.int32)
+    path = tmp_path / "metres.tif"
+    Image.fromarray(metres, "I").save(path)
+
+    with pytest.warns(UserWarning, match="32-bit integer"):
+        lum, _ = load_luminance(str(path))
+    assert lum.max() < 0.25, "the warning is only worth having because the map is dark"
+
+
 def test_palette_images_load(tmp_path):
     src = Image.fromarray(_gradient(4, 4)).convert("P")
     path = tmp_path / "pal.png"
@@ -256,6 +303,58 @@ def test_coastline_survives_erosion():
     assert after == pytest.approx(before, abs=0.05), (
         f"erosion moved the waterline from {before:.1%} land to {after:.1%}"
     )
+
+
+def test_coast_falloff_keeps_the_range_filled(tmp_path):
+    """The opt-in path has to hold the same invariant as the default one.
+
+    `heightmap_coast_falloff` blends towards `continent_seabed` *after* the field has been
+    anchored, which takes it back off [0, 1] and moves the waterline — walking straight
+    back into the erosion renormalisation the anchoring exists to defuse. Measured before
+    the re-anchor: a west-three-quarters stencil went 59.6% land -> 56.5% through erosion,
+    against 59.6% -> 59.7% after.
+    """
+    from worldgen.stages.erosion import ErosionStage
+
+    w, h = 64, 56
+    yy, xx = np.mgrid[0:h, 0:w]
+    path = _save(tmp_path, np.where(xx < w * 0.75, 255, 0).astype(np.uint8), "west.png")
+
+    cfg = WorldConfig(
+        width=w,
+        height=h,
+        heightmap_path=path,
+        heightmap_mode="coastline",
+        heightmap_coast_falloff=True,
+        erosion_iterations=0,
+    )
+    pipeline = GeneratorPipeline(11, cfg)
+    pipeline.add_stage(ImageElevationStage)
+    state = pipeline.run()
+
+    arr = np.array(
+        [[state.hexes[state.coord_at(c, r)].elevation for r in range(h)] for c in range(w)]
+    )
+    assert arr.min() == pytest.approx(0.0), f"deepest sea is {arr.min():.3f} after the falloff"
+    assert arr.max() == pytest.approx(1.0), f"highest land is {arr.max():.3f} after the falloff"
+
+    before = np.mean([hx.elevation >= cfg.sea_level for hx in state.hexes.values()])
+    ErosionStage(cfg, np.random.default_rng(0)).run(state)
+    after = np.mean([hx.elevation >= cfg.sea_level for hx in state.hexes.values()])
+    assert after == pytest.approx(before, abs=0.02), (
+        f"the falloff path lost land to erosion: {before:.1%} -> {after:.1%}"
+    )
+
+
+def test_stencil_without_sea_warns(tmp_path):
+    """No arrangement of an all-land map both stays above sea level and reaches zero.
+
+    Unfixable, so it has to be said out loud rather than silently flooding a tenth of the
+    map at the erosion renormalisation.
+    """
+    path = _save(tmp_path, np.full((64, 64), 255, np.uint8), "allland.png")
+    with pytest.warns(UserWarning, match="no sea"):
+        _run_stage(path, heightmap_mode="coastline")
 
 
 def test_coast_is_shallower_than_the_interior():

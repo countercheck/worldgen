@@ -44,6 +44,29 @@ def test_cli_and_tests_share_one_stage_list():
     assert ".add_stage(ElevationStage)" not in source, "cli.generate has an inline stage list"
 
 
+def test_until_treats_the_two_elevation_stages_as_one_slot(tmp_path):
+    """`build_pipeline`'s docstring advertises varying anything alongside `until`.
+
+    Adding `heightmap_path` swaps the class in that slot, so an existing
+    `until="ElevationStage"` call would otherwise start failing on a name that is an
+    implementation detail of the swap.
+    """
+    import numpy as np
+    from PIL import Image
+
+    path = tmp_path / "hm.png"
+    Image.fromarray(np.full((32, 32), 200, np.uint8)).save(path)
+
+    imported = build_pipeline(until="ElevationStage", heightmap_path=str(path), width=16, height=16)
+    assert [cls.__name__ for cls, _ in imported.stages] == ["ImageElevationStage"]
+
+    generated = build_pipeline(until="ElevationStage", width=16, height=16)
+    assert [cls.__name__ for cls, _ in generated.stages] == ["ElevationStage"]
+
+    with pytest.raises(ValueError, match="No stage named"):
+        build_pipeline(until="NoSuchStage", width=16, height=16)
+
+
 def test_stage_order_is_load_bearing():
     """Each of these consumes what the one before it produces."""
     names = [s.__name__ for s in default_stages("classic")]
