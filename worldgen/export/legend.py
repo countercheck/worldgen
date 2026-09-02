@@ -10,6 +10,7 @@ import math
 from dataclasses import dataclass
 
 from ..core.hex import SettlementTier
+from ..core.hex_grid import split_path_on_water, water_transitions
 from ..core.world_state import RoadTier, WorldState
 
 # Stand-in steps for the continuous greyscale used by color_mode="elevation".
@@ -21,6 +22,16 @@ ELEVATION_RAMP = (0.1, 0.3, 0.5, 0.7, 0.9)
 SYMBOL_BOX = 12.0
 
 CORNERS = ("top-right", "bottom-left")
+
+
+def stroke_scale(hex_size: float) -> float:
+    """Multiplier taking a line width tuned for the reference hex to *hex_size*.
+
+    Road and river widths are written for a 12px hex, the default — the same reference
+    the symbols use.  Without this a map exported at `hex_size=30` draws hairline rivers
+    between huge hexes, and one at `hex_size=6` drowns in roads.
+    """
+    return hex_size / SYMBOL_BOX
 
 
 @dataclass(frozen=True)
@@ -70,7 +81,8 @@ class LegendRow:
     for "ramp" or "river".
     """
 
-    kind: str  # "fill" | "ramp" | "river" | "road" | "settlement"
+    kind: str  # "fill" | "ramp" | "river" | "road" | "anchorage"
+    #       | "ford" | "bridge" | "settlement"
     label: str
     sample: object = None
 
@@ -104,6 +116,56 @@ def _label(member) -> str:
     return str(member.value).replace("_", " ").title()
 
 
+def anchorage_points(ws: WorldState) -> list:
+    """Every land hex where a *drawn* route takes to the water, in stable order.
+
+    Two sources, drawn with the same symbol because they mean the same thing to a
+    reader: a road whose leg across an ocean or lake is not drawn, and a ferry standing
+    in for a road where a river channel cuts the network in two.
+
+    Shore points are filtered to hexes that a drawn road leg actually reaches.  A land
+    leg of a single hex cannot be drawn as a polyline (`split_path_on_water` discards
+    it), and marking its shore would leave an anchor sitting on the coast with no road
+    attached to it.  Ferry landings are never filtered — the ferry is the connection,
+    whether or not a road leg happens to be drawable at either end.
+    """
+    drawn = {
+        c for road in ws.roads for leg in split_path_on_water(road.path, ws.hexes) for c in leg
+    }
+    points = {c for road in ws.roads for c in water_transitions(road.path, ws.hexes) if c in drawn}
+    points |= {c for ferry in ws.ferries for c in (ferry.a, ferry.b)}
+    return sorted(points)
+
+
+def crossings(ws: WorldState, axial_to_pixel, hex_size: float) -> list:
+    """Every tagged ford and bridge, as `(coord, kind, angle)` in stable order.
+
+    *angle* is the bearing in degrees of the river passing under the crossing, taken from
+    the neighbouring hexes on its own drawn path.  Both symbols are laid across the water
+    rather than along it, so an exporter draws them rotated a further 90°; a bridge
+    aligned with the current would read as a second river.
+    """
+    bearing: dict = {}
+    for river in ws.rivers:
+        hexes = river.hexes
+        for i, c in enumerate(hexes):
+            before = hexes[i - 1] if i > 0 else c
+            after = hexes[i + 1] if i + 1 < len(hexes) else c
+            if before == after:
+                continue
+            (ax, ay) = axial_to_pixel(before, hex_size)
+            (bx, by) = axial_to_pixel(after, hex_size)
+            bearing[c] = math.degrees(math.atan2(by - ay, bx - ax))
+
+    out = []
+    for coord, hex_item in ws.hexes.items():
+        if "bridge" in hex_item.tags:
+            out.append((coord, "bridge", bearing.get(coord, 0.0)))
+        elif "ford" in hex_item.tags:
+            out.append((coord, "ford", bearing.get(coord, 0.0)))
+    return sorted(out)
+
+
 def rows(ws: WorldState, color_mode: str, layers: set[str]) -> list[LegendRow]:
     """Legend rows for *ws*, covering only what the given layers actually draw."""
     out: list[LegendRow] = []
@@ -129,6 +191,18 @@ def rows(ws: WorldState, color_mode: str, layers: set[str]) -> list[LegendRow]:
         for tier in RoadTier:
             if tier in present:
                 out.append(LegendRow("road", f"{_label(tier)} road", tier))
+
+    if "anchorages" in layers and anchorage_points(ws):
+        out.append(LegendRow("anchorage", "Anchorage"))
+
+    if "crossings" in layers:
+        # Read straight off the tags rather than via `crossings()`, which needs the
+        # exporter's pixel transform just to compute angles the legend does not use.
+        tagged = {t for hex_item in ws.hexes.values() for t in hex_item.tags}
+        if "ford" in tagged:
+            out.append(LegendRow("ford", "Ford"))
+        if "bridge" in tagged:
+            out.append(LegendRow("bridge", "Bridge"))
 
     if "settlements" in layers and ws.settlements:
         present_tiers = {s.tier for s in ws.settlements}

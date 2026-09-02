@@ -8,7 +8,7 @@ from worldgen.core.hex import (
     SettlementTier,
     TerrainClass,
 )
-from worldgen.core.world_state import River, Road, RoadTier, WorldState
+from worldgen.core.world_state import Ferry, River, Road, RoadTier, WorldState
 from worldgen.export.svg_export import SVGConfig, render, save
 
 
@@ -473,3 +473,337 @@ def test_placement_reserves_the_full_hex_support(corner):
         assert min(panel_ds) > max(hex_ds), (
             f"panel reaches d={min(panel_ds):.2f}, terrain ends at d={max(hex_ds):.2f}"
         )
+
+
+# --- roads and anchorages ----------------------------------------------------
+
+
+def _roads_group(svg: str) -> str:
+    return svg.split('<g id="layer-roads">')[1].split("</g>")[0]
+
+
+def _water_crossing_world() -> WorldState:
+    """A road that puts to sea mid-route: two land legs, two shore points."""
+    ws = WorldState.empty(seed=99, width=6, height=3)
+    for r in range(3):
+        ws.hexes[(3, r)].terrain_class = TerrainClass.OCEAN
+    ws.roads = [Road(path=[(1, 1), (2, 1), (3, 1), (4, 1), (5, 1)], tier=RoadTier.PRIMARY)]
+    return ws
+
+
+def _branching_world() -> WorldState:
+    """A track branching off a primary road, sharing the first two edges with it."""
+    ws = WorldState.empty(seed=99, width=5, height=3)
+    ws.roads = [
+        Road(path=[(0, 1), (1, 1), (2, 1), (3, 1)], tier=RoadTier.PRIMARY),
+        Road(path=[(0, 1), (1, 1), (2, 1), (2, 2)], tier=RoadTier.TRACK),
+    ]
+    return ws
+
+
+def test_shared_road_segments_drawn_once():
+    """A branching track must not stack a second polyline on the shared trunk."""
+    import re
+
+    body = _roads_group(render(_branching_world()))
+    polylines = re.findall(r'<polyline points="([^"]+)"', body)
+    assert len(polylines) == 2
+    points = [p.split() for p in polylines]
+    drawn = [frozenset((a, b)) for pts in points for a, b in zip(pts, pts[1:], strict=False)]
+    assert len(drawn) == len(set(drawn)), "an edge was drawn twice"
+
+
+def test_primary_road_drawn_after_the_track_that_branches_off_it():
+    """Paint order is the fix for overdraw — the primary road has to land on top."""
+    body = _roads_group(render(_branching_world()))
+    assert body.index('stroke="#b8a070"') < body.index('stroke="#5c3d1e"')
+
+
+def test_anchorage_layer_marks_both_shores():
+    svg = render(_water_crossing_world())
+    assert 'id="layer-anchorages"' in svg
+    group = svg.split('<g id="layer-anchorages">')[1].split("  </g>")[0]
+    assert group.count('stroke="#1b3a5c"') == 2
+
+
+def test_anchorage_layer_absent_when_no_road_meets_water():
+    """_small_world's road stays on land, so there is nothing to mark."""
+    assert 'id="layer-anchorages"' not in render(_small_world())
+
+
+def test_anchorage_layer_can_be_disabled():
+    ws = _water_crossing_world()
+    svg = render(ws, SVGConfig(layers={"terrain", "roads"}))
+    assert 'id="layer-anchorages"' not in svg
+
+
+def test_anchorage_markers_sit_on_the_land_shores():
+    """The markers belong on the two shore hexes, not on the water between them.
+
+    Absolute positions carry the layout offset, so compare the gap between the two
+    markers with the gap between the shore hexes (2,1) and (4,1) themselves.
+    """
+    import re
+
+    from worldgen.core.hex_grid import axial_to_pixel
+
+    hex_size = 12.0
+    svg = render(_water_crossing_world(), SVGConfig(hex_size=hex_size, layers={"anchorages"}))
+    group = svg.split('<g id="layer-anchorages">')[1].split("  </g>")[0]
+    drawn_x = sorted(float(x) for x in re.findall(r'<circle cx="([\d.-]+)"', group))
+    assert len(drawn_x) == 2
+    shore_gap = axial_to_pixel((4, 1), hex_size)[0] - axial_to_pixel((2, 1), hex_size)[0]
+    assert abs((drawn_x[1] - drawn_x[0]) - shore_gap) < 0.01
+
+
+def test_legend_lists_anchorage_when_a_road_meets_water():
+    body = render(_water_crossing_world()).split('<g id="layer-legend">')[1]
+    assert ">Anchorage</text>" in body
+
+
+def test_legend_omits_anchorage_when_no_road_meets_water():
+    body = render(_small_world()).split('<g id="layer-legend">')[1]
+    assert ">Anchorage</text>" not in body
+
+
+def test_wargame_style_includes_anchorages():
+    svg = render(_water_crossing_world(), SVGConfig(style="wargame"))
+    assert 'id="layer-anchorages"' in svg
+
+
+def test_ferry_landings_draw_anchorages():
+    """A ferry stands in for a road where a river channel cuts the network in two."""
+    ws = _small_world()
+    ws.ferries = [Ferry(a=(0, 1), b=(2, 1))]
+    svg = render(ws)
+    assert 'id="layer-anchorages"' in svg
+    group = svg.split('<g id="layer-anchorages">')[1].split("  </g>")[0]
+    assert group.count('stroke="#1b3a5c"') == 2
+
+
+def test_ferry_puts_an_anchorage_row_in_the_legend():
+    ws = _small_world()
+    ws.ferries = [Ferry(a=(0, 1), b=(2, 1))]
+    body = render(ws).split('<g id="layer-legend">')[1]
+    assert ">Anchorage</text>" in body
+
+
+# --- fords and bridges -------------------------------------------------------
+
+
+def _crossing_world() -> WorldState:
+    """A river with a road crossing it: one hex tagged ford, one tagged bridge."""
+    ws = WorldState.empty(seed=5, width=5, height=5)
+    ws.rivers = [River(hexes=[(2, 0), (2, 1), (2, 2), (2, 3)], flow_volume=1.0)]
+    for r in range(4):
+        ws.hexes[(2, r)].river_flow = 0.8
+        ws.hexes[(2, r)].tags.add("river")
+    ws.hexes[(2, 1)].tags.add("ford")
+    ws.hexes[(2, 2)].tags.add("bridge")
+    ws.roads = [Road(path=[(1, 1), (2, 1), (3, 1)], tier=RoadTier.PRIMARY)]
+    return ws
+
+
+def _crossings_group(svg: str) -> str:
+    return svg.split('<g id="layer-crossings">')[1].split("\n  </g>")[0]
+
+
+def test_crossings_layer_draws_a_symbol_per_tagged_hex():
+    svg = render(_crossing_world())
+    assert 'id="layer-crossings"' in svg
+    group = _crossings_group(svg)
+    assert group.count('stroke="#2b2118"') == 2
+
+
+def test_ford_is_dashed_and_bridge_is_not():
+    """The two must be tellable apart at a glance, not just present."""
+    group = _crossings_group(render(_crossing_world()))
+    marks = group.strip().splitlines()
+    ford = next(m for m in marks if "stroke-dasharray" in m)
+    bridge = next(m for m in marks if "stroke-dasharray" not in m)
+    # The bridge carries abutments (4 lines) where the ford is just the broken span (2).
+    assert bridge.count("<line") == 4
+    assert ford.count("<line") == 2
+
+
+def test_crossings_are_rotated_square_to_the_river():
+    """A span drawn along the current would read as a second river."""
+    import re
+
+    group = _crossings_group(render(_crossing_world()))
+    angles = [float(a) for a in re.findall(r"rotate\(([-\d.]+)", group)]
+    assert angles, "crossing symbols are not rotated at all"
+    # River runs down a column here; the span must not be parallel to it.
+    assert all(abs((a % 180) - 90.0) > 1.0 for a in angles), angles
+
+
+def test_crossings_layer_can_be_disabled():
+    svg = render(_crossing_world(), SVGConfig(layers={"terrain", "roads"}))
+    assert 'id="layer-crossings"' not in svg
+
+
+def test_crossings_layer_absent_when_nothing_is_tagged():
+    assert 'id="layer-crossings"' not in render(_small_world())
+
+
+def test_legend_lists_ford_and_bridge():
+    body = render(_crossing_world()).split('<g id="layer-legend">')[1]
+    assert ">Ford</text>" in body
+    assert ">Bridge</text>" in body
+
+
+def test_legend_omits_crossings_not_present():
+    """Only the kinds the map actually contains earn a row."""
+    ws = _crossing_world()
+    ws.hexes[(2, 2)].tags.discard("bridge")
+    body = render(ws).split('<g id="layer-legend">')[1]
+    assert ">Ford</text>" in body
+    assert ">Bridge</text>" not in body
+
+
+def test_wargame_style_draws_roads_rivers_and_crossings():
+    """The wargame preset exists to be read while moving units."""
+    svg = render(_crossing_world(), SVGConfig(style="wargame"))
+    for layer in ("roads", "rivers", "crossings", "settlements", "terrain"):
+        assert f'id="layer-{layer}"' in svg, f"wargame style is missing the {layer} layer"
+
+
+def test_anchorage_not_drawn_for_an_undrawable_land_leg():
+    """A one-hex land leg draws no road, so its shore must not carry a lone anchor.
+
+    `split_path_on_water` discards runs shorter than two hexes — marking their shore
+    left anchors sitting on the coast with nothing attached.
+    """
+    ws = WorldState.empty(seed=3, width=5, height=3)
+    for r in range(3):
+        ws.hexes[(2, r)].terrain_class = TerrainClass.OCEAN
+    # (1,1) is a single land hex before the water: no polyline, so no anchorage.
+    ws.roads = [Road(path=[(1, 1), (2, 1), (3, 1), (4, 1)], tier=RoadTier.PRIMARY)]
+    svg = render(ws, SVGConfig(layers={"roads", "anchorages"}))
+    group = svg.split('<g id="layer-anchorages">')[1].split("  </g>")[0]
+    assert group.count('stroke="#1b3a5c"') == 1  # only the drawn (3,1)-(4,1) leg's shore
+
+
+# --- river widths ------------------------------------------------------------
+
+
+def _flowing_river_world() -> WorldState:
+    """One river gaining flow from headwater to mouth."""
+    ws = WorldState.empty(seed=11, width=6, height=3)
+    path = [(q, 1) for q in range(6)]
+    for i, c in enumerate(path):
+        ws.hexes[c].river_flow = 0.05 + i * 0.19
+    ws.rivers = [River(hexes=path, flow_volume=1.0)]
+    return ws
+
+
+def _river_widths(svg: str) -> list[float]:
+    import re
+
+    body = svg.split('<g id="layer-rivers">')[1].split("</g>")[0]
+    return [float(w) for w in re.findall(r'stroke-width="([\d.]+)"', body)]
+
+
+def test_river_is_drawn_at_several_widths():
+    """A river should visibly grow downstream, not be one width taken from its mouth."""
+    widths = _river_widths(render(_flowing_river_world()))
+    assert len(set(widths)) > 1, f"river drawn at a single width: {widths}"
+
+
+def test_river_widths_increase_downstream():
+    widths = _river_widths(render(_flowing_river_world()))
+    assert widths == sorted(widths), f"river narrows downstream: {widths}"
+
+
+def test_river_widths_respect_the_configured_range():
+    svg = render(_flowing_river_world(), SVGConfig(river_min_width=2.0, river_max_width=7.0))
+    for w in _river_widths(svg):
+        assert 2.0 <= w <= 7.0
+
+
+def test_one_width_step_draws_a_uniform_river():
+    svg = render(_flowing_river_world(), SVGConfig(river_width_steps=1))
+    assert len(set(_river_widths(svg))) == 1
+
+
+def test_bigger_river_is_drawn_wider_than_a_smaller_one():
+    """Two rivers on one map must be rankable by eye."""
+    ws = _flowing_river_world()
+    trickle = [(q, 0) for q in range(4)]
+    for c in trickle:
+        ws.hexes[c].river_flow = 0.05
+    ws.rivers.append(River(hexes=trickle, flow_volume=0.05))
+    widths = _river_widths(render(ws))
+    assert max(widths) > min(widths)
+
+
+def test_river_width_settings_are_validated():
+    with pytest.raises(ValueError, match="river_width_steps must be >= 0"):
+        render(_flowing_river_world(), SVGConfig(river_width_steps=-1))
+    with pytest.raises(ValueError, match="river_max_width must be >="):
+        render(_flowing_river_world(), SVGConfig(river_min_width=5.0, river_max_width=1.0))
+
+
+# --- line widths scale with hex size -----------------------------------------
+
+
+def _road_widths(svg: str) -> list[float]:
+    import re
+
+    body = _roads_group(svg)
+    return [float(w) for w in re.findall(r'stroke-width="([\d.]+)"', body)]
+
+
+def test_river_widths_scale_with_hex_size():
+    """A 30px hex must not get hairline rivers, nor a 6px hex drown in them."""
+    ws = _flowing_river_world()
+    small = _river_widths(render(ws, SVGConfig(hex_size=12.0)))
+    large = _river_widths(render(ws, SVGConfig(hex_size=24.0)))
+    assert len(small) == len(large)
+    for a, b in zip(small, large, strict=True):
+        assert b == pytest.approx(a * 2, rel=0.02)
+
+
+def test_road_widths_scale_with_hex_size():
+    ws = _branching_world()
+    small = _road_widths(render(ws, SVGConfig(hex_size=12.0)))
+    large = _road_widths(render(ws, SVGConfig(hex_size=36.0)))
+    assert len(small) == len(large)
+    for a, b in zip(small, large, strict=True):
+        assert b == pytest.approx(a * 3, rel=0.02)
+
+
+def test_track_dashes_scale_with_hex_size():
+    """Unscaled dashes crowd into a solid line on a big export."""
+    import re
+
+    ws = _branching_world()
+
+    def dashes(hex_size):
+        body = _roads_group(render(ws, SVGConfig(hex_size=hex_size)))
+        m = re.search(r'stroke-dasharray="([\d. ]+)"', body)
+        assert m is not None, "no dashed track found"
+        return [float(v) for v in m.group(1).split()]
+
+    small, large = dashes(12.0), dashes(24.0)
+    for a, b in zip(small, large, strict=True):
+        assert b == pytest.approx(a * 2, rel=0.02)
+
+
+def test_reference_hex_size_leaves_widths_unchanged():
+    """12px is the reference the widths are written for, so it must scale by exactly 1."""
+    body = _roads_group(render(_branching_world(), SVGConfig(hex_size=12.0)))
+    assert 'stroke-width="2.00"' in body  # PRIMARY, as configured
+    assert 'stroke-width="0.60"' in body  # TRACK
+
+
+def test_legend_line_glyphs_scale_with_legend_scale():
+    import re
+
+    ws = _small_world()
+
+    def widths(scale):
+        body = render(ws, SVGConfig(legend_scale=scale)).split('<g id="layer-legend">')[1]
+        return [float(w) for w in re.findall(r'stroke-width="([\d.]+)"', body)]
+
+    assert max(widths(2.0)) > max(widths(1.0))

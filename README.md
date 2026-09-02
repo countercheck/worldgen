@@ -115,20 +115,99 @@ save(state, "custom.svg", SVGConfig(
 |---|---|---|
 | `style` | `"atlas"` | `"atlas"`, `"topographic"`, `"wargame"` |
 | `color_mode` | `"biome"` | `"biome"`, `"terrain"`, `"land_cover"`, `"elevation"` |
-| `layers` | all | any subset of `{"terrain", "rivers", "roads", "settlements", "labels", "grid", "legend"}` |
+| `layers` | all | any subset of `{"terrain", "rivers", "roads", "settlements", "labels", "grid", "anchorages", "crossings", "legend"}` |
 | `hex_size` | `12.0` | pixels per hex |
 | `padding` | `20` | border padding in pixels |
 | `legend_corner` | `"top-right"` | `"top-right"`, `"bottom-left"` |
 | `legend_scale` | `1.0` | legend size as a multiple of `hex_size` |
+| `river_min_width` | `0.5` (PNG `1.0`) | width of the thinnest headwater, at the reference 12px hex |
+| `river_max_width` | `4.0` | width at full flow, at the reference 12px hex |
+| `river_width_steps` | `0` | `0` scales continuously with each hex's flow; a positive value quantises into that many discrete widths |
+| `river_width_exponent` | `0.5` | curve applied to flow before it is mapped onto the width range; `1.0` is linear |
 
-`style` is a shortcut that sets `color_mode` and `layers` together: `"topographic"` forces elevation coloring with terrain + rivers + grid; `"wargame"` forces terrain coloring with roads + settlements + grid. Both include the legend. For `"topographic"` and `"wargame"`, the `color_mode` and `layers` values are fixed by the style and any explicitly provided values are ignored. Only `"atlas"` (the default) uses the `color_mode` and `layers` you provide.
+`style` is a shortcut that sets `color_mode` and `layers` together: `"topographic"` forces elevation coloring with terrain + rivers + grid; `"wargame"` forces terrain coloring with roads + rivers + settlements + grid + anchorages + crossings — a wargame map is read while moving units, so the features that gate movement matter as much as the roads. Both include the legend. For `"topographic"` and `"wargame"`, the `color_mode` and `layers` values are fixed by the style and any explicitly provided values are ignored. Only `"atlas"` (the default) uses the `color_mode` and `layers` you provide.
+
+### Roads and anchorages
+
+Routes between different settlement pairs share trunk segments, so each map edge is
+awarded to the highest road tier that uses it and drawn exactly once, in ascending tier
+order — a track branching off a primary road can never paint over the trunk it leaves.
+
+Roads may cross water, but the water leg is not drawn, so a route would otherwise appear
+to stop dead at the shore. The `"anchorages"` layer marks the land hex on each side of a
+crossing with an anchor symbol, so a route that continues by boat reads as one.
+
+### Roads and rivers
+
+Roads follow river valleys along the **bank**, never down the channel. A road drawn on
+the river would hide which side of it the road — and anything standing on that hex — is
+on, which matters as soon as you are moving units around the map. Three things enforce
+it: the hexsides a river is drawn along are excluded from pathfinding outright, a node
+cost (`road_river_hex_cost`) prices out threading a meander or a braid where no drawn
+hexside exists to exclude, and the bank discount (`road_bank_discount`) gives routes a
+reason to hug the valley from beside it.
+
+Crossing a river stays legal and stays expensive, scaled by flow — a big river costs
+roughly a 30-hex detour to cross, a headwater stream far less. Every crossing is tagged
+`"ford"`, upgraded to `"bridge"` where a second road crosses the same hex, and the
+`"crossings"` layer draws both: a bridge as a twin span with abutments, a ford as the
+same span broken, each laid square across the current.
+
+Settlement hexes are exempt from the exclusion, but only far enough to be *reached* — the
+hexside opens when the town's counterpart is dry land, never when it is another river
+hex. A town on the water must be reachable; it is not a licence to carry on down the
+channel a hex at a time.
+
+Where a river mesh seals a city off completely — a delta island, a braided confluence —
+there is no bank route out, so the network is joined by a **ferry** instead of a road in
+the channel. A ferry is a real link (it counts for connectivity) drawn as a pair of
+anchorages, the same symbol used for sea legs. If the gap is wider than
+`road_ferry_max_hop`, no plausible ferry exists and generation raises `RoutingError`
+rather than quietly producing a compromised map — so a seed that fails is worth
+reporting.
+
+### River widths
+
+Rivers are drawn at several discrete widths so flow is readable at a glance and two
+rivers can be ranked against each other. Width comes from each hex's own `river_flow`,
+not from the river's total, so a river visibly **grows downstream** rather than being
+drawn end-to-end at the volume measured at its mouth.
+
+Flow is not mapped onto width linearly. `river_flow` is drainage accumulation over the
+basin maximum, and accumulation is roughly power-law distributed — on a typical map the
+median river hex sits near `0.02` and the 90th percentile near `0.13`. Mapped straight
+onto the width range that spends the whole range on the last few hexes of the single
+largest trunk and draws the other nine tenths of the network as one indistinguishable
+hairline. `river_width_exponent` (default `0.5`, the square root — also what hydraulic
+geometry gives for channel width against discharge) shapes the curve; `1.0` restores the
+raw linear mapping and lower values widen small streams further.
+
+By default (`river_width_steps=0`) width then tracks that curve continuously, so a river
+tapers smoothly from headwater to mouth. That costs roughly one polyline per hex.
+
+Set a positive `river_width_steps` to quantise into that many discrete widths instead.
+Neighbouring segments sharing a width merge into one polyline, so a river costs a handful
+of elements rather than one per hex, and the result has the stepped look of a stream-order
+map. Banding buckets the curved flow, so it spreads across the bands rather than piling
+into the thinnest one. `river_width_steps=1` draws every river uniformly at
+`river_max_width`.
+
+### Line widths and hex size
+
+River and road widths — and a track's dash pattern — are written for the default **12px
+hex** and scale linearly from there, the same reference the settlement, anchorage and
+crossing symbols use. Exporting at `hex_size=28` doubles-and-then-some every line rather
+than leaving hairline rivers between huge hexes; exporting at 6 thins them to match.
+Legend glyphs scale with `legend_scale` on the same basis, so the key always matches the
+map it describes.
 
 ### Legend
 
 The `"legend"` layer draws a key for whatever the map actually contains — fill categories
-for the active `color_mode`, plus rows for rivers, each road tier present, and each
-settlement tier present. Symbols are drawn with the same code as the map itself, so they
-always match.
+for the active `color_mode`, plus rows for rivers, each road tier present, anchorages
+where any road meets water, fords and bridges where they exist, and each settlement tier
+present. Symbols are drawn with the
+same code as the map itself, so they always match.
 
 Because the axial-to-pixel transform shears the grid into a parallelogram, a rectangular
 hex map leaves large empty triangles at the top-right and bottom-left of the canvas. The

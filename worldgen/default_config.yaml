@@ -111,8 +111,8 @@ road_travellers_city: 500    # Simulated daily travellers originating from each 
 road_travellers_town: 100    # Simulated daily travellers originating from each town. Default: 100
 road_travellers_village: 20  # Simulated daily travellers originating from each village. Default: 20
 road_gravity_exponent: 1.5   # Distance-decay exponent for gravity model; higher = traffic stays local. Default: 1.5
-road_river_discount: 0.5     # Maximum cost reduction for travelling along a river hex; multiplied by river_flow. Default: 0.5
-road_river_discount_min_flow: 0.2  # Floor on river_flow used in the discount calc; prevents tiny streams losing all their corridor pull. Default: 0.2
+road_bank_discount: 0.5      # Maximum cost reduction on a hex *beside* a river; multiplied by the largest adjacent river_flow. Roads follow the bank, not the channel, so which side they run on stays readable. Default: 0.5
+road_bank_discount_min_flow: 0.2   # Floor on river_flow used in the discount calc; prevents tiny streams losing all their corridor pull. Default: 0.2
 road_pheromone_factor: 0.1   # How strongly existing traffic attracts new routes. Default: 0.1
 
 # ---------------------------------------------------------------------------
@@ -131,6 +131,8 @@ road_disembark_cost: 8.0 # Cost charged on a water→land edge transition. Defau
 # (entering and leaving), so total ≈ 2 × (base + flow × max_river_flow).
 road_river_crossing_base: 4.0  # Base cost added on each land↔river edge. Default: 4.0
 road_river_crossing_flow: 12.0 # Additional cost × max(river_flow); biggest river adds the full amount. Default: 12.0
+road_river_hex_cost: 12.0      # Cost of standing a road *on* a river hex. Prices out threading a meander or braid, while leaving a genuine crossing affordable. Default: 12.0
+road_ferry_max_hop: 4          # Longest boat hop used to join a component a river mesh cuts off. Beyond this, routing raises RoutingError. Default: 4
 
 # Slope-based cost: grade % = (elevation_delta_m / hex_size_m) * 100
 road_slope_cost: 2.0      # Base multiplier applied to grade-based costs. Default: 2.0
@@ -160,8 +162,18 @@ export:
     - settlements
     - labels
     - grid
+    - anchorages    # Anchor symbols where roads embark onto / land from water
+    - crossings     # Ford and bridge symbols where roads meet a river
     - legend
     # - contours      # Uncomment to add topographic contour lines
+
+  # River settings — only used when "rivers" is in the layers list above.
+  # A river is drawn wider the more water it carries, so a headwater is visibly not
+  # the trunk it feeds.
+  river_min_width: 0.5      # Stroke width in pixels for the smallest stream. Default: 0.5
+  river_max_width: 4.0      # Stroke width in pixels at the mouth of the largest river. Default: 4.0
+  river_width_steps: 0      # 0 scales width continuously; a positive value quantises into that many discrete widths (fewer polylines, stream-order look); 1 draws every river at river_max_width. Default: 0
+  river_width_exponent: 0.5 # Curve applied to flow before it is mapped onto the width range. Flow is power-law distributed, so 1.0 (linear) draws nine tenths of the network at river_min_width; 0.5 is the square root, matching hydraulic geometry. Lower widens small streams further. Default: 0.5
 
   # Contour settings — only used when "contours" is in the layers list above
   contour_elevation_scale_m: 3000.0  # Elevation span in metres for contour scaling. Default: 3000.0

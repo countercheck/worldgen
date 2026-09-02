@@ -3,10 +3,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..core.hex import SettlementTier
-from ..core.hex_grid import axial_to_pixel, neighbors, split_path_on_water
-from ..core.world_state import RoadTier, WorldState
+from ..core.hex_grid import axial_to_pixel, dedupe_road_paths, neighbors
+from ..core.world_state import ROAD_TIER_RANK, RoadTier, WorldState
 from ..render.debug_viewer import BIOME_COLORS, LAND_COVER_COLORS, TERRAIN_COLORS
-from . import legend
+from . import legend, rivers
 
 
 @dataclass
@@ -22,6 +22,8 @@ class SVGConfig:
             "settlements",
             "labels",
             "grid",
+            "anchorages",
+            "crossings",
             "legend",
         }
     )
@@ -32,6 +34,15 @@ class SVGConfig:
     contour_max_stroke: float = 4.0
     legend_corner: str = "top-right"  # "top-right" | "bottom-left"
     legend_scale: float = 1.0  # multiplier on hex_size for legend glyph/text size
+    # Rivers widen downstream with the flow in each hex, so a headwater is visibly not
+    # the trunk it feeds. 0 tracks flow continuously; a positive value quantises into
+    # that many discrete widths, giving the stepped look of a stream-order map. The
+    # exponent shapes the curve — flow is power-law distributed, so mapping it linearly
+    # (1.0) draws almost every river at the minimum width.
+    river_min_width: float = 0.5
+    river_max_width: float = 4.0
+    river_width_steps: int = 0
+    river_width_exponent: float = 0.5
 
 
 _ROAD_SVG = {
@@ -90,6 +101,59 @@ def _star_points(cx: float, cy: float, outer: float, inner: float, n: int = 5) -
     return _points_str(pts)
 
 
+def _anchorage_marker(cx: float, cy: float, scale: float = 1.0) -> str:
+    """Anchor symbol marking where a road embarks onto, or lands from, water.
+
+    Ring, stem, crossbar and flukes — drawn rather than lifted from a font so it stays
+    legible at map scale and needs no external asset.
+    """
+    s = 5.0 * scale
+    return (
+        f'<g fill="none" stroke="#1b3a5c" stroke-width="{max(0.6, 0.28 * s):.2f}"'
+        f' stroke-linecap="round">'
+        f'<circle cx="{cx:.2f}" cy="{cy - 0.80 * s:.2f}" r="{0.26 * s:.2f}"/>'
+        f'<line x1="{cx:.2f}" y1="{cy - 0.54 * s:.2f}" x2="{cx:.2f}" y2="{cy + 0.92 * s:.2f}"/>'
+        f'<line x1="{cx - 0.60 * s:.2f}" y1="{cy - 0.26 * s:.2f}"'
+        f' x2="{cx + 0.60 * s:.2f}" y2="{cy - 0.26 * s:.2f}"/>'
+        f'<path d="M {cx - 0.72 * s:.2f},{cy + 0.40 * s:.2f}'
+        f' Q {cx:.2f},{cy + 1.16 * s:.2f} {cx + 0.72 * s:.2f},{cy + 0.40 * s:.2f}"/>'
+        f"</g>"
+    )
+
+
+_CROSSING_INK = "#2b2118"
+
+
+def _crossing_marker(kind: str, cx: float, cy: float, angle: float, scale: float = 1.0) -> str:
+    """A ford or bridge, laid across the river rather than along it.
+
+    Bridge: two parallel decks with abutments at each end — the conventional map symbol.
+    Ford: the same span broken into dashes, reading as a way through the water rather
+    than over it.  *angle* is the river's bearing; the symbol is rotated square to it.
+    """
+    s = 5.0 * scale
+    w = max(0.6, 0.26 * s)
+    half, sep = 0.78 * s, 0.30 * s
+    turn = f' transform="rotate({angle + 90:.1f} {cx:.2f} {cy:.2f})"'
+    body = [f'<g fill="none" stroke="{_CROSSING_INK}" stroke-width="{w:.2f}"{turn}>']
+    dash = ' stroke-dasharray="1.6 1.4"' if kind == "ford" else ""
+    for side in (-1, 1):
+        y = cy + side * sep
+        body.append(
+            f'<line x1="{cx - half:.2f}" y1="{y:.2f}" x2="{cx + half:.2f}" y2="{y:.2f}"{dash}/>'
+        )
+    if kind == "bridge":
+        # Abutments: short uprights closing the deck at both banks.
+        for side in (-1, 1):
+            x = cx + side * half
+            body.append(
+                f'<line x1="{x:.2f}" y1="{cy - sep * 1.7:.2f}"'
+                f' x2="{x:.2f}" y2="{cy + sep * 1.7:.2f}"/>'
+            )
+    body.append("</g>")
+    return "".join(body)
+
+
 def _settlement_marker(tier: SettlementTier, cx: float, cy: float, scale: float = 1.0) -> str:
     """One settlement symbol centred on (cx, cy).
 
@@ -139,11 +203,23 @@ def _legend_glyph(row: legend.LegendRow, cx: float, cy: float, g: float, color_m
         # Same helper as the settlements layer, so the symbols can never diverge.
         return _settlement_marker(row.sample, cx, cy, scale=g / legend.SYMBOL_BOX)
 
+    if row.kind == "anchorage":
+        return _anchorage_marker(cx, cy, scale=g / legend.SYMBOL_BOX)
+
+    if row.kind in ("ford", "bridge"):
+        # Angle 90 so the legend shows the span horizontally, as it reads on the map.
+        return _crossing_marker(row.kind, cx, cy, -90.0, scale=g / legend.SYMBOL_BOX)
+
+    # Legend line widths scale with the glyph box, as the legend's symbols already do.
+    glyph_scale = g / legend.SYMBOL_BOX
     if row.kind == "road":
         style = _ROAD_SVG[row.sample]
-        stroke, width, dash = style["stroke"], style["stroke-width"], style["dasharray"]
+        stroke, dash = style["stroke"], style["dasharray"]
+        width = f"{float(style['stroke-width']) * glyph_scale:.2f}"
+        if dash:
+            dash = " ".join(f"{float(v) * glyph_scale:.2f}" for v in dash.split())
     else:  # "river" — matches the rivers layer's colour
-        stroke, width, dash = "#3a78c9", "2.0", None
+        stroke, width, dash = "#3a78c9", f"{2.0 * glyph_scale:.2f}", None
     da = f' stroke-dasharray="{dash}"' if dash else ""
     return (
         f'<line x1="{cx - g / 2:.2f}" y1="{cy:.2f}" x2="{cx + g / 2:.2f}" y2="{cy:.2f}"'
@@ -228,7 +304,18 @@ def render(ws: WorldState, config: SVGConfig | None = None) -> str:
         layers = {"terrain", "rivers", "grid", "contours", "legend"}
     elif config.style == "wargame":
         color_mode = "terrain"
-        layers = {"terrain", "roads", "settlements", "grid", "legend"}
+        # Wargame maps are read to move units, so the features that gate movement —
+        # rivers and the fords and bridges over them — are as important as the roads.
+        layers = {
+            "terrain",
+            "rivers",
+            "roads",
+            "settlements",
+            "grid",
+            "anchorages",
+            "crossings",
+            "legend",
+        }
     else:
         color_mode = config.color_mode
         layers = config.layers
@@ -250,8 +337,19 @@ def render(ws: WorldState, config: SVGConfig | None = None) -> str:
     w = math.ceil(max_x - min_x + 2 * pad)
     h = math.ceil(max_y - min_y + 2 * pad)
 
+    # Line widths are written for the reference hex; scale them to this export.
+    line_scale = legend.stroke_scale(size)
+
     # Size the legend before the canvas: on a small map the panel can be larger than the
     # map itself, and clamping alone would just crop it. Grow the canvas to fit instead.
+    if "rivers" in layers:
+        rivers.validate(
+            config.river_min_width,
+            config.river_max_width,
+            config.river_width_steps,
+            config.river_width_exponent,
+        )
+
     legend_rows: list[legend.LegendRow] = []
     legend_m: legend.Metrics | None = None
     if "legend" in layers:
@@ -335,35 +433,74 @@ def render(ws: WorldState, config: SVGConfig | None = None) -> str:
     if "rivers" in layers:
         out.append('  <g id="layer-rivers">')
         for river in ws.rivers:
-            if len(river.hexes) < 2:
-                continue
-            pts = []
-            for coord in river.hexes:
-                px, py = axial_to_pixel(coord, size)
-                pts.append((px + ox, py + oy))
-            sw = max(0.5, min(4.0, river.flow_volume * 2))
-            out.append(
-                f'    <polyline points="{_points_str(pts)}" fill="none" stroke="#3a78c9"'
-                f' stroke-width="{sw:.2f}" stroke-linecap="round" stroke-linejoin="round"/>'
-            )
+            # Banded by per-hex flow, so a river grows downstream instead of being drawn
+            # at one width taken from its mouth.
+            for run, sw in rivers.width_bands(
+                river,
+                ws.hexes,
+                config.river_min_width,
+                config.river_max_width,
+                config.river_width_steps,
+                config.river_width_exponent,
+            ):
+                pts = []
+                for coord in run:
+                    px, py = axial_to_pixel(coord, size)
+                    pts.append((px + ox, py + oy))
+                out.append(
+                    f'    <polyline points="{_points_str(pts)}" fill="none" stroke="#3a78c9"'
+                    f' stroke-width="{sw * line_scale:.2f}"'
+                    f' stroke-linecap="round" stroke-linejoin="round"/>'
+                )
         out.append("  </g>")
 
     if "roads" in layers:
         out.append('  <g id="layer-roads">')
-        for road in ws.roads:
+        # Deduped and ordered by tier, so shared trunk segments are drawn once and a
+        # track never paints over the primary road it branches from.
+        for road, leg in dedupe_road_paths(ws.roads, ws.hexes, lambda r: ROAD_TIER_RANK[r.tier]):
             style = _ROAD_SVG[road.tier]
-            da = f' stroke-dasharray="{style["dasharray"]}"' if style["dasharray"] else ""
-            for leg in split_path_on_water(road.path, ws.hexes):
-                pts = []
-                for coord in leg:
-                    px, py = axial_to_pixel(coord, size)
-                    pts.append((px + ox, py + oy))
-                out.append(
-                    f'    <polyline points="{_points_str(pts)}" fill="none"'
-                    f' stroke="{style["stroke"]}" stroke-width="{style["stroke-width"]}"'
-                    f' stroke-linecap="round" stroke-linejoin="round"{da}/>'
+            da = ""
+            if style["dasharray"]:
+                # The dash pattern scales too, or a track's dashes crowd into a solid
+                # line on a large export and stretch to gaps on a small one.
+                dashes = " ".join(
+                    f"{float(v) * line_scale:.2f}" for v in style["dasharray"].split()
                 )
+                da = f' stroke-dasharray="{dashes}"'
+            pts = []
+            for coord in leg:
+                px, py = axial_to_pixel(coord, size)
+                pts.append((px + ox, py + oy))
+            out.append(
+                f'    <polyline points="{_points_str(pts)}" fill="none"'
+                f' stroke="{style["stroke"]}"'
+                f' stroke-width="{float(style["stroke-width"]) * line_scale:.2f}"'
+                f' stroke-linecap="round" stroke-linejoin="round"{da}/>'
+            )
         out.append("  </g>")
+
+    if "crossings" in layers:
+        marks = legend.crossings(ws, axial_to_pixel, size)
+        if marks:
+            out.append('  <g id="layer-crossings">')
+            for coord, kind, angle in marks:
+                px, py = axial_to_pixel(coord, size)
+                out.append(
+                    f"    {_crossing_marker(kind, px + ox, py + oy, angle, scale=size / 12.0)}"
+                )
+            out.append("  </g>")
+
+    if "anchorages" in layers:
+        # One marker per shore point, however many routes embark there. Covers both
+        # sea legs and ferry landings — the same thing as far as a reader is concerned.
+        points = legend.anchorage_points(ws)
+        if points:
+            out.append('  <g id="layer-anchorages">')
+            for coord in points:
+                px, py = axial_to_pixel(coord, size)
+                out.append(f"    {_anchorage_marker(px + ox, py + oy, scale=size / 12.0)}")
+            out.append("  </g>")
 
     if "settlements" in layers:
         out.append('  <g id="layer-settlements">')

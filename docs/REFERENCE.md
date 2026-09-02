@@ -198,6 +198,16 @@ Convenience accessors: `all_land()`, `all_ocean()`, `all_lakes()`,
 | `"pass"` | HILL hex that's a local-max habitability within 3-hex range, no settlement | City/Town |
 | `"confluence_town"` | TOWN settled on a hex already tagged `"confluence"` | City/Town |
 
+Roads may cross a river but never travel along one: the hexsides a river is drawn
+along are excluded from road pathfinding outright (`make_road_edge_cost`), and
+`road_river_hex_cost` prices out the meander and braid cases the edge rule cannot
+see. Settlement hexes are exempt only far enough to be *reached*: the hexside opens
+when the town's counterpart is dry land, never when it is another river hex, so a
+town on the water cannot be used to carry on down the channel. Where a river mesh
+seals a component off entirely, the network is joined by a `Ferry` (drawn as a pair
+of anchorages) rather than a road in the channel; if the gap is wider than
+`road_ferry_max_hop`, routing raises `RoutingError` instead of degrading quietly.
+
 ---
 
 ## 3. Pipeline & Algorithms
@@ -852,11 +862,12 @@ with self-reinforcing pheromone trails.
 (`"ford"` / `"bridge"`), `hex.habitability` (+0.2 boost).
 
 **Config:** `road_travellers_city`, `road_travellers_town`,
-`road_gravity_exponent`, `road_river_discount`,
-`road_river_discount_min_flow`, `road_pheromone_factor`,
+`road_gravity_exponent`, `road_bank_discount`,
+`road_bank_discount_min_flow`, `road_pheromone_factor`,
 `road_mountain_cost`, `road_hill_cost`, `road_flat_cost`,
 `road_water_cost`, `road_embark_cost`, `road_disembark_cost`,
 `road_river_crossing_base`, `road_river_crossing_flow`,
+`road_river_hex_cost`, `road_ferry_max_hop`,
 `road_slope_cost`, `road_slope_free_pct`, `road_slope_cap_pct`,
 `road_slope_cap_mult`, `road_min_traffic`, `road_river_traffic_min`,
 `road_primary_pct`, `road_secondary_pct`, `hex_size_m`,
@@ -878,15 +889,21 @@ base_cost = match terrain_class:
     HILL         → road_hill_cost           (3.0)
     COAST | FLAT → road_flat_cost           (1.0)
 
-river_discount = road_river_discount * max(river_flow, road_river_discount_min_flow)
-                                     if river_flow > 0 else 0
+river_hex_cost = road_river_hex_cost if river_flow > 0 else 0
+
+bank_discount  = road_bank_discount * max(adjacent_flow, road_bank_discount_min_flow)
+                                    if beside a river and not on one else 0
 pheromone      = road_pheromone_factor * traffic_so_far[hex]
 
-node_cost = max(0, base_cost - river_discount - pheromone)
+node_cost = max(0, base_cost + river_hex_cost - bank_discount - pheromone)
 ```
 
-The river discount makes routes naturally prefer to follow rivers (Roman
-"river roads"). The pheromone term makes the *order* of traveller
+The bank discount makes routes prefer to follow river valleys (Roman
+"river roads") **along the bank rather than down the channel**, so which side
+of a river a road — and anything standing on it — is on stays readable. The
+matching `river_hex_cost` prices out threading a meander or a braid, where two
+river hexes sit side by side without a drawn hexside between them for the
+channel exclusion to catch. The pheromone term makes the *order* of traveller
 processing matter — once enough travellers have used a path, it becomes
 cheap and subsequent travellers reinforce it. This is what concentrates
 random travellers onto a small number of recognisable highways.
@@ -1227,8 +1244,8 @@ Node-cost (cost to *enter* a hex) by `terrain_class`. See [road_cost.py](../worl
 | `road_travellers_town` | `int` | `100` | ≥ 0 | Per town |
 | `road_travellers_village` | `int` | `20` | ≥ 0 | Reserved; not currently consumed by InterurbanRoadStage (which only pathes between cities and towns) |
 | `road_gravity_exponent` | `float` | `1.5` | `≥ 0` | Distance exponent in gravity model. Higher = travellers strongly prefer nearby destinations |
-| `road_river_discount` | `float` | `0.5` | `[0, 1]` typ. | Maximum node-cost reduction (multiplied by river flow) on river hexes |
-| `road_river_discount_min_flow` | `float` | `0.2` | `[0, 1]` (validated) | Floor on `river_flow` used in the discount. Prevents tiny headwaters from losing the discount entirely |
+| `road_bank_discount` | `float` | `0.5` | `[0, 1]` typ. | Maximum node-cost reduction on a hex *beside* a river, multiplied by the largest adjacent river's flow. River hexes themselves get nothing |
+| `road_bank_discount_min_flow` | `float` | `0.2` | `[0, 1]` (validated) | Floor on `river_flow` used in the discount. Prevents tiny headwaters from losing the discount entirely |
 | `road_pheromone_factor` | `float` | `0.1` | `≥ 0` | Cost reduction per unit traffic. Higher = stronger highway-reinforcement effect |
 
 ### 4.13 Roads — Water Transitions
@@ -1249,6 +1266,8 @@ of a 1-hex-wide river hits this twice (entering and leaving the river hex).
 |---|---|---|---|
 | `road_river_crossing_base` | `float` | `4.0` | Constant component (validated `≥ 0`) |
 | `road_river_crossing_flow` | `float` | `12.0` | Multiplied by `max(from.river_flow, to.river_flow)`. Big rivers are dramatically more expensive to bridge |
+| `road_river_hex_cost` | `float` | `12.0` | Node cost for standing a road on a river hex (validated `≥ 0`). Stops roads threading a channel where no drawn hexside exists to exclude; a crossing pays it once |
+| `road_ferry_max_hop` | `int` | `4` | Longest boat hop used to join a component a river mesh cuts off (validated `≥ 1`). Beyond it routing raises `RoutingError` |
 
 ### 4.15 Roads — Slope Penalty
 

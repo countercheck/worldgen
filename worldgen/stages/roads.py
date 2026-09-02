@@ -3,10 +3,13 @@ from collections import defaultdict, deque
 from ..core.hex import Settlement, SettlementTier, TerrainClass
 from ..core.hex_grid import astar, distance, neighbors
 from ..core.pipeline import GeneratorStage
-from ..core.world_state import Road, RoadTier, WorldState
+from ..core.world_state import Ferry, Road, RoadTier, WorldState
 from .road_cost import (
-    river_discount,
-    road_edge_cost,
+    bank_discount,
+    ferry_link,
+    make_road_edge_cost,
+    river_edges,
+    river_hex_cost,
     tag_river_crossings,
     terrain_base_cost,
 )
@@ -25,16 +28,21 @@ class RoadStage(GeneratorStage):
         hex_traffic: dict = defaultdict(float)
         canonical_routes: dict = {}  # (origin, dest) -> path
 
+        # Hexsides the rivers run along — roads may cross a river but never travel down
+        # it, so the bank a road takes stays readable. Settlement hexes are exempt.
+        blocked = river_edges(state.rivers)
+        settled = {s.coord for s in settlements}
+
         # Node cost closure (reads live hex_traffic)
         def node_cost(hx):
-            base = terrain_base_cost(hx, cfg)
-            base = max(0.0, base - river_discount(hx, cfg))
+            base = terrain_base_cost(hx, cfg) + river_hex_cost(hx, cfg)
+            base = max(0.0, base - bank_discount(hx, hexes, cfg))
             pheromone = cfg.road_pheromone_factor * hex_traffic[hx.coord]
             return max(0.0, base - pheromone)
 
-        # Edge cost: slope + water embark/disembark + river crossing
-        def edge_cost(from_hx, to_hx):
-            return road_edge_cost(from_hx, to_hx, cfg)
+        # Edge cost: slope + water embark/disembark + river crossing, with the river's
+        # own hexsides excluded outright.
+        edge_cost = make_road_edge_cost(cfg, blocked, settled)
 
         # Build traveller list
         tier_counts = {
@@ -124,9 +132,10 @@ class RoadStage(GeneratorStage):
         cities = [s for s in settlements if s.tier == SettlementTier.CITY]
         fallback_paths: list[list] = []
         if len(cities) > 1:
-            hex_tier, fallback_paths = self._guarantee_city_connectivity(
-                hexes, cities, hex_tier, cfg
+            hex_tier, fallback_paths, ferries = self._guarantee_city_connectivity(
+                hexes, cities, hex_tier, cfg, blocked, settled
             )
+            state.ferries.extend(ferries)
 
         # Build Road objects from canonical routes
         roads: list[Road] = []
@@ -262,8 +271,14 @@ class RoadStage(GeneratorStage):
         order = {RoadTier.PRIMARY: 0, RoadTier.SECONDARY: 1, RoadTier.TRACK: 2}
         return max(tiers, key=lambda t: order[t])
 
-    def _guarantee_city_connectivity(self, hexes, cities, hex_tier, cfg):
-        """BFS over hex_tier to find isolated cities; connect with plain A*."""
+    def _guarantee_city_connectivity(self, hexes, cities, hex_tier, cfg, blocked, settled):
+        """BFS over hex_tier to find isolated cities; connect with plain A*.
+
+        Where a river mesh seals a city off entirely — a delta island, a braided
+        confluence — no land route exists that keeps roads off the channel, so the two
+        sides are joined by ferry instead.  If the gap is too wide for a plausible ferry
+        the geometry is broken and this raises rather than degrading quietly.
+        """
 
         # Build adjacency from hex_tier
         def bfs_component(start, road_coords):
@@ -291,18 +306,17 @@ class RoadStage(GeneratorStage):
             components.append(comp)
 
         if not components:
-            return hex_tier, []
+            return hex_tier, [], []
 
         # Largest component wins
         main = max(components, key=len)
 
-        # Plain terrain cost for gap-filling (no pheromone, no river discount —
+        # Plain terrain cost for gap-filling (no pheromone, no bank discount —
         # fallback paths shouldn't reuse traffic state from the main routing pass)
         def plain_cost(hx):
-            return terrain_base_cost(hx, cfg)
+            return terrain_base_cost(hx, cfg) + river_hex_cost(hx, cfg)
 
-        def plain_edge(from_hx, to_hx):
-            return road_edge_cost(from_hx, to_hx, cfg)
+        plain_edge = make_road_edge_cost(cfg, blocked, settled)
 
         def path_total_cost(p):
             """Compute total movement cost for a path using plain_cost + plain_edge."""
@@ -316,12 +330,14 @@ class RoadStage(GeneratorStage):
 
         # Connect isolated cities to main component
         fallback_paths: list[list] = []
+        ferries: list[Ferry] = []
         max_iter = len(cities) * 2
         iterations = 0
         while iterations < max_iter:
             isolated = [s for s in cities if s.coord not in main]
             if not isolated:
                 break
+            progressed = False
             # Find nearest main-component city by A* movement cost
             for iso in isolated:
                 best_path = None
@@ -340,10 +356,37 @@ class RoadStage(GeneratorStage):
                     fallback_paths.append(best_path)
                     # Expand main component
                     main |= bfs_component(iso.coord, set(hex_tier.keys()) | city_coords)
+                    progressed = True
                     break
+            if not progressed:
+                # No land route to any main-component city: the river channel cuts this
+                # city off. Join it by boat, or fail loudly if no ferry is plausible.
+                iso = isolated[0]
+                ferry, ferry_paths = ferry_link(
+                    hexes,
+                    iso.coord,
+                    f"City {iso.name}",
+                    main,
+                    cfg,
+                    blocked,
+                    settled,
+                    plain_cost,
+                    plain_edge,
+                )
+                ferries.append(ferry)
+                for p in ferry_paths:
+                    for c in p:
+                        if c not in hex_tier:
+                            hex_tier[c] = RoadTier.PRIMARY
+                    fallback_paths.append(p)
+                hex_tier.setdefault(ferry.a, RoadTier.PRIMARY)
+                hex_tier.setdefault(ferry.b, RoadTier.PRIMARY)
+                main |= bfs_component(iso.coord, set(hex_tier.keys()) | city_coords)
+                main.add(ferry.a)
+                main.add(ferry.b)
             iterations += 1
 
-        return hex_tier, fallback_paths
+        return hex_tier, fallback_paths, ferries
 
     def _assign_role_simple(self, coord, hx, hexes):
         from ..core.hex import Biome, SettlementRole

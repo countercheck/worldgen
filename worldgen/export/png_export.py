@@ -4,10 +4,10 @@ from dataclasses import dataclass, field
 from PIL import Image, ImageDraw, ImageFont
 
 from ..core.hex import SettlementTier
-from ..core.hex_grid import axial_to_pixel, neighbors, split_path_on_water
-from ..core.world_state import RoadTier, WorldState
+from ..core.hex_grid import axial_to_pixel, dedupe_road_paths, neighbors
+from ..core.world_state import ROAD_TIER_RANK, RoadTier, WorldState
 from ..render.debug_viewer import BIOME_COLORS, LAND_COVER_COLORS, TERRAIN_COLORS
-from . import legend
+from . import legend, rivers
 
 
 @dataclass
@@ -24,6 +24,8 @@ class PNGConfig:
             "settlements",
             "labels",
             "grid",
+            "anchorages",
+            "crossings",
             "legend",
         }
     )
@@ -33,6 +35,15 @@ class PNGConfig:
     contour_max_stroke: float = 4.0
     legend_corner: str = "top-right"  # "top-right" | "bottom-left"
     legend_scale: float = 1.0  # multiplier on hex_size for legend glyph/text size
+    # Rivers widen downstream with the flow in each hex, so a headwater is visibly not
+    # the trunk it feeds. 0 tracks flow continuously; a positive value quantises into
+    # that many discrete widths, giving the stepped look of a stream-order map. The
+    # exponent shapes the curve — flow is power-law distributed, so mapping it linearly
+    # (1.0) draws almost every river at the minimum width.
+    river_min_width: float = 1.0
+    river_max_width: float = 4.0
+    river_width_steps: int = 0
+    river_width_exponent: float = 0.5
 
 
 _ROAD_COLOR = {
@@ -90,6 +101,68 @@ def _star_pts(
     return pts
 
 
+def _draw_anchorage(draw: ImageDraw.ImageDraw, cx, cy, scale: float = 1.0):
+    """Anchor symbol marking where a road embarks onto, or lands from, water.
+
+    Ring, stem, crossbar and flukes — the same construction as the SVG exporter's.
+    """
+    s = 5.0 * scale
+    color = (27, 58, 92)
+    lw = max(1, round(0.28 * s))
+    r = 0.26 * s
+    draw.ellipse([cx - r, cy - 0.80 * s - r, cx + r, cy - 0.80 * s + r], outline=color, width=lw)
+    draw.line([(cx, cy - 0.54 * s), (cx, cy + 0.92 * s)], fill=color, width=lw)
+    draw.line(
+        [(cx - 0.60 * s, cy - 0.26 * s), (cx + 0.60 * s, cy - 0.26 * s)], fill=color, width=lw
+    )
+    # PIL has no quadratic curve; the flukes are the lower half of an ellipse.
+    draw.arc(
+        [cx - 0.72 * s, cy - 0.30 * s, cx + 0.72 * s, cy + 1.00 * s],
+        start=25,
+        end=155,
+        fill=color,
+        width=lw,
+    )
+
+
+_CROSSING_INK = (43, 33, 24)
+
+
+def _draw_crossing(draw: ImageDraw.ImageDraw, kind: str, cx, cy, angle: float, scale: float = 1.0):
+    """A ford or bridge, laid across the river rather than along it.
+
+    Same construction as the SVG exporter's. PIL cannot rotate a primitive, so the
+    endpoints are rotated by hand about the centre.
+    """
+    s = 5.0 * scale
+    lw = max(1, round(0.26 * s))
+    half, sep = 0.78 * s, 0.30 * s
+    rad = math.radians(angle + 90.0)
+    cos_a, sin_a = math.cos(rad), math.sin(rad)
+
+    def at(dx, dy):
+        return (cx + dx * cos_a - dy * sin_a, cy + dx * sin_a + dy * cos_a)
+
+    for side in (-1, 1):
+        y = side * sep
+        if kind == "ford":
+            # Broken span: a way through the water rather than over it.
+            steps = 5
+            for i in range(steps):
+                if i % 2:
+                    continue
+                x0 = -half + (2 * half) * i / steps
+                x1 = -half + (2 * half) * (i + 1) / steps
+                draw.line([at(x0, y), at(x1, y)], fill=_CROSSING_INK, width=lw)
+        else:
+            draw.line([at(-half, y), at(half, y)], fill=_CROSSING_INK, width=lw)
+
+    if kind == "bridge":
+        for side in (-1, 1):
+            x = side * half
+            draw.line([at(x, -sep * 1.7), at(x, sep * 1.7)], fill=_CROSSING_INK, width=lw)
+
+
 def _draw_settlement(draw: ImageDraw.ImageDraw, tier: SettlementTier, cx, cy, scale: float = 1.0):
     """One settlement symbol centred on (cx, cy).
 
@@ -135,14 +208,22 @@ def _draw_legend_glyph(draw: ImageDraw.ImageDraw, row, cx, cy, g: float, color_m
         )
     elif row.kind == "settlement":
         _draw_settlement(draw, row.sample, cx, cy, scale=g / legend.SYMBOL_BOX)
+    elif row.kind == "anchorage":
+        _draw_anchorage(draw, cx, cy, scale=g / legend.SYMBOL_BOX)
+    elif row.kind in ("ford", "bridge"):
+        # Angle -90 so the legend shows the span horizontally, as it reads on the map.
+        _draw_crossing(draw, row.kind, cx, cy, -90.0, scale=g / legend.SYMBOL_BOX)
     elif row.kind == "road":
-        color, lw = _ROAD_COLOR[row.sample], _ROAD_WIDTH[row.sample]
+        glyph_scale = g / legend.SYMBOL_BOX
+        color = _ROAD_COLOR[row.sample]
+        lw = max(1, round(_ROAD_WIDTH[row.sample] * glyph_scale))
         if row.sample == RoadTier.TRACK:
             _dashed_line(draw, cx - g / 2, cy, cx + g / 2, color, lw)
         else:
             draw.line([(cx - g / 2, cy), (cx + g / 2, cy)], fill=color, width=lw)
     else:  # "river" — matches the rivers layer's colour
-        draw.line([(cx - g / 2, cy), (cx + g / 2, cy)], fill=(58, 120, 201), width=2)
+        lw = max(1, round(2 * g / legend.SYMBOL_BOX))
+        draw.line([(cx - g / 2, cy), (cx + g / 2, cy)], fill=(58, 120, 201), width=lw)
 
 
 def _legend_font(config: PNGConfig):
@@ -230,7 +311,18 @@ def render(ws: WorldState, config: PNGConfig | None = None) -> Image.Image:
         layers: set[str] = {"terrain", "rivers", "grid", "contours", "legend"}
     elif config.style == "wargame":
         color_mode = "terrain"
-        layers = {"terrain", "roads", "settlements", "grid", "legend"}
+        # Wargame maps are read to move units, so the features that gate movement —
+        # rivers and the fords and bridges over them — are as important as the roads.
+        layers = {
+            "terrain",
+            "rivers",
+            "roads",
+            "settlements",
+            "grid",
+            "anchorages",
+            "crossings",
+            "legend",
+        }
     else:
         color_mode = config.color_mode
         layers = config.layers
@@ -254,6 +346,17 @@ def render(ws: WorldState, config: PNGConfig | None = None) -> Image.Image:
 
     # Size the legend before the canvas: on a small map the panel can be larger than the
     # map itself, and clamping alone would just crop it. Grow the canvas to fit instead.
+    # Line widths are written for the reference hex; scale them to this export.
+    line_scale = legend.stroke_scale(size)
+
+    if "rivers" in layers:
+        rivers.validate(
+            config.river_min_width,
+            config.river_max_width,
+            config.river_width_steps,
+            config.river_width_exponent,
+        )
+
     legend_rows: list[legend.LegendRow] = []
     legend_m: legend.Metrics | None = None
     legend_font = None
@@ -325,23 +428,47 @@ def render(ws: WorldState, config: PNGConfig | None = None) -> Image.Image:
 
     if "rivers" in layers:
         for river in ws.rivers:
-            if len(river.hexes) < 2:
-                continue
-            pts = []
-            for coord in river.hexes:
-                px, py = axial_to_pixel(coord, size)
-                pts.append((int(px + ox), int(py + oy)))
-            lw = max(1, min(4, int(river.flow_volume * 2) + 1))
-            draw.line(pts, fill=(58, 120, 201), width=lw)
-
-    if "roads" in layers:
-        for road in ws.roads:
-            for leg in split_path_on_water(road.path, ws.hexes):
+            # Banded by per-hex flow, so a river grows downstream instead of being drawn
+            # at one width taken from its mouth.
+            for run, sw in rivers.width_bands(
+                river,
+                ws.hexes,
+                config.river_min_width,
+                config.river_max_width,
+                config.river_width_steps,
+                config.river_width_exponent,
+            ):
                 pts = []
-                for coord in leg:
+                for coord in run:
                     px, py = axial_to_pixel(coord, size)
                     pts.append((int(px + ox), int(py + oy)))
-                draw.line(pts, fill=_ROAD_COLOR[road.tier], width=_ROAD_WIDTH[road.tier])
+                draw.line(pts, fill=(58, 120, 201), width=max(1, round(sw * line_scale)))
+
+    if "roads" in layers:
+        # Deduped and ordered by tier, so shared trunk segments are drawn once and a
+        # track never paints over the primary road it branches from.
+        for road, leg in dedupe_road_paths(ws.roads, ws.hexes, lambda r: ROAD_TIER_RANK[r.tier]):
+            pts = []
+            for coord in leg:
+                px, py = axial_to_pixel(coord, size)
+                pts.append((int(px + ox), int(py + oy)))
+            draw.line(
+                pts,
+                fill=_ROAD_COLOR[road.tier],
+                width=max(1, round(_ROAD_WIDTH[road.tier] * line_scale)),
+            )
+
+    if "crossings" in layers:
+        for coord, kind, angle in legend.crossings(ws, axial_to_pixel, size):
+            px, py = axial_to_pixel(coord, size)
+            _draw_crossing(draw, kind, px + ox, py + oy, angle, scale=size / 12.0)
+
+    if "anchorages" in layers:
+        # One marker per shore point, however many routes embark there. Covers both
+        # sea legs and ferry landings — the same thing as far as a reader is concerned.
+        for coord in legend.anchorage_points(ws):
+            px, py = axial_to_pixel(coord, size)
+            _draw_anchorage(draw, px + ox, py + oy, scale=size / 12.0)
 
     if "settlements" in layers:
         for s in ws.settlements:

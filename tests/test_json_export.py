@@ -8,7 +8,7 @@ from worldgen.core.hex import (
     SettlementTier,
     TerrainClass,
 )
-from worldgen.core.world_state import River, Road, RoadTier, WorldState
+from worldgen.core.world_state import Ferry, River, Road, RoadTier, WorldState
 from worldgen.export import json_export
 
 
@@ -138,3 +138,27 @@ def test_none_biome_and_land_cover(tmp_path):
     h = ws2.hexes[(0, 0)]
     assert h.biome is None
     assert h.land_cover is None
+
+
+def test_ferries_round_trip(tmp_path):
+    ws = WorldState.empty(seed=5, width=3, height=3)
+    ws.ferries = [Ferry(a=(0, 0), b=(2, 2))]
+    path = tmp_path / "ferries.json"
+    json_export.save(ws, str(path))
+    ws2 = json_export.load(str(path))
+    assert len(ws2.ferries) == 1
+    assert ws2.ferries[0].a == (0, 0)
+    assert ws2.ferries[0].b == (2, 2)
+
+
+def test_worlds_without_ferries_still_load(tmp_path):
+    """Worlds saved before ferries existed have no such key and must still load."""
+    import json
+
+    ws = WorldState.empty(seed=5, width=3, height=3)
+    path = tmp_path / "legacy.json"
+    json_export.save(ws, str(path))
+    data = json.loads(path.read_text())
+    del data["ferries"]
+    path.write_text(json.dumps(data))
+    assert json_export.load(str(path)).ferries == []

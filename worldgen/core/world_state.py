@@ -10,6 +10,11 @@ class RoadTier(Enum):
     TRACK = "track"
 
 
+# Draw precedence where routes of different tiers share an edge: higher wins, and
+# renderers paint in ascending order so a primary road is never overdrawn by a track.
+ROAD_TIER_RANK = {RoadTier.TRACK: 0, RoadTier.SECONDARY: 1, RoadTier.PRIMARY: 2}
+
+
 @dataclass
 class River:
     hexes: list[HexCoord]
@@ -23,6 +28,20 @@ class Road:
 
 
 @dataclass
+class Ferry:
+    """A boat link between two land hexes the road network cannot join by land.
+
+    Roads may not run down a river channel (it would hide which bank they are on), so a
+    component sealed off by a river mesh — a delta island, a braided confluence — is
+    joined by water instead.  Both endpoints are land hexes carrying road ends; the
+    crossing itself is drawn as a pair of anchorages rather than a line.
+    """
+
+    a: HexCoord
+    b: HexCoord
+
+
+@dataclass
 class WorldState:
     seed: int
     width: int
@@ -31,6 +50,7 @@ class WorldState:
     rivers: list[River] = field(default_factory=list)
     settlements: list[Settlement] = field(default_factory=list)
     roads: list[Road] = field(default_factory=list)
+    ferries: list[Ferry] = field(default_factory=list)
     metadata: dict = field(default_factory=dict)
 
     @classmethod
@@ -121,6 +141,7 @@ class WorldState:
             "roads": [
                 {"path": [list(c) for c in r.path], "tier": r.tier.value} for r in self.roads
             ],
+            "ferries": [{"a": list(f.a), "b": list(f.b)} for f in self.ferries],
         }
 
     @classmethod
@@ -189,6 +210,7 @@ class WorldState:
             Road(path=[tuple(c) for c in rd["path"]], tier=RoadTier(rd["tier"]))
             for rd in data.get("roads", [])
         ]
+        ws.ferries = [Ferry(a=tuple(fd["a"]), b=tuple(fd["b"])) for fd in data.get("ferries", [])]
 
         return ws
 

@@ -3,10 +3,13 @@ from collections import defaultdict, deque
 from ..core.hex import SettlementTier, TerrainClass
 from ..core.hex_grid import astar, distance, neighbors
 from ..core.pipeline import GeneratorStage
-from ..core.world_state import Road, RoadTier, WorldState
+from ..core.world_state import Ferry, Road, RoadTier, WorldState
 from .road_cost import (
-    river_discount,
-    road_edge_cost,
+    bank_discount,
+    ferry_link,
+    make_road_edge_cost,
+    river_edges,
+    river_hex_cost,
     tag_river_crossings,
     terrain_base_cost,
 )
@@ -32,14 +35,18 @@ class InterurbanRoadStage(GeneratorStage):
         hex_traffic: dict = defaultdict(float)
         canonical_routes: dict = {}
 
+        # Hexsides the rivers run along — roads may cross a river but never travel down
+        # it, so the bank a road takes stays readable. Settlement hexes are exempt.
+        blocked = river_edges(state.rivers)
+        settled = {s.coord for s in state.settlements}
+
         def node_cost(hx):
-            base = terrain_base_cost(hx, cfg)
-            base = max(0.0, base - river_discount(hx, cfg))
+            base = terrain_base_cost(hx, cfg) + river_hex_cost(hx, cfg)
+            base = max(0.0, base - bank_discount(hx, hexes, cfg))
             pheromone = cfg.road_pheromone_factor * hex_traffic[hx.coord]
             return max(0.0, base - pheromone)
 
-        def edge_cost(from_hx, to_hx):
-            return road_edge_cost(from_hx, to_hx, cfg)
+        edge_cost = make_road_edge_cost(cfg, blocked, settled)
 
         tier_counts = {
             SettlementTier.CITY: cfg.road_travellers_city,
@@ -116,9 +123,10 @@ class InterurbanRoadStage(GeneratorStage):
         cities = [s for s in settlements if s.tier == SettlementTier.CITY]
         fallback_paths: list[list] = []
         if len(cities) > 1:
-            hex_tier, fallback_paths = self._guarantee_city_connectivity(
-                hexes, cities, hex_tier, canonical_routes, cfg
+            hex_tier, fallback_paths, ferries = self._guarantee_city_connectivity(
+                hexes, cities, hex_tier, canonical_routes, cfg, blocked, settled
             )
+            state.ferries.extend(ferries)
 
         roads: list[Road] = []
         for path in canonical_routes.values():
@@ -195,7 +203,9 @@ class InterurbanRoadStage(GeneratorStage):
         order = {RoadTier.PRIMARY: 0, RoadTier.SECONDARY: 1, RoadTier.TRACK: 2}
         return max(tiers, key=lambda t: order[t])
 
-    def _guarantee_city_connectivity(self, hexes, cities, hex_tier, canonical_routes, cfg):
+    def _guarantee_city_connectivity(
+        self, hexes, cities, hex_tier, canonical_routes, cfg, blocked, settled
+    ):
         # Build road adjacency from actual road path edges (not hex-neighbour proximity).
         # Only include paths that contribute a tier (i.e. pass the traffic threshold).
         road_adj: dict = defaultdict(set)
@@ -227,14 +237,13 @@ class InterurbanRoadStage(GeneratorStage):
             visited_global |= comp
             components.append(comp)
         if not components:
-            return hex_tier, []
+            return hex_tier, [], []
         main = max(components, key=len)
 
         def plain_cost(hx):
-            return terrain_base_cost(hx, cfg)
+            return terrain_base_cost(hx, cfg) + river_hex_cost(hx, cfg)
 
-        def plain_edge(from_hx, to_hx):
-            return road_edge_cost(from_hx, to_hx, cfg)
+        plain_edge = make_road_edge_cost(cfg, blocked, settled)
 
         def path_total_cost(p):
             if not p:
@@ -246,11 +255,13 @@ class InterurbanRoadStage(GeneratorStage):
             return total
 
         fallback_paths: list[list] = []
+        ferries: list[Ferry] = []
         max_iter = len(cities) * 2
         for _ in range(max_iter):
             isolated = [s for s in cities if s.coord not in main]
             if not isolated:
                 break
+            progressed = False
             for iso in isolated:
                 best_path = None
                 best_cost = float("inf")
@@ -271,6 +282,36 @@ class InterurbanRoadStage(GeneratorStage):
                             hex_tier[c] = RoadTier.PRIMARY
                     fallback_paths.append(best_path)
                     main |= bfs_component(iso.coord)
+                    progressed = True
                     break
+            if not progressed:
+                # No land route to any main-component city: the river channel cuts this
+                # city off. Join it by boat, or fail loudly if no ferry is plausible.
+                iso = isolated[0]
+                ferry, ferry_paths = ferry_link(
+                    hexes,
+                    iso.coord,
+                    f"City {iso.name}",
+                    main,
+                    cfg,
+                    blocked,
+                    settled,
+                    plain_cost,
+                    plain_edge,
+                )
+                ferries.append(ferry)
+                for p in ferry_paths:
+                    for a, b in zip(p, p[1:], strict=False):
+                        road_adj[a].add(b)
+                        road_adj[b].add(a)
+                    for c in p:
+                        if c not in hex_tier:
+                            hex_tier[c] = RoadTier.PRIMARY
+                    fallback_paths.append(p)
+                hex_tier.setdefault(ferry.a, RoadTier.PRIMARY)
+                hex_tier.setdefault(ferry.b, RoadTier.PRIMARY)
+                main |= bfs_component(iso.coord)
+                main.add(ferry.a)
+                main.add(ferry.b)
 
-        return hex_tier, fallback_paths
+        return hex_tier, fallback_paths, ferries

@@ -17,17 +17,16 @@ from worldgen.stages.terrain_class import TerrainClassificationStage
 
 
 def _build_pipeline(seed: int = 42, width: int = 64, height: int = 64, **cfg_overrides):
-    cfg = WorldConfig(
-        width=width,
-        height=height,
-        erosion_iterations=500,
-        target_city_count=4,
-        target_town_count=10,
-        road_travellers_city=100,
-        road_travellers_town=20,
-        road_travellers_village=5,
-        **cfg_overrides,
-    )
+    defaults = {
+        "erosion_iterations": 500,
+        "target_city_count": 4,
+        "target_town_count": 10,
+        "road_travellers_city": 100,
+        "road_travellers_town": 20,
+        "road_travellers_village": 5,
+    }
+    # Overrides win, so a fixture can vary any of these — including the ones above.
+    cfg = WorldConfig(width=width, height=height, **{**defaults, **cfg_overrides})
     p = GeneratorPipeline(seed, cfg)
     p.add_stage(ElevationStage)
     p.add_stage(ErosionStage)
@@ -44,6 +43,29 @@ def _build_pipeline(seed: int = 42, width: int = 64, height: int = 64, **cfg_ove
 @pytest.fixture(scope="module")
 def road_state():
     return _build_pipeline().run()
+
+
+@pytest.fixture(scope="module", params=["64x64", "48x48-dense"])
+def any_road_state(request):
+    """The river invariants, checked at two map sizes and settlement densities.
+
+    The 48x48 case is the config the exported map set is generated at; the channel leak
+    that the settlement exemption used to allow showed up there and not at 64x64, so a
+    single fixture size is not enough to trust these.
+    """
+    if request.param == "64x64":
+        return _build_pipeline().run()
+    return _build_pipeline(
+        seed=42,
+        width=48,
+        height=48,
+        erosion_iterations=200,
+        target_city_count=3,
+        target_town_count=6,
+        road_travellers_city=50,
+        road_travellers_town=10,
+        road_travellers_village=2,
+    ).run()
 
 
 def test_has_roads(road_state):
@@ -126,13 +148,39 @@ def test_cities_mutually_reachable(road_state):
                 visited.add(n)
                 queue.append(n)
 
+    # Ferries are links too: where a river channel cuts a city off, the network is
+    # joined by boat rather than by a road running down the river.
+    changed = True
+    while changed:
+        changed = False
+        for f in road_state.ferries:
+            for a, b in ((f.a, f.b), (f.b, f.a)):
+                if a in visited and b not in visited:
+                    visited.add(b)
+                    queue.append(b)
+                    changed = True
+        while queue:
+            c = queue.popleft()
+            for n in hexes[c].road_connections:
+                if n not in visited:
+                    visited.add(n)
+                    queue.append(n)
+
     for city in cities[1:]:
         assert city.coord in visited, (
             f"City {city.name} at {city.coord} not reachable via road network"
         )
 
 
-def test_river_preference_in_roads(road_state):
+def test_river_corridor_preference_in_roads(road_state):
+    """Roads still follow river valleys — but along the corridor, not down the channel.
+
+    The pull used to sit on river hexes themselves, so this measured how often roads
+    landed *on* a river. Roads now take the bank instead, so the corridor (a river hex
+    or a hex beside one) is what they should over-represent.
+    """
+    from worldgen.core.hex_grid import neighbors
+
     hexes = road_state.hexes
     road_hexes = {c for road in road_state.roads for c in road.path if c in hexes}
     all_land = {c for c, h in hexes.items() if h.terrain_class != TerrainClass.OCEAN}
@@ -140,15 +188,15 @@ def test_river_preference_in_roads(road_state):
     if not road_hexes or not all_land:
         return
 
-    river_in_roads = sum(1 for c in road_hexes if "river" in hexes[c].tags)
-    river_in_map = sum(1 for c in all_land if "river" in hexes[c].tags)
+    river = {c for c in all_land if "river" in hexes[c].tags}
+    corridor = river | {n for c in river for n in neighbors(c) if n in all_land}
 
-    road_river_rate = river_in_roads / len(road_hexes) if road_hexes else 0
-    map_river_rate = river_in_map / len(all_land) if all_land else 0
+    road_rate = len(road_hexes & corridor) / len(road_hexes)
+    map_rate = len(corridor & all_land) / len(all_land)
 
-    assert road_river_rate >= map_river_rate, (
-        f"River preference not detected: road river rate {road_river_rate:.3f} < "
-        f"map river rate {map_river_rate:.3f}"
+    assert road_rate >= map_rate, (
+        f"River corridor preference not detected: road corridor rate {road_rate:.3f} < "
+        f"map corridor rate {map_rate:.3f}"
     )
 
 
@@ -224,3 +272,145 @@ def test_slope_edge_cost_formula():
     deltas = [delta_free + i * (delta_cap - delta_free) / 20 for i in range(1, 21)]
     costs = [slope_cost(d) for d in deltas]
     assert all(a <= b for a, b in zip(costs, costs[1:], strict=False))
+
+
+# --- river channel constraint ------------------------------------------------
+
+
+def _river_edges(state):
+    return {
+        frozenset((a, b))
+        for river in state.rivers
+        for a, b in zip(river.hexes, river.hexes[1:], strict=False)
+    }
+
+
+def test_roads_never_run_along_a_river_channel(any_road_state):
+    """A road drawn on the channel hides which bank it — and anything on it — is on.
+
+    Crossing is fine; travelling down the river is not. A settlement exempts the hexside
+    only when its counterpart is dry land — enough to reach a riverside town, not enough
+    to leave one along the water.
+    """
+    state = any_road_state
+    hexes = state.hexes
+    settled = {s.coord for s in state.settlements}
+    channel = _river_edges(state)
+
+    def exempt(a, b):
+        return (a in settled and hexes[b].river_flow <= 0) or (
+            b in settled and hexes[a].river_flow <= 0
+        )
+
+    offenders = []
+    for road in state.roads:
+        for a, b in zip(road.path, road.path[1:], strict=False):
+            if frozenset((a, b)) in channel and not exempt(a, b):
+                offenders.append((a, b))
+    assert not offenders, f"roads run along the river channel at {offenders[:5]}"
+
+
+def test_roads_cross_rivers_on_opposite_sides(road_state):
+    """A road entering a river hex must come out the other side, not back the same way.
+
+    Dipping into the channel and returning to the bank it came from would leave a unit
+    standing on that hex with no defined side, and would tag a ford that is not one.
+    The cost model should make it uneconomic; this checks that it actually does.
+    """
+    from worldgen.core.hex_grid import neighbors
+
+    hexes = road_state.hexes
+    settled = {s.coord for s in road_state.settlements}
+
+    # Local channel direction at each river hex: the ring indices of its up/downstream
+    # neighbours. Only hexes with both are two-sided; sources and mouths are skipped.
+    channel_dirs: dict = {}
+    for river in road_state.rivers:
+        for prev, cur, nxt in zip(river.hexes, river.hexes[1:], river.hexes[2:], strict=False):
+            ring = neighbors(cur)
+            if prev in ring and nxt in ring:
+                channel_dirs[cur] = (ring.index(prev), ring.index(nxt))
+
+    def same_arc(centre, i, j, p, n):
+        """True when ring positions p and n sit on the same side of the channel."""
+        ring = neighbors(centre)
+        if p not in ring or n not in ring:
+            return False
+        pi, ni = ring.index(p), ring.index(n)
+        lo, hi = min(i, j), max(i, j)
+        between = lo < pi < hi
+        return between == (lo < ni < hi)
+
+    offenders = []
+    for road in road_state.roads:
+        path = road.path
+        for k in range(1, len(path) - 1):
+            c = path[k]
+            if c in settled or c not in channel_dirs:
+                continue
+            # Only a bank->river->bank step is a crossing; a step whose neighbour is
+            # itself a river hex is channel travel, covered by its own test below.
+            if hexes[path[k - 1]].river_flow > 0 or hexes[path[k + 1]].river_flow > 0:
+                continue
+            i, j = channel_dirs[c]
+            if same_arc(c, i, j, path[k - 1], path[k + 1]):
+                offenders.append((path[k - 1], c, path[k + 1]))
+    assert not offenders, f"road re-enters the bank it came from at {offenders[:5]}"
+
+
+def test_ferry_endpoints_are_a_plausible_hop(road_state):
+    from worldgen.core.hex_grid import distance
+
+    cfg = WorldConfig()
+    for f in road_state.ferries:
+        assert f.a != f.b
+        assert distance(f.a, f.b) <= cfg.road_ferry_max_hop, (
+            f"ferry from {f.a} to {f.b} is longer than road_ferry_max_hop"
+        )
+
+
+def test_roads_never_occupy_consecutive_river_hexes(any_road_state):
+    """A road meets a river to cross it, and is back on a bank the very next hex.
+
+    This replaces an earlier ratio test that compared in-channel steps against crossings.
+    That premise was wrong twice over: it counted a road merely *approaching* a riverside
+    town as channel travel, and its threshold happened to hold at 64x64 while failing at
+    48x48. A run of consecutive river hexes is the thing that actually means "travelling
+    the river", and it does not depend on map size or settlement density.
+
+    Settlement hexes are excluded from a run: a town on the water is a road hex by
+    definition, and a road arriving at one through an adjacent river hex is unavoidable
+    where a river braids or meanders past the town.
+    """
+    state = any_road_state
+    hexes = state.hexes
+    settled = {s.coord for s in state.settlements}
+
+    worst = []
+    for road in state.roads:
+        run: list = []
+        for c in road.path:
+            if hexes[c].river_flow > 0 and c not in settled:
+                run.append(c)
+            else:
+                if len(run) > 1:
+                    worst.append(list(run))
+                run = []
+        if len(run) > 1:
+            worst.append(list(run))
+
+    assert not worst, f"roads travel along {len(worst)} river runs, e.g. {worst[:3]}"
+
+
+def test_road_hexes_on_rivers_are_rare(any_road_state):
+    """Whatever the route, a road should almost always have a bank under it."""
+    state = any_road_state
+    hexes = state.hexes
+    road_hexes = {c for road in state.roads for c in road.path if c in hexes}
+    settled = {s.coord for s in state.settlements}
+    if not road_hexes:
+        return
+    on_river = {c for c in road_hexes if hexes[c].river_flow > 0 and c not in settled}
+    assert len(on_river) / len(road_hexes) < 0.10, (
+        f"{len(on_river)}/{len(road_hexes)} road hexes sit in a river channel"
+    )

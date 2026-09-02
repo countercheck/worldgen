@@ -87,11 +87,15 @@ class WorldConfig:
             raise ValueError(
                 f"settlement_min_reachable must be >= 1, got {self.settlement_min_reachable}"
             )
-        if not (0.0 <= self.road_river_discount_min_flow <= 1.0):
+        if not (0.0 <= self.road_bank_discount_min_flow <= 1.0):
             raise ValueError(
-                "road_river_discount_min_flow must be in [0, 1], "
-                f"got {self.road_river_discount_min_flow}"
+                "road_bank_discount_min_flow must be in [0, 1], "
+                f"got {self.road_bank_discount_min_flow}"
             )
+        if self.road_river_hex_cost < 0:
+            raise ValueError(f"road_river_hex_cost must be >= 0, got {self.road_river_hex_cost}")
+        if self.road_ferry_max_hop < 1:
+            raise ValueError(f"road_ferry_max_hop must be >= 1, got {self.road_ferry_max_hop}")
         if self.road_water_cost < 0:
             raise ValueError(f"road_water_cost must be >= 0, got {self.road_water_cost}")
         if self.road_embark_cost < 0:
@@ -151,8 +155,11 @@ class WorldConfig:
     road_travellers_town: int = 100
     road_travellers_village: int = 20
     road_gravity_exponent: float = 1.5
-    road_river_discount: float = 0.5
-    road_river_discount_min_flow: float = 0.2
+    # Roads follow river valleys along the *bank*, never down the channel itself, so the
+    # side of the river a road runs on stays readable. Discount applies to land hexes
+    # adjacent to a river, scaled by the largest adjacent river's flow.
+    road_bank_discount: float = 0.5
+    road_bank_discount_min_flow: float = 0.2
     road_pheromone_factor: float = 0.1
 
     # Roads — water bodies (oceans + lakes treated as traversable)
@@ -163,6 +170,17 @@ class WorldConfig:
     # Roads — river crossings (perpendicular to flow, charged on each land↔river edge)
     road_river_crossing_base: float = 4.0
     road_river_crossing_flow: float = 12.0
+
+    # Cost of standing a road *on* a river hex. The channel exclusion only covers the
+    # hexsides a river is drawn along; a meander or braid puts two river hexes side by
+    # side without one, and a road threading those is still in the water. This makes
+    # occupying the channel uneconomic while leaving a genuine crossing affordable.
+    road_river_hex_cost: float = 12.0
+
+    # Roads — ferries. A component cut off by a river mesh (a delta island, a braided
+    # confluence) is joined by boat rather than by a road running down the channel.
+    # Longer than this and no plausible ferry exists, so routing raises instead.
+    road_ferry_max_hop: int = 4
     road_slope_cost: float = 2.0
     road_slope_free_pct: float = 3.0  # grade % below which slope costs nothing
     road_slope_cap_pct: float = 25.0  # grade % at which cost saturates
