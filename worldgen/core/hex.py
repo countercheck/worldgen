@@ -82,3 +82,10 @@ class Hex:
     habitability_village: float = 0.0
     land_cover: LandCover | None = None
     cultivated: bool = False
+    # Which settlement works this hex, and what it costs that settlement to reach it.
+    # Catchments are allocated by travel cost rather than drawn as discs, so a ridge
+    # between two settlements becomes a genuine watershed and the shapes follow valleys.
+    # `territory_cost` is what weights the hex's contribution: ground at the far edge of a
+    # catchment feeds its owner less than ground at the gate.
+    territory: HexCoord | None = None
+    territory_cost: float = 0.0

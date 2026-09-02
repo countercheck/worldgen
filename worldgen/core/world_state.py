@@ -16,11 +16,14 @@ ROAD_TIER_RANK = {RoadTier.TRACK: 0, RoadTier.SECONDARY: 1, RoadTier.PRIMARY: 2}
 
 
 # Serialised schema version.  1.1 replaced the single "habitability" key with one score
-# per settlement tier; a 1.0 file still loads, its lone value read into all three.  The
-# bump exists so the schema cannot change shape under a fixed version string — an old
-# reader handed a 1.1 file fails with a clear message instead of silently missing fields.
-SCHEMA_VERSION = "1.1"
-SUPPORTED_SCHEMA_VERSIONS = frozenset({"1.0", "1.1"})
+# per settlement tier; a 1.0 file still loads, its lone value read into all three.  1.2
+# added "territory" and "territory_cost": which settlement works a hex, and what it costs
+# that settlement to reach it.  Both default when absent, so a 1.0 or 1.1 file still loads
+# — it simply has no catchments recorded.  The bump exists so the schema cannot change
+# shape under a fixed version string: an old reader handed a newer file fails with a clear
+# message instead of silently missing fields.
+SCHEMA_VERSION = "1.2"
+SUPPORTED_SCHEMA_VERSIONS = frozenset({"1.0", "1.1", "1.2"})
 
 
 @dataclass
@@ -129,6 +132,8 @@ class WorldState:
                     "habitability_town": h.habitability_town,
                     "habitability_village": h.habitability_village,
                     "cultivated": h.cultivated,
+                    "territory": list(h.territory) if h.territory is not None else None,
+                    "territory_cost": h.territory_cost,
                     "tags": sorted(h.tags),
                     "road_connections": sorted([list(c) for c in h.road_connections]),
                 }
@@ -211,6 +216,9 @@ class WorldState:
                 habitability_town=hd.get("habitability_town", hd.get("habitability", 0.0)),
                 habitability_village=hd.get("habitability_village", hd.get("habitability", 0.0)),
                 cultivated=hd["cultivated"],
+                # Absent before 1.2: such a file simply records no catchments.
+                territory=tuple(hd["territory"]) if hd.get("territory") is not None else None,
+                territory_cost=hd.get("territory_cost", 0.0),
                 tags=set(hd.get("tags", [])),
                 road_connections={tuple(c) for c in hd.get("road_connections", [])},
             )

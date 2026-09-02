@@ -137,24 +137,54 @@ def test_catchments_are_disjoint_and_go_to_the_nearer_seat():
 def test_a_ridge_splits_two_catchments():
     """Why catchments are costed rather than drawn as discs.
 
-    Mountains cost ten times flat ground, so a ridge between two seats is a watershed:
-    each keeps its own valley instead of the boundary falling at the midpoint.
+    A ridge is made of *elevation*, not of terrain class: what stops a catchment is the
+    climb, so this raises real ground between the two seats rather than labelling a hex
+    a mountain.  Each seat then keeps its own valley instead of the boundary falling at
+    the midpoint.
     """
     cfg = WorldConfig()
     hexes = _strip(9)
-    for q in (4,):
-        hexes[(q, 0)] = _hex((q, 0), TerrainClass.MOUNTAIN)
+    # 500 m of climb over one hex, against travel_ascent_per_hex of 125 m: four units of
+    # budget to go up, which is most of a six-unit day.
+    hexes[(4, 0)].elevation = 500.0 / cfg.road_elev_range_m
 
     owner, _ = allocate_catchments(hexes, [(0, 0), (8, 0)], 6.0, cfg)
     assert owner[(3, 0)] == (0, 0), "west valley should be wholly western"
     assert owner[(5, 0)] == (8, 0), "east valley should be wholly eastern"
     assert (4, 0) not in owner, "the ridge is dearer than the budget and stays unclaimed"
 
-    # The counterfactual: level the ridge and the two catchments meet in the middle
-    # instead, so the split above is the terrain talking and not the budget.
-    hexes[(4, 0)] = _hex((4, 0))
+    # The counterfactual: level the ridge and the catchments meet across it instead, so
+    # the split above is the relief talking and not the budget.
+    hexes[(4, 0)].elevation = 0.0
     flat_owner, _ = allocate_catchments(hexes, [(0, 0), (8, 0)], 6.0, cfg)
     assert (4, 0) in flat_owner
+
+
+def test_descending_a_ridge_is_free():
+    """Naismith counts climb only.
+
+    A catchment that paid for going downhill would refuse to follow a valley, which is
+    the one direction it ought to run.
+    """
+    cfg = WorldConfig()
+    hexes = _strip(6)
+    for q in range(6):
+        hexes[(q, 0)].elevation = (5 - q) * 400.0 / cfg.road_elev_range_m
+
+    owner, cost = allocate_catchments(hexes, [(0, 0)], 6.0, cfg)
+    assert set(owner) == set(hexes), "walking downhill should cost no more than the distance"
+    assert cost[(5, 0)] == pytest.approx(5 * cfg.road_flat_cost)
+
+
+def test_a_high_plateau_is_walkable():
+    """Relief enters as ascent, not as altitude: level ground is level however high."""
+    cfg = WorldConfig()
+    hexes = _strip(6)
+    for q in range(6):
+        hexes[(q, 0)].elevation = 0.9
+
+    owner, _ = allocate_catchments(hexes, [(0, 0)], 6.0, cfg)
+    assert set(owner) == set(hexes)
 
 
 def test_water_is_not_traversable():

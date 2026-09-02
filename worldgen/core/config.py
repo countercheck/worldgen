@@ -199,7 +199,12 @@ class WorldConfig:
         ):
             if getattr(self, name) < 0:
                 raise ValueError(f"{name} must be >= 0, got {getattr(self, name)}")
-        for name in ("haulage_range_land", "rural_field_radius", "market_day_radius"):
+        for name in (
+            "haulage_range_land",
+            "rural_field_radius",
+            "market_day_radius",
+            "travel_ascent_per_hex",
+        ):
             if getattr(self, name) <= 0:
                 raise ValueError(f"{name} must be > 0, got {getattr(self, name)}")
         # The regime ordering is the model's central claim: a farmer's daily walk is
@@ -304,6 +309,11 @@ class WorldConfig:
     # market. Sizing markets off the *surplus* rather than the production is why the tier
     # ratios come out right without target counts anywhere.
     marketable_surplus_fraction: float = 0.20
+    # Naismith's rule: this many metres of ascent cost as much as one hex of level
+    # ground. Catchments are walked, not engineered, so they use this rather than
+    # road_slope_cost — that curve prices grading a road and saturates at ten times base,
+    # which over eroded terrain shrinks a catchment to a third of its proper reach.
+    travel_ascent_per_hex: float = 125.0
 
     # Biome thresholds
     biome_alpine_elev: float = 0.85
@@ -327,7 +337,9 @@ class WorldConfig:
     # over the food field gives the same number as enumerating ~900 hamlets on a 128x128
     # map, almost none of which would carry military or administrative weight.
     rural_field_radius: float = 2.5  # the daily walk to the fields; sets cultivated extent
-    people_per_food: float = 120.0  # people per unit of haulage-weighted food
+    # Calibrated so market towns land in their historical 500-2500 band: across five
+    # seeds at 128x128 this gives medians of 1260-1700 and a largest of 4200-5450.
+    people_per_food: float = 400.0
 
     # Market centres. A market goes where it can gather the most surplus inside a day's
     # return — central-place logic with a real transport cost rather than an abstract one.
@@ -341,7 +353,7 @@ class WorldConfig:
     # planting once the best remaining site scores below this. Calibrated against ~70-85
     # markets at 128x128 (England had ~700 markets in ~130,000 km2; this map is about an
     # eighth of that).
-    market_viability_floor: float = 6.0
+    market_viability_floor: float = 5.0
 
     # Cultivation radii — also the catchment each tier is scored on by HabitabilityStage
     cultivation_city_radius: int = 8

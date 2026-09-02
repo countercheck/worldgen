@@ -74,6 +74,7 @@ def generate(seed: int, config: str, output_dir: str, width: int, height: int, m
     render_debug(state, "roads", str(output_path / "roads.svg"))
     render_debug(state, "land_cover", str(output_path / "land_cover.svg"))
     render_debug(state, "cultivation", str(output_path / "cultivation.svg"))
+    render_debug(state, "territory", str(output_path / "territory.svg"))
 
     click.echo("✓ Done")
 
@@ -93,6 +94,7 @@ _ATTRIBUTES = [
     "roads",
     "land_cover",
     "cultivation",
+    "territory",
 ]
 
 

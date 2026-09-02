@@ -9,10 +9,10 @@ magnitude cheaper per tonne-kilometre, which is why the large pre-industrial cit
 navigable water and inland ones stay small.
 
 Every range here is a travel-cost budget rather than a distance, so terrain shortens it
-automatically: with `road_mountain_cost` ten times `road_flat_cost`, a two-and-a-half unit
-field budget dies on the first mountain hex and runs freely down a valley.  Catchments come
-out valley-shaped with ridges as boundaries, which is the point of costing them this way
-instead of drawing discs.
+automatically.  A hex of level ground costs one unit wherever it lies and relief enters
+only as ascent, so a valley floor is cheap however high it sits and a ridge is dear to
+cross.  Catchments therefore come out valley-shaped with watersheds as boundaries, which
+is the whole point of costing them rather than drawing discs.
 
 Pure functions and one Dijkstra, in the shape of `road_cost.py`: no stage class, no world
 mutation, so it can be unit-tested on synthetic grids.
@@ -22,14 +22,7 @@ import heapq
 
 from ..core.hex import TerrainClass
 from ..core.hex_grid import neighbors
-from .road_cost import (
-    WATER,
-    is_river,
-    make_road_edge_cost,
-    river_edges,
-    river_hex_cost,
-    terrain_base_cost,
-)
+from .road_cost import WATER, is_river
 
 
 def usable_fraction(cost: float, range_limit: float) -> float:
@@ -72,38 +65,77 @@ def haulage_range(hx, cfg) -> float:
     return cfg.haulage_range_land
 
 
-def make_travel_cost(hexes, cfg, rivers=None, exempt=frozenset()):
-    """Node and edge cost closures for moving goods overland.
+def make_travel_cost(hexes, cfg):
+    """Node and edge cost closures for people and goods moving over the ground.
 
-    Reuses the road cost primitives verbatim so that a route a cart would take and a route
-    a road would take are priced by the same rules.  Two deliberate omissions:
+    Terrain and slope only.  Every river term in `road_cost.py` is deliberately left out,
+    because they answer a question about *roads* rather than about travel:
 
-    `bank_discount` is left out.  It exists to pull *roads* onto riverbanks so the side a
-    road runs on stays readable, which has nothing to do with how far a farmer walks to a
-    field, and applying it here would make catchments hug rivers for a rendering reason.
+    - `river_hex_cost` (12.0) prices a road out of threading a channel.  It is larger than
+      the whole 10.0 market-day budget, so including it made a single river hex an
+      absolute barrier and catchments came out covering a quarter of the map.
+    - The channel exclusion in `make_road_edge_cost` prices river-to-river edges at
+      infinity for the same reason.  Applied to a catchment it severs one along every
+      watercourse — the exact inverse of the truth, since a river valley is the best land
+      and the thing that holds a district together.
+    - `river_crossing_edge_cost` charges a bridge or ford on every land-river edge.  A
+      road pays that because a road is a built thing; a person fords a stream.  At 4.0
+      base it would spend nearly half a day's travel budget per crossing.
+    - `bank_discount` pulls roads onto riverbanks so the side a road runs on stays
+      readable.  Nothing to do with how far a farmer walks.
 
-    Water is impassable rather than cheap.  Roads cross water because a road is a route;
-    a catchment is ground somebody works, and leaving the sea traversable at
+    `terrain_base_cost` is left out too, and this is the one that actually mattered.  It
+    charges 3x on a hill and 10x on a mountain — the cost of *cutting a road* through
+    them.  A person walking a level kilometre of hill country covers it in the time they
+    would cover a level kilometre of plain; what costs them is the climbing, and ascent is
+    charged separately below.  Using both double-counts the same terrain, and since the
+    generated maps run about a quarter hill and a quarter mountain, the median step came
+    out at 3.0 against a 10.0 day budget: markets reached three hexes instead of ten, and
+    catchments covered a third of the land they should.
+
+    So a hex of level ground is one unit wherever it lies, and relief enters only through
+    ascent.  A high plateau is walkable, which is right; a ridge is dear to cross, which
+    is also right, and is what makes catchments break at watersheds.
+
+    Slope is charged by Naismith's rule rather than by `slope_edge_cost`, for the same
+    reason: that curve prices the difficulty of grading a road and saturates at ten times
+    base cost.  Naismith's figure is that a fixed amount of ascent costs about as much as
+    a set distance on the level, and only ascent counts — walking downhill is free.  Hence
+    a linear charge on climb, with no saturation and no descent term.
+
+    Water is impassable rather than cheap.  A road crosses water because a road is a
+    route; a catchment is ground somebody works, and leaving the sea traversable at
     `road_water_cost` would let one coastal settlement claim an entire strait.  Fishing is
-    handled by `fishery_rim` instead, which is bounded by the land that does the fishing.
+    handled by `fishery_rim`, which is bounded by the land that does the fishing.
     """
-    blocked = river_edges(rivers) if rivers else None
-    road_edge = make_road_edge_cost(cfg, blocked, exempt)
 
     def node_cost(hx) -> float:
         if hx.terrain_class in WATER:
             return float("inf")
-        return terrain_base_cost(hx, cfg) + river_hex_cost(hx, cfg)
+        return cfg.road_flat_cost
 
     def edge_cost(from_hx, to_hx) -> float:
         if to_hx.terrain_class in WATER or from_hx.terrain_class in WATER:
             return float("inf")
-        return road_edge(from_hx, to_hx)
+        return ascent_cost(from_hx, to_hx, cfg)
 
     return node_cost, edge_cost
 
 
-def allocate_catchments(hexes, seats, budget: float, cfg, rivers=None):
+def ascent_cost(from_hx, to_hx, cfg) -> float:
+    """Naismith: a fixed climb costs as much as a set distance on the level.
+
+    `travel_ascent_per_hex` metres of ascent are charged as one hex of flat walking.
+    Descent is free — the rule counts climb only, and a catchment that charged for going
+    downhill would refuse to follow a valley, which is the one direction it should.
+    """
+    climb = to_hx.elevation - from_hx.elevation
+    if climb <= 0.0:
+        return 0.0
+    return climb * cfg.road_elev_range_m / cfg.travel_ascent_per_hex
+
+
+def allocate_catchments(hexes, seats, budget: float, cfg):
     """Assign each land hex to the seat that can reach it most cheaply.
 
     One multi-source Dijkstra over the travel-cost field, stopping at *budget*.  Scales
@@ -120,7 +152,7 @@ def allocate_catchments(hexes, seats, budget: float, cfg, rivers=None):
     if not seats or budget <= 0.0:
         return {}, {}
 
-    node_cost, edge_cost = make_travel_cost(hexes, cfg, rivers, exempt=frozenset(seats))
+    node_cost, edge_cost = make_travel_cost(hexes, cfg)
 
     owner: dict = {}
     cost: dict = {}

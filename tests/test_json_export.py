@@ -106,13 +106,52 @@ def test_pre_split_habitability_still_loads(tmp_path):
     assert h.habitability_village == 0.6
 
 
+def test_territory_round_trips(tmp_path):
+    ws = _small_world()
+    ws.hexes[(0, 0)].territory = (1, 1)
+    ws.hexes[(0, 0)].territory_cost = 2.5
+    path = tmp_path / "world.json"
+    json_export.save(ws, path)
+
+    h = json_export.load(path).hexes[(0, 0)]
+    assert h.territory == (1, 1), "territory must come back as a tuple, not a list"
+    assert h.territory_cost == 2.5
+
+
+def test_unclaimed_territory_round_trips_as_none(tmp_path):
+    ws = _small_world()
+    path = tmp_path / "world.json"
+    json_export.save(ws, path)
+    assert json_export.load(path).hexes[(0, 0)].territory is None
+
+
+def test_pre_territory_worlds_still_load(tmp_path):
+    """A 1.1 file has no catchments recorded; it must open, not fail."""
+    import json
+
+    ws = _small_world()
+    path = tmp_path / "world.json"
+    json_export.save(ws, path)
+
+    data = json.loads(path.read_text())
+    data["version"] = "1.1"
+    for hd in data["hexes"]:
+        hd.pop("territory", None)
+        hd.pop("territory_cost", None)
+    path.write_text(json.dumps(data))
+
+    h = json_export.load(path).hexes[(0, 0)]
+    assert h.territory is None
+    assert h.territory_cost == 0.0
+
+
 def test_new_saves_carry_the_bumped_version(tmp_path):
     """The schema changed shape, so it must not keep claiming to be 1.0."""
     import json
 
     path = tmp_path / "world.json"
     json_export.save(_small_world(), path)
-    assert json.loads(path.read_text())["version"] == "1.1"
+    assert json.loads(path.read_text())["version"] == "1.2"
 
 
 def test_an_unknown_version_is_rejected_by_name(tmp_path):
@@ -126,7 +165,7 @@ def test_an_unknown_version_is_rejected_by_name(tmp_path):
     data["version"] = "2.0"
     path.write_text(json.dumps(data))
 
-    with pytest.raises(ValueError, match="Supported: 1.0, 1.1"):
+    with pytest.raises(ValueError, match="Supported: 1.0, 1.1, 1.2"):
         json_export.load(path)
 
 

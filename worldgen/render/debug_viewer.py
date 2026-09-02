@@ -125,6 +125,24 @@ def _color_getter(attribute: str):
             return LAND_COVER_COLORS.get(h.land_cover, (0.5, 0.5, 0.5))
 
         return get_color, False, False
+    if attribute == "territory":
+        # Which settlement works each hex.  Hashed to a colour rather than ramped: the
+        # question is where one catchment ends and the next begins, so neighbouring
+        # catchments need to be *unalike*, and any ordered palette makes adjacent owners
+        # look related when they are not.
+        import colorsys
+
+        def get_color(h):
+            if h.terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE) and h.territory is None:
+                return TERRAIN_COLORS[h.terrain_class]
+            if h.territory is None:
+                return (0.85, 0.85, 0.85)
+            hue = ((hash(h.territory) % 997) / 997.0) % 1.0
+            # Value falls off with haulage distance, so the gradient inside one catchment
+            # reads as "far from its market" while the hue still says whose it is.
+            return colorsys.hsv_to_rgb(hue, 0.55, 1.0 - min(h.territory_cost / 20.0, 0.45))
+
+        return get_color, True, False
     if attribute == "cultivation":
         _cultivated = (0.831, 0.643, 0.298)
 

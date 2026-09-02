@@ -69,6 +69,36 @@ def food_value(hx, cfg, dry: float, wet: float) -> float:
     return base * moisture_factor(hx.moisture, dry, wet)
 
 
+def site_bonus(coord, hx, hexes, cfg) -> float:
+    """What the hex itself is worth as a site, independent of the land around it.
+
+    A river to carry goods and drive a mill, a coast to land a boat, a rise to see and be
+    seen from, a confluence where two routes must meet.  These are facts about the point,
+    not about its catchment, so every scorer that ranks sites should read the same
+    function — a second copy would drift from this one the first time a bonus changed.
+    """
+    nbrs = [hexes[n] for n in neighbors(coord) if n in hexes]
+    bonus = 0.0
+
+    if "river" in hx.tags or any("river" in n.tags for n in nbrs):
+        bonus += cfg.habitability_river_bonus
+
+    if hx.terrain_class == TerrainClass.COAST or any(
+        n.terrain_class == TerrainClass.COAST for n in nbrs
+    ):
+        bonus += cfg.habitability_coast_bonus
+
+    if hx.terrain_class == TerrainClass.HILL and any(
+        n.terrain_class == TerrainClass.FLAT for n in nbrs
+    ):
+        bonus += cfg.habitability_hill_bonus
+
+    if "confluence" in hx.tags:
+        bonus += cfg.habitability_confluence_bonus
+
+    return bonus
+
+
 def _ring_offsets(max_radius: int) -> list[list[tuple[int, int]]]:
     """Offsets from a hex, grouped by ring, out to *max_radius*.
 
@@ -134,26 +164,9 @@ class HabitabilityStage(GeneratorStage):
                     raw[tier][coord] = 0.0
                 continue
 
-            # Site bonuses.  These describe the hex itself and so are identical across
-            # tiers; only the catchment term changes with reach.
-            bonus = 0.0
-            nbrs = [hexes[n] for n in neighbors(coord) if n in hexes]
-
-            if "river" in hx.tags or any("river" in n.tags for n in nbrs):
-                bonus += cfg.habitability_river_bonus
-
-            if hx.terrain_class == TerrainClass.COAST or any(
-                n.terrain_class == TerrainClass.COAST for n in nbrs
-            ):
-                bonus += cfg.habitability_coast_bonus
-
-            if hx.terrain_class == TerrainClass.HILL and any(
-                n.terrain_class == TerrainClass.FLAT for n in nbrs
-            ):
-                bonus += cfg.habitability_hill_bonus
-
-            if "confluence" in hx.tags:
-                bonus += cfg.habitability_confluence_bonus
+            # Site bonuses describe the hex itself and so are identical across tiers;
+            # only the catchment term changes with reach.
+            bonus = site_bonus(coord, hx, hexes, cfg)
 
             for tier, radius in radii.items():
                 raw[tier][coord] = cfg.habitability_agri_weight * means[radius][coord] + bonus

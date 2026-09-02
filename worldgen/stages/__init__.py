@@ -15,16 +15,23 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from ..core.pipeline import GeneratorStage
 
-MODELS = ("classic",)
+MODELS = ("classic", "organic")
 
 
 def default_stages(model: str = "classic") -> tuple[type["GeneratorStage"], ...]:
     """The production pipeline, in run order.
 
-    *model* selects which settlement and road model to use.  Only ``classic`` — the
-    habitability-ranked placement with a single gravity road pass — exists today; the
-    haulage-based model is added alongside it so the two can be compared in the debug
-    viewer before either is retired.
+    *model* selects which settlement and road model to use.
+
+    ``classic`` ranks hexes on habitability and places a configured number of cities and
+    towns at a fixed minimum separation, then sprinkles villages.
+
+    ``organic`` derives the hierarchy from pre-industrial haulage economics: markets go
+    where the most surplus can reach them inside a day's return, and their number follows
+    the land rather than a target.  It is being built stage by stage, so it currently
+    replaces settlement placement only and still runs the classic road stages over the
+    result.  The two live side by side so they can be compared in the debug viewer before
+    either is retired.
     """
     if model not in MODELS:
         raise ValueError(f"Unknown pipeline model {model!r}. Supported: {', '.join(MODELS)}")
@@ -44,7 +51,9 @@ def default_stages(model: str = "classic") -> tuple[type["GeneratorStage"], ...]
     from .village_tracks import VillageTrackStage
     from .water_bodies import WaterBodiesStage
 
-    return (
+    # Terrain first, and in strict dependency order: each of these reads what the one
+    # before it wrote.
+    physical = (
         ElevationStage,
         ErosionStage,
         TerrainClassificationStage,
@@ -54,6 +63,25 @@ def default_stages(model: str = "classic") -> tuple[type["GeneratorStage"], ...]
         BiomeStage,
         LandCoverStage,
         HabitabilityStage,
+    )
+
+    if model == "organic":
+        from .markets import MarketStage
+
+        return physical + (
+            MarketStage,
+            # Interim: the classic road stages still run over the new settlements, so
+            # there is something to look at in the viewer. Markets are all TOWN tier for
+            # now, which is what InterurbanRoadStage expects. Villages, cities, lanes and
+            # trade roads each replace one of these in turn.
+            InterurbanRoadStage,
+            CultivationStage,
+            VillagePlacementStage,
+            VillageTrackStage,
+            VillageCultivationStage,
+        )
+
+    return physical + (
         # Villages need roads and cultivation to exist before VillagePlacementStage will
         # site them, so this ordering is load-bearing, not incidental.
         CityTownStage,
