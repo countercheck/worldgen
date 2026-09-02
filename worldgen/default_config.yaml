@@ -59,7 +59,13 @@ terrain_escarpment_gradient_m: 250.0 # m/km above which it is a break of slope. 
 # ---------------------------------------------------------------------------
 # Erosion (hydraulic droplet simulation)
 # ---------------------------------------------------------------------------
-erosion_iterations: 15000              # Number of water-droplet simulations. Default: 15000
+# Droplets run per land hex, not per map, so the dose means the same thing at any size.
+# It is what decides whether the map has valleys: below about one per hex the rivers only
+# scratch a line into the noise and there is no floodplain. It is also a climate setting —
+# the orographic term lifts on height above sea level, so wearing the high ground down
+# flattens the rain shadow. 3.0 has floodplains and keeps most of the shadow; raising it
+# buys level ground at the cost of the map having any dry country.
+erosion_droplets_per_hex: 3.0          # Water-droplet simulations per land hex. Default: 3.0
 erosion_inertia: 0.05                  # Droplet momentum factor. Default: 0.05
 erosion_capacity: 4.0                  # Sediment capacity multiplier. Default: 4.0
 erosion_deposition: 0.3                # Rate of sediment deposition. Default: 0.3
