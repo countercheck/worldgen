@@ -315,6 +315,37 @@ class WorldConfig:
     # which over eroded terrain shrinks a catchment to a third of its proper reach.
     travel_ascent_per_hex: float = 125.0
 
+    # ---- River crossings ---------------------------------------------------
+    # A river is not uniformly crossable. Most of its length is an obstacle; a few places
+    # are not, and those places are why towns sit where they do. Crossings are settled
+    # before anything is built, so a bridging point can be the reason a market grows there
+    # rather than a consequence of one.
+    #
+    # Fords are physical and free: shallow braided water anyone can wade. What makes a
+    # reach shallow is small discharge over a slack bed — a steep reach of the same river
+    # is a gorge, and a large one is deep whatever its bed is doing.
+    # Catchment area, in km2, at or below which the water can be waded. A physical
+    # figure and comparable between maps, unlike river_flow, which is normalised against
+    # the largest accumulation present and so is a rank rather than a quantity. A stream
+    # draining a few tens of km2 is ankle deep and a step across; one draining thousands
+    # is not.
+    ford_max_catchment_km2: float = 60.0
+    # A bridge is capital, so it appears only where enough traffic will use it: the
+    # surplus a site needs within reach, per multiple of the widest wadeable span. A river
+    # twice that width needs twice the traffic to be worth the structure. This is
+    # road_river_crossing_base's idea doing its proper work — a threshold a particular
+    # site either clears or does not, rather than a toll charged along every watercourse.
+    # Nobody bridges to nowhere.
+    bridge_pressure_per_span: float = 3.0
+    crossing_pressure_radius: int = 6  # how far either bank is searched for that surplus
+    crossing_min_separation: int = 4  # nobody builds two bridges within sight of each other
+    # Getting across away from a crossing, per multiple of the wadeable span, charged on
+    # each land-river edge. Deliberately has no fixed term, unlike road_river_crossing_base:
+    # that base is the capital of building a bridge, and somebody walking to market pays no
+    # capital — what stops them is how much water is in the way.
+    travel_ford_cost: float = 8.0
+    crossing_use_cost: float = 0.5  # using an existing ford or bridge
+
     # Biome thresholds
     biome_alpine_elev: float = 0.85
     biome_cold_temp: float = 0.25

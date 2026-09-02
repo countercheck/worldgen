@@ -17,9 +17,11 @@ ROAD_TIER_RANK = {RoadTier.TRACK: 0, RoadTier.SECONDARY: 1, RoadTier.PRIMARY: 2}
 
 # Serialised schema version.  1.1 replaced the single "habitability" key with one score
 # per settlement tier; a 1.0 file still loads, its lone value read into all three.  1.2
-# added "territory" and "territory_cost": which settlement works a hex, and what it costs
-# that settlement to reach it.  Both default when absent, so a 1.0 or 1.1 file still loads
-# — it simply has no catchments recorded.  The bump exists so the schema cannot change
+# added "territory" and "territory_cost" — which settlement works a hex and what it costs
+# that settlement to reach it — and "catchment_km2", the upstream area draining through a
+# hex, kept alongside the normalised "river_flow" because that one is a rank and this one
+# is a quantity.  All three default when absent, so a 1.0 or 1.1 file still loads; it
+# simply records no catchments.  The bump exists so the schema cannot change
 # shape under a fixed version string: an old reader handed a newer file fails with a clear
 # message instead of silently missing fields.
 SCHEMA_VERSION = "1.2"
@@ -128,6 +130,7 @@ class WorldState:
                     "terrain_class": h.terrain_class.value,
                     "land_cover": h.land_cover.value if h.land_cover is not None else None,
                     "river_flow": h.river_flow,
+                    "catchment_km2": h.catchment_km2,
                     "habitability_city": h.habitability_city,
                     "habitability_town": h.habitability_town,
                     "habitability_village": h.habitability_village,
@@ -210,6 +213,7 @@ class WorldState:
                 if hd.get("land_cover") is not None
                 else None,
                 river_flow=hd["river_flow"],
+                catchment_km2=hd.get("catchment_km2", 0.0),
                 # Files written before habitability was split per tier carry a single
                 # "habitability"; read it into all three rather than rejecting them.
                 habitability_city=hd.get("habitability_city", hd.get("habitability", 0.0)),

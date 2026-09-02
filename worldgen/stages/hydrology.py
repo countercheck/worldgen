@@ -106,6 +106,17 @@ class HydrologyStage(GeneratorStage):
         else:
             for coord in river_set:
                 hexes[coord].river_flow = acc.get(coord, 0.0) / max_acc
+
+        # `acc` is an upstream hex count, and at 1 hex = 1 km that is catchment area in
+        # square kilometres — a physical quantity, comparable between one map and another.
+        # `river_flow` divides it away: normalised against the largest accumulation on the
+        # map, it says only "this river is X% of the biggest one *here*", so every map has
+        # a 1.0 however small its rivers really are. That is right for drawing, where
+        # width by rank reads correctly, and useless for asking whether a river can be
+        # waded. Keep both: the rank for rendering, the area for physics.
+        for coord in land:
+            hexes[coord].catchment_km2 = acc.get(coord, 0.0)
+
         # Clear stale river tags from hexes submerged into lake during drainage
         # (they were removed from river_set but still carry tags from the first pass)
         _river_tags = {"river", "headwater", "confluence", "river_mouth"}

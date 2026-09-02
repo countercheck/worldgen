@@ -66,9 +66,14 @@ def default_stages(model: str = "classic") -> tuple[type["GeneratorStage"], ...]
     )
 
     if model == "organic":
+        from .crossings import CrossingStage
         from .markets import MarketStage
 
         return physical + (
+            # Crossings before markets, deliberately: a bridging point is the cheapest
+            # ground in a district to reach from both banks, so it should be a reason a
+            # market grows there rather than something noticed afterwards.
+            CrossingStage,
             MarketStage,
             # Interim: the classic road stages still run over the new settlements, so
             # there is something to look at in the viewer. Markets are all TOWN tier for

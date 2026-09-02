@@ -70,7 +70,13 @@ class Hex:
     moisture: float = 0.0
     temperature: float = 0.0
     biome: Biome | None = None
+    # How much water passes, twice over. `river_flow` is normalised against the largest
+    # accumulation on the map, so it is a rank — right for drawing, where width by rank
+    # reads correctly, but not comparable between maps. `catchment_km2` is the upstream
+    # area draining through this hex, which is a physical quantity and does compare: a
+    # stream draining 30 km2 is the same stream whatever else is on the map.
     river_flow: float = 0.0
+    catchment_km2: float = 0.0
     terrain_class: TerrainClass = TerrainClass.FLAT
     settlement: Settlement | None = None
     road_connections: set[HexCoord] = field(default_factory=set)
