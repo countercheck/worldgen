@@ -9,8 +9,8 @@ from worldgen.core.hex import (
     SettlementTier,
     TerrainClass,
 )
-from worldgen.core.world_state import River, Road, RoadTier, WorldState
-from worldgen.export.png_export import PNGConfig, render, save
+from worldgen.core.world_state import Ferry, River, Road, RoadTier, WorldState
+from worldgen.export.png_export import _ROAD_COLOR, PNGConfig, render, save
 
 
 def _small_world() -> WorldState:
@@ -294,3 +294,208 @@ def test_legend_fits_a_canvas_smaller_than_itself():
     # runs to the very edge; require the drawn panel to end inside the canvas instead.
     assert box[2] < with_legend.width and box[3] < with_legend.height
     assert with_legend.height > without.height  # canvas grew to make room
+
+
+# --- roads and anchorages ----------------------------------------------------
+
+_ANCHOR_COLOR = (27, 58, 92)
+
+
+def _water_crossing_world() -> WorldState:
+    """A road that puts to sea mid-route: two land legs, two shore points."""
+    ws = WorldState.empty(seed=99, width=6, height=3)
+    for r in range(3):
+        ws.hexes[(3, r)].terrain_class = TerrainClass.OCEAN
+    ws.roads = [Road(path=[(1, 1), (2, 1), (3, 1), (4, 1), (5, 1)], tier=RoadTier.PRIMARY)]
+    return ws
+
+
+def _has_color(img: Image.Image, color) -> bool:
+    return color in {c for _, c in img.convert("RGB").getcolors(maxcolors=1 << 20)}
+
+
+def test_anchorage_layer_draws_markers():
+    """The anchor symbol appears only when the layer is on."""
+    ws = _water_crossing_world()
+    layers = {"terrain", "roads"}
+    with_anchorages = render(ws, PNGConfig(layers=layers | {"anchorages"}))
+    without = render(ws, PNGConfig(layers=layers))
+    assert _has_color(with_anchorages, _ANCHOR_COLOR)
+    assert not _has_color(without, _ANCHOR_COLOR)
+
+
+def test_anchorage_absent_when_no_road_meets_water():
+    """_small_world's road stays on land, so the layer draws nothing."""
+    img = render(_small_world(), PNGConfig(layers={"terrain", "roads", "anchorages"}))
+    assert not _has_color(img, _ANCHOR_COLOR)
+
+
+def test_wargame_style_includes_anchorages():
+    img = render(_water_crossing_world(), PNGConfig(style="wargame"))
+    assert _has_color(img, _ANCHOR_COLOR)
+
+
+def test_track_duplicating_a_primary_road_is_never_drawn():
+    """The overdraw bug: a track sharing every edge used to paint over the primary road."""
+    ws = WorldState.empty(seed=99, width=5, height=3)
+    path = [(0, 1), (1, 1), (2, 1), (3, 1)]
+    ws.roads = [
+        Road(path=path, tier=RoadTier.PRIMARY),
+        Road(path=list(path), tier=RoadTier.TRACK),
+    ]
+    img = render(ws, PNGConfig(layers={"terrain", "roads"}))
+    assert _has_color(img, _ROAD_COLOR[RoadTier.PRIMARY])
+    assert not _has_color(img, _ROAD_COLOR[RoadTier.TRACK])
+
+
+def test_branching_track_keeps_its_own_spur():
+    """Deduping must not swallow the part of the track that is genuinely its own."""
+    ws = WorldState.empty(seed=99, width=5, height=4)
+    ws.roads = [
+        Road(path=[(0, 1), (1, 1), (2, 1), (3, 1)], tier=RoadTier.PRIMARY),
+        Road(path=[(0, 1), (1, 1), (2, 1), (2, 2)], tier=RoadTier.TRACK),
+    ]
+    img = render(ws, PNGConfig(layers={"terrain", "roads"}))
+    assert _has_color(img, _ROAD_COLOR[RoadTier.PRIMARY])
+    assert _has_color(img, _ROAD_COLOR[RoadTier.TRACK])
+
+
+def test_ferry_landings_draw_anchorages():
+    """A ferry stands in for a road where a river channel cuts the network in two."""
+    ws = _small_world()
+    layers = {"terrain", "roads"}
+    without = render(ws, PNGConfig(layers=layers | {"anchorages"}))
+    ws.ferries = [Ferry(a=(0, 1), b=(2, 1))]
+    with_ferry = render(ws, PNGConfig(layers=layers | {"anchorages"}))
+    assert not _has_color(without, _ANCHOR_COLOR)
+    assert _has_color(with_ferry, _ANCHOR_COLOR)
+
+
+# --- fords and bridges -------------------------------------------------------
+
+_CROSSING_INK = (43, 33, 24)
+
+
+def _crossing_world() -> WorldState:
+    """A river with a road crossing it: one hex tagged ford, one tagged bridge."""
+    ws = WorldState.empty(seed=5, width=5, height=5)
+    ws.rivers = [River(hexes=[(2, 0), (2, 1), (2, 2), (2, 3)], flow_volume=1.0)]
+    for r in range(4):
+        ws.hexes[(2, r)].river_flow = 0.8
+        ws.hexes[(2, r)].tags.add("river")
+    ws.hexes[(2, 1)].tags.add("ford")
+    ws.hexes[(2, 2)].tags.add("bridge")
+    ws.roads = [Road(path=[(1, 1), (2, 1), (3, 1)], tier=RoadTier.PRIMARY)]
+    return ws
+
+
+def test_crossings_layer_draws_symbols():
+    ws = _crossing_world()
+    layers = {"terrain", "roads"}
+    assert not _has_color(render(ws, PNGConfig(layers=layers)), _CROSSING_INK)
+    assert _has_color(render(ws, PNGConfig(layers=layers | {"crossings"})), _CROSSING_INK)
+
+
+def test_bridge_draws_more_ink_than_a_ford():
+    """The ford's span is broken and carries no abutments, so it uses strictly less."""
+    from PIL import ImageChops
+
+    def ink(tag):
+        ws = _crossing_world()
+        for c in ((2, 1), (2, 2)):
+            ws.hexes[c].tags -= {"ford", "bridge"}
+        ws.hexes[(2, 1)].tags.add(tag)
+        cfg = PNGConfig(layers={"crossings"})
+        img = render(ws, cfg)
+        plain = render(WorldState.empty(seed=5, width=5, height=5), cfg)
+        box = ImageChops.difference(img.convert("RGB"), plain.convert("RGB"))
+        return sum(1 for p in box.getdata() if p != (0, 0, 0))
+
+    assert ink("ford") < ink("bridge")
+
+
+def test_crossings_layer_absent_when_nothing_is_tagged():
+    img = render(_small_world(), PNGConfig(layers={"terrain", "roads", "crossings"}))
+    assert not _has_color(img, _CROSSING_INK)
+
+
+def test_wargame_style_draws_crossings():
+    assert _has_color(render(_crossing_world(), PNGConfig(style="wargame")), _CROSSING_INK)
+
+
+# --- river widths ------------------------------------------------------------
+
+_RIVER_BLUE = (58, 120, 201)
+
+
+def _flowing_river_world() -> WorldState:
+    """One river gaining flow from headwater to mouth."""
+    ws = WorldState.empty(seed=11, width=6, height=3)
+    path = [(q, 1) for q in range(6)]
+    for i, c in enumerate(path):
+        ws.hexes[c].river_flow = 0.05 + i * 0.19
+    ws.rivers = [River(hexes=path, flow_volume=1.0)]
+    return ws
+
+
+def _blue_pixels(img: Image.Image) -> int:
+    return sum(1 for p in img.convert("RGB").getdata() if p == _RIVER_BLUE)
+
+
+def test_wider_settings_draw_more_river_ink():
+    """The width range reaches the raster, not just the SVG."""
+    ws = _flowing_river_world()
+    thin = render(ws, PNGConfig(layers={"rivers"}, river_min_width=1.0, river_max_width=1.0))
+    thick = render(ws, PNGConfig(layers={"rivers"}, river_min_width=4.0, river_max_width=4.0))
+    assert _blue_pixels(thick) > _blue_pixels(thin)
+
+
+def test_flow_banding_draws_more_ink_than_a_uniform_thin_river():
+    """A river that grows downstream uses more ink than one pinned at its thinnest."""
+    ws = _flowing_river_world()
+    banded = render(ws, PNGConfig(layers={"rivers"}, river_min_width=1.0, river_max_width=4.0))
+    flat = render(ws, PNGConfig(layers={"rivers"}, river_min_width=1.0, river_max_width=1.0))
+    assert _blue_pixels(banded) > _blue_pixels(flat)
+
+
+def test_river_width_settings_are_validated():
+    with pytest.raises(ValueError, match="river_width_steps must be >= 0"):
+        render(_flowing_river_world(), PNGConfig(river_width_steps=-1))
+    with pytest.raises(ValueError, match="river_min_width must be positive"):
+        render(_flowing_river_world(), PNGConfig(river_min_width=0))
+
+
+# --- line widths scale with hex size -----------------------------------------
+
+
+def _thickest_run(img: Image.Image, color) -> int:
+    """Longest vertical run of *color* anywhere in the image — i.e. drawn line width."""
+    px = img.convert("RGB").load()
+    best = 0
+    for x in range(img.width):
+        run = 0
+        for y in range(img.height):
+            if px[x, y] == color:
+                run += 1
+                best = max(best, run)
+            else:
+                run = 0
+    return best
+
+
+def test_river_line_thickness_scales_with_hex_size():
+    """The raster must actually get thicker, not just the width value passed to PIL."""
+    ws = _flowing_river_world()
+    cfg = {"layers": {"rivers"}, "river_width_steps": 1}
+    small = _thickest_run(render(ws, PNGConfig(hex_size=12.0, **cfg)), _RIVER_BLUE)
+    large = _thickest_run(render(ws, PNGConfig(hex_size=36.0, **cfg)), _RIVER_BLUE)
+    assert large > small * 2, f"river thickness barely moved: {small} -> {large}"
+
+
+def test_road_line_thickness_scales_with_hex_size():
+    ws = WorldState.empty(seed=4, width=6, height=3)
+    ws.roads = [Road(path=[(q, 1) for q in range(6)], tier=RoadTier.PRIMARY)]
+    color = _ROAD_COLOR[RoadTier.PRIMARY]
+    small = _thickest_run(render(ws, PNGConfig(hex_size=12.0, layers={"roads"})), color)
+    large = _thickest_run(render(ws, PNGConfig(hex_size=36.0, layers={"roads"})), color)
+    assert large > small, f"road thickness did not scale: {small} -> {large}"

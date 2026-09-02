@@ -4,8 +4,8 @@ from pathlib import Path
 import matplotlib as mpl
 
 from ..core.hex import Biome, LandCover, SettlementTier, TerrainClass
-from ..core.hex_grid import axial_to_pixel, split_path_on_water
-from ..core.world_state import RoadTier, WorldState
+from ..core.hex_grid import axial_to_pixel, dedupe_road_paths
+from ..core.world_state import ROAD_TIER_RANK, RoadTier, WorldState
 
 TERRAIN_COLORS = {
     TerrainClass.OCEAN: (0.2, 0.4, 0.8),
@@ -193,21 +193,20 @@ def render_svg(state: WorldState, attribute: str, hex_size: float = 20) -> str:
 
     if road_overlay:
         out.append('  <g id="layer-roads">')
-        for tier in RoadTier:
-            style = _ROAD_STYLE[tier]
+        # Iterating RoadTier drew PRIMARY first and TRACK last, so a track painted over
+        # the primary road it branches from. dedupe_road_paths awards each shared edge to
+        # its highest tier and returns them in ascending order, so primaries land on top.
+        for road, leg in dedupe_road_paths(
+            state.roads, state.hexes, lambda r: ROAD_TIER_RANK[r.tier]
+        ):
+            style = _ROAD_STYLE[road.tier]
             da = f' stroke-dasharray="{style["dasharray"]}"' if "dasharray" in style else ""
-            for road in state.roads:
-                if road.tier != tier:
-                    continue
-                for leg in split_path_on_water(road.path, state.hexes):
-                    pts = [
-                        (px + ox, py + oy) for px, py in (axial_to_pixel(c, hex_size) for c in leg)
-                    ]
-                    out.append(
-                        f'    <polyline points="{_points_str(pts)}" fill="none"'
-                        f' stroke="{style["stroke"]}" stroke-width="{style["stroke-width"]}"'
-                        f' stroke-linecap="round" stroke-linejoin="round"{da}/>'
-                    )
+            pts = [(px + ox, py + oy) for px, py in (axial_to_pixel(c, hex_size) for c in leg)]
+            out.append(
+                f'    <polyline points="{_points_str(pts)}" fill="none"'
+                f' stroke="{style["stroke"]}" stroke-width="{style["stroke-width"]}"'
+                f' stroke-linecap="round" stroke-linejoin="round"{da}/>'
+            )
         out.append("  </g>")
 
     out.append(

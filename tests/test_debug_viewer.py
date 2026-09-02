@@ -102,3 +102,29 @@ def test_render_cultivation_produces_file(land_cover_state, tmp_path):
     out = tmp_path / "cultivation.svg"
     render(land_cover_state, "cultivation", str(out))
     assert out.exists() and out.stat().st_size > 0
+
+
+def test_debug_viewer_paints_the_primary_road_over_the_branching_track():
+    """Iterating RoadTier drew tracks last, so a branch painted over its own trunk."""
+    import re
+
+    from worldgen.core.world_state import Road, RoadTier, WorldState
+    from worldgen.render.debug_viewer import render_svg
+
+    ws = WorldState.empty(seed=1, width=5, height=3)
+    ws.roads = [
+        Road(path=[(0, 1), (1, 1), (2, 1), (3, 1)], tier=RoadTier.PRIMARY),
+        Road(path=[(0, 1), (1, 1), (2, 1), (2, 2)], tier=RoadTier.TRACK),
+    ]
+    body = render_svg(ws, "roads").split('<g id="layer-roads">')[1].split("</g>")[0]
+
+    assert body.index('stroke="#b8a070"') < body.index('stroke="#5c3d1e"')
+    # The shared trunk is drawn once, by the primary road only.
+    polylines = re.findall(r'<polyline points="([^"]+)"', body)
+    assert len(polylines) == 2
+    edges = [
+        frozenset((a, b))
+        for pts in (p.split() for p in polylines)
+        for a, b in zip(pts, pts[1:], strict=False)
+    ]
+    assert len(edges) == len(set(edges)), "an edge was drawn twice"

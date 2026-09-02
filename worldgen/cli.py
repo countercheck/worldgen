@@ -139,7 +139,17 @@ def render_map(input_path: str, attribute: str, output: str):
 
 _STYLES = ["atlas", "topographic", "wargame"]
 _COLOR_MODES = ["biome", "terrain", "land_cover", "elevation"]
-_DEFAULT_LAYERS = {"terrain", "rivers", "roads", "settlements", "labels", "grid", "legend"}
+_DEFAULT_LAYERS = {
+    "terrain",
+    "rivers",
+    "roads",
+    "settlements",
+    "labels",
+    "grid",
+    "anchorages",
+    "crossings",
+    "legend",
+}
 _ALLOWED_LAYERS = _DEFAULT_LAYERS | {"contours"}
 _CONFIG_LAYERS_SOURCE = "export.layers in config"
 
@@ -265,6 +275,10 @@ def export_svg(
             "contour_max_stroke",
             "legend_corner",
             "legend_scale",
+            "river_min_width",
+            "river_max_width",
+            "river_width_steps",
+            "river_width_exponent",
         ):
             if key in export_section:
                 svg_kwargs[key] = export_section[key]
@@ -299,7 +313,10 @@ def export_svg(
         raise click.ClickException(str(exc)) from exc
 
     cfg = SVGConfig(**svg_kwargs)
-    save_svg(state, output, cfg)
+    try:
+        save_svg(state, output, cfg)
+    except ValueError as exc:
+        raise click.ClickException(f"Bad export setting: {exc}") from exc
     click.echo(f"✓ Saved to {output}")
 
 

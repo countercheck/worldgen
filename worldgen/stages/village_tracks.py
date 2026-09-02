@@ -3,8 +3,10 @@ from ..core.hex_grid import astar
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import Road, RoadTier, WorldState
 from .road_cost import (
-    river_discount,
-    road_edge_cost,
+    bank_discount,
+    make_road_edge_cost,
+    river_edges,
+    river_hex_cost,
     tag_river_crossings,
     terrain_base_cost,
 )
@@ -31,12 +33,16 @@ class VillageTrackStage(GeneratorStage):
         }
         targets = road_hex_set | settled_major
 
-        def node_cost(hx):
-            base = terrain_base_cost(hx, cfg)
-            return max(0.0, base - river_discount(hx, cfg))
+        # Roads may cross a river but never travel down the channel, so which bank a
+        # track runs on stays readable. Settlement hexes are exempt.
+        blocked = river_edges(state.rivers)
+        settled = {s.coord for s in state.settlements}
 
-        def edge_cost(from_hx, to_hx):
-            return road_edge_cost(from_hx, to_hx, cfg)
+        def node_cost(hx):
+            base = terrain_base_cost(hx, cfg) + river_hex_cost(hx, cfg)
+            return max(0.0, base - bank_discount(hx, hexes, cfg))
+
+        edge_cost = make_road_edge_cost(cfg, blocked, settled)
 
         new_roads: list[Road] = []
 

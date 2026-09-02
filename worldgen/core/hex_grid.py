@@ -121,11 +121,15 @@ def astar(
                 continue
 
             cost = cost_fn(grid[neighbor])
-            if cost == float("inf"):
-                continue
 
             if edge_cost_fn is not None:
                 cost += edge_cost_fn(grid[current], grid[neighbor])
+
+            # Checked after the edge term so an impassable *edge* is skipped too. Adding
+            # inf and pushing the node instead would let the search reach the goal with an
+            # infinite score and return a path straight through the forbidden edge.
+            if cost == float("inf"):
+                continue
 
             tentative_g = g_score[current] + cost
 
@@ -137,6 +141,76 @@ def astar(
                 heapq.heappush(open_set, (f, neighbor))
 
     return None
+
+
+def _is_water(hexes: dict[HexCoord, Hex], coord: HexCoord) -> bool:
+    """Water test used by the path helpers.
+
+    A coord absent from the grid has no terrain to judge, so it counts as land — the
+    same way `split_path_on_water` keeps it rather than cutting the path there.
+    """
+    hx = hexes.get(coord)
+    return hx is not None and hx.terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE)
+
+
+def water_transitions(path: list[HexCoord], hexes: dict[HexCoord, Hex]) -> list[HexCoord]:
+    """Land hexes where *path* meets water — the points a route embarks and lands.
+
+    Roads may cross water (see road_cost.py), but the water leg is not drawn, so those
+    land legs otherwise appear to stop dead at a shore.  Renderers mark these hexes so a
+    route that continues by boat reads as one.  Returns the *land* side of each
+    transition, in path order, with repeats collapsed.
+    """
+    out: list[HexCoord] = []
+    for prev, cur in zip(path, path[1:], strict=False):
+        prev_water = _is_water(hexes, prev)
+        if prev_water != _is_water(hexes, cur):
+            land = cur if prev_water else prev
+            if not out or out[-1] != land:
+                out.append(land)
+    return out
+
+
+def dedupe_road_paths(roads, hexes: dict[HexCoord, Hex], rank) -> list[tuple]:
+    """Split roads into land legs with every map edge drawn exactly once.
+
+    Routes between different settlement pairs share trunk segments, so a naive render
+    stacks many polylines on the same edge — mostly invisible, but where the tiers differ
+    a thin dashed track paints over a primary road, and the redundancy bloats the output.
+
+    Each edge is awarded to the highest-ranked road using it (`rank(road) -> int`, higher
+    wins; ties go to the first road in list order).  Results come back in ascending rank
+    so a renderer drawing them in order paints important roads last, on top.  Returns
+    (road, polyline) pairs; the road carries whatever styling the caller needs.
+    """
+    best: dict[frozenset, int] = {}
+    for road in roads:
+        r = rank(road)
+        for a, b in zip(road.path, road.path[1:], strict=False):
+            edge = frozenset((a, b))
+            if best.get(edge, -1) < r:
+                best[edge] = r
+
+    out: list[tuple] = []
+    claimed: set[frozenset] = set()
+    for road in sorted(roads, key=rank):  # stable, so ties keep list order
+        r = rank(road)
+        for leg in split_path_on_water(road.path, hexes):
+            run: list[HexCoord] = []
+            for a, b in zip(leg, leg[1:], strict=False):
+                edge = frozenset((a, b))
+                if best[edge] == r and edge not in claimed:
+                    claimed.add(edge)
+                    if not run:
+                        run.append(a)
+                    run.append(b)
+                else:
+                    if len(run) >= 2:
+                        out.append((road, run))
+                    run = []
+            if len(run) >= 2:
+                out.append((road, run))
+    return out
 
 
 def split_path_on_water(path: list[HexCoord], hexes: dict[HexCoord, Hex]) -> list[list[HexCoord]]:
