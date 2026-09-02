@@ -105,3 +105,65 @@ def test_world_config_validates_vector_fields(kwargs, message):
 def test_world_config_validates_new_road_and_settlement_fields(kwargs, message):
     with pytest.raises(ValueError, match=message):
         WorldConfig(**kwargs)
+
+
+# --- unknown and retired keys ------------------------------------------------
+
+
+def test_unknown_key_raises_value_error_not_type_error(tmp_path):
+    """A typo used to reach the dataclass constructor as a TypeError.
+
+    The CLI catches ValueError, so that surfaced as a raw traceback rather than a message.
+    """
+    path = tmp_path / "typo.yaml"
+    path.write_text("width: 32\nsea_levl: 0.3\n")
+    with pytest.raises(ValueError, match="Unknown config setting"):
+        WorldConfig.from_yaml(str(path))
+
+
+def test_unknown_key_suggests_the_nearest_real_setting(tmp_path):
+    path = tmp_path / "typo.yaml"
+    path.write_text("sea_levl: 0.3\n")
+    with pytest.raises(ValueError, match="did you mean 'sea_level'"):
+        WorldConfig.from_yaml(str(path))
+
+
+def test_unknown_key_with_no_near_match_still_names_the_key(tmp_path):
+    path = tmp_path / "junk.yaml"
+    path.write_text("qqqqzzzz: 1\n")
+    with pytest.raises(ValueError, match="'qqqqzzzz'"):
+        WorldConfig.from_yaml(str(path))
+
+
+def test_unknown_key_in_json_is_also_a_value_error(tmp_path):
+    path = tmp_path / "bad.json"
+    path.write_text('{"width": 32, "not_a_setting": 1}')
+    with pytest.raises(ValueError, match="Unknown config setting"):
+        WorldConfig.from_json(str(path))
+
+
+def test_retired_key_warns_and_still_loads(tmp_path, monkeypatch):
+    """A config written against an older version must keep working."""
+    from worldgen.core import config as config_module
+
+    monkeypatch.setitem(config_module._RETIRED_FIELDS, "old_knob", "use new_knob instead.")
+    path = tmp_path / "old.yaml"
+    path.write_text("width: 32\nold_knob: 5\n")
+
+    with pytest.warns(DeprecationWarning, match="old_knob"):
+        cfg = WorldConfig.from_yaml(str(path))
+    assert cfg.width == 32
+
+
+def test_shipped_default_config_loads():
+    """`init-config` copies this file verbatim, so it must parse against the dataclass.
+
+    It is hand-synced with the dataclass, so nothing else would catch a key that was
+    renamed in one place and not the other.
+    """
+    from pathlib import Path
+
+    import worldgen
+
+    shipped = Path(worldgen.__file__).parent / "default_config.yaml"
+    assert WorldConfig.from_yaml(str(shipped)).width > 0

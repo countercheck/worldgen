@@ -8,6 +8,17 @@
 # ---------------------------------------------------------------------------
 width: 128    # Map width in hexes. Default: 128
 height: 128   # Map height in hexes. Default: 128
+
+# How width x height are laid onto the hex grid.
+#   axial   Hex coordinates run q in [0, width), r in [0, height). The flat-top pixel
+#           transform shears that rhombus, so the drawn map is a leaning parallelogram
+#           with a straight edge on all four sides. Default.
+#   offset  Odd-q offset column/row. The drawn map is a rectangle; odd columns sit half
+#           a hex lower than even ones, so the north and south edges are ragged while
+#           east and west stay straight.
+# Columns are spaced 1.5 hex-sizes apart and rows sqrt(3), so an offset map is square
+# when height is about 0.87 * width — 128 x 111, say.
+grid_layout: axial
 sea_level: 0.25  # Water level threshold (0–1) on normalised elevation. Lower = more land. Default: 0.25
 
 # ---------------------------------------------------------------------------
@@ -26,7 +37,7 @@ continent_falloff: true   # Apply edge falloff so the sea rings the map and ever
 #   [north, south, east, west]  →  an island, sea on all sides
 #   [west]                      →  a west coast, land running inland to the east
 #   [north, west]               →  a north-west corner of a larger continent
-continent_falloff_edges: [south, east]
+continent_falloff_edges: [south]
 continent_shelf_variance: 0.35 # How much the shelf's inner edge wanders, 0–1. 0 gives a coast of even width; higher makes bays and headlands. The terrain noise already moves the shoreline a good deal on its own, so this is a nudge, not the main shaping. Default: 0.35
 continent_shelf_hexes: 10 # Width in hexes (km) of the coastal shelf over which land drops away to the sea. In hexes rather than a fraction of the map, so the coastal gradient is the same per km at any size. Narrower = steeper, cliffier coasts. Capped at a quarter of the shorter side. Only used when continent_falloff is true. Default: 10
 continent_seabed: 0.15    # Elevation the shelf descends to at the map edge. Must be below sea_level so the border is always under water. Nearer sea_level = a shallower, gentler shelf; nearer 0 = a steep drop into deep water, which makes cliff coasts common. Default: 0.15
@@ -172,8 +183,8 @@ road_pheromone_factor: 0.1   # How strongly existing traffic attracts new routes
 # Per-hex cost across water is tiny so distance across a body barely matters;
 # the journey is paid for by the embark + disembark costs at the shores.
 road_water_cost: 0.05    # Per-hex pathfinding cost on OCEAN/LAKE hexes. Default: 0.05
-road_embark_cost: 8.0    # Cost charged on a land→water edge transition. Default: 8.0
-road_disembark_cost: 8.0 # Cost charged on a water→land edge transition. Default: 8.0
+road_embark_cost: 20.0    # Cost charged on a land→water edge transition. Default: 8.0
+road_disembark_cost: 20.0 # Cost charged on a water→land edge transition. Default: 8.0
 
 # ---------------------------------------------------------------------------
 # Roads: river crossings (charged on each land↔river edge, scales with flow)
@@ -241,7 +252,8 @@ export:
   contour_max_stroke: 4.0            # Maximum contour stroke width in pixels. Default: 4.0
 
   # Legend settings — only used when "legend" is in the layers list above.
-  # The hex grid is sheared into a parallelogram, leaving the top-right and
-  # bottom-left of the canvas empty; the legend goes into one of them.
+  # On an axial grid the hexes are sheared into a parallelogram, leaving the top-right
+  # and bottom-left of the canvas empty; the legend goes into one of them. An offset
+  # grid fills its canvas, so there the legend sits in the corner over the map.
   legend_corner: top-right  # Which empty corner to use: top-right | bottom-left. Default: top-right
   legend_scale: 1.0         # Legend size as a multiple of hex_size. Default: 1.0

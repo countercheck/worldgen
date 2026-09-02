@@ -17,7 +17,10 @@ class ElevationStage(GeneratorStage):
         warp_gen = OpenSimplex(seed_b)
         coast_gen = OpenSimplex(seed_c)
 
-        # Base coordinate axes
+        # Base coordinate axes.  Everything here works in grid column/row — the
+        # (w, h) array indices — and only the final write-back goes through
+        # `state.coord_at` to find the hex, so the field is the same shape whichever
+        # layout the grid uses.
         q_1d = np.arange(w) / w * cfg.noise_scale  # (w,)
         r_1d = np.arange(h) / h * cfg.noise_scale  # (h,)
 
@@ -120,8 +123,8 @@ class ElevationStage(GeneratorStage):
             # and a truer one — the sea floor near a coast is shallow.
             arr = arr * t + cfg.continent_seabed * (1.0 - t)
 
-        for q in range(w):
-            for r in range(h):
-                state.hexes[(q, r)].elevation = float(arr[q, r])
+        for col in range(w):
+            for row in range(h):
+                state.hexes[state.coord_at(col, row)].elevation = float(arr[col, row])
 
         return state

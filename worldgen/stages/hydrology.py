@@ -1,26 +1,26 @@
 import heapq
 from collections import defaultdict, deque
+from collections.abc import Callable
 
 from ..core.hex import Hex, HexCoord, TerrainClass
 from ..core.hex_grid import neighbors
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import River, WorldState
 
-
-def _on_border(coord: HexCoord, w: int, h: int) -> bool:
-    """True for hexes on the grid edge, which drain off the map.
-
-    A border hex is a valid terminal even when its own steepest descent points back
-    inland (see `_flow_direction`), so path tracing must stop *on* it rather than follow
-    it inward — including when a path starts there.
-    """
-    q, r = coord
-    return q == 0 or q == w - 1 or r == 0 or r == h - 1
+# True for hexes on the grid edge, which drain off the map.  Which coordinates those are
+# depends on the grid layout, so the test travels as `WorldState.on_border` rather than
+# being rebuilt from a width and a height at each site.
+#
+# A border hex is a valid terminal even when its own steepest descent points back inland
+# (see `_flow_direction`), so path tracing must stop *on* it rather than follow it
+# inward — including when a path starts there.
+OnBorder = Callable[[HexCoord], bool]
 
 
 class HydrologyStage(GeneratorStage):
     def run(self, state: WorldState) -> WorldState:
         w, h = state.width, state.height
+        on_border = state.on_border
         hexes = state.hexes
 
         # Build elevation array and valid coord set
@@ -38,14 +38,14 @@ class HydrologyStage(GeneratorStage):
         }
 
         # A — Priority-Flood sink filling
-        filled = self._priority_flood(elev, land, ocean, w, h)
+        filled = self._priority_flood(elev, land, ocean, on_border)
         # Epsilon tilt: hexes farther from their plateau's drain point get slightly higher
         # filled elevation so that flat plateau areas have a well-defined gradient toward
         # water. Distance is scoped per-plateau (propagated only across equal-elevation
         # neighbors) rather than raw hex-distance-to-ocean — the latter can rank a cell as
         # "closer to water" than its own downhill neighbor, creating a false local minimum
         # that stalls flow_dir in the middle of a plateau.
-        drain_dist = self._plateau_drain_distance(filled, land, ocean, lakes, w, h)
+        drain_dist = self._plateau_drain_distance(filled, land, ocean, lakes, on_border)
         max_dist = max(drain_dist.values()) or 1
         eps = 1e-6
         for coord in filled:
@@ -55,7 +55,7 @@ class HydrologyStage(GeneratorStage):
             ) / (w + h)
 
         # B — Flow direction (steepest descent on filled surface)
-        flow_dir = self._flow_direction(filled, land, ocean, lakes, elev, w, h)
+        flow_dir = self._flow_direction(filled, land, ocean, lakes, elev, on_border)
 
         # C — Flow accumulation (topological sort)
         acc = self._flow_accumulation(flow_dir, land)
@@ -78,7 +78,7 @@ class HydrologyStage(GeneratorStage):
 
         # E — Build River objects (may extend river_set via fallback for stalled rivers)
         state.rivers = self._build_rivers(
-            river_set, flow_dir, hexes, land, ocean, lakes, acc, max_acc, filled, w, h
+            river_set, flow_dir, hexes, land, ocean, lakes, acc, max_acc, filled, on_border
         )
 
         # F — Normalize river_flow; headwater/confluence/mouth tags set from river_set
@@ -88,11 +88,11 @@ class HydrologyStage(GeneratorStage):
         else:
             for coord in river_set:
                 hexes[coord].river_flow = acc.get(coord, 0.0) / max_acc
-        self._tag_hexes(river_set, flow_dir, hexes, ocean, lakes, w, h)
+        self._tag_hexes(river_set, flow_dir, hexes, ocean, lakes, on_border)
 
         # G — Ensure every lake has an outflow river (fill-to-spillway enforcement)
         drainage_rivers, outlet_of = self._ensure_lake_drainage(
-            river_set, flow_dir, hexes, land, ocean, lakes, acc, filled, w, h
+            river_set, flow_dir, hexes, land, ocean, lakes, acc, filled, on_border
         )
         if drainage_rivers:
             state.rivers.extend(drainage_rivers)
@@ -112,7 +112,7 @@ class HydrologyStage(GeneratorStage):
         for coord, hx in hexes.items():
             if coord not in river_set:
                 hx.tags -= _river_tags
-        self._tag_hexes(river_set, flow_dir, hexes, ocean, lakes, w, h)
+        self._tag_hexes(river_set, flow_dir, hexes, ocean, lakes, on_border)
         # Recompute flow_volume for all rivers now that max_acc is final;
         # _ensure_lake_drainage may remove land hexes from acc (submerged into lake)
         # which can change max_acc, making pre-drainage flow_volume values stale.
@@ -142,7 +142,7 @@ class HydrologyStage(GeneratorStage):
         # leaves such a basin by evaporation instead, so its shore is tagged for
         # BiomeStage to turn into wetland — that is the "percolates out into marshes"
         # outlet, and it keeps the map honest about where the water goes.
-        for comp in _endorheic_components(hexes, lakes, ocean, flow_dir, outlet_of, w, h):
+        for comp in _endorheic_components(hexes, lakes, ocean, flow_dir, outlet_of, on_border):
             for coord in comp:
                 hexes[coord].tags.add("endorheic")
             shore = set(comp)
@@ -168,8 +168,7 @@ class HydrologyStage(GeneratorStage):
         land: set[HexCoord],
         ocean: set[HexCoord],
         lakes: set[HexCoord],
-        w: int,
-        h: int,
+        on_border: OnBorder,
     ) -> dict[HexCoord, int]:
         """BFS distance from each plateau's own drain point, propagated only across
         neighbors with equal filled elevation.
@@ -191,15 +190,13 @@ class HydrologyStage(GeneratorStage):
         for coord in land:
             if coord in dist:
                 continue
-            q, r = coord
-            on_border = q == 0 or q == w - 1 or r == 0 or r == h - 1
             has_lower_nbr = any(
                 nbr in ocean
                 or nbr in lakes
                 or (nbr in filled and filled[nbr] < filled[coord] - 1e-12)
                 for nbr in neighbors(coord)
             )
-            if on_border or has_lower_nbr:
+            if on_border(coord) or has_lower_nbr:
                 dist[coord] = 0
                 queue.append(coord)
         while queue:
@@ -217,8 +214,7 @@ class HydrologyStage(GeneratorStage):
         elev: dict[HexCoord, float],
         land: set[HexCoord],
         ocean: set[HexCoord],
-        w: int,
-        h: int,
+        on_border: OnBorder,
     ) -> dict[HexCoord, float]:
         """Barnes et al. Priority-Flood: fill closed depressions on land."""
         filled = dict(elev)
@@ -231,8 +227,7 @@ class HydrologyStage(GeneratorStage):
             visited.add(coord)
 
         for coord in land:
-            q, r = coord
-            if q == 0 or q == w - 1 or r == 0 or r == h - 1:
+            if on_border(coord):
                 heapq.heappush(heap, (filled[coord], coord))
                 visited.add(coord)
 
@@ -254,8 +249,7 @@ class HydrologyStage(GeneratorStage):
         ocean: set[HexCoord],
         lakes: set[HexCoord],
         elev: dict[HexCoord, float],
-        w: int,
-        h: int,
+        on_border: OnBorder,
     ) -> dict[HexCoord, HexCoord | None]:
         """For each land hex, flow to the lowest filled neighbor.
 
@@ -285,13 +279,14 @@ class HydrologyStage(GeneratorStage):
             # A border land hex whose steepest descent leads to another border land hex
             # would produce rivers that creep along the map edge.  Terminate here instead
             # so the border acts as a drain, not a channel.
-            if best_coord is not None and best_coord not in ocean and best_coord not in lakes:
-                q, r = coord
-                bq, br = best_coord
-                if (q == 0 or q == w - 1 or r == 0 or r == h - 1) and (
-                    bq == 0 or bq == w - 1 or br == 0 or br == h - 1
-                ):
-                    best_coord = None
+            if (
+                best_coord is not None
+                and best_coord not in ocean
+                and best_coord not in lakes
+                and on_border(coord)
+                and on_border(best_coord)
+            ):
+                best_coord = None
 
             flow_dir[coord] = best_coord
         return flow_dir
@@ -333,8 +328,7 @@ class HydrologyStage(GeneratorStage):
         hexes: dict[HexCoord, "Hex"],
         ocean: set[HexCoord],
         lakes: set[HexCoord],
-        w: int,
-        h: int,
+        on_border: OnBorder,
     ) -> None:
         # upstream river neighbors count
         upstream_river_nbrs: dict[HexCoord, int] = defaultdict(int)
@@ -350,9 +344,7 @@ class HydrologyStage(GeneratorStage):
                 hx.tags.add("headwater")
             if up_count >= 2:
                 hx.tags.add("confluence")
-            q, r = coord
-            on_border = q == 0 or q == w - 1 or r == 0 or r == h - 1
-            if on_border or any(nbr in ocean or nbr in lakes for nbr in neighbors(coord)):
+            if on_border(coord) or any(nbr in ocean or nbr in lakes for nbr in neighbors(coord)):
                 hx.tags.add("river_mouth")
 
     def _build_rivers(
@@ -366,8 +358,7 @@ class HydrologyStage(GeneratorStage):
         acc: dict[HexCoord, float],
         max_acc: float,
         filled: dict[HexCoord, float],
-        w: int,
-        h: int,
+        on_border: OnBorder,
     ) -> list[River]:
         """Trace each headwater downstream to ocean/border.
 
@@ -398,7 +389,7 @@ class HydrologyStage(GeneratorStage):
             while True:
                 # Tested at the top of the loop so a headwater that already sits on the
                 # border terminates too, instead of being traced back inland.
-                if _on_border(current, w, h):
+                if on_border(current):
                     break
                 ds = flow_dir.get(current)
                 if ds is None:
@@ -416,26 +407,24 @@ class HydrologyStage(GeneratorStage):
             # elevation-guided search.  Fallback hexes are registered in river_set and
             # flow_dir is updated so that subsequent tagging is consistent.
             mouth = path[-1]
-            mq, mr = mouth
-            on_border = mq == 0 or mq == w - 1 or mr == 0 or mr == h - 1
             reached_water = (
                 mouth in ocean
                 or mouth in lakes
                 or any(n in ocean or n in lakes for n in neighbors(mouth))
             )
-            if not reached_water and not on_border:
+            if not reached_water and not on_border(mouth):
                 # Stage 1: valley-preferring, excluding already-visited hexes
                 extension = self._guided_path_to_ocean(
-                    mouth, filled, land, ocean, lakes, visited_path, w, h
+                    mouth, filled, land, ocean, lakes, visited_path, on_border
                 )
                 if not extension:
                     # Stage 2: same elevation-guided search without the avoid constraint
                     extension = self._guided_path_to_ocean(
-                        mouth, filled, land, ocean, lakes, set(), w, h
+                        mouth, filled, land, ocean, lakes, set(), on_border
                     )
                 if not extension:
                     # Stage 3: plain BFS over any hex — guaranteed to reach a border
-                    extension = self._forced_exit_to_border(mouth, hexes, ocean, lakes, w, h)
+                    extension = self._forced_exit_to_border(mouth, hexes, ocean, lakes, on_border)
                 if extension:
                     mouth_acc = acc.get(mouth, 1.0)
                     prev = mouth
@@ -467,8 +456,7 @@ class HydrologyStage(GeneratorStage):
         ocean: set[HexCoord],
         lakes: set[HexCoord],
         avoid: set[HexCoord],
-        w: int,
-        h: int,
+        on_border: OnBorder,
     ) -> list[HexCoord]:
         """Elevation-guided Dijkstra over land hexes from *start* toward the nearest
         water-adjacent or border hex.
@@ -484,10 +472,8 @@ class HydrologyStage(GeneratorStage):
             cost, coord = heapq.heappop(heap)
             if cost > dist[coord]:
                 continue
-            q, r = coord
-            on_border = q == 0 or q == w - 1 or r == 0 or r == h - 1
             water_adj = any(n in ocean or n in lakes for n in neighbors(coord))
-            if (on_border or water_adj) and coord != start:
+            if (on_border(coord) or water_adj) and coord != start:
                 path: list[HexCoord] = []
                 node: HexCoord | None = coord
                 while node is not None and node != start:
@@ -512,8 +498,7 @@ class HydrologyStage(GeneratorStage):
         hexes: dict[HexCoord, "Hex"],
         ocean: set[HexCoord],
         lakes: set[HexCoord],
-        w: int,
-        h: int,
+        on_border: OnBorder,
     ) -> list[HexCoord]:
         """Plain BFS over all hexes (land and water) to the nearest border or water-adjacent hex.
 
@@ -525,10 +510,8 @@ class HydrologyStage(GeneratorStage):
         queue: deque[HexCoord] = deque([start])
         while queue:
             coord = queue.popleft()
-            q, r = coord
-            on_border = q == 0 or q == w - 1 or r == 0 or r == h - 1
             water_adj = any(n in ocean or n in lakes for n in neighbors(coord))
-            if (on_border or water_adj) and coord != start:
+            if (on_border(coord) or water_adj) and coord != start:
                 path: list[HexCoord] = []
                 cur: HexCoord = coord
                 while cur != start:
@@ -554,8 +537,7 @@ class HydrologyStage(GeneratorStage):
         lakes: set[HexCoord],
         acc: dict[HexCoord, float],
         filled: dict[HexCoord, float],
-        w: int,
-        h: int,
+        on_border: OnBorder,
     ) -> tuple[list[River], dict[HexCoord, HexCoord | None]]:
         """Raise each lake to its natural spillway, expand into submerged land, then
         route an outflow river.
@@ -590,10 +572,6 @@ class HydrologyStage(GeneratorStage):
         outlet_of: dict[HexCoord, HexCoord | None] = {}
         if not lakes:
             return [], outlet_of
-
-        def on_border(coord: HexCoord) -> bool:
-            q, r = coord
-            return q == 0 or q == w - 1 or r == 0 or r == h - 1
 
         def reaches_terminal(
             coord: HexCoord,
@@ -877,7 +855,7 @@ class HydrologyStage(GeneratorStage):
             spillway: HexCoord | None = None
             for candidate in outflow_candidates:
                 extension = self._guided_path_to_ocean(
-                    candidate, filled, land, ocean, lower_lakes, catchment - {candidate}, w, h
+                    candidate, filled, land, ocean, lower_lakes, catchment - {candidate}, on_border
                 )
                 if extension:
                     spillway = candidate
@@ -886,7 +864,9 @@ class HydrologyStage(GeneratorStage):
             # Guaranteed fallback: plain BFS (only border/ocean as terminals)
             if not extension:
                 spillway = outflow_candidates[0]
-                extension = self._forced_exit_to_border(spillway, hexes, ocean, lower_lakes, w, h)
+                extension = self._forced_exit_to_border(
+                    spillway, hexes, ocean, lower_lakes, on_border
+                )
 
             if not extension or spillway is None:
                 outlet_of.update(dict.fromkeys(component))
@@ -938,7 +918,7 @@ class HydrologyStage(GeneratorStage):
                 while True:
                     # Tested at the top so a merge point already on the border stops
                     # here, rather than following its inland-pointing flow_dir.
-                    if _on_border(tail, w, h):
+                    if on_border(tail):
                         break
                     ds = flow_dir.get(tail)
                     if ds is None or ds in seen:
@@ -1035,8 +1015,7 @@ def _endorheic_components(
     ocean: set[HexCoord],
     flow_dir: dict[HexCoord, HexCoord | None],
     outlet_of: dict[HexCoord, HexCoord | None],
-    w: int,
-    h: int,
+    on_border: OnBorder,
 ) -> list[set[HexCoord]]:
     """Return the lake components that have no outlet at all.
 
@@ -1061,7 +1040,7 @@ def _endorheic_components(
         cur: HexCoord | None = start
         while cur is not None and cur not in seen:
             seen.add(cur)
-            if cur in ocean or _on_border(cur, w, h):
+            if cur in ocean or on_border(cur):
                 return -1
             if cur in index:
                 return index[cur]
@@ -1070,9 +1049,7 @@ def _endorheic_components(
 
     drains = [False] * len(components)
     for i, comp in enumerate(components):
-        if any(_on_border(c, w, h) for c in comp) or any(
-            n in ocean for c in comp for n in neighbors(c)
-        ):
+        if any(on_border(c) for c in comp) or any(n in ocean for c in comp for n in neighbors(c)):
             drains[i] = True
             continue
         outlet = next((outlet_of.get(c) for c in sorted(comp) if outlet_of.get(c)), None)

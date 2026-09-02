@@ -165,12 +165,17 @@ class ErosionStage(GeneratorStage):
         cfg = self.config
         w, h = state.width, state.height
 
+        # Indexed by grid column/row throughout; `state.coord_at` turns an index back
+        # into a hex on the way in and out, so droplets run over the same rectangular
+        # field whichever layout the grid uses.
         arr = np.zeros((w, h))
-        for q in range(w):
-            for r in range(h):
-                arr[q, r] = state.hexes[(q, r)].elevation
+        for col in range(w):
+            for row in range(h):
+                arr[col, row] = state.hexes[state.coord_at(col, row)].elevation
 
-        land_coords = [(q, r) for q in range(w) for r in range(h) if arr[q, r] >= cfg.sea_level]
+        land_coords = [
+            (col, row) for col in range(w) for row in range(h) if arr[col, row] >= cfg.sea_level
+        ]
 
         if land_coords:
             land_arr = np.array(land_coords)
@@ -218,8 +223,8 @@ class ErosionStage(GeneratorStage):
         if hi > lo:
             arr = (arr - lo) / (hi - lo)
 
-        for q in range(w):
-            for r in range(h):
-                state.hexes[(q, r)].elevation = float(arr[q, r])
+        for col in range(w):
+            for row in range(h):
+                state.hexes[state.coord_at(col, row)].elevation = float(arr[col, row])
 
         return state

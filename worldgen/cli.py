@@ -3,7 +3,9 @@ from pathlib import Path
 import click
 
 from .core.config import WorldConfig
+from .core.hex_grid import GRID_LAYOUTS
 from .core.pipeline import GeneratorPipeline
+from .stages import MODELS, default_stages
 
 
 @click.group()
@@ -18,7 +20,31 @@ def cli():
 @click.option("--output-dir", type=str, default="./output", help="Output directory")
 @click.option("--width", type=int, default=None, help="Map width in hexes")
 @click.option("--height", type=int, default=None, help="Map height in hexes")
-def generate(seed: int, config: str, output_dir: str, width: int, height: int):
+@click.option(
+    "--grid-layout",
+    type=click.Choice(GRID_LAYOUTS, case_sensitive=False),
+    default=None,
+    help=(
+        "Grid shape. 'axial' draws a leaning parallelogram; 'offset' draws a rectangle "
+        "with ragged north and south edges."
+    ),
+)
+@click.option(
+    "--model",
+    type=click.Choice(MODELS, case_sensitive=False),
+    default="classic",
+    show_default=True,
+    help="Settlement and road model to run.",
+)
+def generate(
+    seed: int,
+    config: str,
+    output_dir: str,
+    width: int,
+    height: int,
+    grid_layout: str,
+    model: str,
+):
     """Generate a world."""
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -35,43 +61,16 @@ def generate(seed: int, config: str, output_dir: str, width: int, height: int):
         cfg.width = width
     if height:
         cfg.height = height
-
-    from .stages.biomes import BiomeStage
-    from .stages.city_town import CityTownStage
-    from .stages.climate import ClimateStage
-    from .stages.cultivation import CultivationStage, VillageCultivationStage
-    from .stages.elevation import ElevationStage
-    from .stages.erosion import ErosionStage
-    from .stages.habitability import HabitabilityStage
-    from .stages.hydrology import HydrologyStage
-    from .stages.interurban_roads import InterurbanRoadStage
-    from .stages.land_cover import LandCoverStage
-    from .stages.terrain_class import TerrainClassificationStage
-    from .stages.village_placement import VillagePlacementStage
-    from .stages.village_tracks import VillageTrackStage
-    from .stages.water_bodies import WaterBodiesStage
+    if grid_layout:
+        cfg.grid_layout = grid_layout.lower()
 
     click.echo(f"Generating world with seed {seed}...")
-    click.echo(f"  Size: {cfg.width}×{cfg.height}")
+    click.echo(f"  Size: {cfg.width}×{cfg.height} ({cfg.grid_layout})")
+    click.echo(f"  Model: {model}")
 
     pipeline = GeneratorPipeline(seed, cfg)
-    (
-        pipeline.add_stage(ElevationStage)
-        .add_stage(ErosionStage)
-        .add_stage(TerrainClassificationStage)
-        .add_stage(WaterBodiesStage)
-        .add_stage(HydrologyStage)
-        .add_stage(ClimateStage)
-        .add_stage(BiomeStage)
-        .add_stage(LandCoverStage)
-        .add_stage(HabitabilityStage)
-        .add_stage(CityTownStage)
-        .add_stage(InterurbanRoadStage)
-        .add_stage(CultivationStage)
-        .add_stage(VillagePlacementStage)
-        .add_stage(VillageTrackStage)
-        .add_stage(VillageCultivationStage)
-    )
+    for stage in default_stages(model):
+        pipeline.add_stage(stage)
     state = pipeline.run()
 
     click.echo("Writing output...")

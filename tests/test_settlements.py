@@ -1,58 +1,6 @@
-import pytest
-
-from worldgen.core.config import WorldConfig
+from tests.worlds import build_pipeline, build_world
 from worldgen.core.hex import Biome, Hex, SettlementRole, SettlementTier, TerrainClass
-from worldgen.core.pipeline import GeneratorPipeline
-from worldgen.stages.biomes import BiomeStage
-from worldgen.stages.city_town import CityTownStage
 from worldgen.stages.city_town import _assign_role as assign_city_town_role
-from worldgen.stages.climate import ClimateStage
-from worldgen.stages.cultivation import CultivationStage, VillageCultivationStage
-from worldgen.stages.elevation import ElevationStage
-from worldgen.stages.erosion import ErosionStage
-from worldgen.stages.habitability import HabitabilityStage
-from worldgen.stages.hydrology import HydrologyStage
-from worldgen.stages.interurban_roads import InterurbanRoadStage
-from worldgen.stages.land_cover import LandCoverStage
-from worldgen.stages.terrain_class import TerrainClassificationStage
-from worldgen.stages.village_placement import VillagePlacementStage
-from worldgen.stages.village_tracks import VillageTrackStage
-from worldgen.stages.water_bodies import WaterBodiesStage
-
-
-def _build_pipeline(seed: int = 42, width: int = 64, height: int = 64):
-    cfg = WorldConfig(
-        width=width,
-        height=height,
-        erosion_iterations=500,
-        target_city_count=4,
-        target_town_count=12,
-    )
-    p = GeneratorPipeline(seed, cfg)
-    # The production pipeline, stage for stage — see worldgen/cli.py.  Villages need
-    # roads and cultivation to exist before VillagePlacementStage will site them, so
-    # a settlement test cannot stop short of the full run.
-    p.add_stage(ElevationStage)
-    p.add_stage(ErosionStage)
-    p.add_stage(TerrainClassificationStage)
-    p.add_stage(WaterBodiesStage)
-    p.add_stage(HydrologyStage)
-    p.add_stage(ClimateStage)
-    p.add_stage(BiomeStage)
-    p.add_stage(LandCoverStage)
-    p.add_stage(HabitabilityStage)
-    p.add_stage(CityTownStage)
-    p.add_stage(InterurbanRoadStage)
-    p.add_stage(CultivationStage)
-    p.add_stage(VillagePlacementStage)
-    p.add_stage(VillageTrackStage)
-    p.add_stage(VillageCultivationStage)
-    return p
-
-
-@pytest.fixture(scope="module")
-def settle_state():
-    return _build_pipeline().run()
 
 
 def test_has_settlements(settle_state):
@@ -122,8 +70,9 @@ def test_positive_population(settle_state):
 
 
 def test_reproducibility():
-    s1 = _build_pipeline(seed=13).run()
-    s2 = _build_pipeline(seed=13).run()
+    kwargs = {"seed": 13, "target_city_count": 4, "target_town_count": 12}
+    s1 = build_world(**kwargs)
+    s2 = build_pipeline(**kwargs).run()
     names1 = sorted(s.name for s in s1.settlements)
     names2 = sorted(s.name for s in s2.settlements)
     assert names1 == names2, "Settlement names differ between identical seeds"

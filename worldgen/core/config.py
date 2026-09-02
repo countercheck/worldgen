@@ -1,6 +1,8 @@
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, fields
 from typing import Any
+
+from .hex_grid import GRID_LAYOUTS
 
 
 @dataclass(frozen=True)
@@ -49,6 +51,14 @@ class WorldConfig:
 
     width: int = 128
     height: int = 128
+    # How width x height are laid out on the hex grid:
+    #   "axial"   q in [0, width), r in [0, height).  The flat-top pixel transform
+    #             shears that rhombus, so the drawn map is a leaning parallelogram.
+    #   "offset"  odd-q offset column/row.  The drawn map is a rectangle; odd columns
+    #             sit half a hex lower than even ones, so the north and south edges are
+    #             ragged.  A square needs height about 0.87 * width, since hex columns
+    #             are spaced 1.5 hex-sizes apart and rows sqrt(3).
+    grid_layout: str = "axial"
     sea_level: float = 0.25
 
     # Elevation
@@ -93,6 +103,10 @@ class WorldConfig:
     endorheic_marsh_min_moisture: float = 0.40  # Below this a closed basin is arid, not marshy
 
     def __post_init__(self) -> None:
+        if self.grid_layout not in GRID_LAYOUTS:
+            raise ValueError(
+                f"unknown grid_layout {self.grid_layout!r}; choose from {', '.join(GRID_LAYOUTS)}"
+            )
         self.wind_direction = _coerce_pair("wind_direction", self.wind_direction)
         self.elevation_gradient = _coerce_pair("elevation_gradient", self.elevation_gradient)
         if not (0.0 <= self.river_flow_threshold <= 1.0):
@@ -340,7 +354,7 @@ class WorldConfig:
         with open(path) as f:
             data = json.load(f)
         _coerce_tuples(data)
-        return cls(**data)
+        return _construct(cls, data)
 
     def to_json(self, path: str) -> None:
         """Save config to JSON file."""
@@ -360,7 +374,7 @@ class WorldConfig:
             raise ValueError("YAML config root must be a mapping/object.")
         data.pop("export", None)
         _coerce_tuples(data)
-        return cls(**data)
+        return _construct(cls, data)
 
     def to_yaml(self, path: str) -> None:
         """Save config to YAML file."""
@@ -378,6 +392,54 @@ class WorldConfig:
 
 _TUPLE_FIELDS = ("wind_direction", "elevation_gradient")
 _EDGES = ("north", "south", "east", "west")
+
+# Settings that used to exist. A key here is dropped with a warning naming what replaced
+# it, so a config written against an older version still loads instead of crashing.
+_RETIRED_FIELDS: dict[str, str] = {}
+
+
+def _construct(cls: type, data: dict) -> "WorldConfig":
+    """Build a config from a loaded mapping, with a readable error for a bad key.
+
+    Without this an unknown key reaches the dataclass constructor and raises `TypeError`,
+    which the CLI's `except ValueError` handlers do not catch — so a single typo in a YAML
+    file surfaced as a raw traceback rather than a message. Every other config error is a
+    `ValueError`; this makes an unrecognised key one too.
+    """
+    import warnings
+
+    for name in sorted(set(data) & set(_RETIRED_FIELDS)):
+        warnings.warn(
+            f"Config setting {name!r} has been retired: {_RETIRED_FIELDS[name]}",
+            DeprecationWarning,
+            stacklevel=3,
+        )
+        data.pop(name)
+
+    known = {f.name for f in fields(cls)}
+    unknown = sorted(set(data) - known)
+    if unknown:
+        plural = "s" if len(unknown) > 1 else ""
+        listed = ", ".join(repr(name) for name in unknown)
+        suggestions = "; ".join(
+            f"{name!r}: did you mean {close!r}?"
+            for name in unknown
+            if (close := _closest(name, known)) is not None
+        )
+        message = f"Unknown config setting{plural}: {listed}."
+        if suggestions:
+            message += f" {suggestions}"
+        raise ValueError(message)
+
+    return cls(**data)
+
+
+def _closest(name: str, known: set[str]) -> str | None:
+    """The nearest known setting name, if one is close enough to be worth suggesting."""
+    import difflib
+
+    matches = difflib.get_close_matches(name, sorted(known), n=1, cutoff=0.7)
+    return matches[0] if matches else None
 
 
 def _coerce_edges(value: Any) -> tuple[str, ...]:
