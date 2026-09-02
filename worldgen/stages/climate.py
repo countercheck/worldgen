@@ -17,13 +17,15 @@ class ClimateStage(GeneratorStage):
 
     def _compute_temperature(self, state: WorldState) -> None:
         w, h = state.width, state.height
-        height = state.height
         base = self.config.base_temperature
         lat_range = self.config.latitude_temp_range
         lapse = self.config.altitude_lapse_rate
 
-        for (_, r), hx in state.hexes.items():
-            row_frac = r / max(height - 1, 1)
+        # Latitude is the grid *row*, which on an offset grid is the true north-south
+        # axis; on an axial grid it is r, as before.
+        for coord, hx in state.hexes.items():
+            row = state.grid_index(coord)[1]
+            row_frac = row / max(h - 1, 1)
             lat_temp = math.sin(row_frac * math.pi)
             # Subtract the mean of sin over [0, π] (= 2/π ≈ 0.637) so that
             # base_temperature is the true map mean temperature.
@@ -32,11 +34,12 @@ class ClimateStage(GeneratorStage):
             hx.temperature = max(0.0, min(1.0, temp))
 
         # Smooth temperature with gaussian_filter (replaces 5 manual neighbor-average passes)
-        temp_arr = np.array([[state.hexes[(q, r)].temperature for r in range(h)] for q in range(w)])
+        coords = [[state.coord_at(col, row) for row in range(h)] for col in range(w)]
+        temp_arr = np.array([[state.hexes[c].temperature for c in column] for column in coords])
         temp_arr = gaussian_filter(temp_arr, sigma=1.0)
-        for q in range(w):
-            for r in range(h):
-                state.hexes[(q, r)].temperature = float(temp_arr[q, r])
+        for col in range(w):
+            for row in range(h):
+                state.hexes[coords[col][row]].temperature = float(temp_arr[col, row])
 
     def _compute_moisture(self, state: WorldState) -> None:
         wind = self.config.wind_direction
@@ -45,6 +48,8 @@ class ClimateStage(GeneratorStage):
             wlen = 1.0
         wd = (wind[0] / wlen, wind[1] / wlen)
 
+        # A linear function of the axial coord, as is the pixel transform, so the
+        # direction this sweeps is the same one whatever layout the grid uses.
         def pos(coord):
             q, r = coord
             return (q + r * 0.5, float(r))

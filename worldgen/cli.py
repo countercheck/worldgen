@@ -3,6 +3,7 @@ from pathlib import Path
 import click
 
 from .core.config import WorldConfig
+from .core.hex_grid import GRID_LAYOUTS
 from .core.pipeline import GeneratorPipeline
 from .stages import MODELS, default_stages
 
@@ -20,13 +21,30 @@ def cli():
 @click.option("--width", type=int, default=None, help="Map width in hexes")
 @click.option("--height", type=int, default=None, help="Map height in hexes")
 @click.option(
+    "--grid-layout",
+    type=click.Choice(GRID_LAYOUTS, case_sensitive=False),
+    default=None,
+    help=(
+        "Grid shape. 'axial' draws a leaning parallelogram; 'offset' draws a rectangle "
+        "with ragged north and south edges."
+    ),
+)
+@click.option(
     "--model",
     type=click.Choice(MODELS, case_sensitive=False),
     default="classic",
     show_default=True,
     help="Settlement and road model to run.",
 )
-def generate(seed: int, config: str, output_dir: str, width: int, height: int, model: str):
+def generate(
+    seed: int,
+    config: str,
+    output_dir: str,
+    width: int,
+    height: int,
+    grid_layout: str,
+    model: str,
+):
     """Generate a world."""
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -43,9 +61,11 @@ def generate(seed: int, config: str, output_dir: str, width: int, height: int, m
         cfg.width = width
     if height:
         cfg.height = height
+    if grid_layout:
+        cfg.grid_layout = grid_layout.lower()
 
     click.echo(f"Generating world with seed {seed}...")
-    click.echo(f"  Size: {cfg.width}×{cfg.height}")
+    click.echo(f"  Size: {cfg.width}×{cfg.height} ({cfg.grid_layout})")
     click.echo(f"  Model: {model}")
 
     pipeline = GeneratorPipeline(seed, cfg)

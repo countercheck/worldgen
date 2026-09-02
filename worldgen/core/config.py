@@ -2,6 +2,8 @@ import json
 from dataclasses import asdict, dataclass, fields
 from typing import Any
 
+from .hex_grid import GRID_LAYOUTS
+
 
 @dataclass(frozen=True)
 class ClimateContext:
@@ -49,6 +51,14 @@ class WorldConfig:
 
     width: int = 128
     height: int = 128
+    # How width x height are laid out on the hex grid:
+    #   "axial"   q in [0, width), r in [0, height).  The flat-top pixel transform
+    #             shears that rhombus, so the drawn map is a leaning parallelogram.
+    #   "offset"  odd-q offset column/row.  The drawn map is a rectangle; odd columns
+    #             sit half a hex lower than even ones, so the north and south edges are
+    #             ragged.  A square needs height about 0.87 * width, since hex columns
+    #             are spaced 1.5 hex-sizes apart and rows sqrt(3).
+    grid_layout: str = "axial"
     sea_level: float = 0.25
 
     # Elevation
@@ -93,6 +103,10 @@ class WorldConfig:
     endorheic_marsh_min_moisture: float = 0.40  # Below this a closed basin is arid, not marshy
 
     def __post_init__(self) -> None:
+        if self.grid_layout not in GRID_LAYOUTS:
+            raise ValueError(
+                f"unknown grid_layout {self.grid_layout!r}; choose from {', '.join(GRID_LAYOUTS)}"
+            )
         self.wind_direction = _coerce_pair("wind_direction", self.wind_direction)
         self.elevation_gradient = _coerce_pair("elevation_gradient", self.elevation_gradient)
         if not (0.0 <= self.river_flow_threshold <= 1.0):

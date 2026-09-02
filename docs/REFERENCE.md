@@ -141,7 +141,8 @@ flowchart TD
 |---|---|---|
 | `seed` | `int` | The RNG seed for this run |
 | `width`, `height` | `int` | Grid dimensions in hexes |
-| `hexes` | `dict[HexCoord, Hex]` | Every cell, keyed by `(q, r)` |
+| `layout` | `str` | `"axial"` or `"offset"` — how `width`/`height` map onto hex coordinates |
+| `hexes` | `dict[HexCoord, Hex]` | Every cell, keyed by axial `(q, r)` in either layout |
 | `rivers` | `list[River]` | Source-to-confluence (or source-to-sea) paths |
 | `settlements` | `list[Settlement]` | Cities, towns, and villages combined |
 | `roads` | `list[Road]` | PRIMARY / SECONDARY / TRACK paths |
@@ -580,7 +581,9 @@ sub-passes, run sequentially.
 
 For each hex:
 ```
-row_frac = r / max(height - 1, 1)             # 0 at top, 1 at bottom
+row_frac = row / max(height - 1, 1)           # 0 at top, 1 at bottom; `row` is the
+                                              # grid row, which is `r` on an axial grid
+                                              # and the true north-south axis on offset
 lat_temp = sin(row_frac * π)                   # 0 at poles, 1 at equator
 temperature = base_temperature
             + (lat_temp - 2/π) * latitude_temp_range
@@ -1170,6 +1173,27 @@ below.
 |---|---|---|---|---|
 | `width` | `int` | `128` | ≥ 1 | Map width in hexes (`1 hex = 1 km` by convention) |
 | `height` | `int` | `128` | ≥ 1 | Map height in hexes |
+| `grid_layout` | `str` | `"axial"` | `axial` \| `offset` | Grid shape — see below |
+
+`grid_layout` decides which hexes a world is built from:
+
+- **`axial`** — `q` runs `[0, width)`, `r` runs `[0, height)`. That rhombus is sheared
+  by the flat-top pixel transform, so the drawn map is a leaning parallelogram with a
+  straight edge on all four sides.
+- **`offset`** — odd-q offset column/row, stored as the axial coordinate each
+  column/row names. The drawn map is a **rectangle**: odd columns sit half a hex lower
+  than even ones, so the north and south edges are **ragged** while east and west stay
+  straight.
+
+Hexes are keyed by axial coordinates in both layouts, so adjacency, distance and
+pathfinding are identical; only the set of hexes differs. Stages that work on a
+`(width, height)` array go through `WorldState.coord_at(col, row)` and
+`WorldState.grid_index(coord)` to cross between array indices and hex coordinates, and
+`WorldState.on_border(coord)` is the layout-aware map-edge test the hydrology and
+water-body stages drain to.
+
+Columns are spaced `1.5 * hex_size` apart and rows `sqrt(3) * hex_size`, so an offset
+map comes out square at `height ≈ 0.87 * width` — `128 x 111`, for instance.
 
 ### 4.2 Elevation Noise — § [3.1](#31-elevation)
 

@@ -41,8 +41,16 @@ in the interpreter you intend to use.
 ```bash
 worldgen generate --seed 42
 worldgen generate --seed 42 --width 256 --height 256 --output-dir ./my_world
+worldgen generate --seed 42 --width 256 --height 222 --grid-layout offset
 worldgen generate --seed 42 --config path/to/config.json
 ```
+
+`--grid-layout` picks the shape of the map. The default `axial` runs `q` over the width
+and `r` over the height, which the flat-top hex transform shears into a leaning
+parallelogram. `offset` uses odd-q offset column/row instead: the map is a **rectangle**,
+with the north and south edges left **ragged** because odd columns sit half a hex lower
+than even ones. Columns are spaced `1.5` hex-widths apart against `sqrt(3)` for rows, so
+an offset map comes out square at `height ~= 0.87 * width`.
 
 Outputs go to `./output/` by default:
 

@@ -5,6 +5,41 @@ from collections.abc import Callable
 
 from .hex import Hex, HexCoord, TerrainClass
 
+# Grid layouts.  Both store hexes under axial coordinates — only the *set* of hexes a
+# world is built from differs, so adjacency, distance and pathfinding are unaffected.
+#
+#   AXIAL   q in [0, width), r in [0, height).  A rhombus in axial space, which the
+#           flat-top pixel transform shears into a parallelogram: the drawn map is a
+#           leaning diamond with a straight edge on every side.
+#   OFFSET  odd-q offset coordinates: column in [0, width), row in [0, height), stored
+#           as the axial coord that column/row names.  The drawn map is a rectangle,
+#           with the north and south edges ragged because odd columns sit half a hex
+#           lower than even ones.
+AXIAL = "axial"
+OFFSET = "offset"
+GRID_LAYOUTS = (AXIAL, OFFSET)
+
+
+def offset_to_axial(col: int, row: int) -> HexCoord:
+    """Odd-q offset column/row to axial (flat-top layout)."""
+    return col, row - (col - (col & 1)) // 2
+
+
+def axial_to_offset(coord: HexCoord) -> tuple[int, int]:
+    """Axial to odd-q offset column/row (flat-top layout)."""
+    q, r = coord
+    return q, r + (q - (q & 1)) // 2
+
+
+def grid_coord(layout: str, col: int, row: int) -> HexCoord:
+    """The hex coordinate *layout* stores at grid column/row."""
+    return offset_to_axial(col, row) if layout == OFFSET else (col, row)
+
+
+def grid_index(layout: str, coord: HexCoord) -> tuple[int, int]:
+    """The grid column/row *layout* stores *coord* at — the inverse of `grid_coord`."""
+    return axial_to_offset(coord) if layout == OFFSET else coord
+
 
 def neighbors(coord: HexCoord) -> list[HexCoord]:
     """Six neighbors in axial coordinates."""
