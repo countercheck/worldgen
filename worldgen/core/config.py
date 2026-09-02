@@ -87,6 +87,31 @@ class WorldConfig:
             raise ValueError(
                 f"settlement_min_reachable must be >= 1, got {self.settlement_min_reachable}"
             )
+        for name in (
+            "cultivation_city_radius",
+            "cultivation_town_radius",
+            "cultivation_village_radius",
+        ):
+            if getattr(self, name) < 0:
+                raise ValueError(f"{name} must be >= 0, got {getattr(self, name)}")
+        for name in (
+            "food_fertile_value",
+            "food_marginal_value",
+            "food_wetland_value",
+            "food_water_value",
+            "habitability_agri_weight",
+            "habitability_river_bonus",
+            "habitability_coast_bonus",
+            "habitability_hill_bonus",
+            "habitability_confluence_bonus",
+        ):
+            if getattr(self, name) < 0:
+                raise ValueError(f"{name} must be >= 0, got {getattr(self, name)}")
+        if self.biome_dry_moist > self.biome_wet_moist:
+            raise ValueError(
+                "biome_dry_moist must be <= biome_wet_moist, got "
+                f"{self.biome_dry_moist} > {self.biome_wet_moist}"
+            )
         if not (0.0 <= self.road_bank_discount_min_flow <= 1.0):
             raise ValueError(
                 "road_bank_discount_min_flow must be in [0, 1], "
@@ -136,10 +161,25 @@ class WorldConfig:
     target_city_count: int = 6
     target_town_count: int = 24
 
-    # Cultivation radii
+    # Cultivation radii — also the catchment each tier is scored on by HabitabilityStage
     cultivation_city_radius: int = 8
     cultivation_town_radius: int = 4
     cultivation_village_radius: int = 2
+
+    # Habitability — food value of one hex, by land cover band.  Water is deliberately
+    # non-zero: a coastal site fishes, and scoring the sea at nothing penalised coastal
+    # sites twice. Tundra, desert, alpine and bare rock are always zero.
+    food_fertile_value: float = 1.0
+    food_marginal_value: float = 0.4
+    food_wetland_value: float = 0.15
+    food_water_value: float = 0.4
+
+    # Habitability — weight on the catchment mean, plus flat site bonuses
+    habitability_agri_weight: float = 0.40
+    habitability_river_bonus: float = 0.25
+    habitability_coast_bonus: float = 0.25
+    habitability_hill_bonus: float = 0.15
+    habitability_confluence_bonus: float = 0.10
 
     # World scale
     hex_size_m: float = 1000.0  # metres per hex

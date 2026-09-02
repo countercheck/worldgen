@@ -88,7 +88,9 @@ def generate(seed: int, config: str, output_dir: str, width: int, height: int):
     render_debug(state, "temperature", str(output_path / "temperature.svg"))
     render_debug(state, "moisture", str(output_path / "moisture.svg"))
     render_debug(state, "biome", str(output_path / "biome.svg"))
-    render_debug(state, "habitability", str(output_path / "habitability.svg"))
+    render_debug(state, "habitability_city", str(output_path / "habitability_city.svg"))
+    render_debug(state, "habitability_town", str(output_path / "habitability_town.svg"))
+    render_debug(state, "habitability_village", str(output_path / "habitability_village.svg"))
     render_debug(state, "settlements", str(output_path / "settlements.svg"))
     render_debug(state, "roads", str(output_path / "roads.svg"))
     render_debug(state, "land_cover", str(output_path / "land_cover.svg"))
@@ -105,6 +107,9 @@ _ATTRIBUTES = [
     "moisture",
     "biome",
     "habitability",
+    "habitability_city",
+    "habitability_town",
+    "habitability_village",
     "settlements",
     "roads",
     "land_cover",

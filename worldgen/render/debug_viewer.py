@@ -107,9 +107,12 @@ def _color_getter(attribute: str):
             return cmap(min(h.river_flow * 3, 1.0))
 
         return get_color, False, False
-    if attribute == "habitability":
+    if attribute.startswith("habitability"):
+        # "habitability" alone shows the city catchment — the widest, and the one that
+        # decides where the map's anchors go.
+        field = "habitability_city" if attribute == "habitability" else attribute
         cmap = mpl.colormaps["YlGn"]
-        return (lambda h: cmap(h.habitability)), False, False
+        return (lambda h: cmap(getattr(h, field))), False, False
     if attribute == "settlements":
         return _get_color_biome, True, False
     if attribute == "roads":

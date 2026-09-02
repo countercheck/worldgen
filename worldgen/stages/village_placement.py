@@ -43,7 +43,7 @@ class VillagePlacementStage(GeneratorStage):
                 continue
             if hx.settlement is not None:
                 continue
-            if hx.habitability <= 0:
+            if hx.habitability_village <= 0:
                 continue
             if hx.land_cover in _RESISTANT:
                 continue
@@ -63,7 +63,7 @@ class VillagePlacementStage(GeneratorStage):
             if not on_frontier and not road_adjacent:
                 continue
 
-            w = hx.habitability
+            w = hx.habitability_village
             if on_frontier:
                 w *= 2.0
             if road_adjacent:

@@ -117,7 +117,9 @@ class WorldState:
                     "terrain_class": h.terrain_class.value,
                     "land_cover": h.land_cover.value if h.land_cover is not None else None,
                     "river_flow": h.river_flow,
-                    "habitability": h.habitability,
+                    "habitability_city": h.habitability_city,
+                    "habitability_town": h.habitability_town,
+                    "habitability_village": h.habitability_village,
                     "cultivated": h.cultivated,
                     "tags": sorted(h.tags),
                     "road_connections": sorted([list(c) for c in h.road_connections]),
@@ -194,7 +196,11 @@ class WorldState:
                 if hd.get("land_cover") is not None
                 else None,
                 river_flow=hd["river_flow"],
-                habitability=hd["habitability"],
+                # Files written before habitability was split per tier carry a single
+                # "habitability"; read it into all three rather than rejecting them.
+                habitability_city=hd.get("habitability_city", hd.get("habitability", 0.0)),
+                habitability_town=hd.get("habitability_town", hd.get("habitability", 0.0)),
+                habitability_village=hd.get("habitability_village", hd.get("habitability", 0.0)),
                 cultivated=hd["cultivated"],
                 tags=set(hd.get("tags", [])),
                 road_connections={tuple(c) for c in hd.get("road_connections", [])},

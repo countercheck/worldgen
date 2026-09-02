@@ -49,10 +49,15 @@ class CityTownStage(GeneratorStage):
         land = [
             (coord, hx)
             for coord, hx in hexes.items()
-            if hx.habitability > 0
-            and hx.terrain_class not in (TerrainClass.OCEAN, TerrainClass.LAKE)
+            if hx.terrain_class not in (TerrainClass.OCEAN, TerrainClass.LAKE)
         ]
-        land.sort(key=lambda x: x[1].habitability, reverse=True)
+        # Cities are sorted on the widest catchment: a capital is chosen for the
+        # hinterland it can draw on, not for the hex it stands on.
+        city_ranked = sorted(
+            (x for x in land if x[1].habitability_city > 0),
+            key=lambda x: x[1].habitability_city,
+            reverse=True,
+        )
 
         settlements: list[Settlement] = []
         city_coords: list = []
@@ -60,7 +65,7 @@ class CityTownStage(GeneratorStage):
 
         # --- Cities ---
         city_idx = 0
-        for coord, hx in land:
+        for coord, hx in city_ranked:
             if len(city_coords) >= cfg.target_city_count:
                 break
             if reachable(coord) < cfg.settlement_min_reachable:
@@ -82,20 +87,21 @@ class CityTownStage(GeneratorStage):
                 city_idx += 1
 
         # --- Towns ---
-        adjusted: dict = {coord: hx.habitability for coord, hx in hexes.items()}
-        for city_coord in city_coords:
-            for nearby in hex_range(city_coord, 30):
-                if nearby in adjusted:
-                    adjusted[nearby] *= 0.5
+        # Towns are sorted on their own, narrower catchment — a market town lives off
+        # the fields in walking distance, not off a province.  That score is a different
+        # surface from the city one, with its own peaks, so towns no longer need the old
+        # blanket halving inside 30 hexes of a city to be pushed off the capitals'
+        # sites; town_min_separation does the spreading.
+        town_scores = {coord: hx.habitability_town for coord, hx in hexes.items()}
 
         local_maxima = []
         for coord, _hx in land:
             if hexes[coord].settlement is not None:
                 continue
-            score = adjusted[coord]
+            score = town_scores[coord]
             if score <= 0:
                 continue
-            nbr_scores = [adjusted.get(n, 0.0) for n in neighbors(coord) if n in hexes]
+            nbr_scores = [town_scores.get(n, 0.0) for n in neighbors(coord) if n in hexes]
             if score > max(nbr_scores, default=0.0):
                 local_maxima.append((score, coord))
         local_maxima.sort(reverse=True)
@@ -135,9 +141,9 @@ class CityTownStage(GeneratorStage):
             if coord in all_coords:
                 continue
             nearby = [c for c in hex_range(coord, 3) if c in hexes and c != coord]
-            if hx.habitability == max(
-                (hexes[c].habitability for c in nearby if c in hexes),
-                default=hx.habitability,
+            if hx.habitability_town == max(
+                (hexes[c].habitability_town for c in nearby if c in hexes),
+                default=hx.habitability_town,
             ):
                 hx.tags.add("pass")
 

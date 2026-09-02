@@ -106,9 +106,9 @@ flowchart TD
     end
 
     subgraph Settle["Settlements &amp; Roads"]
-        Hab[HabitabilityStage<br/><i>hex.habitability ∈ [0,1]</i>]
+        Hab[HabitabilityStage<br/><i>habitability_city/town/village ∈ [0,1]</i>]
         Cit[CityTownStage<br/><i>cities + towns; pass tags</i>]
-        Iur[InterurbanRoadStage<br/><i>PRIMARY/SECONDARY + habitability +0.2</i>]
+        Iur[InterurbanRoadStage<br/><i>PRIMARY/SECONDARY + habitability_village +0.2</i>]
         Cul[CultivationStage<br/><i>hex.cultivated near cities/towns</i>]
         Vil[VillagePlacementStage<br/><i>villages on frontier / near roads</i>]
         Vtk[VillageTrackStage<br/><i>TRACK roads to network</i>]
@@ -162,7 +162,9 @@ Convenience accessors: `all_land()`, `all_ocean()`, `all_lakes()`,
 | `biome` | `Biome \| None` | enum | Biome |
 | `land_cover` | `LandCover \| None` | enum | Land Cover |
 | `river_flow` | `float` | `[0.0, 1.0]`, normalized to map max | Hydrology |
-| `habitability` | `float` | `[0.0, 1.0]` | Habitability, Roads (+0.2 near roads) |
+| `habitability_city` | `float` | `[0.0, 1.0]` | Habitability (catchment radius 8) |
+| `habitability_town` | `float` | `[0.0, 1.0]` | Habitability (catchment radius 4) |
+| `habitability_village` | `float` | `[0.0, 1.0]` | Habitability (catchment radius 2), Roads (+0.2 near roads) |
 | `settlement` | `Settlement \| None` | — | City/Town, Village |
 | `road_connections` | `set[HexCoord]` | adjacent cells with roads | Interurban Roads, Village Tracks |
 | `cultivated` | `bool` | — | Cultivation, Village Cultivation |
@@ -195,7 +197,7 @@ Convenience accessors: `all_land()`, `all_ocean()`, `all_lakes()`,
 | `"river_mouth"` | River hex on map border or adjacent to ocean/lake | Hydrology |
 | `"ford"` | First road crossing of a river hex | `tag_river_crossings` |
 | `"bridge"` | Second road to cross the same river hex (upgrades a ford) | `tag_river_crossings` |
-| `"pass"` | HILL hex that's a local-max habitability within 3-hex range, no settlement | City/Town |
+| `"pass"` | HILL hex that's a local-max `habitability_town` within 3-hex range, no settlement | City/Town |
 | `"confluence_town"` | TOWN settled on a hex already tagged `"confluence"` | City/Town |
 
 Roads may cross a river but never travel along one: the hexsides a river is drawn
@@ -740,50 +742,83 @@ appear. Splitting the surviving range in half — i.e. `(wet_moist + 1) / 2`
 
 [stages/habitability.py](../worldgen/stages/habitability.py)
 
-**Purpose:** Composite `[0, 1]` score per hex, used as the input to all
-settlement placement.
+**Purpose:** Three `[0, 1]` scores per hex — one per settlement tier — used
+as the input to all settlement placement.
 
-**Reads:** `hex.terrain_class`, `hex.biome`, `hex.tags`, neighbours.
-**Writes:** `hex.habitability`.
+A site is scored on the land it can actually feed itself from, not on the
+biome of the single hex it stands on. The **catchment** is the mean food
+value of every hex within reach, so a town ringed by grassland beats one on
+an identical hex ringed by desert. Reach depends on tier: a city draws on a
+far wider hinterland than a village, so the same hex is scored three times,
+at each tier's cultivation radius (8 / 4 / 2).
 
-**Config:** none — all weights are hardcoded (see §5).
+**Reads:** `hex.land_cover`, `hex.moisture`, `hex.terrain_class`,
+`hex.biome`, `hex.tags`, neighbours.
+**Writes:** `hex.habitability_city`, `hex.habitability_town`,
+`hex.habitability_village`.
 
-**Algorithm** ([habitability.py:20–69](../worldgen/stages/habitability.py#L20)):
+**Config:** `food_fertile_value`, `food_marginal_value`,
+`food_wetland_value`, `food_water_value`, `habitability_agri_weight`,
+`habitability_river_bonus`, `habitability_coast_bonus`,
+`habitability_hill_bonus`, `habitability_confluence_bonus`,
+`cultivation_city_radius`, `cultivation_town_radius`,
+`cultivation_village_radius`, `biome_dry_moist`, `biome_wet_moist`.
+
+**Algorithm** ([habitability.py](../worldgen/stages/habitability.py)):
 
 ```
-# Hard zeros
+# Per-hex food value, by land cover band
+OPEN, WOODLAND            → food_fertile_value  × moisture_factor
+SCRUB, DENSE_FOREST       → food_marginal_value × moisture_factor
+BOG, MARSH                → food_wetland_value
+OPEN_WATER                → food_water_value
+TUNDRA/DESERT/ALPINE/ROCK → 0.0
+
+# Moisture is not monotonic for farming — a tent, not a ramp
+moisture_factor(m) = 1.0                        if biome_dry_moist <= m <= biome_wet_moist
+                   = m / biome_dry_moist        if m < biome_dry_moist
+                   = (1-m) / (1-biome_wet_moist) if m > biome_wet_moist
+
+# Hard zeros — you cannot found a settlement here
 if terrain_class in (OCEAN, LAKE, MOUNTAIN) or biome == WETLAND:
-    raw = 0.0
-    continue
+    every score = 0.0
 
-raw = 0.0
-if "river" in hex.tags or any neighbour has "river":
-    raw += 0.35                       # river adjacency
-raw += 0.25 * AGRI_SCORE[biome]       # agricultural potential
-if terrain_class == HILL and any neighbour is FLAT:
-    raw += 0.15                       # defensible hill
-if terrain_class == COAST or any neighbour is COAST:
-    raw += 0.15                       # coastal access
-if "confluence" in hex.tags:
-    raw += 0.10                       # river junction
+# Site bonuses, identical across tiers
+bonus  = habitability_river_bonus      if hex or neighbour has "river"
+       + habitability_coast_bonus      if hex or neighbour is COAST
+       + habitability_hill_bonus       if HILL with a FLAT neighbour
+       + habitability_confluence_bonus if "confluence" in hex.tags
 
-# Final normalisation
-hex.habitability = raw / max(raw across map)
+# One score per tier, each normalised against its own map-max
+raw[tier] = habitability_agri_weight * mean(food value within radius[tier]) + bonus
+hex.habitability_<tier> = raw[tier] / max(raw[tier] across map)
 ```
-
-`AGRI_SCORE` ([habitability.py:6–17](../worldgen/stages/habitability.py#L6)):
-GRASSLAND `1.0`, TROPICAL `0.8`, TEMPERATE_FOREST `0.7`, SHRUBLAND `0.5`,
-BOREAL `0.3`, everything else `0.0`.
 
 **Notes**
 
-- The score *before* normalisation can exceed 1 (max sum is
-  `0.35 + 0.25 + 0.15 + 0.15 + 0.10 = 1.00` if every bonus fires *and*
-  the biome is GRASSLAND), so normalisation is by the actual map-max,
-  not a fixed cap.
-- Roads add `+0.2` to neighbour habitability *after* this stage, in
-  Interurban Roads — so village placement sees a different (boosted)
-  habitability than city/town placement did.
+- **Water is not worth zero.** A coastal site fishes. Scoring the sea at
+  nothing penalised coastal sites twice — half their catchment counted as
+  waste ground, and the coastal bonus existed largely to repair the damage.
+  Wetland sits *below* open water, being neither good fishing nor good
+  ploughing, which matches bog and marsh resisting cultivation outright.
+- **Land cover, not biome, is the key.** Cover already folds in terrain and
+  moisture (the dense-forest/woodland split is a moisture threshold) and is
+  what Cultivation tests against, so the two cannot disagree about what is
+  farmable. The moisture curve then discriminates *within* a band rather
+  than re-deciding what the cover already settled.
+- Off-map neighbours are excluded from the mean rather than counted as
+  zero, so a hex on the map border is not scored as though the edge were
+  desert.
+- Each tier normalises against its own best site: the scores are only
+  compared within a tier, and a shared divisor would let the widest
+  catchment squash the other two.
+- Roads add `+0.2` to neighbour `habitability_village` *after* this stage,
+  in Interurban Roads. Only the village score — cities and towns are
+  already sited by then, and a road they caused should not retroactively
+  flatter the ground it runs over.
+- Costs one walk of the largest radius per hex (217 hexes at r=8), with
+  per-hex food values computed once into a lookup table. A 128×128 world
+  generates end to end in under 4s.
 
 ---
 
@@ -792,10 +827,11 @@ BOREAL `0.3`, everything else `0.0`.
 [stages/city_town.py](../worldgen/stages/city_town.py)
 
 **Purpose:** Place up to `target_city_count` cities and `target_town_count`
-towns by greedy selection on habitability with minimum-separation
+towns by greedy selection on their own tier's habitability score, with minimum-separation
 constraints.
 
-**Reads:** `hex.habitability`, `hex.terrain_class`, `hex.biome`,
+**Reads:** `hex.habitability_city`, `hex.habitability_town`,
+`hex.terrain_class`, `hex.biome`,
 `hex.elevation`, neighbours.
 **Writes:** `hex.settlement`, `state.settlements`, `hex.tags` (`"pass"`,
 `"confluence_town"`).
@@ -815,18 +851,21 @@ candidate is rejected. This keeps cities off geographically isolated
 peaks and tiny islands.
 
 **Cities** ([city_town.py:62–82](../worldgen/stages/city_town.py#L62)):
-sort all land hexes by `habitability` descending; greedily accept each
+sort all land hexes by `habitability_city` descending — the widest catchment,
+because a capital is chosen for the hinterland it can draw on; greedily accept each
 one whose distance from every prior city is `>= city_min_separation`.
 Each city gets a uniform-random population in `[10_000, 50_000]` and a
 role from `_assign_role` (below).
 
 **Towns** ([city_town.py:84–128](../worldgen/stages/city_town.py#L84)):
 
-1. Build an *adjusted* habitability map: multiply by `0.5` everywhere
-   within 30 hexes of any city ([city_town.py:85–89](../worldgen/stages/city_town.py#L85)).
-   This stops towns from clustering in the cities' best-spots.
-2. Find local maxima of the adjusted score (hexes whose adjusted score
-   beats all 6 neighbours).
+1. Sort on `habitability_town` — a different surface from the city score,
+   with its own peaks, because a market town lives off the fields in
+   walking distance rather than off a province. This replaces the old
+   blanket `× 0.5 within 30 hexes of a city` damp, which existed only to
+   push towns off the capitals' sites; `town_min_separation` now does that.
+2. Find local maxima of that score (hexes whose score beats all 6
+   neighbours).
 3. Greedy placement with `town_min_separation` (default 8). Population
    uniform random in `[1_000, 10_000]`. Towns on `"confluence"` hexes
    also get the `"confluence_town"` tag.
@@ -843,7 +882,7 @@ MARKET       otherwise
 
 **Pass tagging** ([city_town.py:130–142](../worldgen/stages/city_town.py#L130)):
 After settlements are placed, every empty HILL hex that is the local-max
-habitability within 3-hex range gets the `"pass"` tag. Used for rendering
+`habitability_town` within 3-hex range gets the `"pass"` tag. Used for rendering
 mountain passes and as a convenient query for module authors.
 
 ---
@@ -859,7 +898,7 @@ with self-reinforcing pheromone trails.
 **Reads:** `hex.terrain_class`, `hex.elevation`, `hex.river_flow`,
 `hex.coord`, `state.settlements` (CITY and TOWN tiers only).
 **Writes:** `state.roads`, `hex.road_connections`, `hex.tags`
-(`"ford"` / `"bridge"`), `hex.habitability` (+0.2 boost).
+(`"ford"` / `"bridge"`), `hex.habitability_village` (+0.2 boost).
 
 **Config:** `road_travellers_city`, `road_travellers_town`,
 `road_gravity_exponent`, `road_bank_discount`,
@@ -1034,7 +1073,7 @@ ideal for new villages.
 **Purpose:** Place villages by stochastic weighted sampling, biased toward
 either the cultivation frontier or road corridors.
 
-**Reads:** `hex.habitability` (already road-boosted), `hex.land_cover`,
+**Reads:** `hex.habitability_village` (already road-boosted), `hex.land_cover`,
 `hex.terrain_class`, `hex.cultivated`, `hex.road_connections`,
 `state.settlements`.
 **Writes:** `hex.settlement`, `state.settlements`.
@@ -1046,12 +1085,12 @@ the same reachability filter cities/towns use.
 a hex is a candidate if **all** of these hold:
 - not OCEAN/LAKE
 - no existing settlement
-- `habitability > 0`
+- `habitability_village > 0`
 - `land_cover not in RESISTANT` (same set as cultivation)
 - `grade_reachable_count(...) >= settlement_min_reachable`
 - **and** at least one of: on the cultivation frontier, OR road-adjacent
 
-Each candidate's weight starts at `habitability` and is multiplied:
+Each candidate's weight starts at `habitability_village` and is multiplied:
 - `× 2.0` if on the frontier
   ([village_placement.py:67](../worldgen/stages/village_placement.py#L67))
 - `× 1.5` if road-adjacent
@@ -1215,6 +1254,36 @@ All thresholds are in normalised `[0, 1]` units, matched to `hex.elevation`,
 | `cultivation_town_radius` | `int` | `4` | ≥ 0 | Around each town |
 | `cultivation_village_radius` | `int` | `2` | ≥ 0 | Around each village (runs after villages place) |
 
+These radii do double duty: each is also the catchment Habitability scores that
+tier on (§ [3.9](#39-habitability)).
+
+### 4.9a Habitability — § [3.9](#39-habitability)
+
+Food value of one hex, by land cover band. `TUNDRA`, `DESERT`, `ALPINE` and
+`BARE_ROCK` are always `0`.
+
+| Param | Type | Default | Range | Effect |
+|---|---|---|---|---|
+| `food_fertile_value` | `float` | `1.0` | ≥ 0 | `OPEN`, `WOODLAND` — prime arable |
+| `food_marginal_value` | `float` | `0.4` | ≥ 0 | `SCRUB`, `DENSE_FOREST` — grazing and hard-to-clear forest |
+| `food_wetland_value` | `float` | `0.15` | ≥ 0 | `BOG`, `MARSH` — deliberately below water; neither good fishing nor good ploughing |
+| `food_water_value` | `float` | `0.4` | ≥ 0 | `OPEN_WATER` — fishing. Non-zero so a coastal site is not penalised for having sea in its catchment |
+
+Fertile and marginal hexes are additionally scaled by a moisture curve peaking
+across `[biome_dry_moist, biome_wet_moist]` and falling to `0` at both extremes.
+Water and wetland ignore it.
+
+| Param | Type | Default | Range | Effect |
+|---|---|---|---|---|
+| `habitability_agri_weight` | `float` | `0.40` | ≥ 0 | Weight on the catchment mean |
+| `habitability_river_bonus` | `float` | `0.25` | ≥ 0 | Flat, if the hex or a neighbour carries a river |
+| `habitability_coast_bonus` | `float` | `0.25` | ≥ 0 | Flat, if the hex or a neighbour is `COAST` |
+| `habitability_hill_bonus` | `float` | `0.15` | ≥ 0 | Flat, for a `HILL` with a `FLAT` neighbour |
+| `habitability_confluence_bonus` | `float` | `0.10` | ≥ 0 | Flat, on a river junction (this hex only) |
+
+Bonuses are binary within each term: a hex with one river neighbour scores the
+same as one ringed by six, and adjacency is radius 1 only.
+
 ### 4.10 World Scale — § [3.11](#311-interurban-roads)
 
 These exist so road-grade calculations can express slopes in real-world
@@ -1318,23 +1387,17 @@ shape map output. Change these by editing the source file.
 | Flat river moisture bonus | `+0.15` | [climate.py:103](../worldgen/stages/climate.py#L103) | Used when `moisture_bleed_passes == 0` |
 | Coastal moisture bonus | `+0.10` | [climate.py:107](../worldgen/stages/climate.py#L107) | Always applied to land hexes adjacent to OCEAN/LAKE |
 | LandCover dense-forest threshold | `(wet_moist + 1) / 2` | [land_cover.py:37](../worldgen/stages/land_cover.py#L37) | Splits TEMPERATE_FOREST into DENSE_FOREST vs WOODLAND |
-| Habitability — river adjacency | `+0.35` | [habitability.py:39](../worldgen/stages/habitability.py#L39) | |
-| Habitability — agricultural | `+0.25 × AGRI_SCORE` | [habitability.py:42](../worldgen/stages/habitability.py#L42) | |
-| Habitability — defensible hill | `+0.15` | [habitability.py:48](../worldgen/stages/habitability.py#L48) | HILL with FLAT neighbour |
-| Habitability — coastal | `+0.15` | [habitability.py:54](../worldgen/stages/habitability.py#L54) | |
-| Habitability — confluence | `+0.10` | [habitability.py:58](../worldgen/stages/habitability.py#L58) | |
-| `AGRI_SCORE` table | dict | [habitability.py:6–17](../worldgen/stages/habitability.py#L6) | Per-biome agricultural multiplier (GRASSLAND=1.0, TROPICAL=0.8, TEMPERATE_FOREST=0.7, SHRUBLAND=0.5, BOREAL=0.3, others 0) |
+| Habitability land-cover bands | sets | [habitability.py:21–23](../worldgen/stages/habitability.py#L21) | Which covers count as fertile / marginal / wetland. The *values* are config (§4) |
 | City population range | `[10_000, 50_000]` | [city_town.py:69](../worldgen/stages/city_town.py#L69) | Uniform random per city |
 | Town population range | `[1_000, 10_000]` | [city_town.py:113](../worldgen/stages/city_town.py#L113) | |
-| Town habitability damp | `× 0.5 within 30 hexes of any city` | [city_town.py:87–89](../worldgen/stages/city_town.py#L87) | |
 | Town placement role: MINING elev cutoff | `> 0.70` | [city_town.py:21](../worldgen/stages/city_town.py#L21) | Mountain neighbour elevation needed for MINING role |
 | Town placement role: AGRICULTURAL fertile-neighbour count | `>= 3` | [city_town.py:26](../worldgen/stages/city_town.py#L26) | GRASSLAND or TEMPERATE_FOREST neighbours required |
-| Pass tag radius | `3` hexes | [city_town.py:137](../worldgen/stages/city_town.py#L137) | Local-max habitability neighbourhood for `"pass"` tag |
+| Pass tag radius | `3` hexes | [city_town.py:137](../worldgen/stages/city_town.py#L137) | Local-max `habitability_town` neighbourhood for `"pass"` tag |
 | Village population range | `[100, 1_000]` | [village_placement.py:90](../worldgen/stages/village_placement.py#L90) | |
 | Village minimum separation | `3` hexes | [village_placement.py:89](../worldgen/stages/village_placement.py#L89) | Hardcoded — not a `WorldConfig` parameter |
 | Village frontier weight bonus | `× 2.0` | [village_placement.py:67](../worldgen/stages/village_placement.py#L67) | |
 | Village road-adjacent bonus | `× 1.5` | [village_placement.py:69](../worldgen/stages/village_placement.py#L69) | |
-| Road-adjacent habitability boost | `+0.2` (cap 1.0) | [interurban_roads.py:147](../worldgen/stages/interurban_roads.py#L147) | Applied after road tiers are decided; feeds VillagePlacement |
+| Road-adjacent habitability boost | `+0.2` (cap 1.0) | [interurban_roads.py:147](../worldgen/stages/interurban_roads.py#L147) | Applied to `habitability_village` only, after road tiers are decided; feeds VillagePlacement |
 | Cultivation `RESISTANT` set | `{BOG, MARSH, BARE_ROCK, ALPINE, TUNDRA, DESERT, OPEN_WATER}` | [cultivation.py:6–16](../worldgen/stages/cultivation.py#L6) | Land covers immune to cultivation, used by both Cultivation and VillagePlacement |
 | WorldState JSON schema version | `"1.0"` | [world_state.py:84, 140](../worldgen/core/world_state.py#L84) | Round-trip compatibility check |
 
@@ -1355,7 +1418,9 @@ shape map output. Change these by editing the source file.
 | `temperature.png` | Greyscale temperature field |
 | `moisture.png` | Greyscale moisture field |
 | `biome.png` | Categorical biome map |
-| `habitability.png` | Composite settlement-suitability score (post-road boost) |
+| `habitability_city.svg` | Settlement suitability at the city catchment (radius 8) |
+| `habitability_town.svg` | Settlement suitability at the town catchment (radius 4) |
+| `habitability_village.svg` | Settlement suitability at the village catchment (radius 2), post-road boost |
 | `settlements.png` | City / town / village markers |
 | `roads.png` | PRIMARY / SECONDARY / TRACK lines |
 | `land_cover.png` | Categorical land-cover map |

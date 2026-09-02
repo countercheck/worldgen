@@ -21,7 +21,10 @@ def _small_world() -> WorldState:
     h.biome = Biome.GRASSLAND
     h.terrain_class = TerrainClass.FLAT
     h.land_cover = LandCover.OPEN
-    h.habitability = 0.7
+    # Distinct per tier, so a round trip that collapsed them would show up.
+    h.habitability_city = 0.7
+    h.habitability_town = 0.5
+    h.habitability_village = 0.3
     h.cultivated = True
     h.tags = {"test"}
     ws.settlements = [
@@ -65,6 +68,9 @@ def test_hex_fields_preserved(tmp_path):
     assert h.biome == Biome.GRASSLAND
     assert h.terrain_class == TerrainClass.FLAT
     assert h.land_cover == LandCover.OPEN
+    assert abs(h.habitability_city - 0.7) < 1e-9
+    assert abs(h.habitability_town - 0.5) < 1e-9
+    assert abs(h.habitability_village - 0.3) < 1e-9
     assert h.cultivated is True
     assert "test" in h.tags
     s2 = ws2.settlements[0]
@@ -72,6 +78,26 @@ def test_hex_fields_preserved(tmp_path):
     assert s2.tier == SettlementTier.CITY
     assert s2.role == SettlementRole.MARKET
     assert s2.population == 5000
+
+
+def test_pre_split_habitability_still_loads(tmp_path):
+    """Worlds saved before habitability was split per tier must still open."""
+    import json
+
+    ws = _small_world()
+    path = tmp_path / "world.json"
+    json_export.save(ws, path)
+    data = json.loads(path.read_text())
+    for hd in data["hexes"]:
+        for key in ("habitability_city", "habitability_town", "habitability_village"):
+            hd.pop(key, None)
+        hd["habitability"] = 0.6
+    path.write_text(json.dumps(data))
+
+    h = json_export.load(path).hexes[(0, 0)]
+    assert h.habitability_city == 0.6
+    assert h.habitability_town == 0.6
+    assert h.habitability_village == 0.6
 
 
 def test_settlement_linked_on_hex(tmp_path):

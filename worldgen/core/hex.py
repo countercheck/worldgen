@@ -75,6 +75,10 @@ class Hex:
     settlement: Settlement | None = None
     road_connections: set[HexCoord] = field(default_factory=set)
     tags: set[str] = field(default_factory=set)
-    habitability: float = 0.0
+    # Site quality at each tier's catchment radius — a city draws on a far wider
+    # hinterland than a village, so the same hex scores differently for each.
+    habitability_city: float = 0.0
+    habitability_town: float = 0.0
+    habitability_village: float = 0.0
     land_cover: LandCover | None = None
     cultivated: bool = False

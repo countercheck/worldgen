@@ -56,7 +56,9 @@ output/
 ├── temperature.svg
 ├── moisture.svg
 ├── biome.svg
-├── habitability.svg
+├── habitability_city.svg
+├── habitability_town.svg
+├── habitability_village.svg
 ├── settlements.svg
 ├── roads.svg
 ├── land_cover.svg
@@ -70,7 +72,8 @@ worldgen render --input output/world.json --attribute biome --output biome.svg
 ```
 
 Available attributes: `elevation`, `terrain_class`, `river_flow`, `temperature`, `moisture`,
-`biome`, `habitability`, `settlements`, `roads`, `land_cover`, `cultivation`.
+`biome`, `habitability_city`, `habitability_town`, `habitability_village`,
+`settlements`, `roads`, `land_cover`, `cultivation`.
 
 ## SVG export
 
@@ -126,6 +129,38 @@ save(state, "custom.svg", SVGConfig(
 | `river_width_exponent` | `0.5` | curve applied to flow before it is mapped onto the width range; `1.0` is linear |
 
 `style` is a shortcut that sets `color_mode` and `layers` together: `"topographic"` forces elevation coloring with terrain + rivers + grid; `"wargame"` forces terrain coloring with roads + rivers + settlements + grid + anchorages + crossings — a wargame map is read while moving units, so the features that gate movement matter as much as the roads. Both include the legend. For `"topographic"` and `"wargame"`, the `color_mode` and `layers` values are fixed by the style and any explicitly provided values are ignored. Only `"atlas"` (the default) uses the `color_mode` and `layers` you provide.
+
+### Where settlements go
+
+A site is scored on the land it can actually feed itself from, not on the biome of the
+single hex it stands on. The **catchment** is the mean food value of every hex within
+reach, so a town ringed by grassland beats one on an identical hex ringed by desert.
+
+Reach depends on tier, so every hex is scored three times — at the city, town and village
+cultivation radii (8 / 4 / 2 hexes) — and each tier is placed on its own surface. A
+capital is chosen for the province it can draw on; a market town for the fields within
+walking distance.
+
+Food value comes from land cover, in four configurable bands: fertile (`OPEN`,
+`WOODLAND`), marginal (`SCRUB`, `DENSE_FOREST`), wetland (`BOG`, `MARSH`), and water
+(`OPEN_WATER`). Tundra, desert, alpine and bare rock are worth nothing.
+
+**Water is deliberately not zero** — a coastal site fishes. Scoring the sea at nothing
+penalised coastal sites twice over: half their catchment counted as waste ground, and the
+coastal bonus existed largely to repair the damage. Wetland sits *below* open water,
+being neither good fishing nor good ploughing, which matches bog and marsh resisting
+cultivation outright.
+
+Fertile and marginal hexes are then scaled by a moisture curve. This is a tent, not a
+ramp — too dry is desert, too wet is waterlogged — peaking across the same
+`[biome_dry_moist, biome_wet_moist]` band the biome classifier uses, so the two cannot
+disagree. Land cover already buckets moisture coarsely, so the curve discriminates
+*within* a band: the wet end of grassland is better farmland than the dry end.
+
+On top of the catchment sit four flat site bonuses — river adjacency, coastal access, a
+hill overlooking a plain, and a river confluence. These are binary within each term: a hex
+with one river neighbour scores the same as one ringed by six, and adjacency is radius 1
+only. All nine values live in `WorldConfig`.
 
 ### Roads and anchorages
 
@@ -272,7 +307,7 @@ worldgen/
 │   ├── climate.py           # temperature gradient, orographic moisture
 │   ├── biomes.py            # Whittaker-style temp × moisture → biome
 │   ├── land_cover.py        # land cover classification
-│   ├── habitability.py      # composite score for settlement placement
+│   ├── habitability.py      # per-tier catchment score for settlement placement
 │   ├── city_town.py         # city & town placement
 │   ├── interurban_roads.py  # inter-settlement road network
 │   ├── cultivation.py       # city/town and village cultivation rings

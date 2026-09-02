@@ -4,6 +4,7 @@ from worldgen.core.hex_grid import (
     dedupe_road_paths,
     distance,
     grade_reachable_count,
+    hex_range,
     neighbors,
     ring,
     split_path_on_water,
@@ -24,6 +25,39 @@ def test_ring_size():
 
 def test_ring_radius_zero():
     assert ring((3, 4), 0) == [(3, 4)]
+
+
+def test_ring_one_is_exactly_the_neighbours():
+    assert sorted(ring((0, 0), 1)) == sorted(neighbors((0, 0)))
+
+
+def test_ring_members_are_all_at_that_distance():
+    """Counting the ring is not enough — a wrong walk returns 6r hexes in a smear."""
+    for radius in range(1, 9):
+        members = ring((2, -3), radius)
+        assert len(members) == len(set(members)), f"ring {radius} repeats a hex"
+        assert len(members) == 6 * radius
+        for coord in members:
+            assert distance((2, -3), coord) == radius, (
+                f"ring {radius} returned {coord} at distance {distance((2, -3), coord)}"
+            )
+
+
+def test_hex_range_is_a_disc():
+    """1 + 3r(r+1) is the hex-disc size; anything else means gaps or overspill."""
+    for radius in range(0, 9):
+        members = hex_range((-4, 1), radius)
+        assert len(members) == len(set(members)), f"hex_range {radius} repeats a hex"
+        assert len(members) == 1 + 3 * radius * (radius + 1)
+        for coord in members:
+            assert distance((-4, 1), coord) <= radius
+
+
+def test_hex_range_is_symmetric():
+    """A lopsided radius would smear cultivation and catchments off to one side."""
+    members = set(hex_range((0, 0), 4))
+    for q, r in members:
+        assert (-q, -r) in members, f"({q}, {r}) has no opposite in the disc"
 
 
 def test_astar_finds_path():
