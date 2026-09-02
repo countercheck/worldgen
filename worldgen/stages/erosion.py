@@ -175,7 +175,16 @@ class ErosionStage(GeneratorStage):
         if land_coords:
             land_arr = np.array(land_coords)
             n_land = len(land_coords)
-            n_iter = cfg.erosion_iterations
+            # Dosed per land hex rather than as a flat count, because a flat count is a
+            # different amount of weather depending on how big the map is. At the old
+            # default of 15000 droplets a 32x32 map got 14.6 per hex and a 128x128 got
+            # 0.9 — a sixteenfold spread, and most of why small maps came out as Alpine
+            # massifs while the default map stayed a barely-touched noise field.
+            #
+            # Per *land* hex, not per map hex: droplets are seeded on land, so a map that
+            # is mostly ocean should not have its weather spread thinner over what land it
+            # has.
+            n_iter = max(1, int(round(cfg.erosion_droplets_per_hex * n_land)))
             affinity_interval = cfg.erosion_affinity_update_interval
 
             # Channel affinity: starts uniform, biases later particles toward established channels

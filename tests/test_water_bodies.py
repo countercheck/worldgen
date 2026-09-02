@@ -14,7 +14,7 @@ from worldgen.stages.water_bodies import WaterBodiesStage
 
 
 def _build_pipeline(seed: int = 42, width: int = 40, height: int = 40):
-    cfg = WorldConfig(width=width, height=height, erosion_iterations=500)
+    cfg = WorldConfig(width=width, height=height)
     p = GeneratorPipeline(seed, cfg)
     p.add_stage(ElevationStage)
     p.add_stage(ErosionStage)

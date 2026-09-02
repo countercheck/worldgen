@@ -61,11 +61,15 @@ def test_stage_order_is_load_bearing():
 
 
 def test_pipeline_runs_and_populates_a_world():
-    state = build_pipeline(width=32, height=32, erosion_iterations=200).run()
+    # 48x48 rather than 32x32: `continent_shelf_hexes` is capped at a quarter of the
+    # shorter side, so a 32-hex map is mostly coastal shelf and cannot muster the
+    # `settlement_min_reachable` hexes of connected interior a settlement needs. It is
+    # not a landscape, and asserting settlements on one asserts an accident.
+    state = build_pipeline(width=48, height=48).run()
     assert isinstance(state, WorldState)
-    assert len(state.hexes) == 32 * 32
-    assert state.settlements, "a 32x32 world produced no settlements"
-    assert state.roads, "a 32x32 world produced no roads"
+    assert len(state.hexes) == 48 * 48
+    assert state.settlements, "a 48x48 world produced no settlements"
+    assert state.roads, "a 48x48 world produced no roads"
 
 
 def test_until_truncates_the_run():
@@ -82,7 +86,7 @@ def test_until_rejects_a_stage_not_in_the_pipeline():
 
 def test_same_seed_same_world():
     """The project's central promise: one integer reproduces the whole map."""
-    kwargs = {"width": 32, "height": 32, "erosion_iterations": 200}
+    kwargs = {"width": 32, "height": 32}
     a = build_pipeline(seed=7, **kwargs).run()
     b = build_pipeline(seed=7, **kwargs).run()
 
@@ -92,13 +96,13 @@ def test_same_seed_same_world():
 
 
 def test_different_seed_different_world():
-    kwargs = {"width": 32, "height": 32, "erosion_iterations": 200}
+    kwargs = {"width": 32, "height": 32}
     a = build_pipeline(seed=7, **kwargs).run()
     b = build_pipeline(seed=8, **kwargs).run()
     assert [h.elevation for h in a.hexes.values()] != [h.elevation for h in b.hexes.values()]
 
 
 def test_seed_is_recorded_in_metadata():
-    state = build_pipeline(seed=123, width=32, height=32, erosion_iterations=200).run()
+    state = build_pipeline(seed=123, width=32, height=32).run()
     assert state.seed == 123
     assert state.metadata["seed"] == 123

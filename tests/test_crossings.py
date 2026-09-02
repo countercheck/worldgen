@@ -67,7 +67,7 @@ def test_bigger_maps_really_do_have_bigger_rivers():
     different sizes. Catchment area is comparable: a larger region drains a larger trunk.
     """
     small = _crossing_world(width=48, height=48)
-    large = _crossing_world(width=128, height=128, erosion_iterations=2000)
+    large = _crossing_world(width=128, height=128)
 
     def biggest(ws, field):
         return max(getattr(h, field) for h in ws.hexes.values() if is_river(h))
@@ -215,12 +215,8 @@ def test_bridges_only_span_reaches_that_cannot_be_waded(crossed):
 
 
 def test_a_dearer_bridge_needs_more_traffic():
-    lenient = _crossing_world(
-        width=128, height=128, erosion_iterations=2000, bridge_pressure_per_span=2.0
-    )
-    strict = _crossing_world(
-        width=128, height=128, erosion_iterations=2000, bridge_pressure_per_span=8.0
-    )
+    lenient = _crossing_world(width=128, height=128, bridge_pressure_per_span=2.0)
+    strict = _crossing_world(width=128, height=128, bridge_pressure_per_span=8.0)
 
     def bridges(ws):
         return [h for h in ws.hexes.values() if BRIDGE in h.tags]

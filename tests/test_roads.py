@@ -38,7 +38,6 @@ def any_road_state(request):
         seed=42,
         width=48,
         height=48,
-        erosion_iterations=200,
         target_city_count=3,
         target_town_count=6,
         road_travellers_city=50,

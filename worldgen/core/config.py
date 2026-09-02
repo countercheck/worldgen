@@ -80,7 +80,25 @@ class WorldConfig:
     terrain_escarpment_gradient_m: float = 250.0
 
     # Erosion
-    erosion_iterations: int = 15000
+    # Droplets run per land hex, not per map. A flat count is a different amount of
+    # weather depending on map size — at the old 15000 a 32x32 map got 14.6 per hex and a
+    # 128x128 got 0.9, which is most of why small maps came out mountainous and the
+    # default map came out as barely-touched noise.
+    #
+    # The dose is what decides whether the map has valleys. Below about one per hex the
+    # rivers only scratch a line into the noise: there is no floodplain, and the ground
+    # beside a trunk river climbs at a constant 12 m per km with no break of slope. It is
+    # also non-monotonic at the low end, because erosion incises before it fills — half a
+    # droplet per hex leaves the map *rougher* than none at all.
+    # 3.0 is chosen against two things that pull opposite ways. Valleys want erosion:
+    # the floodplain appears between 1 and 2 droplets per hex, where the rise beside a
+    # trunk river falls from 27 m per km to 4 m. Rain shadow wants relief: the orographic
+    # term lifts on elevation above sea level, so wearing the high ground down flattens
+    # the moisture contrast — measured windward-to-leeward it falls from 0.37 at the old
+    # dose to 0.13 at 15 per hex, taking the dry biomes with it. 3.0 has the floodplains
+    # and keeps about three quarters of the shadow; going higher buys level ground at the
+    # cost of the map having any dry country at all.
+    erosion_droplets_per_hex: float = 3.0
     erosion_inertia: float = 0.05
     erosion_capacity: float = 4.0
     erosion_deposition: float = 0.3
@@ -525,6 +543,10 @@ _EDGES = ("north", "south", "east", "west")
 # Settings that used to exist. A key here is dropped with a warning naming what replaced
 # it, so a config written against an older version still loads instead of crashing.
 _RETIRED_FIELDS: dict[str, str] = {
+    "erosion_iterations": (
+        "erosion is now dosed per land hex so it means the same thing at any map size; "
+        "use erosion_droplets_per_hex (try 8.0, which is 15000 droplets on a 48x48 map)"
+    ),
     "terrain_hill_gradient": (
         "terrain classes are now bands of absolute gradient; use "
         "terrain_rolling_gradient_m, in metres of rise per kilometre"

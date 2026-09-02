@@ -57,7 +57,6 @@ def small_state():
     return build_world(
         width=32,
         height=32,
-        erosion_iterations=200,
         target_city_count=2,
         target_town_count=4,
         road_travellers_city=50,

@@ -28,10 +28,9 @@ def build_pipeline(
 
     *until* stops after the stage of that class name, for tests that only care about an
     early attribute and should not pay for settlement and road generation.  Overrides win
-    over the defaults, so a caller can vary anything including `erosion_iterations`.
+    the production defaults, so a caller can vary anything it needs to.
     """
-    defaults = {"erosion_iterations": 500}
-    cfg = WorldConfig(width=width, height=height, **{**defaults, **cfg_overrides})
+    cfg = WorldConfig(width=width, height=height, **cfg_overrides)
 
     stages = default_stages(model)
     if until is not None:

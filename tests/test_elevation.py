@@ -11,7 +11,7 @@ from worldgen.stages.terrain_class import TerrainClassificationStage
 
 @pytest.fixture(scope="module")
 def phase1_state():
-    cfg = WorldConfig(width=64, height=64, erosion_iterations=3000)
+    cfg = WorldConfig(width=64, height=64, erosion_droplets_per_hex=3.0)
     pipeline = GeneratorPipeline(42, cfg)
     pipeline.add_stage(ElevationStage).add_stage(ErosionStage).add_stage(TerrainClassificationStage)
     return pipeline.run()
@@ -62,7 +62,9 @@ def test_mountain_not_isolated(phase1_state):
 
 def test_elevation_gradient_tilts_north_high():
     """Negative south_bias should make northern rows higher on average."""
-    cfg = WorldConfig(width=32, height=32, erosion_iterations=0, elevation_gradient=(0.0, -0.8))
+    cfg = WorldConfig(
+        width=32, height=32, erosion_droplets_per_hex=0.0, elevation_gradient=(0.0, -0.8)
+    )
     p = GeneratorPipeline(42, cfg)
     p.add_stage(ElevationStage)
     state = p.run()
@@ -76,7 +78,9 @@ def test_elevation_gradient_tilts_north_high():
 
 def test_elevation_gradient_default_no_bias():
     """Default gradient (0, 0) should not skew east vs. west elevation."""
-    cfg = WorldConfig(width=32, height=32, erosion_iterations=0, elevation_gradient=(0.0, 0.0))
+    cfg = WorldConfig(
+        width=32, height=32, erosion_droplets_per_hex=0.0, elevation_gradient=(0.0, 0.0)
+    )
     p = GeneratorPipeline(42, cfg)
     p.add_stage(ElevationStage)
     state = p.run()
@@ -88,7 +92,7 @@ def test_elevation_gradient_default_no_bias():
 
 
 def test_reproducible():
-    cfg = WorldConfig(width=32, height=32, erosion_iterations=500)
+    cfg = WorldConfig(width=32, height=32, erosion_droplets_per_hex=3.0)
 
     def build():
         p = GeneratorPipeline(7, cfg)

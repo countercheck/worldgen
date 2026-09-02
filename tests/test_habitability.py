@@ -221,7 +221,7 @@ def test_a_wider_catchment_is_smoother():
     from worldgen.core.hex_grid import neighbors
     from worldgen.stages.habitability import catchment_means, food_value
 
-    cfg = WorldConfig(width=48, height=48, erosion_iterations=500)
+    cfg = WorldConfig(width=48, height=48)
     state = build_world(width=48, height=48, until=_HAB_STOP)
     hexes = state.hexes
 

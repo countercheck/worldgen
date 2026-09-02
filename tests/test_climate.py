@@ -12,7 +12,7 @@ from worldgen.stages.terrain_class import TerrainClassificationStage
 
 
 def _build_pipeline(seed: int = 42, width: int = 32, height: int = 32):
-    cfg = WorldConfig(width=width, height=height, erosion_iterations=500)
+    cfg = WorldConfig(width=width, height=height)
     p = GeneratorPipeline(seed, cfg)
     p.add_stage(ElevationStage)
     p.add_stage(ErosionStage)
@@ -64,29 +64,38 @@ def test_mountains_colder_than_flat(climate_state):
 
 
 def test_rain_shadow_present(climate_state):
-    # Compare moisture on windward vs. leeward sides of mountain ranges.
-    # Default wind blows east (positive q direction). For each mountain column,
-    # windward neighbors (lower q) should have higher average moisture than leeward (higher q).
-    windward_avg = []
-    leeward_avg = []
-    for (q, r), h in climate_state.hexes.items():
-        if h.terrain_class != TerrainClass.STEEP:
-            continue
-        windward = climate_state.hexes.get((q - 1, r))
-        leeward = climate_state.hexes.get((q + 1, r))
-        if (
-            windward
-            and leeward
-            and windward.terrain_class != TerrainClass.OCEAN
-            and leeward.terrain_class != TerrainClass.OCEAN
-        ):
-            windward_avg.append(windward.moisture)
-            leeward_avg.append(leeward.moisture)
+    # Measured against the barrier the air has already had to climb, not against the
+    # terrain class beside it. Orographic lift keys on elevation above sea level, so what
+    # casts a shadow is *high* ground. Selecting on the terrain class worked only while
+    # MOUNTAIN meant "steep or high"; the classes are bands of gradient now, and a steep
+    # hex can sit at any altitude. Testing the mechanism is both truer and less brittle
+    # than testing a proxy that has stopped holding.
+    cfg = WorldConfig(**climate_state.metadata["config"])
+    water = (TerrainClass.OCEAN, TerrainClass.LAKE)
 
-    if windward_avg and leeward_avg:
-        assert sum(windward_avg) / len(windward_avg) > sum(leeward_avg) / len(leeward_avg), (
-            "Rain shadow not detected: windward side is not wetter than leeward"
-        )
+    # Wind blows east by default, so upwind is west along a row.
+    sheltered, exposed = [], []
+    for r in range(climate_state.height):
+        barrier = 0.0
+        for q in range(climate_state.width):
+            h = climate_state.hexes.get((q, r))
+            if h is None:
+                continue
+            if h.terrain_class not in water:
+                behind = (barrier - cfg.sea_level) > 0.30
+                (sheltered if behind else exposed).append(h.moisture)
+            barrier = max(barrier, h.elevation)
+
+    assert sheltered, "no land lies behind high ground — the map has no barrier to test"
+    assert exposed, "no land lies in front of high ground"
+
+    wet = sum(exposed) / len(exposed)
+    dry = sum(sheltered) / len(sheltered)
+    assert wet > dry + 0.05, (
+        f"Rain shadow not detected: land behind high ground averages {dry:.2f} moisture "
+        f"against {wet:.2f} in front of it. Erosion wearing the barriers down is the "
+        f"usual cause — see erosion_droplets_per_hex."
+    )
 
 
 def test_reproducibility():
@@ -110,7 +119,7 @@ def test_base_temperature_shifts_mean_upward():
     """Higher base_temperature should produce a higher mean land temperature."""
 
     def run_with_base(base: float):
-        cfg = WorldConfig(width=32, height=32, erosion_iterations=500, base_temperature=base)
+        cfg = WorldConfig(width=32, height=32, base_temperature=base)
         p = GeneratorPipeline(42, cfg)
         p.add_stage(ElevationStage)
         p.add_stage(ErosionStage)
@@ -134,7 +143,6 @@ def test_base_temperature_preserves_latitude_shape():
         cfg = WorldConfig(
             width=32,
             height=32,
-            erosion_iterations=500,
             base_temperature=base,
             latitude_temp_range=0.3,  # large enough to distinguish rows
         )
@@ -188,7 +196,7 @@ def test_base_moisture_shifts_mean_upward():
     """Positive base_moisture should raise mean land moisture."""
 
     def run(base: float):
-        cfg = WorldConfig(width=32, height=32, erosion_iterations=500, base_moisture=base)
+        cfg = WorldConfig(width=32, height=32, base_moisture=base)
         p = GeneratorPipeline(42, cfg)
         p.add_stage(ElevationStage)
         p.add_stage(ErosionStage)
@@ -207,7 +215,7 @@ def test_base_moisture_shifts_mean_upward():
 def test_base_moisture_clamps_to_unit_interval():
     """base_moisture = 1.0 should not push moisture above 1.0."""
 
-    cfg = WorldConfig(width=32, height=32, erosion_iterations=500, base_moisture=1.0)
+    cfg = WorldConfig(width=32, height=32, base_moisture=1.0)
     p = GeneratorPipeline(42, cfg)
     p.add_stage(ElevationStage)
     p.add_stage(ErosionStage)
@@ -257,3 +265,49 @@ def test_latitude_temp_range_validation():
         WorldConfig(latitude_temp_range=-0.01)
     with pytest.raises(ValueError, match="latitude_temp_range"):
         WorldConfig(latitude_temp_range=1.1)
+
+
+def test_erosion_dose_does_not_wash_the_rain_shadow_away():
+    """The coupling that makes `erosion_droplets_per_hex` a climate setting too.
+
+    Orographic lift is `elevation - sea_level`, and erosion wears high ground down, so
+    weather and rain shadow pull against each other: enough droplets to cut floodplains
+    also flatten the barriers that make a leeward side dry. At eight per hex the high
+    ground is all but gone — 0-4% of land stands 0.30 above sea level, against 13-19% at
+    the default — and the shadow closes to nothing on a small map. This pins the default
+    on the right side of that, so raising it for flatter country cannot silently cost the
+    map its dry country.
+    """
+
+    def shadow(dose):
+        cfg = WorldConfig(width=48, height=48, erosion_droplets_per_hex=dose)
+        p = GeneratorPipeline(42, cfg)
+        for stage in (ElevationStage, ErosionStage, TerrainClassificationStage, ClimateStage):
+            p.add_stage(stage)
+        state = p.run()
+
+        water = (TerrainClass.OCEAN, TerrainClass.LAKE)
+        sheltered, exposed = [], []
+        for r in range(state.height):
+            barrier = 0.0
+            for q in range(state.width):
+                h = state.hexes.get((q, r))
+                if h is None:
+                    continue
+                if h.terrain_class not in water:
+                    behind = (barrier - cfg.sea_level) > 0.30
+                    (sheltered if behind else exposed).append(h.moisture)
+                barrier = max(barrier, h.elevation)
+        if not sheltered or not exposed:
+            return 0.0
+        return sum(exposed) / len(exposed) - sum(sheltered) / len(sheltered)
+
+    at_default = shadow(WorldConfig().erosion_droplets_per_hex)
+    assert at_default > 0.10, (
+        f"the default erosion dose leaves only a {at_default:.2f} moisture contrast "
+        "across high ground; the rain shadow has been eroded away"
+    )
+    assert at_default > shadow(8.0), (
+        "a heavier dose should weaken the shadow — if it does not, this test is no "
+        "longer exercising the coupling it was written for"
+    )
