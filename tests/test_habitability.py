@@ -1,45 +1,19 @@
 import pytest
 
+from tests.worlds import build_pipeline, build_world
 from worldgen.core.config import WorldConfig
 from worldgen.core.hex import Biome, Hex, LandCover, TerrainClass
-from worldgen.core.pipeline import GeneratorPipeline
-from worldgen.stages.biomes import BiomeStage
-from worldgen.stages.climate import ClimateStage
-from worldgen.stages.elevation import ElevationStage
-from worldgen.stages.erosion import ErosionStage
-from worldgen.stages.habitability import (
-    HabitabilityStage,
-    catchment_means,
-    food_value,
-    moisture_factor,
-)
-from worldgen.stages.hydrology import HydrologyStage
-from worldgen.stages.land_cover import LandCoverStage
-from worldgen.stages.terrain_class import TerrainClassificationStage
-from worldgen.stages.water_bodies import WaterBodiesStage
+from worldgen.stages.habitability import catchment_means, food_value, moisture_factor
 
 TIERS = ("habitability_city", "habitability_town", "habitability_village")
 
+# Scoring reads land_cover, so the run has to reach LandCoverStage — but nothing
+# downstream of HabitabilityStage affects these scores, so it stops there.
+_HAB_STOP = "HabitabilityStage"
+
 
 def _build_pipeline(seed: int = 42, width: int = 48, height: int = 48):
-    cfg = WorldConfig(width=width, height=height, erosion_iterations=500)
-    p = GeneratorPipeline(seed, cfg)
-    p.add_stage(ElevationStage)
-    p.add_stage(ErosionStage)
-    p.add_stage(TerrainClassificationStage)
-    p.add_stage(WaterBodiesStage)
-    p.add_stage(HydrologyStage)
-    p.add_stage(ClimateStage)
-    p.add_stage(BiomeStage)
-    # Scoring reads land_cover, so the cover stage is no longer optional here.
-    p.add_stage(LandCoverStage)
-    p.add_stage(HabitabilityStage)
-    return p
-
-
-@pytest.fixture(scope="module")
-def hab_state():
-    return _build_pipeline().run()
+    return build_pipeline(seed=seed, width=width, height=height, until=_HAB_STOP)
 
 
 # --- the moisture curve ------------------------------------------------------
@@ -224,7 +198,7 @@ def test_the_three_scores_rank_sites_differently():
     any size.  What has to differ is the *order* further down, where a wide catchment
     and a narrow one disagree about which of two sites is better.
     """
-    state = _build_pipeline().run()
+    state = build_world(width=48, height=48, until=_HAB_STOP)
 
     def ranking(field):
         scored = [(getattr(h, field), c) for c, h in state.hexes.items() if getattr(h, field) > 0]
@@ -248,7 +222,7 @@ def test_a_wider_catchment_is_smoother():
     from worldgen.stages.habitability import catchment_means, food_value
 
     cfg = WorldConfig(width=48, height=48, erosion_iterations=500)
-    state = _build_pipeline().run()
+    state = build_world(width=48, height=48, until=_HAB_STOP)
     hexes = state.hexes
 
     food = {

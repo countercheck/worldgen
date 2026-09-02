@@ -26,7 +26,7 @@ continent_falloff: true   # Apply edge falloff so the sea rings the map and ever
 #   [north, south, east, west]  →  an island, sea on all sides
 #   [west]                      →  a west coast, land running inland to the east
 #   [north, west]               →  a north-west corner of a larger continent
-continent_falloff_edges: [south, east]
+continent_falloff_edges: [south]
 continent_shelf_variance: 0.35 # How much the shelf's inner edge wanders, 0–1. 0 gives a coast of even width; higher makes bays and headlands. The terrain noise already moves the shoreline a good deal on its own, so this is a nudge, not the main shaping. Default: 0.35
 continent_shelf_hexes: 10 # Width in hexes (km) of the coastal shelf over which land drops away to the sea. In hexes rather than a fraction of the map, so the coastal gradient is the same per km at any size. Narrower = steeper, cliffier coasts. Capped at a quarter of the shorter side. Only used when continent_falloff is true. Default: 10
 continent_seabed: 0.15    # Elevation the shelf descends to at the map edge. Must be below sea_level so the border is always under water. Nearer sea_level = a shallower, gentler shelf; nearer 0 = a steep drop into deep water, which makes cliff coasts common. Default: 0.15
@@ -172,8 +172,8 @@ road_pheromone_factor: 0.1   # How strongly existing traffic attracts new routes
 # Per-hex cost across water is tiny so distance across a body barely matters;
 # the journey is paid for by the embark + disembark costs at the shores.
 road_water_cost: 0.05    # Per-hex pathfinding cost on OCEAN/LAKE hexes. Default: 0.05
-road_embark_cost: 8.0    # Cost charged on a land→water edge transition. Default: 8.0
-road_disembark_cost: 8.0 # Cost charged on a water→land edge transition. Default: 8.0
+road_embark_cost: 20.0    # Cost charged on a land→water edge transition. Default: 8.0
+road_disembark_cost: 20.0 # Cost charged on a water→land edge transition. Default: 8.0
 
 # ---------------------------------------------------------------------------
 # Roads: river crossings (charged on each land↔river edge, scales with flow)

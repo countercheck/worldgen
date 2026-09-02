@@ -1,0 +1,76 @@
+"""World builders shared by the test suite.
+
+Four test modules each carried a private `_build_pipeline` that restated the production
+stage list, stage for stage.  Five copies of one ordering meant a stage added to the CLI
+but missed in a fixture would leave those tests asserting about a pipeline nobody runs.
+Everything here builds on `worldgen.stages.default_stages`, which is the same list the CLI
+uses.
+
+Worlds are memoised for the session.  Several modules want the same 64x64 seed-42 world,
+and generating it once rather than once per module is what keeps the suite fast enough to
+run on every commit.
+"""
+
+from worldgen.core.config import WorldConfig
+from worldgen.core.pipeline import GeneratorPipeline
+from worldgen.stages import default_stages
+
+
+def build_pipeline(
+    seed: int = 42,
+    width: int = 64,
+    height: int = 64,
+    model: str = "classic",
+    until: str | None = None,
+    **cfg_overrides,
+) -> GeneratorPipeline:
+    """A pipeline over the production stage list.
+
+    *until* stops after the stage of that class name, for tests that only care about an
+    early attribute and should not pay for settlement and road generation.  Overrides win
+    over the defaults, so a caller can vary anything including `erosion_iterations`.
+    """
+    defaults = {"erosion_iterations": 500}
+    cfg = WorldConfig(width=width, height=height, **{**defaults, **cfg_overrides})
+
+    stages = default_stages(model)
+    if until is not None:
+        names = [s.__name__ for s in stages]
+        if until not in names:
+            raise ValueError(f"No stage named {until!r} in the {model} pipeline: {names}")
+        stages = stages[: names.index(until) + 1]
+
+    pipeline = GeneratorPipeline(seed, cfg)
+    for stage in stages:
+        pipeline.add_stage(stage)
+    return pipeline
+
+
+_WORLD_CACHE: dict = {}
+
+
+def build_world(
+    seed: int = 42,
+    width: int = 64,
+    height: int = 64,
+    model: str = "classic",
+    until: str | None = None,
+    **cfg_overrides,
+):
+    """Memoised `build_pipeline(...).run()`.
+
+    The cache key is the full argument set, so two callers asking for different configs
+    get different worlds — but the common 64x64 seed-42 case is generated once.  Callers
+    must not mutate the result; anything that needs to mutate should build its own.
+    """
+    key = (seed, width, height, model, until, tuple(sorted(cfg_overrides.items())))
+    if key not in _WORLD_CACHE:
+        _WORLD_CACHE[key] = build_pipeline(
+            seed=seed,
+            width=width,
+            height=height,
+            model=model,
+            until=until,
+            **cfg_overrides,
+        ).run()
+    return _WORLD_CACHE[key]
