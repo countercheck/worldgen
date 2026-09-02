@@ -436,10 +436,16 @@ def test_upsampling_warns(tmp_path):
 
 
 def test_coast_falloff_sinks_the_border(tmp_path):
-    """Opt-in, and when opted into it must actually ring the map with sea."""
+    """Opt-in, and when opted into it must actually ring the map with sea.
+
+    An all-land stencil is the clearest case: without the falloff there is nowhere for a
+    river to reach, which is exactly the situation the flag exists for. That also makes
+    the plain arm warn, and the flag is what resolves it — so both are asserted.
+    """
     path = _save(tmp_path, np.full((64, 64), 255, np.uint8), "allland.png")
     cfg_kw = dict(heightmap_mode="coastline", width=32, height=32)
-    plain = _run_stage(path, **cfg_kw)
+    with pytest.warns(UserWarning, match="no sea"):
+        plain = _run_stage(path, **cfg_kw)
     ringed = _run_stage(path, heightmap_coast_falloff=True, **cfg_kw)
 
     corner = plain.coord_at(0, 0)
