@@ -44,8 +44,17 @@ elevation_gradient: [0.0, 0.0]
 # ---------------------------------------------------------------------------
 # Terrain classification
 # ---------------------------------------------------------------------------
-terrain_hill_gradient: 0.02      # Elevation gradient threshold for hills. Default: 0.02
-terrain_mountain_gradient: 0.04  # Elevation gradient threshold for mountains. Default: 0.04
+# Terrain classes are bands of gradient, in metres of rise per kilometre. They describe
+# how the ground lies, not how high it is: a high plateau is level ground and is classed
+# as such. Absolute rather than a fraction of the elevation range, so a band means the
+# same thing whatever road_elev_range_m is set to.
+#   under 30    FLAT        level going: plough it, cart across it
+#   30 to 100   ROLLING     undulating; farmed, and a laden cart manages
+#   100 to 250  STEEP       pack animals, terraces, no wheels
+#   over 250    ESCARPMENT  a break of slope; on foot and with effort
+terrain_rolling_gradient_m: 30.0     # m/km above which ground stops being level. Default: 30.0
+terrain_steep_gradient_m: 100.0      # m/km above which wheels stop working. Default: 100.0
+terrain_escarpment_gradient_m: 250.0 # m/km above which it is a break of slope. Default: 250.0
 
 # ---------------------------------------------------------------------------
 # Erosion (hydraulic droplet simulation)
@@ -151,8 +160,9 @@ road_elev_range_m: 3000.0 # Elevation span in metres representing the full 0→1
 # ---------------------------------------------------------------------------
 # Roads: base terrain costs (pathfinding multipliers by terrain type)
 # ---------------------------------------------------------------------------
-road_mountain_cost: 10.0  # Cost multiplier for mountain hexes. Default: 10.0
-road_hill_cost: 3.0       # Cost multiplier for hill hexes. Default: 3.0
+road_escarpment_cost: 20.0 # Cost multiplier for escarpment hexes. Default: 20.0
+road_steep_cost: 10.0      # Cost multiplier for steep hexes. Default: 10.0
+road_rolling_cost: 3.0     # Cost multiplier for rolling hexes. Default: 3.0
 road_flat_cost: 1.0       # Cost multiplier for flat hexes. Default: 1.0
 
 # ---------------------------------------------------------------------------
