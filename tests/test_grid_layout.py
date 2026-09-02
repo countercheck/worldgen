@@ -147,6 +147,13 @@ def test_a_file_without_a_layout_loads_as_axial():
     assert WorldState.from_dict(data).layout == "axial"
 
 
+def test_a_file_with_an_unknown_layout_is_rejected():
+    data = WorldState.empty(3, 5, 4).to_dict()
+    data["layout"] = "hexagonal"
+    with pytest.raises(ValueError, match="layout"):
+        WorldState.from_dict(data)
+
+
 # --- the full pipeline on an offset grid -------------------------------------
 
 

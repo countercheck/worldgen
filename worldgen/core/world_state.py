@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from .hex import Hex, HexCoord, Settlement
-from .hex_grid import AXIAL, grid_coord, grid_index
+from .hex_grid import AXIAL, GRID_LAYOUTS, grid_coord, grid_index
 
 
 class RoadTier(Enum):
@@ -199,11 +199,16 @@ class WorldState:
             supported = ", ".join(sorted(SUPPORTED_SCHEMA_VERSIONS))
             raise ValueError(f"Unsupported WorldState version '{version}'. Supported: {supported}.")
 
+        layout = data.get("layout", AXIAL)
+        if layout not in GRID_LAYOUTS:
+            supported = ", ".join(GRID_LAYOUTS)
+            raise ValueError(f"Unknown WorldState layout '{layout}'. Supported: {supported}.")
+
         ws = cls(
             seed=data["seed"],
             width=data["width"],
             height=data["height"],
-            layout=data.get("layout", AXIAL),
+            layout=layout,
             metadata=data.get("metadata", {}),
         )
 
