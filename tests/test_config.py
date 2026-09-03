@@ -95,7 +95,7 @@ def test_world_config_validates_vector_fields(kwargs, message):
         ({"hex_size_m": 0.0}, "hex_size_m"),
         ({"max_elevation_m": 0.0}, "max_elevation_m"),
         ({"seabed_depth_m": 0.0}, "seabed_depth_m"),
-        ({"road_ascent_per_hex": 0.0}, "road_ascent_per_hex"),
+        ({"road_delta_elevation_per_hex": 0.0}, "road_delta_elevation_per_hex"),
         (
             {"road_switchback_grade_pct": 30.0, "road_slope_cap_pct": 25.0},
             "road_switchback_grade_pct",

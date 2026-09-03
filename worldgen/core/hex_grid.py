@@ -335,9 +335,10 @@ def road_polylines(road_edges, hexes: dict[HexCoord, Hex]) -> list[tuple]:
     # a schema-1.3 file has its sea legs mixed in and must still draw.
     adjacency: dict[HexCoord, list[tuple[HexCoord, object]]] = {}
     edges: dict[frozenset, object] = {}
-    for (a, b), tier in road_edges.items():
+    for (a, b), edge in road_edges.items():
         if _is_water(hexes, a) or _is_water(hexes, b):
             continue
+        tier = getattr(edge, "tier", edge)
         edges[frozenset((a, b))] = tier
         adjacency.setdefault(a, []).append((b, tier))
         adjacency.setdefault(b, []).append((a, tier))

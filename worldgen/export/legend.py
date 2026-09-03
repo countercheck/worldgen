@@ -185,7 +185,7 @@ def rows(ws: WorldState, color_mode: str, layers: set[str]) -> list[LegendRow]:
         out.append(LegendRow("river", "River"))
 
     if "roads" in layers and ws.road_edges:
-        present = set(ws.road_edges.values())
+        present = {edge.tier for edge in ws.road_edges.values()}
         for tier in RoadTier:
             if tier in present:
                 out.append(LegendRow("road", f"{_label(tier)} road", tier))

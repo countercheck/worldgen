@@ -4,6 +4,7 @@ from ..core.pipeline import GeneratorStage
 from ..core.world_state import RoadTier, WorldState, road_edge_key
 from .road_cost import (
     WATER,
+    as_road_edges,
     bank_discount,
     make_road_edge_cost,
     river_edges,
@@ -86,14 +87,19 @@ class VillageTrackStage(GeneratorStage):
                 # Village's hex is now a road endpoint — add to targets for later villages
                 targets.add(village.coord)
 
+        # Work in bare tiers, as the interurban stage does, and wrap once at the end. The
+        # tidying passes below are about which edges exist and how they rank; measuring
+        # each one belongs in a single place.
+        tiers = {key: edge.tier for key, edge in state.road_edges.items()}
         for key, tier in new_edges.items():
-            state.road_edges.setdefault(key, tier)
+            tiers.setdefault(key, tier)
 
         # Tracks are laid after the trunk network, so they can skirt a village the way
         # trunk roads could skirt a town. Run the same rule again over the finished
         # network — this is the last stage that touches it.
-        route_through_settlements(state.road_edges, hexes, settled, cfg, blocked)
+        route_through_settlements(tiers, hexes, settled, cfg, blocked)
 
-        tag_river_crossings(state.road_edges, hexes)
-        tag_switchbacks(state.road_edges, hexes, cfg)
+        tag_river_crossings(tiers, hexes)
+        tag_switchbacks(tiers, hexes, cfg)
+        state.road_edges = as_road_edges(tiers, hexes)
         return state

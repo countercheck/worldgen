@@ -8,10 +8,18 @@ from ..core.world_state import ROAD_TIER_RANK, Ferry, RoadTier, road_edge_key
 WATER = (TerrainClass.OCEAN, TerrainClass.LAKE)
 
 
+def delta_elevation(from_hx, to_hx) -> float:
+    """Height gained from *from_hx* to *to_hx*, signed: negative where the road falls.
+
+    One definition, so the number a `RoadEdge` carries and the number the cost is charged on
+    cannot drift apart. The cost takes the absolute value; the sign is kept for the reader.
+    """
+    return to_hx.elevation - from_hx.elevation
+
+
 def edge_grade_pct(from_hx, to_hx, cfg) -> float:
     """Percent grade between two adjacent hexes."""
-    delta = abs(to_hx.elevation - from_hx.elevation)
-    return delta * 100.0 / cfg.hex_size_m
+    return abs(delta_elevation(from_hx, to_hx)) * 100.0 / cfg.hex_size_m
 
 
 def grade_is_under_cap(from_hx, to_hx, cfg) -> bool:
@@ -29,12 +37,13 @@ def slope_edge_cost(from_hx, to_hx, cfg) -> float:
     """What the climb costs, as hexes of level going — the switchback, priced.
 
     At 1 hex = 1 km a road climbing 200 m is not a straight ramp; it is several kilometres
-    of zigzag folded inside that hex. `road_ascent_per_hex` is the exchange rate that says
+    of zigzag folded inside that hex. `road_delta_elevation_per_hex` is the exchange rate that says
     so, and the cost is continuous in the height difference rather than banded.
 
-    Symmetric in up and down, unlike `travel_ascent_per_hex`. A walker pays for the climb
-    alone (Naismith); a road pays for both, being cut-and-fill, and a steep descent needs
-    braking and washes out.
+    Charged on the *absolute* height difference, so a descent costs exactly what the same
+    climb would. That is the difference from `travel_ascent_per_hex`: a walker pays for the
+    climb alone (Naismith), while a road is cut-and-fill and a steep descent needs braking
+    and washes out.
 
     Above `road_slope_cap_pct` the edge is refused outright — a laden cart cannot climb 25%,
     and it should not be offered the option at a price. The curve this replaced saturated
@@ -42,7 +51,7 @@ def slope_edge_cost(from_hx, to_hx, cfg) -> float:
     """
     if not grade_is_under_cap(from_hx, to_hx, cfg):
         return float("inf")
-    return abs(to_hx.elevation - from_hx.elevation) / cfg.road_ascent_per_hex
+    return abs(delta_elevation(from_hx, to_hx)) / cfg.road_delta_elevation_per_hex
 
 
 def terrain_base_cost(hx, cfg) -> float:
@@ -515,6 +524,23 @@ def route_through_settlements(
                 road_edges[key] = combine(road_edges.get(key), carried)
             rerouted += 1
     return rerouted
+
+
+def as_road_edges(tiers, hexes) -> dict:
+    """Turn a key -> tier map into key -> `RoadEdge`, measuring each edge as it goes.
+
+    The stages build with bare tiers because that is all the routing and tidying passes
+    need. This is the one place the delta is measured, so the number a world carries is the
+    number `slope_edge_cost` charged on.
+    """
+    from ..core.world_state import RoadEdge
+
+    out = {}
+    for (a, b), tier in tiers.items():
+        ha, hb = hexes.get(a), hexes.get(b)
+        delta = delta_elevation(ha, hb) if ha is not None and hb is not None else 0.0
+        out[(a, b)] = RoadEdge(tier, delta)
+    return out
 
 
 def prune_orphan_roads(road_edges, anchors) -> int:

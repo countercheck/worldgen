@@ -8,7 +8,14 @@ from worldgen.core.hex import (
     SettlementTier,
     TerrainClass,
 )
-from worldgen.core.world_state import Ferry, River, RoadTier, WorldState, road_edge_key
+from worldgen.core.world_state import (
+    Ferry,
+    River,
+    RoadEdge,
+    RoadTier,
+    WorldState,
+    road_edge_key,
+)
 from worldgen.export import json_export
 
 
@@ -40,8 +47,8 @@ def _small_world() -> WorldState:
     ws.hexes[(1, 1)].road_connections = {(2, 1)}
     ws.rivers = [River(hexes=[(0, 0), (1, 0), (2, 0)], flow_volume=1.5)]
     ws.road_edges = {
-        road_edge_key((1, 1), (2, 1)): RoadTier.PRIMARY,
-        road_edge_key((2, 1), (3, 1)): RoadTier.PRIMARY,
+        road_edge_key((1, 1), (2, 1)): RoadEdge(RoadTier.PRIMARY, 12.5),
+        road_edge_key((2, 1), (3, 1)): RoadEdge(RoadTier.PRIMARY, -4.0),
     }
     return ws
 
@@ -154,7 +161,7 @@ def test_new_saves_carry_the_bumped_version(tmp_path):
 
     path = tmp_path / "world.json"
     json_export.save(_small_world(), path)
-    assert json.loads(path.read_text())["version"] == "1.4"
+    assert json.loads(path.read_text())["version"] == "1.5"
 
 
 def test_an_unknown_version_is_rejected_by_name(tmp_path):
@@ -199,12 +206,42 @@ def test_river_preserved(tmp_path):
     assert ws2.rivers[0].hexes[0] == (0, 0)
 
 
+def test_delta_elevation_round_trips(tmp_path):
+    """The height a segment climbs is what decides how slow it is, so it has to survive."""
+    ws = _small_world()
+    path = tmp_path / "world.json"
+    json_export.save(ws, path)
+    ws2 = json_export.load(path)
+    assert ws2.road_edges == ws.road_edges
+    deltas = {k: e.delta_elevation_m for k, e in ws2.road_edges.items()}
+    assert deltas[road_edge_key((1, 1), (2, 1))] == pytest.approx(12.5)
+    # Signed, so a reader can tell which way is uphill.
+    assert deltas[road_edge_key((2, 1), (3, 1))] == pytest.approx(-4.0)
+
+
+def test_an_edge_saved_before_deltas_loads_as_level(tmp_path):
+    """A 1.4 file has no delta recorded; it must open rather than fail."""
+    import json
+
+    ws = _small_world()
+    path = tmp_path / "world.json"
+    json_export.save(ws, path)
+    data = json.loads(path.read_text())
+    data["version"] = "1.4"
+    for ed in data["road_edges"]:
+        ed.pop("delta_elevation_m", None)
+    path.write_text(json.dumps(data))
+
+    for edge in json_export.load(path).road_edges.values():
+        assert edge.delta_elevation_m == 0.0
+
+
 def test_road_tier_preserved(tmp_path):
     ws = _small_world()
     path = tmp_path / "world.json"
     json_export.save(ws, path)
     ws2 = json_export.load(path)
-    assert set(ws2.road_edges.values()) == {RoadTier.PRIMARY}
+    assert {e.tier for e in ws2.road_edges.values()} == {RoadTier.PRIMARY}
 
 
 def test_a_schema_1_2_file_loads_its_journeys_as_a_network():
@@ -218,7 +255,7 @@ def test_a_schema_1_2_file_loads_its_journeys_as_a_network():
         {"path": [[2, 1], [3, 1]], "tier": "primary"},
     ]
     ws = WorldState.from_dict(data)
-    assert ws.road_edges == {
+    assert {k: e.tier for k, e in ws.road_edges.items()} == {
         road_edge_key((1, 1), (2, 1)): RoadTier.TRACK,
         road_edge_key((2, 1), (3, 1)): RoadTier.PRIMARY,
     }

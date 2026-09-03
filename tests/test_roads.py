@@ -95,8 +95,8 @@ def test_river_crossing_hexes_tagged(road_state):
 
 
 def test_valid_road_tiers(road_state):
-    for tier in road_state.road_edges.values():
-        assert isinstance(tier, RoadTier)
+    for edge in road_state.road_edges.values():
+        assert isinstance(edge.tier, RoadTier)
 
 
 def test_cities_mutually_reachable(road_state):
@@ -164,7 +164,7 @@ def test_roads_route_when_river_flow_is_continuous():
     )
 
     def network(ws):
-        return sorted((k, t.value) for k, t in ws.road_edges.items())
+        return sorted((k, e.tier.value) for k, e in ws.road_edges.items())
 
     assert network(continuous) == network(plain), (
         "roads differ between flow modes: something is still identifying a river channel "
@@ -264,8 +264,8 @@ def test_road_river_traffic_threshold_draws_more_river_roads():
 def test_reproducibility():
     s1 = _build_pipeline(seed=99).run()
     s2 = _build_pipeline(seed=99).run()
-    net1 = sorted((k, t.value) for k, t in s1.road_edges.items())
-    net2 = sorted((k, t.value) for k, t in s2.road_edges.items())
+    net1 = sorted((k, e.tier.value) for k, e in s1.road_edges.items())
+    net2 = sorted((k, e.tier.value) for k, e in s2.road_edges.items())
     assert net1 == net2, "Roads differ between identical seeds"
 
 
@@ -289,8 +289,8 @@ def test_slope_edge_cost_is_the_switchback_priced():
     assert slope_cost(0.0) == pytest.approx(0.0)
 
     # Metres of climb over the exchange rate, and nothing is free but level ground.
-    assert slope_cost(cfg.road_ascent_per_hex) == pytest.approx(1.0)
-    assert slope_cost(2 * cfg.road_ascent_per_hex) == pytest.approx(2.0)
+    assert slope_cost(cfg.road_delta_elevation_per_hex) == pytest.approx(1.0)
+    assert slope_cost(2 * cfg.road_delta_elevation_per_hex) == pytest.approx(2.0)
     assert slope_cost(1.0) > 0.0, "a metre of climb must cost something"
 
     # Symmetric: a road is cut-and-fill, and a descent needs braking. Naismith's walker
@@ -487,10 +487,10 @@ def test_no_two_important_roads_run_side_by_side_for_long(road_state):
 
     edges = road_state.road_edges
     hex_tier: dict = {}
-    for (a, b), tier in edges.items():
+    for (a, b), edge in edges.items():
         for c in (a, b):
-            if ROAD_TIER_RANK[tier] > ROAD_TIER_RANK.get(hex_tier.get(c), -1):
-                hex_tier[c] = tier
+            if ROAD_TIER_RANK[edge.tier] > ROAD_TIER_RANK.get(hex_tier.get(c), -1):
+                hex_tier[c] = edge.tier
     important = {c for c, t in hex_tier.items() if t is not RoadTier.TRACK}
 
     pairs = {
@@ -705,7 +705,7 @@ def test_a_bigger_settlement_sends_more_travellers(road_state):
         return
 
     def busiest_road_at(seat):
-        tiers = [ROAD_TIER_RANK[t] for edge, t in road_state.road_edges.items() if seat in edge]
+        tiers = [ROAD_TIER_RANK[e.tier] for key, e in road_state.road_edges.items() if seat in key]
         return max(tiers, default=-1)
 
     assert busiest_road_at(large.coord) >= busiest_road_at(small.coord), (

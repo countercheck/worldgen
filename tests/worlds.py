@@ -105,7 +105,7 @@ def lay_road(ws, path, tier):
     rather than `road_edges`, because it is a sea leg and not a road.
     """
     from worldgen.core.hex import TerrainClass
-    from worldgen.core.world_state import ROAD_TIER_RANK, road_edge_key
+    from worldgen.core.world_state import ROAD_TIER_RANK, RoadEdge, road_edge_key
 
     water = (TerrainClass.OCEAN, TerrainClass.LAKE)
     for a, b in zip(path, path[1:], strict=False):
@@ -113,8 +113,10 @@ def lay_road(ws, path, tier):
         key = road_edge_key(a, b)
         wet = any(ws.hexes[c].terrain_class in water for c in (a, b))
         book = ws.sea_edges if wet else ws.road_edges
-        if ROAD_TIER_RANK[tier] > ROAD_TIER_RANK.get(book.get(key), -1):
-            book[key] = tier
+        have = book.get(key)
+        if have is None or ROAD_TIER_RANK[tier] > ROAD_TIER_RANK[have.tier]:
+            lo, hi = key
+            book[key] = RoadEdge(tier, ws.hexes[hi].elevation - ws.hexes[lo].elevation)
         ws.hexes[a].road_connections.add(b)
         ws.hexes[b].road_connections.add(a)
     return ws

@@ -41,8 +41,12 @@ ROAD_TIER_RANK = {RoadTier.TRACK: 0, RoadTier.SECONDARY: 1, RoadTier.PRIMARY: 2}
 # not a road, and while the two were mixed there was no way to ask whether two places were
 # joined *by land*.  A 1.3 file loads with no sea edges, which reads its water legs as
 # roads — the shape it was written with.
-SCHEMA_VERSION = "1.4"
-SUPPORTED_SCHEMA_VERSIONS = frozenset({"1.0", "1.1", "1.2", "1.3", "1.4"})
+#
+# 1.5 put "delta_elevation_m" on each edge, signed in the direction of the key.  It is the
+# quantity that decides how slow a segment is, and nothing reading a world should have to
+# reconstruct the cost model to find it.  An older file loads with zeroes.
+SCHEMA_VERSION = "1.5"
+SUPPORTED_SCHEMA_VERSIONS = frozenset({"1.0", "1.1", "1.2", "1.3", "1.4", "1.5"})
 
 
 # Terrain classes before they were reframed as bands of gradient. "hill" and "mountain"
@@ -70,6 +74,26 @@ class Road:
 
     path: list[HexCoord]
     tier: RoadTier
+
+
+@dataclass(frozen=True)
+class RoadEdge:
+    """One step of road or sea, with what it costs a traveller to be told rather than
+    worked out again.
+
+    `delta_elevation_m` is signed and read in the direction of the canonical key: positive
+    means the road climbs from `a` to `b`, negative that it falls.  A consumer wanting the
+    effort takes the absolute value, which is what the cost model does — a road is
+    cut-and-fill and pays for the descent as well as the climb — but the sign is kept
+    because a map that cannot say which way is uphill is missing something a reader wants.
+
+    Derivable from the two hexes, and stored anyway: it is the quantity that decides how
+    slow the segment is, and anything reading `world.json` should not have to reconstruct
+    the cost model to find out.
+    """
+
+    tier: RoadTier
+    delta_elevation_m: float = 0.0
 
 
 def road_edge_key(a: HexCoord, b: HexCoord) -> tuple[HexCoord, HexCoord]:
@@ -120,7 +144,7 @@ class WorldState:
     # An edge is the thing a tier is actually a property of.  `road_polylines` walks this
     # for anything that needs lines to draw, and `hex.road_connections` stays as the
     # adjacency index into it.
-    road_edges: dict[tuple[HexCoord, HexCoord], RoadTier] = field(default_factory=dict)
+    road_edges: dict[tuple[HexCoord, HexCoord], RoadEdge] = field(default_factory=dict)
     # The water legs of the same network, kept apart from the roads rather than mixed in.
     #
     # Routes cross open water because water is cheap to cross — rightly, since sea carriage
@@ -132,7 +156,7 @@ class WorldState:
     #
     # Same shape as `road_edges`, so connectivity by land is the components of one and
     # connectivity by any means is the components of both.
-    sea_edges: dict[tuple[HexCoord, HexCoord], RoadTier] = field(default_factory=dict)
+    sea_edges: dict[tuple[HexCoord, HexCoord], RoadEdge] = field(default_factory=dict)
     ferries: list[Ferry] = field(default_factory=list)
     metadata: dict = field(default_factory=dict)
 
@@ -247,12 +271,22 @@ class WorldState:
                 for s in self.settlements
             ],
             "road_edges": [
-                {"a": list(a), "b": list(b), "tier": tier.value}
-                for (a, b), tier in sorted(self.road_edges.items())
+                {
+                    "a": list(a),
+                    "b": list(b),
+                    "tier": edge.tier.value,
+                    "delta_elevation_m": edge.delta_elevation_m,
+                }
+                for (a, b), edge in sorted(self.road_edges.items())
             ],
             "sea_edges": [
-                {"a": list(a), "b": list(b), "tier": tier.value}
-                for (a, b), tier in sorted(self.sea_edges.items())
+                {
+                    "a": list(a),
+                    "b": list(b),
+                    "tier": edge.tier.value,
+                    "delta_elevation_m": edge.delta_elevation_m,
+                }
+                for (a, b), edge in sorted(self.sea_edges.items())
             ],
             "ferries": [{"a": list(f.a), "b": list(f.b)} for f in self.ferries],
         }
@@ -337,15 +371,18 @@ class WorldState:
             River(hexes=[tuple(c) for c in rd["hexes"]], flow_volume=rd["flow_volume"])
             for rd in data.get("rivers", [])
         ]
-        ws.sea_edges = {
-            road_edge_key(tuple(ed["a"]), tuple(ed["b"])): RoadTier(ed["tier"])
-            for ed in data.get("sea_edges", [])
-        }
-        if "road_edges" in data:
-            ws.road_edges = {
-                road_edge_key(tuple(ed["a"]), tuple(ed["b"])): RoadTier(ed["tier"])
-                for ed in data["road_edges"]
+
+        def read_edges(rows):
+            return {
+                road_edge_key(tuple(ed["a"]), tuple(ed["b"])): RoadEdge(
+                    RoadTier(ed["tier"]), ed.get("delta_elevation_m", 0.0)
+                )
+                for ed in rows
             }
+
+        ws.sea_edges = read_edges(data.get("sea_edges", []))
+        if "road_edges" in data:
+            ws.road_edges = read_edges(data["road_edges"])
         else:
             # Schema 1.2 and earlier stored whole journeys, which overlap. Where two of
             # them share an edge the higher tier wins, which is the rule the renderer
@@ -355,8 +392,9 @@ class WorldState:
                 path = [tuple(c) for c in rd["path"]]
                 for a, b in zip(path, path[1:], strict=False):
                     key = road_edge_key(a, b)
-                    if ROAD_TIER_RANK[tier] > ROAD_TIER_RANK.get(ws.road_edges.get(key), -1):
-                        ws.road_edges[key] = tier
+                    have = ws.road_edges.get(key)
+                    if have is None or ROAD_TIER_RANK[tier] > ROAD_TIER_RANK[have.tier]:
+                        ws.road_edges[key] = RoadEdge(tier)
         ws.ferries = [Ferry(a=tuple(fd["a"]), b=tuple(fd["b"])) for fd in data.get("ferries", [])]
 
         return ws

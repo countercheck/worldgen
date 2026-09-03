@@ -348,8 +348,10 @@ class WorldConfig:
         if self.hex_size_m <= 0:
             raise ValueError(f"hex_size_m must be > 0, got {self.hex_size_m}")
 
-        if self.road_ascent_per_hex <= 0:
-            raise ValueError(f"road_ascent_per_hex must be > 0, got {self.road_ascent_per_hex}")
+        if self.road_delta_elevation_per_hex <= 0:
+            raise ValueError(
+                f"road_delta_elevation_per_hex must be > 0, got {self.road_delta_elevation_per_hex}"
+            )
         if not 0 < self.road_switchback_grade_pct <= self.road_slope_cap_pct:
             raise ValueError(
                 "road_switchback_grade_pct must be above 0 and no more than "
@@ -524,7 +526,7 @@ class WorldConfig:
     marketable_surplus_fraction: float = 0.20
     # Naismith's rule: this many metres of ascent cost as much as one hex of level
     # ground. Catchments are walked, not engineered, so they use this rather than
-    # road_ascent_per_hex, which prices a graded road and is five times stricter than a
+    # road_delta_elevation_per_hex, which prices a graded road and is five times stricter than a
     # walker has any reason to be.
     travel_ascent_per_hex: float = 125.0
 
@@ -712,7 +714,7 @@ class WorldConfig:
     # hexsides a river is drawn along; a meander or braid puts two river hexes side by
     # side without one, and a road threading those is still in the water. This makes
     # occupying the channel uneconomic while leaving a genuine crossing affordable.
-    # Raised from 12 with `road_ascent_per_hex`. Pricing the climb continuously made the
+    # Raised from 12 with `road_delta_elevation_per_hex`. Pricing the climb continuously made the
     # valley floor more attractive — it is the flattest line there is — and roads began
     # taking the channel as often as it occurs rather than declining it, 3.6% of road hexes
     # against 3.2% of the land. 16 restores the avoidance (3.1%) and slightly improves
@@ -723,7 +725,13 @@ class WorldConfig:
     # confluence) is joined by boat rather than by a road running down the channel.
     # Longer than this and no plausible ferry exists, so routing raises instead.
     road_ferry_max_hop: int = 4
-    # Metres of elevation change that cost as much as one hex of level going.
+    # Metres of *delta elevation* that cost as much as one hex of level going.
+    #
+    # Delta, not ascent, and the name matters: the cost is the absolute height difference
+    # between two hexes, so it is charged the same going down as going up. A walker pays
+    # for the climb alone (Naismith, `travel_ascent_per_hex`); a road is cut-and-fill, and
+    # a steep descent needs braking and washes out. `RoadEdge.delta_elevation_m` records
+    # the signed value so a reader can still tell which way is uphill.
     #
     # This is the switchback, priced. At 1 hex = 1 km a road climbing 200 m is not a
     # straight ramp — it is several kilometres of zigzag folded inside that one hex — and
@@ -741,7 +749,7 @@ class WorldConfig:
     # boundary, so every flat edge was free and tied — and the saturation was worse: a road
     # met a 65% face, paid a flat 20 for it, and went straight up. On a 4000 m map the
     # steepest road grade was 64.8%; with this it is 24.4%, at the cap where it belongs.
-    road_ascent_per_hex: float = 25.0
+    road_delta_elevation_per_hex: float = 25.0
     road_slope_cap_pct: float = 25.0  # grade % at which cost saturates
     # A road edge at or above this grade is tagged "switchback" on both its hexes, so a
     # reader of the map knows the crossing is slow — the zigzag is priced but not otherwise

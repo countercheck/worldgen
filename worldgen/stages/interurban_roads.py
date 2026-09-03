@@ -8,6 +8,7 @@ from ..core.pipeline import GeneratorStage
 from ..core.world_state import Ferry, RoadTier, WorldState, road_edge_key
 from .road_cost import (
     add_traffic,
+    as_road_edges,
     bank_discount,
     ferry_link,
     is_river,
@@ -246,8 +247,11 @@ class InterurbanRoadStage(GeneratorStage):
             if any(n in road_hex_set for n in neighbors(coord)):
                 hx.habitability_village = min(1.0, hx.habitability_village + 0.2)
 
-        state.road_edges = road_edges
-        state.sea_edges = sea_edges
+        # The tiers were enough to build with; what goes out carries the delta elevation
+        # too, signed in the direction of the key, so nothing downstream has to rebuild the
+        # cost model to know how slow a segment is.
+        state.road_edges = as_road_edges(road_edges, hexes)
+        state.sea_edges = as_road_edges(sea_edges, hexes)
         return state
 
     def _route(self, hexes, origin, dest, net_adj, node_cost, edge_cost, cache, version):
