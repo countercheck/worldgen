@@ -21,3 +21,9 @@ my_world/
 .claude/worktrees/
 .claude/cache/
 .claude/*.local.*
+# Claude Code settings. Machine-specific: the hook these carry holds an absolute
+# path, and permission entries accumulate per session with scratchpad paths in
+# them. `.claude/skills/` and friends stay tracked; only the settings do not.
+.claude/settings.json
+.claude/settings.local.json
+.claude/worktrees/
