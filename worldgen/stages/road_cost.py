@@ -360,3 +360,47 @@ def pheromone_discount(base: float, traffic: float, cfg) -> float:
     `_guarantee_city_connectivity`'s `plain_cost` quietly used a different formula.
     """
     return max(0.0, base - cfg.road_pheromone_factor * traffic)
+
+
+def route_through_settlements(road_edges, hexes, settled, cfg, blocked=frozenset()) -> int:
+    """Bend any road skirting a settlement so that it passes through it instead.
+
+    A road whose two ends are both neighbours of a town enters the ring around it and
+    leaves again without arriving — at 1 hex = 1 km, a trunk road passing a market town at
+    the width of one field. Bypasses are a motor-age idea; before that the road went
+    through the town, which is half the reason the town is where it is.
+
+    So the edge (a, b) is replaced by (a, s) and (s, b): one hex longer, and the traffic
+    now calls. Where those two already exist the bypass was pure redundancy and simply
+    goes. Neither replacement may demote a road already laid, cross a river channel it has
+    no business on, or climb a grade a laden cart cannot.
+
+    Mutates *road_edges*; returns how many bypasses were rerouted.
+    """
+    rerouted = 0
+    for seat in settled:
+        seat_hx = hexes.get(seat)
+        if seat_hx is None or seat_hx.terrain_class in WATER:
+            continue
+        ring = set(neighbors(seat))
+        for a, b in [(a, b) for a, b in road_edges if a in ring and b in ring]:
+            legs = ((a, seat), (seat, b))
+            if any(
+                end not in hexes
+                or (
+                    frozenset((start, end)) in blocked
+                    and not _settlement_exempt(hexes, settled, start, end)
+                )
+                or not grade_is_under_cap(hexes[start], hexes[end], cfg)
+                for start, end in legs
+            ):
+                continue
+            from ..core.world_state import road_edge_key
+
+            tier = road_edges.pop(road_edge_key(a, b))
+            for start, end in legs:
+                key = road_edge_key(start, end)
+                if ROAD_TIER_RANK[tier] > ROAD_TIER_RANK.get(road_edges.get(key), -1):
+                    road_edges[key] = tier
+            rerouted += 1
+    return rerouted

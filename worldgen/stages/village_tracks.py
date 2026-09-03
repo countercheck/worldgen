@@ -8,6 +8,7 @@ from .road_cost import (
     make_road_edge_cost,
     river_edges,
     river_hex_cost,
+    route_through_settlements,
     tag_river_crossings,
     terrain_base_cost,
 )
@@ -80,5 +81,11 @@ class VillageTrackStage(GeneratorStage):
 
         for key, tier in new_edges.items():
             state.road_edges.setdefault(key, tier)
-        tag_river_crossings(new_edges, hexes)
+
+        # Tracks are laid after the trunk network, so they can skirt a village the way
+        # trunk roads could skirt a town. Run the same rule again over the finished
+        # network — this is the last stage that touches it.
+        route_through_settlements(state.road_edges, hexes, settled, cfg, blocked)
+
+        tag_river_crossings(state.road_edges, hexes)
         return state

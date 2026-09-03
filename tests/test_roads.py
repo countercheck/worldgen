@@ -522,3 +522,30 @@ def test_no_two_important_roads_run_side_by_side_for_long(road_state):
         f"{len(worst)} hexes of primary/secondary road run parallel to another of the same "
         f"tier — one road drawn twice. Near {sorted(worst)[0]}"
     )
+
+
+def test_no_road_skirts_a_settlement_it_could_pass_through(road_state):
+    """A road whose two ends both touch a town entered its ring and left without arriving.
+
+    At 1 hex = 1 km that is a trunk road passing a market town at the width of one field.
+    Bypasses are a motor-age idea; before that the road went through the town, which is
+    half the reason the town is where it is.
+
+    One hex, deliberately, and not more. At two the test stops discriminating — near a
+    town most edges have both ends within two hexes, because they are the roads radiating
+    *from* it — and bending those would zigzag every route through every settlement it
+    passed. Measured on a 128x128 map, "both ends within r" covers 5% of the network at
+    r=1, 12% at r=2 and 22% at r=3, while the road distance to a nearby town already
+    equals the crow-flies distance at every radius out to four.
+    """
+    from worldgen.core.hex_grid import neighbors
+
+    offenders = []
+    for seat in {s.coord for s in road_state.settlements}:
+        ring = set(neighbors(seat))
+        offenders += [(seat, a, b) for a, b in road_state.road_edges if a in ring and b in ring]
+
+    assert not offenders, (
+        f"{len(offenders)} roads pass a settlement without entering it, e.g. "
+        f"{offenders[0][1]}->{offenders[0][2]} around {offenders[0][0]}"
+    )

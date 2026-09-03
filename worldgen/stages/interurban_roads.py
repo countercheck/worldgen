@@ -11,6 +11,7 @@ from .road_cost import (
     pheromone_discount,
     river_edges,
     river_hex_cost,
+    route_through_settlements,
     tag_river_crossings,
     terrain_base_cost,
 )
@@ -145,6 +146,9 @@ class InterurbanRoadStage(GeneratorStage):
                 hexes, cities, road_edges, canonical_routes, cfg, blocked, settled
             )
             state.ferries.extend(ferries)
+
+        # Last, once the network is settled: no road passes a town at a field's width.
+        route_through_settlements(road_edges, hexes, settled, cfg, blocked)
 
         for a, b in road_edges:
             if a in hexes and b in hexes:
