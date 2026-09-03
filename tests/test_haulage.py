@@ -165,7 +165,7 @@ def test_a_ridge_splits_two_catchments():
     hexes = _strip(9)
     # 500 m of climb over one hex, against travel_ascent_per_hex of 125 m: four units of
     # budget to go up, which is most of a six-unit day.
-    hexes[(4, 0)].elevation = 500.0 / cfg.road_elev_range_m
+    hexes[(4, 0)].elevation = 500.0
 
     owner, _ = allocate_catchments(hexes, [(0, 0), (8, 0)], 6.0, cfg)
     assert owner[(3, 0)] == (0, 0), "west valley should be wholly western"
@@ -188,7 +188,7 @@ def test_descending_a_ridge_is_free():
     cfg = WorldConfig()
     hexes = _strip(6)
     for q in range(6):
-        hexes[(q, 0)].elevation = (5 - q) * 400.0 / cfg.road_elev_range_m
+        hexes[(q, 0)].elevation = (5 - q) * 400.0
 
     owner, cost = allocate_catchments(hexes, [(0, 0)], 6.0, cfg)
     assert set(owner) == set(hexes), "walking downhill should cost no more than the distance"
@@ -200,7 +200,7 @@ def test_a_high_plateau_is_walkable():
     cfg = WorldConfig()
     hexes = _strip(6)
     for q in range(6):
-        hexes[(q, 0)].elevation = 0.9
+        hexes[(q, 0)].elevation = 2000.0
 
     owner, _ = allocate_catchments(hexes, [(0, 0)], 6.0, cfg)
     assert set(owner) == set(hexes)

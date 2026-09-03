@@ -76,8 +76,11 @@ def test_rain_shadow_present(climate_state):
     # MOUNTAIN meant "steep or high"; the classes are bands of gradient now, and a steep
     # hex can sit at any altitude. Testing the mechanism is both truer and less brittle
     # than testing a proxy that has stopped holding.
-    cfg = WorldConfig(**climate_state.metadata["config"])
     water = (TerrainClass.OCEAN, TerrainClass.LAKE)
+
+    land = [h.elevation for h in climate_state.hexes.values() if h.terrain_class not in water]
+    land.sort()
+    high = land[int(len(land) * 0.8)]
 
     # Wind blows east by default, so upwind is west along a row.
     sheltered, exposed = [], []
@@ -88,7 +91,7 @@ def test_rain_shadow_present(climate_state):
             if h is None:
                 continue
             if h.terrain_class not in water:
-                behind = (barrier - cfg.sea_level) > 0.30
+                behind = barrier > high
                 (sheltered if behind else exposed).append(h.moisture)
             barrier = max(barrier, h.elevation)
 
@@ -245,7 +248,6 @@ def test_moisture_bleed_requires_river_tag():
     cfg = WorldConfig(
         width=3,
         height=1,
-        sea_level=2.0,
         moisture_bleed_passes=1,
         moisture_bleed_strength=0.5,
     )
@@ -255,22 +257,24 @@ def test_moisture_bleed_requires_river_tag():
     for hx in state.hexes.values():
         hx.terrain_class = TerrainClass.FLAT
         hx.elevation = 0.0
-    state.hexes[(0, 0)].elevation = 1.0
+    state.hexes[(0, 0)].elevation = 500.0
     state.hexes[(0, 0)].river_flow = 1.0
 
     without_tag = stage.run(state)
-    assert without_tag.hexes[(1, 0)].moisture == pytest.approx(0.0)
+    dry_neighbour = without_tag.hexes[(1, 0)].moisture
 
     tagged_state = WorldState.empty(seed=1, width=3, height=1)
     for hx in tagged_state.hexes.values():
         hx.terrain_class = TerrainClass.FLAT
         hx.elevation = 0.0
-    tagged_state.hexes[(0, 0)].elevation = 1.0
+    tagged_state.hexes[(0, 0)].elevation = 500.0
     tagged_state.hexes[(0, 0)].river_flow = 1.0
     tagged_state.hexes[(0, 0)].tags.add("river")
 
     with_tag = stage.run(tagged_state)
-    assert with_tag.hexes[(1, 0)].moisture > without_tag.hexes[(1, 0)].moisture
+    assert with_tag.hexes[(1, 0)].moisture > dry_neighbour, (
+        "the bleed did nothing: only a hex tagged as a river should wet its neighbours"
+    )
 
 
 def test_latitude_temp_range_validation():
@@ -291,7 +295,7 @@ def test_the_old_zero_to_one_temperature_settings_still_load(tmp_path):
 def test_erosion_dose_does_not_wash_the_rain_shadow_away():
     """The coupling that makes `erosion_droplets_per_hex` a climate setting too.
 
-    Orographic lift is `elevation - sea_level`, and erosion wears high ground down, so
+    Orographic lift is height above sea level, and erosion wears high ground down, so
     weather and rain shadow pull against each other: enough droplets to cut floodplains
     also flatten the barriers that make a leeward side dry. At eight per hex the high
     ground is all but gone — 0-4% of land stands 0.30 above sea level, against 13-19% at
@@ -308,6 +312,9 @@ def test_erosion_dose_does_not_wash_the_rain_shadow_away():
         state = p.run()
 
         water = (TerrainClass.OCEAN, TerrainClass.LAKE)
+        land = [h.elevation for h in state.hexes.values() if h.terrain_class not in water]
+        land.sort()
+        high = land[int(len(land) * 0.8)]
         sheltered, exposed = [], []
         for r in range(state.height):
             barrier = 0.0
@@ -316,7 +323,7 @@ def test_erosion_dose_does_not_wash_the_rain_shadow_away():
                 if h is None:
                     continue
                 if h.terrain_class not in water:
-                    behind = (barrier - cfg.sea_level) > 0.30
+                    behind = barrier > high
                     (sheltered if behind else exposed).append(h.moisture)
                 barrier = max(barrier, h.elevation)
         if not sheltered or not exposed:

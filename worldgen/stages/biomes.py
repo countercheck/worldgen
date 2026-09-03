@@ -6,7 +6,7 @@ from ..core.world_state import WorldState
 
 class BiomeStage(GeneratorStage):
     def run(self, state: WorldState) -> WorldState:
-        alpine_elev = self.config.biome_alpine_elev
+        alpine_elev = self.config.treeline_m()
         cold_temp = self.config.biome_cold_temp_c
         warm_temp = self.config.biome_warm_temp_c
         dry_moist = self.config.biome_dry_precip_mm

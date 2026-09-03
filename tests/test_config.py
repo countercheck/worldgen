@@ -7,14 +7,16 @@ from worldgen.core.config import WorldConfig
 
 
 def test_yaml_roundtrip(tmp_path):
-    cfg = WorldConfig(width=64, height=48, base_precip_mm=50.0, elevation_gradient=(0.3, -0.2))
+    cfg = WorldConfig(
+        width=64, height=48, base_precip_mm=50.0, elevation_gradient_m=(300.0, -200.0)
+    )
     out = str(tmp_path / "cfg.yaml")
     cfg.to_yaml(out)
     loaded = WorldConfig.from_yaml(out)
     assert loaded.width == 64
     assert loaded.height == 48
     assert loaded.base_precip_mm == pytest.approx(50.0)
-    assert loaded.elevation_gradient == pytest.approx((0.3, -0.2))
+    assert loaded.elevation_gradient_m == pytest.approx((300.0, -200.0))
 
 
 def test_from_yaml_ignores_export_block(tmp_path):
@@ -49,12 +51,12 @@ def test_from_yaml_wind_direction_is_tuple(tmp_path):
 
 
 def test_from_yaml_elevation_gradient_is_tuple(tmp_path):
-    data = {"elevation_gradient": [0.5, -0.3]}
+    data = {"elevation_gradient_m": [0.5, -0.3]}
     p = tmp_path / "cfg.yaml"
     p.write_text(yaml.dump(data))
     cfg = WorldConfig.from_yaml(str(p))
-    assert isinstance(cfg.elevation_gradient, tuple)
-    assert cfg.elevation_gradient == pytest.approx((0.5, -0.3))
+    assert isinstance(cfg.elevation_gradient_m, tuple)
+    assert cfg.elevation_gradient_m == pytest.approx((0.5, -0.3))
 
 
 def test_from_json_wind_direction_is_tuple(tmp_path):
@@ -65,7 +67,7 @@ def test_from_json_wind_direction_is_tuple(tmp_path):
     assert isinstance(cfg.wind_direction, tuple)
 
 
-@pytest.mark.parametrize("key", ["wind_direction", "elevation_gradient"])
+@pytest.mark.parametrize("key", ["wind_direction", "elevation_gradient_m"])
 def test_yaml_tuple_fields_require_two_numeric_values(tmp_path, key):
     p = tmp_path / "cfg.yaml"
     p.write_text(yaml.dump({key: None}))
@@ -78,8 +80,8 @@ def test_yaml_tuple_fields_require_two_numeric_values(tmp_path, key):
     [
         ({"wind_direction": (1.0,)}, "wind_direction"),
         ({"wind_direction": ("east", 0.0)}, "wind_direction"),
-        ({"elevation_gradient": (0.5,)}, "elevation_gradient"),
-        ({"elevation_gradient": (0.1, "north")}, "elevation_gradient"),
+        ({"elevation_gradient_m": (0.5,)}, "elevation_gradient_m"),
+        ({"elevation_gradient_m": (0.1, "north")}, "elevation_gradient_m"),
     ],
 )
 def test_world_config_validates_vector_fields(kwargs, message):
@@ -91,7 +93,8 @@ def test_world_config_validates_vector_fields(kwargs, message):
     ("kwargs", "message"),
     [
         ({"hex_size_m": 0.0}, "hex_size_m"),
-        ({"road_elev_range_m": 0.0}, "road_elev_range_m"),
+        ({"max_elevation_m": 0.0}, "max_elevation_m"),
+        ({"seabed_depth_m": 0.0}, "seabed_depth_m"),
         (
             {"road_slope_free_pct": 10.0, "road_slope_cap_pct": 10.0},
             "road_slope_cap_pct",
@@ -116,15 +119,15 @@ def test_unknown_key_raises_value_error_not_type_error(tmp_path):
     The CLI catches ValueError, so that surfaced as a raw traceback rather than a message.
     """
     path = tmp_path / "typo.yaml"
-    path.write_text("width: 32\nsea_levl: 0.3\n")
+    path.write_text("width: 32\nhex_size_mm: 1000\n")
     with pytest.raises(ValueError, match="Unknown config setting"):
         WorldConfig.from_yaml(str(path))
 
 
 def test_unknown_key_suggests_the_nearest_real_setting(tmp_path):
     path = tmp_path / "typo.yaml"
-    path.write_text("sea_levl: 0.3\n")
-    with pytest.raises(ValueError, match="did you mean 'sea_level'"):
+    path.write_text("hex_size_mm: 1000\n")
+    with pytest.raises(ValueError, match="did you mean 'hex_size_m'"):
         WorldConfig.from_yaml(str(path))
 
 

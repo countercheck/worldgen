@@ -56,7 +56,7 @@ def channel_drop_m(hx, hexes, cfg) -> float:
         n_hx = hexes.get(n)
         if n_hx is not None and is_river(n_hx):
             lowest = min(lowest, n_hx.elevation)
-    return max(0.0, hx.elevation - lowest) * cfg.road_elev_range_m
+    return max(0.0, hx.elevation - lowest)
 
 
 def river_span(hx, hexes, cfg) -> float:

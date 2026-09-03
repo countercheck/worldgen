@@ -166,7 +166,7 @@ def ascent_cost(from_hx, to_hx, cfg) -> float:
     climb = to_hx.elevation - from_hx.elevation
     if climb <= 0.0:
         return 0.0
-    return climb * cfg.road_elev_range_m / cfg.travel_ascent_per_hex
+    return climb / cfg.travel_ascent_per_hex
 
 
 def allocate_catchments(hexes, seats, budget: float, cfg):

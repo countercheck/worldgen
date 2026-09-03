@@ -8,7 +8,11 @@
 # ---------------------------------------------------------------------------
 width: 128    # Map width in hexes. Default: 128
 height: 128   # Map height in hexes. Default: 128
-sea_level: 0.25  # Water level threshold (0–1) on normalised elevation. Lower = more land. Default: 0.25
+# Elevation is metres above sea level, so sea level is zero by definition and is not a
+# setting. How the map looks is set by how high the land stands and how deep the sea lies.
+max_elevation_m: 1500.0  # Highest ground above sea level. The map's vertical scale, and the single most consequential setting for what country this is: 800 gives downland, 1500 mixed uplands, 3000 an Alpine massif. Default: 1500
+seabed_depth_m: 200.0    # How deep the sea floor lies at the map edge. A continental shelf, not an abyss. How much of the map ends up underwater follows from this and max_elevation_m. Default: 200
+coast_max_elevation_m: 100.0 # Land no higher than this beside the sea is coast. Default: 100
 
 # ---------------------------------------------------------------------------
 # Elevation noise (Fractal Brownian Motion)
@@ -29,17 +33,15 @@ continent_falloff: true   # Apply edge falloff so the sea rings the map and ever
 continent_falloff_edges: [north, south, east, west]
 continent_shelf_variance: 0.35 # How much the shelf's inner edge wanders, 0–1. 0 gives a coast of even width; higher makes bays and headlands. The terrain noise already moves the shoreline a good deal on its own, so this is a nudge, not the main shaping. Default: 0.35
 continent_shelf_hexes: 10 # Width in hexes (km) of the coastal shelf over which land drops away to the sea. In hexes rather than a fraction of the map, so the coastal gradient is the same per km at any size. Narrower = steeper, cliffier coasts. Capped at a quarter of the shorter side. Only used when continent_falloff is true. Default: 10
-continent_seabed: 0.15    # Elevation the shelf descends to at the map edge. Must be below sea_level so the border is always under water. Nearer sea_level = a shallower, gentler shelf; nearer 0 = a steep drop into deep water, which makes cliff coasts common. Default: 0.15
 
-# Directional tilt [east_bias, south_bias] added to raw elevation before normalization.
+# Directional tilt [east, south] in metres, applied after the terrain is shaped.
 # Positive x raises the east edge; negative x raises the west edge.
 # Positive y raises the south edge; negative y raises the north edge.
-# Values around ±0.5 produce a clear slope across the map.
 # Examples:
-#   [0.0, -0.5]  →  north is highest, map runs downhill to the south
-#   [-0.5, 0.0]  →  west is highest, map runs downhill to the east
-#   [0.0, 0.0]   →  no tilt (default)
-elevation_gradient: [0.0, 0.0]
+#   [0.0, -600.0]  →  north stands 600 m higher, map runs downhill to the south
+#   [-600.0, 0.0]  →  west stands 600 m higher, map runs downhill to the east
+#   [0.0, 0.0]     →  no tilt (default)
+elevation_gradient_m: [0.0, 0.0]  # Tilt across the map in metres: [east, south].
 
 # ---------------------------------------------------------------------------
 # Terrain classification
@@ -47,7 +49,7 @@ elevation_gradient: [0.0, 0.0]
 # Terrain classes are bands of gradient, in metres of rise per kilometre. They describe
 # how the ground lies, not how high it is: a high plateau is level ground and is classed
 # as such. Absolute rather than a fraction of the elevation range, so a band means the
-# same thing whatever road_elev_range_m is set to.
+# same thing whatever the map's vertical scale is.
 #   under 30    FLAT        level going: plough it, cart across it
 #   30 to 100   ROLLING     undulating; farmed, and a laden cart manages
 #   100 to 250  STEEP       pack animals, terraces, no wheels
@@ -122,7 +124,10 @@ base_precip_mm: 0.0
 # ---------------------------------------------------------------------------
 # Biome thresholds
 # ---------------------------------------------------------------------------
-biome_alpine_elev: 0.85  # Elevation above which terrain becomes alpine. Default: 0.85
+# The treeline is a temperature, not a height. The altitude it falls at follows from how
+# warm the region is and how fast air cools with height — about 1400 m in temperate
+# country, sea level in the subarctic, near 4000 m in the tropics.
+biome_treeline_temp_c: 1.0 # Mean annual Celsius at which trees stop. Default: 1.0
 biome_cold_temp_c: 5.0   # Mean annual Celsius below which the cold biomes take over — taiga gives way to broadleaf around here. Default: 5.0
 biome_warm_temp_c: 18.0  # Mean annual Celsius above which the warm biomes take over. Default: 18.0
 biome_dry_precip_mm: 400.0   # Annual rainfall below which the dry biomes take over — steppe and desert. Default: 400
@@ -173,7 +178,6 @@ cultivation_village_radius: 2 # Farmland radius in hexes around villages. Defaul
 # World scale
 # ---------------------------------------------------------------------------
 hex_size_m: 1000.0        # Metres per hex; used for slope cost calculations. Default: 1000.0
-road_elev_range_m: 3000.0 # Elevation span in metres representing the full 0→1 range. Default: 3000.0
 
 # ---------------------------------------------------------------------------
 # Roads: base terrain costs (pathfinding multipliers by terrain type)

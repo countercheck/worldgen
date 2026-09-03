@@ -21,11 +21,8 @@ class ClimateStage(GeneratorStage):
         cfg = self.config
         base = cfg.mean_temperature_c
         lat_range = cfg.latitude_temp_range_c
-        # The environmental lapse rate is quoted per kilometre of ascent, so the drop is
-        # the hex's height in kilometres times that. Elevation is still a fraction of the
-        # range here, hence the conversion through road_elev_range_m; when elevation
-        # itself becomes metres this term simplifies.
-        lapse_per_elev = cfg.lapse_rate_c_per_km * (cfg.road_elev_range_m / 1000.0)
+        # The lapse rate is quoted per kilometre of ascent and elevation is metres above
+        # sea level, so this is a division by a thousand and nothing more.
 
         for (_, r), hx in state.hexes.items():
             row_frac = r / max(height - 1, 1)
@@ -33,10 +30,9 @@ class ClimateStage(GeneratorStage):
             # Subtract the mean of sin over [0, π] (= 2/π ≈ 0.637) so that
             # mean_temperature_c is the true map mean.
             temp = base + (lat_temp - 2.0 / math.pi) * lat_range
-            # Measured from sea level: a hex at the waterline gets no lapse, which is what
-            # makes the figure a real temperature rather than one relative to the map's
-            # own lowest point.
-            temp -= max(0.0, hx.elevation - cfg.sea_level) * lapse_per_elev
+            # A hex at the waterline gets no lapse, which is what makes the figure a real
+            # temperature rather than one relative to the map's own lowest point.
+            temp -= max(0.0, hx.elevation) / 1000.0 * cfg.lapse_rate_c_per_km
             hx.temperature = temp
 
         # Smooth temperature with gaussian_filter (replaces 5 manual neighbor-average passes)
@@ -73,7 +69,6 @@ class ClimateStage(GeneratorStage):
 
         orographic = self.config.orographic_strength
         resupply = self.config.moisture_resupply_per_hex
-        sea_level = self.config.sea_level
 
         for coord in sorted_coords:
             h = state.hexes[coord]
@@ -95,7 +90,7 @@ class ClimateStage(GeneratorStage):
 
             incoming = sum(upwind_vals) / len(upwind_vals) if upwind_vals else 1.0
 
-            lift = max(0.0, h.elevation - sea_level)
+            lift = max(0.0, h.elevation) / self.config.max_elevation_m
             fraction = min(1.0, lift * orographic)
             precip = incoming * fraction
             h.moisture = precip

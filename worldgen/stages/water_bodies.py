@@ -67,7 +67,7 @@ def _fix_coast_hexes(state: WorldState, cfg) -> None:
     original terrain classification.
     """
     hexes = state.hexes
-    coast_threshold = cfg.sea_level + 0.05
+    coast_threshold = cfg.coast_max_elevation_m
 
     for coord, hx in hexes.items():
         if hx.terrain_class != TerrainClass.COAST:

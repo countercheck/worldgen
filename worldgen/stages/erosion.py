@@ -165,12 +165,28 @@ class ErosionStage(GeneratorStage):
         cfg = self.config
         w, h = state.width, state.height
 
+        # Erosion works on a normalised copy, and puts the result back in metres.
+        #
+        # Its constants are fractions of the map's relief rather than physical
+        # quantities: erosion_capacity multiplies a height difference, the capacity floor
+        # and erosion_delta_min_load are absolute heights, and all of them were tuned
+        # against a 0-1 range. Fed metres directly they become centimetres — a droplet's
+        # capacity collapses to nothing, so every one of them deposits, and the whole map
+        # planes off to sea level within a couple of passes.
+        #
+        # Converted against the *known* span rather than the map's own minimum and
+        # maximum, so this is a fixed change of units and not another per-map stretch of
+        # the kind the rest of this work has been removing. Erosion is a shaping heuristic,
+        # and its knobs being shares of the relief is the honest description of them.
+        span = cfg.max_elevation_m + cfg.seabed_depth_m
+        sea_shaped = cfg.seabed_depth_m / span
+
         arr = np.zeros((w, h))
         for q in range(w):
             for r in range(h):
-                arr[q, r] = state.hexes[(q, r)].elevation
+                arr[q, r] = (state.hexes[(q, r)].elevation + cfg.seabed_depth_m) / span
 
-        land_coords = [(q, r) for q in range(w) for r in range(h) if arr[q, r] >= cfg.sea_level]
+        land_coords = [(q, r) for q in range(w) for r in range(h) if arr[q, r] >= sea_shaped]
 
         if land_coords:
             land_arr = np.array(land_coords)
@@ -202,7 +218,7 @@ class ErosionStage(GeneratorStage):
                     float(sr),
                     w,
                     h,
-                    cfg.sea_level,
+                    sea_shaped,
                     cfg.erosion_inertia,
                     cfg.erosion_capacity,
                     cfg.erosion_deposition,
@@ -223,12 +239,14 @@ class ErosionStage(GeneratorStage):
 
         arr = gaussian_filter(arr, sigma=0.5)
 
-        lo, hi = arr.min(), arr.max()
-        if hi > lo:
-            arr = (arr - lo) / (hi - lo)
-
+        # Back to metres. There is deliberately no re-stretch to [0, 1] here: it would
+        # undo the datum, putting the lowest point of the eroded map at the seabed and
+        # the highest at the peak whatever erosion had actually done to either. Sea level
+        # has to stay where it is for the word to mean anything, and a landscape that has
+        # been worn down should read as worn down rather than being scaled back up to
+        # fill the range it started with.
         for q in range(w):
             for r in range(h):
-                state.hexes[(q, r)].elevation = float(arr[q, r])
+                state.hexes[(q, r)].elevation = float(arr[q, r]) * span - cfg.seabed_depth_m
 
         return state

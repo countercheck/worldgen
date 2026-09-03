@@ -23,11 +23,10 @@ def gradient_m_per_km(coord, hx, hexes, cfg) -> float:
     fall equally — and a crest is walkable along, whatever the drop either side.  A
     hillside reads steep, because uphill and downhill neighbours genuinely differ.
 
-    In metres deliberately.  The thresholds used to be fractions of the elevation range,
-    so what counted as a mountain moved with `road_elev_range_m` — 120 m/km at the 3000 m
-    default, but 20 m/km on a 500 m map, where it called rolling downland a peak.  At
-    1 hex = 1 km this is a gradient in the ordinary sense and means the same thing on
-    every map.
+    Elevation is already metres above sea level, so at 1 hex = 1 km this is a gradient in
+    the ordinary sense with nothing to convert.  The thresholds it is compared against
+    used to be fractions of the elevation range, which meant a mountain was 120 m/km on
+    one map and 20 m/km on another.
     """
     ring = neighbors(coord)
     tilt = 0.0
@@ -41,7 +40,7 @@ def gradient_m_per_km(coord, hx, hexes, cfg) -> float:
                 tilt = max(tilt, abs(hx.elevation - present.elevation))
             continue
         tilt = max(tilt, abs(a.elevation - b.elevation) / 2.0)
-    return tilt * cfg.road_elev_range_m
+    return tilt
 
 
 def classify(gradient: float, cfg) -> TerrainClass:
@@ -58,12 +57,11 @@ def classify(gradient: float, cfg) -> TerrainClass:
 class TerrainClassificationStage(GeneratorStage):
     def run(self, state: WorldState) -> WorldState:
         cfg = self.config
-        sea = cfg.sea_level
-        coast_threshold = sea + 0.05
+        coast_threshold = cfg.coast_max_elevation_m
 
         # Pass 1: assign OCEAN
         for h in state.hexes.values():
-            if h.elevation < sea:
+            if h.elevation < 0.0:
                 h.terrain_class = TerrainClass.OCEAN
 
         # Pass 2: classify land hexes by how steeply they lie.
@@ -73,7 +71,7 @@ class TerrainClassificationStage(GeneratorStage):
         # a 128x128 map's "mountain" hexes on ground gentler than 75 m/km — high plateaus
         # and upland basins that are perfectly walkable and farmable, but were priced at
         # ten times flat ground for roads and refused settlement outright. Where altitude
-        # genuinely matters it is read directly: the treeline from `biome_alpine_elev`,
+        # genuinely matters it is read directly: the treeline from `biome_alpine_elev_m`,
         # and mine workings from a settlement's own elevation test.
         for coord, h in state.hexes.items():
             if h.terrain_class == TerrainClass.OCEAN:

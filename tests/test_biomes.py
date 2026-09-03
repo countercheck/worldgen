@@ -40,7 +40,7 @@ def test_ocean_hexes_have_ocean_biome(biome_state):
 
 
 def test_alpine_hexes_assigned(biome_state):
-    alpine_elev = biome_state.metadata["config"]["biome_alpine_elev"]
+    alpine_elev = WorldConfig(**biome_state.metadata["config"]).treeline_m()
     high_land = [
         h
         for h in biome_state.hexes.values()

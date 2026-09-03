@@ -45,19 +45,13 @@ class ElevationStage(GeneratorStage):
             result[i] = v / max_val
         arr = result.reshape(w, h)
 
-        gx, gy = cfg.elevation_gradient
-        if gx != 0.0 or gy != 0.0:
-            qf = np.linspace(-0.5, 0.5, w)[:, np.newaxis]
-            rf = np.linspace(-0.5, 0.5, h)[np.newaxis, :]
-            arr += gx * qf + gy * rf
-
-        # Normalise to [0, 1] *before* the falloff.  The falloff multiplies towards
-        # zero, so it only pulls the map edge underwater if zero is the bottom of the
-        # elevation range.  Applied to raw noise, which straddles zero, it instead pulls
-        # the edge towards the middle of the range: the edge came out around 0.46–0.59
-        # against a 0.45 sea level, so whether the sea reached the border at all was a
-        # coin flip per seed, and on a map where it did not every drop of water was
-        # trapped inland.
+        # Shape to [0, 1] first, then put it in metres.
+        #
+        # The shaping stays because the falloff below blends *towards* the seabed, and it
+        # needs a known floor to blend from: applied to raw noise, which straddles zero,
+        # the edge came out mid-range instead of underwater, so whether the sea reached
+        # the border at all was a coin flip per seed — and on a map where it did not,
+        # every drop of water was trapped inland.
         lo, hi = arr.min(), arr.max()
         if hi > lo:
             arr = (arr - lo) / (hi - lo)
@@ -113,12 +107,32 @@ class ElevationStage(GeneratorStage):
             # high the drop is still abrupt, which is what a sea cliff is.
             t = t * t * (3.0 - 2.0 * t)
 
-            # Blend towards a shallow seabed, not towards zero.  Dropping the border to
-            # elevation 0 puts an abyss against the shore, and the whole descent has to
-            # happen across the shelf, which is what made the coast a cliff whatever
-            # width it was given.  A seabed just below sea level is both a shorter drop
-            # and a truer one — the sea floor near a coast is shallow.
-            arr = arr * t + cfg.continent_seabed * (1.0 - t)
+            # Blend towards a shallow seabed rather than towards the very bottom of the
+            # range.  Dropping the border all the way down puts an abyss against the
+            # shore, and the whole descent then has to happen across the shelf, which is
+            # what made the coast a cliff whatever width it was given.  A shallow shelf is
+            # both a shorter drop and a truer one.
+            seabed_shaped = 0.0
+            arr = arr * t + seabed_shaped * (1.0 - t)
+
+        # Into metres above sea level, which is the datum: land is positive, sea floor
+        # negative, and sea level is zero by definition rather than by a threshold. Every
+        # test downstream — is this ocean, how far above the water does the ground stand,
+        # is it above the treeline — is then a statement about the world rather than a
+        # position on a per-map axis.
+        span = cfg.max_elevation_m + cfg.seabed_depth_m
+        arr = arr * span - cfg.seabed_depth_m
+
+        # The regional tilt, in metres, applied last. It used to go on before the shaping,
+        # where it was competing with a normalisation that promptly stretched the result
+        # back out — so asking for half a range of tilt got you rather less than that. In
+        # metres after the fact it does what it says: raise one edge of the map by the
+        # figure given, and let whatever that puts under water go under water.
+        gx, gy = cfg.elevation_gradient_m
+        if gx != 0.0 or gy != 0.0:
+            qf = np.linspace(-0.5, 0.5, w)[:, np.newaxis]
+            rf = np.linspace(-0.5, 0.5, h)[np.newaxis, :]
+            arr = arr + gx * qf + gy * rf
 
         for q in range(w):
             for r in range(h):

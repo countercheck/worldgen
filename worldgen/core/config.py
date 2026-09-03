@@ -51,7 +51,9 @@ class WorldConfig:
 
     width: int = 128
     height: int = 128
-    sea_level: float = 0.25
+    # Sea level is the datum: elevation is metres above it, so it is zero by
+    # definition and is no longer a setting. What the map looks like is set by how
+    # high the land stands and how deep the sea lies, below.
 
     # Elevation
     noise_octaves: int = 6
@@ -66,8 +68,23 @@ class WorldConfig:
     # border rather than ending in a coast.
     continent_falloff_edges: tuple[str, ...] = ("north", "south", "east", "west")
     continent_shelf_variance: float = 0.35
-    continent_seabed: float = 0.15
-    elevation_gradient: tuple[float, float] = (0.0, 0.0)
+    # The highest ground on the map, in metres above sea level. This is the map's
+    # vertical scale and the single most consequential setting for what kind of
+    # country it is: 2400 gives real uplands with a little ground above the treeline,
+    # 1200 gives downland and hills, 4000 gives an Alpine massif. How much of the map
+    # ends up under water follows from this and seabed_depth_m rather than being set
+    # directly, which is the honest way round.
+    max_elevation_m: float = 1500.0
+    # How deep the sea floor lies at the map edge, in metres below sea level. A
+    # continental shelf, not an abyss — the falloff blends the border down to this,
+    # and a shallow shelf makes a gentler coast than a plunge would.
+    seabed_depth_m: float = 200.0
+    # Land no higher than this beside the sea is coast: the beach, the marsh, the harbour
+    # flat. Metres above sea level, so it means the same on any map.
+    coast_max_elevation_m: float = 100.0
+    # A directional tilt across the whole map, in metres: [east, south]. Positive east
+    # raises the eastern edge, positive south the southern one.
+    elevation_gradient_m: tuple[float, float] = (0.0, 0.0)
 
     # Terrain classification — bands of gradient, in metres of rise per kilometre.
     # Absolute, not a fraction of the elevation range: the old fractional thresholds moved
@@ -146,7 +163,7 @@ class WorldConfig:
 
     def __post_init__(self) -> None:
         self.wind_direction = _coerce_pair("wind_direction", self.wind_direction)
-        self.elevation_gradient = _coerce_pair("elevation_gradient", self.elevation_gradient)
+        self.elevation_gradient_m = _coerce_pair("elevation_gradient_m", self.elevation_gradient_m)
         if self.channel_min_discharge < 0:
             raise ValueError(
                 f"channel_min_discharge must be >= 0, got {self.channel_min_discharge}"
@@ -185,10 +202,16 @@ class WorldConfig:
             raise ValueError(
                 f"continent_shelf_hexes must be >= 1, got {self.continent_shelf_hexes}"
             )
-        if not (0.0 <= self.continent_seabed < self.sea_level):
+        if self.max_elevation_m <= 0.0:
+            raise ValueError(f"max_elevation_m must be above sea level, got {self.max_elevation_m}")
+        if self.coast_max_elevation_m < 0.0:
             raise ValueError(
-                "continent_seabed must be in [0, sea_level) so the map edge is under "
-                f"water, got seabed={self.continent_seabed}, sea_level={self.sea_level}"
+                f"coast_max_elevation_m must be >= 0, got {self.coast_max_elevation_m}"
+            )
+        if self.seabed_depth_m <= 0.0:
+            raise ValueError(
+                "seabed_depth_m is a depth below sea level and must be positive, got "
+                f"{self.seabed_depth_m}"
             )
         if self.endorheic_marsh_radius < 0:
             raise ValueError(
@@ -239,6 +262,12 @@ class WorldConfig:
             )
         if self.lapse_rate_c_per_km < 0.0:
             raise ValueError(f"lapse_rate_c_per_km must be >= 0, got {self.lapse_rate_c_per_km}")
+        if self.biome_treeline_temp_c > self.biome_cold_temp_c:
+            raise ValueError(
+                "biome_treeline_temp_c must be at or below biome_cold_temp_c — trees stop "
+                "above the treeline, so it cannot be warmer than the cold band, got "
+                f"{self.biome_treeline_temp_c} and {self.biome_cold_temp_c}"
+            )
         if self.biome_cold_temp_c >= self.biome_warm_temp_c:
             raise ValueError(
                 "biome_cold_temp_c must be below biome_warm_temp_c, got "
@@ -260,8 +289,7 @@ class WorldConfig:
             )
         if self.hex_size_m <= 0:
             raise ValueError(f"hex_size_m must be > 0, got {self.hex_size_m}")
-        if self.road_elev_range_m <= 0:
-            raise ValueError(f"road_elev_range_m must be > 0, got {self.road_elev_range_m}")
+
         if self.road_slope_free_pct < 0:
             raise ValueError(f"road_slope_free_pct must be >= 0, got {self.road_slope_free_pct}")
         if self.road_slope_cap_pct <= self.road_slope_free_pct:
@@ -465,7 +493,14 @@ class WorldConfig:
     crossing_use_cost: float = 0.5  # using an existing ford or bridge
 
     # Biome thresholds
-    biome_alpine_elev: float = 0.85
+    # The mean annual temperature at which trees stop, in Celsius. The treeline is not a
+    # height — it is a temperature, and the height it happens to fall at follows from how
+    # warm the region is and how fast air cools with altitude. That is why it stands at
+    # about 1400 m in temperate country, near sea level in the subarctic, and close to
+    # 4000 m in the tropics. A fixed altitude could not say any of that, and a fraction of
+    # the elevation range said the opposite: it gave every map the same share of alpine
+    # ground however low its hills.
+    biome_treeline_temp_c: float = 1.0
     # Mean annual temperature bounding the cold and warm biome bands, in Celsius. Taiga
     # gives way to broadleaf woodland around 5 C; the warm band begins where subtropical
     # vegetation takes over, around 18 C.
@@ -536,7 +571,6 @@ class WorldConfig:
 
     # World scale
     hex_size_m: float = 1000.0  # metres per hex
-    road_elev_range_m: float = 3000.0  # metres for full 0→1 elevation span
 
     # Roads — base terrain costs
     road_escarpment_cost: float = 20.0
@@ -587,6 +621,19 @@ class WorldConfig:
 
     # Settlement placement
     settlement_min_reachable: int = 100  # min hexes reachable below cap grade
+
+    def treeline_m(self) -> float:
+        """The altitude the treeline falls at, in metres above sea level.
+
+        Derived rather than set: it is where the lapse rate has cooled the region's mean
+        annual temperature down to the point trees stop. About 1400 m in temperate
+        country, at sea level in the subarctic, near 4000 m in the tropics — all from one
+        temperature and one rate, none of it configured per map.
+        """
+        if self.lapse_rate_c_per_km <= 0.0:
+            return float("inf")
+        drop = self.mean_temperature_c - self.biome_treeline_temp_c
+        return max(0.0, drop / self.lapse_rate_c_per_km * 1000.0)
 
     def runoff_mm(self, precip_mm: float, temp_c: float | None = None) -> float:
         """How much of a year's rain runs off, rather than returning to the air.
@@ -645,7 +692,7 @@ class WorldConfig:
             yaml.dump(d, f, default_flow_style=False, sort_keys=False)
 
 
-_TUPLE_FIELDS = ("wind_direction", "elevation_gradient")
+_TUPLE_FIELDS = ("wind_direction", "elevation_gradient_m")
 _EDGES = ("north", "south", "east", "west")
 
 # Settings that used to exist. A key here is dropped with a warning naming what replaced
@@ -693,6 +740,25 @@ _RETIRED_FIELDS: dict[str, str] = {
     ),
     "navigable_river_flow": (
         "navigability is decided by discharge now; use navigable_min_discharge"
+    ),
+    "sea_level": (
+        "elevation is metres above sea level now, so sea level is zero by definition; "
+        "set max_elevation_m and seabed_depth_m instead"
+    ),
+    "continent_seabed": (
+        "elevation is metres above sea level now; use seabed_depth_m, a depth in metres"
+    ),
+    "elevation_gradient": (
+        "elevation is metres now; use elevation_gradient_m, a tilt in metres across the map"
+    ),
+    "biome_alpine_elev": (
+        "the treeline is a temperature now, not a height: trees stop where it is too cold "
+        "for them, and the altitude that happens at follows from the region's warmth and "
+        "the lapse rate. Use biome_treeline_temp_c (try 1.0)"
+    ),
+    "road_elev_range_m": (
+        "elevation is metres throughout, so nothing needs converting from a 0-1 range any "
+        "more; max_elevation_m sets the map's vertical scale"
     ),
     "erosion_iterations": (
         "erosion is now dosed per land hex so it means the same thing at any map size; "

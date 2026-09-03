@@ -83,21 +83,20 @@ def test_bigger_maps_really_do_have_bigger_rivers():
 # --- river_span --------------------------------------------------------------
 
 
-def _reach(catchment, drop_m=0.0, elevation=0.5):
+def _reach(catchment, drop_m=0.0, elevation=500.0):
     """A river hex with a downstream neighbour *drop_m* below it, and dry banks alongside.
 
     The drop is along the channel, which is what sets velocity. The banks are left level
     on purpose: a river winds down a valley, so the ground beside it is nearly always
     higher, and that says nothing about whether the water can be waded.
     """
-    cfg = WorldConfig()
     hx = Hex(coord=(0, 0), catchment_km2=catchment, elevation=elevation)
     hx.tags.add("river")
     hexes = {(0, 0): hx}
     for n in neighbors((0, 0)):
         hexes[n] = Hex(coord=n, elevation=elevation)
     downstream = neighbors((0, 0))[0]
-    hexes[downstream].elevation = elevation - drop_m / cfg.road_elev_range_m
+    hexes[downstream].elevation = elevation - drop_m
     hexes[downstream].tags.add("river")
     return hx, hexes
 
@@ -146,7 +145,7 @@ def test_a_high_valley_side_does_not_make_a_river_uncrossable():
     plain, plain_hexes = _reach(cfg.ford_max_catchment_km2)
     valley, valley_hexes = _reach(cfg.ford_max_catchment_km2)
     for n in neighbors((0, 0))[1:]:
-        valley_hexes[n].elevation = valley.elevation + 250.0 / cfg.road_elev_range_m
+        valley_hexes[n].elevation = valley.elevation + 250.0
 
     assert river_span(valley, valley_hexes, cfg) == pytest.approx(
         river_span(plain, plain_hexes, cfg)

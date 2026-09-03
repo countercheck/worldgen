@@ -291,13 +291,13 @@ def test_slope_edge_cost_formula():
     # grade = 0% → free
     assert slope_cost(0.0) == pytest.approx(0.0)
     # grade = free_pct (3%) → zero cost
-    delta_free = cfg.road_slope_free_pct * cfg.hex_size_m / (cfg.road_elev_range_m * 100.0)
+    delta_free = cfg.road_slope_free_pct * cfg.hex_size_m / 100.0
     assert slope_cost(delta_free) == pytest.approx(0.0)
     # grade slightly above free → small positive cost
     assert slope_cost(delta_free * 1.01) > 0.0
     # midpoint grade → cost = road_slope_cost × 1.0
     mid_pct = (cfg.road_slope_free_pct + cfg.road_slope_cap_pct) / 2
-    delta_mid = mid_pct * cfg.hex_size_m / (cfg.road_elev_range_m * 100.0)
+    delta_mid = mid_pct * cfg.hex_size_m / 100.0
     mid_cost = slope_cost(delta_mid)
     expected_mid = (
         cfg.road_slope_cost
@@ -306,7 +306,7 @@ def test_slope_edge_cost_formula():
     )
     assert abs(mid_cost - expected_mid) < 1e-9
     # grade = cap_pct → saturated at road_slope_cost * road_slope_cap_mult
-    delta_cap = cfg.road_slope_cap_pct * cfg.hex_size_m / (cfg.road_elev_range_m * 100.0)
+    delta_cap = cfg.road_slope_cap_pct * cfg.hex_size_m / 100.0
     assert slope_cost(delta_cap) == pytest.approx(cfg.road_slope_cost * cfg.road_slope_cap_mult)
     # grade > cap → same saturation value
     assert slope_cost(delta_cap * 2) == pytest.approx(cfg.road_slope_cost * cfg.road_slope_cap_mult)

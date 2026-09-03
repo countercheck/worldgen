@@ -79,8 +79,12 @@ def test_lake_bodies_no_border(world):
 
 
 def test_all_water_classified(world):
-    """Every hex with elevation below sea_level is either OCEAN or LAKE."""
-    sea = world.metadata.get("config", {}).get("sea_level", 0.45)
+    """Every hex below sea level is either OCEAN or LAKE.
+
+    Sea level is zero: elevation is metres above it, so this is a statement about the
+    world rather than a comparison against a per-map threshold.
+    """
+    sea = 0.0
     water_types = (TerrainClass.OCEAN, TerrainClass.LAKE)
     for coord, hx in world.hexes.items():
         if hx.elevation < sea:
