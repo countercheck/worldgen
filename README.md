@@ -157,10 +157,10 @@ coastal bonus existed largely to repair the damage. Wetland sits *below* open wa
 being neither good fishing nor good ploughing, which matches bog and marsh resisting
 cultivation outright.
 
-Fertile and marginal hexes are then scaled by a moisture curve. This is a tent, not a
-ramp — too dry is desert, too wet is waterlogged — peaking across the same
-`[biome_dry_moist, biome_wet_moist]` band the biome classifier uses, so the two cannot
-disagree. Land cover already buckets moisture coarsely, so the curve discriminates
+Fertile and marginal hexes are then scaled by a rainfall curve. This is a tent, not a
+ramp — too dry is desert, too wet is leached and waterlogged — peaking across the same
+`[biome_dry_precip_mm, biome_wet_precip_mm]` band the biome classifier uses, so the two
+cannot disagree, and falling to zero at `food_drowned_precip_mm`. Land cover already buckets moisture coarsely, so the curve discriminates
 *within* a band: the wet end of grassland is better farmland than the dry end.
 
 On top of the catchment sit four flat site bonuses — river adjacency, coastal access, a
@@ -276,24 +276,26 @@ No built-in presets ship with the project — create your own. Any field omitted
 {
     "width": 96,
     "height": 96,
-    "continent_falloff": 0.8,
-    "sea_level": 0.60,
-    "base_temperature": 0.75,
+    "regional_climate": "mediterranean",
+    "max_elevation_m": 2400.0,
+    "continent_falloff_edges": ["south", "east"],
     "target_city_count": 3,
     "target_town_count": 12
 }
 ```
 
-Key fields to customize per world type:
+Key fields to customize per world type. Every physical setting is in real units — metres,
+degrees Celsius, millimetres of rain a year — so a value means the same thing on any map:
 
 | Field | Effect |
 |---|---|
-| `sea_level` | fraction of hexes below sea (0.3 = lots of land, 0.7 = archipelago) |
-| `continent_falloff` | edge-falloff strength — higher = more island-shaped |
-| `base_temperature` | 0 = arctic, 1 = tropical |
+| `regional_climate` | `boreal`, `temperate`, `mediterranean`, `arid`, `tropical`. Sets mean temperature, rainfall, and which biomes the region can grow |
+| `max_elevation_m` | the map's vertical scale: 800 downland, 1500 mixed uplands, 3000 an Alpine massif |
+| `seabed_depth_m` | how deep the sea lies at the edge; with `max_elevation_m` this decides how much of the map is underwater |
+| `continent_falloff_edges` | which edges the sea comes in from. `["west"]` gives a west coast running inland; `[]` a landlocked map |
 | `noise_octaves` | fBm detail levels — more = rougher terrain |
-| `erosion_iterations` | more = sharper valleys |
-| `target_city_count` / `target_town_count` | settlement density |
+| `erosion_droplets_per_hex` | whether the map has valleys. Below ~1 the rivers only scratch the noise |
+| `target_city_count` / `target_town_count` | settlement density under `--model classic`; the `organic` model derives its own |
 
 ## Architecture
 
@@ -370,16 +372,23 @@ All parameters are in `WorldConfig`. Key knobs:
 WorldConfig(
     width=128,
     height=128,
-    sea_level=0.45,  # fraction of hexes below sea
+    # Elevation is metres above sea level; sea level is the datum, so it is zero by
+    # definition rather than a setting.
+    max_elevation_m=1500.0,  # the map's vertical scale
+    seabed_depth_m=200.0,  # how deep the sea lies at the edge
     noise_octaves=6,  # fBm detail levels
-    erosion_iterations=15000,  # more = sharper valleys
-    river_flow_threshold=0.05,  # top N% of flow accumulation becomes rivers
-    base_temperature=0.5,  # 0 = arctic, 1 = tropical
+    erosion_droplets_per_hex=3.0,  # per land hex, so it means the same at any map size
+    channel_min_discharge=20000.0,  # catchment km2 x runoff mm needed to cut a channel
+    regional_climate="temperate",  # sets mean temperature (10 C) and rainfall (800 mm)
     target_city_count=6,
     target_town_count=24,
-    road_mountain_cost=10.0,  # cost multiplier for mountain hexes
+    road_steep_cost=10.0,  # cost multiplier for steep hexes
 )
 ```
+
+A config file that sets a setting the generator no longer has still loads: retired names
+warn and name their replacement, so an old file keeps working while telling you what to
+change. `worldgen init-config` writes a fully commented template with every setting in it.
 
 Save / load a config:
 

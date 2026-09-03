@@ -158,15 +158,72 @@ def test_retired_key_warns_and_still_loads(tmp_path, monkeypatch):
     assert cfg.width == 32
 
 
-def test_shipped_default_config_loads():
-    """`init-config` copies this file verbatim, so it must parse against the dataclass.
+def _config_yaml_keys(path):
+    """Top-level setting names in a config file, excluding the `export` section."""
+    import yaml
 
-    It is hand-synced with the dataclass, so nothing else would catch a key that was
-    renamed in one place and not the other.
+    with open(path) as f:
+        raw = yaml.safe_load(f)
+    return {k for k in raw if k != "export"}
+
+
+def _documented_config_files():
+    """The two hand-written config files, both of which must track the dataclass.
+
+    `default_config.yaml` is what `init-config` copies for a new user; the root
+    `worldgen.yaml` is the working config the README and the verification commands
+    point at. Neither is generated, so only a test keeps them honest.
     """
     from pathlib import Path
 
     import worldgen
 
-    shipped = Path(worldgen.__file__).parent / "default_config.yaml"
-    assert WorldConfig.from_yaml(str(shipped)).width > 0
+    package = Path(worldgen.__file__).parent
+    return [package / "default_config.yaml", package.parent / "worldgen.yaml"]
+
+
+@pytest.mark.parametrize("path", _documented_config_files(), ids=lambda p: p.name)
+def test_shipped_config_loads(path):
+    """`init-config` copies this file verbatim, so it must parse against the dataclass."""
+    assert WorldConfig.from_yaml(str(path)).width > 0
+
+
+@pytest.mark.parametrize("path", _documented_config_files(), ids=lambda p: p.name)
+def test_shipped_config_documents_every_setting(path):
+    """Every `WorldConfig` field must appear in the shipped configs.
+
+    Parsing alone is not enough, and the difference is not academic: the root
+    `worldgen.yaml` went twenty-one retired keys and forty-nine missing ones out of date
+    across the units work while still loading cleanly every time, because a retired key
+    only warns and a missing one silently takes the dataclass default. A config file that
+    loads but documents none of the settings that matter is worse than one that fails, so
+    the coverage is asserted rather than the parse.
+    """
+    from dataclasses import fields
+
+    documented = _config_yaml_keys(path)
+    declared = {f.name for f in fields(WorldConfig)}
+
+    missing = sorted(declared - documented)
+    assert not missing, f"{path.name} does not document: {', '.join(missing)}"
+
+
+@pytest.mark.parametrize("path", _documented_config_files(), ids=lambda p: p.name)
+def test_shipped_config_has_no_retired_or_unknown_settings(path):
+    """...and nothing in them may be a setting the dataclass no longer has.
+
+    A retired key loads with a warning, so a stale file is quiet at runtime; this is what
+    makes it audible.
+    """
+    from dataclasses import fields
+
+    from worldgen.core.config import _RENAMED_FIELDS, _RETIRED_FIELDS
+
+    documented = _config_yaml_keys(path)
+    declared = {f.name for f in fields(WorldConfig)}
+
+    retired = sorted(documented & (set(_RETIRED_FIELDS) | set(_RENAMED_FIELDS)))
+    assert not retired, f"{path.name} still sets retired settings: {', '.join(retired)}"
+
+    unknown = sorted(documented - declared)
+    assert not unknown, f"{path.name} sets settings that do not exist: {', '.join(unknown)}"

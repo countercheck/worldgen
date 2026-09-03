@@ -1,14 +1,24 @@
-# worldgen.yaml — Map generation configuration
+# worldgen.yaml — the repository's working configuration
 # Pass to the CLI with: worldgen generate --config worldgen.yaml
 #                        worldgen export  --config worldgen.yaml ...
-# All values shown are defaults. Edit any line to override.
+#
+# Every value is the default except the three marked "Overridden", each of which names
+# the default it departs from. `worldgen init-config` writes the unmodified template.
+#
+# Every setting the generator has appears here, and a test enforces that: a config that
+# silently omits a setting still loads, taking the dataclass default, so a file can drift
+# a long way out of date without ever failing.
 
 # ---------------------------------------------------------------------------
 # Map dimensions
 # ---------------------------------------------------------------------------
 width: 128    # Map width in hexes. Default: 128
 height: 128   # Map height in hexes. Default: 128
-sea_level: 0.25  # Water level threshold (0–1) on normalised elevation. Lower = more land. Default: 0.25
+# Elevation is metres above sea level, so sea level is zero by definition and is not a
+# setting. How the map looks is set by how high the land stands and how deep the sea lies.
+max_elevation_m: 1500.0  # Highest ground above sea level. The map's vertical scale, and the single most consequential setting for what country this is: 800 gives downland, 1500 mixed uplands, 3000 an Alpine massif. Default: 1500
+seabed_depth_m: 200.0    # How deep the sea floor lies at the map edge. A continental shelf, not an abyss. How much of the map ends up underwater follows from this and max_elevation_m. Default: 200
+coast_max_elevation_m: 100.0 # Land no higher than this beside the sea is coast. Default: 100
 
 # ---------------------------------------------------------------------------
 # Elevation noise (Fractal Brownian Motion)
@@ -26,31 +36,44 @@ continent_falloff: true   # Apply edge falloff so the sea rings the map and ever
 #   [north, south, east, west]  →  an island, sea on all sides
 #   [west]                      →  a west coast, land running inland to the east
 #   [north, west]               →  a north-west corner of a larger continent
-continent_falloff_edges: [south]
+continent_falloff_edges: [south]  # Overridden: a south coast with land running inland to the north. Default: [north, south, east, west]
 continent_shelf_variance: 0.35 # How much the shelf's inner edge wanders, 0–1. 0 gives a coast of even width; higher makes bays and headlands. The terrain noise already moves the shoreline a good deal on its own, so this is a nudge, not the main shaping. Default: 0.35
 continent_shelf_hexes: 10 # Width in hexes (km) of the coastal shelf over which land drops away to the sea. In hexes rather than a fraction of the map, so the coastal gradient is the same per km at any size. Narrower = steeper, cliffier coasts. Capped at a quarter of the shorter side. Only used when continent_falloff is true. Default: 10
-continent_seabed: 0.15    # Elevation the shelf descends to at the map edge. Must be below sea_level so the border is always under water. Nearer sea_level = a shallower, gentler shelf; nearer 0 = a steep drop into deep water, which makes cliff coasts common. Default: 0.15
 
-# Directional tilt [east_bias, south_bias] added to raw elevation before normalization.
+# Directional tilt [east, south] in metres, applied after the terrain is shaped.
 # Positive x raises the east edge; negative x raises the west edge.
 # Positive y raises the south edge; negative y raises the north edge.
-# Values around ±0.5 produce a clear slope across the map.
 # Examples:
-#   [0.0, -0.5]  →  north is highest, map runs downhill to the south
-#   [-0.5, 0.0]  →  west is highest, map runs downhill to the east
-#   [0.0, 0.0]   →  no tilt (default)
-elevation_gradient: [0.0, 0.0]
+#   [0.0, -600.0]  →  north stands 600 m higher, map runs downhill to the south
+#   [-600.0, 0.0]  →  west stands 600 m higher, map runs downhill to the east
+#   [0.0, 0.0]     →  no tilt (default)
+elevation_gradient_m: [0.0, 0.0]  # Tilt across the map in metres: [east, south].
 
 # ---------------------------------------------------------------------------
 # Terrain classification
 # ---------------------------------------------------------------------------
-terrain_hill_gradient: 0.02      # Elevation gradient threshold for hills. Default: 0.02
-terrain_mountain_gradient: 0.04  # Elevation gradient threshold for mountains. Default: 0.04
+# Terrain classes are bands of gradient, in metres of rise per kilometre. They describe
+# how the ground lies, not how high it is: a high plateau is level ground and is classed
+# as such. Absolute rather than a fraction of the elevation range, so a band means the
+# same thing whatever the map's vertical scale is.
+#   under 30    FLAT        level going: plough it, cart across it
+#   30 to 100   ROLLING     undulating; farmed, and a laden cart manages
+#   100 to 250  STEEP       pack animals, terraces, no wheels
+#   over 250    ESCARPMENT  a break of slope; on foot and with effort
+terrain_rolling_gradient_m: 30.0     # m/km above which ground stops being level. Default: 30.0
+terrain_steep_gradient_m: 100.0      # m/km above which wheels stop working. Default: 100.0
+terrain_escarpment_gradient_m: 250.0 # m/km above which it is a break of slope. Default: 250.0
 
 # ---------------------------------------------------------------------------
 # Erosion (hydraulic droplet simulation)
 # ---------------------------------------------------------------------------
-erosion_iterations: 15000              # Number of water-droplet simulations. Default: 15000
+# Droplets run per land hex, not per map, so the dose means the same thing at any size.
+# It is what decides whether the map has valleys: below about one per hex the rivers only
+# scratch a line into the noise and there is no floodplain. It is also a climate setting —
+# the orographic term lifts on height above sea level, so wearing the high ground down
+# flattens the rain shadow. 3.0 has floodplains and keeps most of the shadow; raising it
+# buys level ground at the cost of the map having any dry country.
+erosion_droplets_per_hex: 3.0          # Water-droplet simulations per land hex. Default: 3.0
 erosion_inertia: 0.05                  # Droplet momentum factor. Default: 0.05
 erosion_capacity: 4.0                  # Sediment capacity multiplier. Default: 4.0
 erosion_deposition: 0.3                # Rate of sediment deposition. Default: 0.3
@@ -62,13 +85,24 @@ erosion_delta_min_load: 0.15 # Sediment a droplet must still carry when it reach
 # ---------------------------------------------------------------------------
 # Hydrology
 # ---------------------------------------------------------------------------
-river_flow_threshold: 0.05  # Minimum flow volume (0–1) for a hex to be a river. Default: 0.05
+# A channel forms where enough water passes to keep one open: catchment area times runoff
+# depth. This replaced a threshold that was really a rank — the top 5% of land by
+# accumulation — which gave desert and rainforest alike 5.6% of their land under channel.
+channel_min_discharge: 20000.0   # Catchment km2 x runoff mm needed to cut a channel. Default: 20000
+navigable_min_discharge: 150000.0 # ...and to float a boat. Default: 150000
+river_flow_continuous: false # Record a flow figure on every draining land hex, not only on hexes that carry a channel. Off by default: it is a diagnostic for inspecting the drainage field in the viewer, and turning it on does not add rivers to the map. Default: false
+# Rain the ground and its plants take before anything runs off. Rises with temperature,
+# which is why cold country sheds nearly all its rain and the taiga is full of rivers.
+evapotranspiration_base_mm: 50.0  # Taken even at freezing. Default: 50
+evapotranspiration_per_c_mm: 30.0 # ...plus this much per degree of mean temperature. Default: 30
+min_runoff_mm: 25.0               # Floor, so even a desert drains its largest valleys. Default: 25
+wetland_min_runoff_mm: 300.0      # Runoff above which flat riverside ground waterlogs. Default: 300
 
 # Lake drainage. Every lake is filled to its spillway and given an outflow, so water
 # that enters a basin has somewhere to go instead of accumulating forever.
 lake_chaining: true             # Allow a lake to spill into a strictly lower lake, not just the sea. Chains of lakes stepping down to the coast are the only outlet on a landlocked map. Default: true
 endorheic_marsh_radius: 1       # Where a basin genuinely has no outlet it is endorheic: water leaves by evaporation. This many hexes of its shore become wetland. 0 disables. Default: 1
-endorheic_marsh_min_moisture: 0.4 # A closed basin drier than this is a salt pan, not a marsh, and gets no wetland shore. Default: 0.4
+endorheic_marsh_min_precip_mm: 300.0 # A closed basin drier than this is a salt pan, not a marsh, and gets no wetland shore. Default: 300
 
 # ---------------------------------------------------------------------------
 # Climate
@@ -81,26 +115,46 @@ endorheic_marsh_min_moisture: 0.4 # A closed basin drier than this is a salt pan
 # runs desert to steppe to alpine with altitude but never grows a jungle three valleys over.
 #   boreal | temperate | mediterranean | arid | tropical
 regional_climate: temperate
-regional_moisture:        # Mean land moisture (0–1). Blank = take it from regional_climate. The orographic pass gives a relative wet/dry pattern; this says where that pattern is centred.
+# Leave mean_temperature_c and mean_precip_mm blank to take both from regional_climate.
+# Writing a figure here pins it, which is rarely what you want: a config that names a
+# climate and also pins the temperature gives you, say, arid rainfall over temperate air.
+# Set one only to shift a region off its climate's default on purpose.
+mean_temperature_c:       # Mean annual temperature at sea level, in Celsius. Blank = from regional_climate (boreal 1, temperate 10, mediterranean 16, arid 21, tropical 26).
+mean_precip_mm:           # Mean annual rainfall over land, in millimetres. Blank = from regional_climate (boreal 450, temperate 800, mediterranean 550, arid 200, tropical 2000). The orographic pass gives a relative wet/dry pattern; this says what it is worth in real rain.
 wind_direction: [1.0, 0.0]  # Wind vector [x, y] driving moisture transport. Default: [1.0, 0.0] (eastward)
-base_temperature: 0.5       # Map's mean temperature (0=arctic, 1=tropical). Default: 0.5
-latitude_temp_range: 0.0    # Pole-to-equator temperature variation. Negligible across a region; raise only if mapping something continental. Default: 0.0
-altitude_lapse_rate: 0.4    # Temperature drop per unit of elevation. Default: 0.4
+latitude_temp_range_c: 0.0  # Degrees between the map's pole-ward and equator-ward edges. Negligible across a region — 128 km is about a degree of latitude. Default: 0.0
+lapse_rate_c_per_km: 6.5    # How fast air cools with height, in Celsius per km. 6.5 is the standard environmental lapse rate. Default: 6.5
 orographic_strength: 2.0    # Wind-driven precipitation intensity; higher = drier leeward slopes. Default: 2.0
+moisture_resupply_per_hex: 0.08 # How much of its moisture deficit the air makes back each km, by evaporation. Without it a rain shadow would run from the first hill to the map edge. Default: 0.08
 
-# Flat moisture bias added to all land hexes after normalization.
-# Positive = uniformly wetter; negative = uniformly drier. Clipped to [0, 1].
-# Default: 0.0 (no adjustment)
-base_moisture: 0.0
+# Flat rainfall bias in millimetres a year, added to every land hex after the orographic
+# pass. Positive = uniformly wetter, negative = uniformly drier. Use it to shift a whole
+# map without changing the wet/dry pattern the terrain produces.
+base_precip_mm: 0.0  # Default: 0.0 (no adjustment)
+
+# Moisture carried inland along a river, so a valley is greener than the ground above it.
+# Off by default: rivers already give a flat habitability bonus, and the bleed is a
+# second, elevation-gated route to the same effect that is worth turning on only when you
+# want visible riparian corridors.
+moisture_bleed_passes: 0     # Bleed iterations. 0 = off, the flat river bonus only. Default: 0
+moisture_bleed_strength: 0.3 # Share of the difference moved per pass, 0–1. Default: 0.3
 
 # ---------------------------------------------------------------------------
 # Biome thresholds
 # ---------------------------------------------------------------------------
-biome_alpine_elev: 0.85  # Elevation above which terrain becomes alpine. Default: 0.85
-biome_cold_temp: 0.25    # Temperature below which climate is considered cold. Default: 0.25
-biome_warm_temp: 0.6     # Temperature above which climate is considered warm. Default: 0.6
-biome_dry_moist: 0.2     # Moisture below which climate is considered dry. Default: 0.2
-biome_wet_moist: 0.5     # Moisture above which climate is considered wet. Default: 0.5
+# The treeline is a temperature, not a height. The altitude it falls at follows from how
+# warm the region is and how fast air cools with height — about 1850 m in temperate
+# country, some 500 m in the subarctic, above 4300 m in the tropics.
+#
+# Keep it clear of every climate's own mean temperature. The alpine test runs ahead of
+# every temperature rule, so a treeline that lands at sea level makes a whole region bare
+# rock: at 1.0 C, which is the boreal region's own mean, a boreal map grew no taiga at all.
+biome_treeline_temp_c: -2.0 # Mean annual Celsius at which trees stop. The height that falls at follows from the region's warmth and the lapse rate: ~1800 m temperate, ~500 m boreal, >4000 m tropical. Default: -2.0
+biome_cold_temp_c: 5.0   # Mean annual Celsius below which the cold biomes take over — taiga gives way to broadleaf around here. Default: 5.0
+biome_warm_temp_c: 18.0  # Mean annual Celsius above which the warm biomes take over. Default: 18.0
+biome_dry_precip_mm: 400.0   # Annual rainfall below which the dry biomes take over — steppe and desert. Default: 400
+biome_wet_precip_mm: 1000.0  # Annual rainfall above which the wet biomes take over — closed forest. Default: 1000
+food_drowned_precip_mm: 3000.0 # Annual rainfall at which ground is leached and waterlogged and grows nothing. Default: 3000
 
 # ---------------------------------------------------------------------------
 # Settlements
@@ -119,9 +173,10 @@ food_marginal_value: 0.4   # Grazing and hard-to-clear forest. Default: 0.4
 food_wetland_value: 0.15   # Neither good fishing nor good ploughing; below water on purpose. Default: 0.15
 food_water_value: 0.4      # Fishing. Non-zero so a coastal site is not penalised for having sea in its catchment. Default: 0.4
 
-# Fertile and marginal hexes are additionally scaled by a moisture curve peaking across
-# the [biome_dry_moist, biome_wet_moist] band and falling to 0 at both extremes — too dry
-# is desert, too wet is waterlogged. Water and wetland ignore it.
+# Fertile and marginal hexes are additionally scaled by a rainfall curve peaking across
+# the [biome_dry_precip_mm, biome_wet_precip_mm] band and falling to 0 at both ends — too
+# dry is desert, too wet is leached and waterlogged (food_drowned_precip_mm sets the wet
+# end). Water and wetland ignore it.
 
 habitability_agri_weight: 0.40      # Weight on the catchment mean. Default: 0.40
 habitability_river_bonus: 0.25      # Flat bonus if the hex or a neighbour carries a river. Default: 0.25
@@ -129,11 +184,72 @@ habitability_coast_bonus: 0.25      # Flat bonus if the hex or a neighbour is co
 habitability_hill_bonus: 0.15       # Flat bonus for a hill overlooking a plain. Default: 0.15
 habitability_confluence_bonus: 0.10 # Flat bonus on a river junction (this hex only). Default: 0.10
 
+# --- the classic model: counts and spacing are inputs -----------------------
+# Used by `generate --model classic`. The map is told how many cities and towns to have
+# and how far apart to keep them, so it produces six cities whether it is one fertile
+# plain or landlocked desert.
 target_city_count: 6    # Number of cities to place. Default: 6
 target_town_count: 24   # Number of towns to place. Default: 24
 city_min_separation: 20 # Minimum hexes between any two cities. Default: 20
 town_min_separation: 8  # Minimum hexes between any two towns. Default: 8
-settlement_min_reachable: 100  # Minimum accessible hexes required for a valid settlement site. Default: 100
+settlement_min_reachable: 100  # Minimum accessible hexes required for a valid settlement site. Used by both models. Default: 100
+
+# ---------------------------------------------------------------------------
+# River crossings — § used by `--model organic`
+# ---------------------------------------------------------------------------
+# A river is not uniformly crossable. Most of its length is an obstacle; a few places are
+# not, and those places are why towns sit where they do. Crossings are settled before
+# anything else is built, so a bridging point can be the reason a market grows there
+# rather than something noticed afterwards.
+#
+# A ford is terrain and is free — shallow braided water anyone can wade, needing nobody's
+# permission. A bridge is capital, and appears only where enough traffic will use it.
+ford_max_catchment_km2: 60.0 # Catchment area, in km2, at or below which the water can be waded. A physical figure comparable between maps: a stream draining a few tens of km2 is ankle deep and a step across; one draining thousands is not. Default: 60
+crossing_relief_m: 60.0      # Local relief, in metres, that doubles how hard a reach is to get across. Fast water takes your feet from under you whatever its depth, and at a kilometre to the hex it is the approaches rather than the span that defeat a bridge. A floodplain has a few metres of this; a gorge has hundreds. Default: 60
+bridge_pressure_per_span: 3.0 # Surplus needed within reach per multiple of the widest wadeable span, before a bridge is worth building. A river twice that width needs twice the traffic. Nobody bridges to nowhere. Default: 3.0
+crossing_pressure_radius: 6   # How far either bank is searched for that surplus. Default: 6
+crossing_min_separation: 4    # Nobody builds two bridges within sight of each other. Default: 4
+crossing_use_cost: 0.5        # Cost of using an existing ford or bridge. Default: 0.5
+
+# ---------------------------------------------------------------------------
+# Haulage economics — § used by `--model organic`
+# ---------------------------------------------------------------------------
+# The ranges the settlement hierarchy is built on. Before rail and the motor lorry the
+# binding constraint on where people live and how large a place can grow is what it costs
+# to move bulk grain, and that one constraint generates the whole hierarchy.
+#
+# Each is a travel-cost budget rather than a distance, so terrain shortens it: at
+# 1 hex = 1 km they are calibrated to give the historical figure on flat ground and less
+# across hills. The ordering rural_field_radius < market_day_radius < haulage_range_land
+# is the model's core claim and is enforced.
+#
+#   rural_field_radius   ~2 km   the daily walk out to the fields. Chisholm: cropping
+#                                intensity falls off past ~1 km, land past 3–4 km is
+#                                grazing or waste.
+#   market_day_radius   ~10 km   out to market, business done, home inside a day.
+#                                Bracton held markets should stand 6⅔ miles apart, a
+#                                third of a twenty-mile day out and a third back.
+#   haulage_range_land  ~40 km   bulk grain overland before the team has eaten the cargo.
+#                                The softest figure here — what is well attested is the
+#                                water ratio below, not this absolute.
+rural_field_radius: 2.5    # The daily walk to the fields; sets cultivated extent. Default: 2.5
+haulage_range_land: 40.0   # Travel cost at which bulk food is worth nothing overland. Default: 40.0
+haulage_range_water_mult: 15.0 # How much further the same cargo goes by water. Diocletian's Price Edict prices land carriage at roughly 55x sea and 11x river for the same tonne-kilometre. This is why large pre-industrial cities sit on navigable water and inland ones stay small: nothing gates a city, water simply extends what can feed it. Default: 15.0
+marketable_surplus_fraction: 0.20 # Share of what a farming household grows that can leave for a market; it eats the rest. Sizing markets off the surplus rather than the production is why the tier ratios come out right without target counts anywhere. Default: 0.20
+people_per_food: 400.0     # People supported per unit of haulage-weighted food. Calibrated so market towns land in their historical 500–2500 band: across five seeds at 128x128 this gives medians of 1260–1700 and a largest of 4200–5450. Default: 400
+travel_ascent_per_hex: 125.0 # Naismith's rule: metres of ascent that cost as much as one hex of level ground. Catchments are walked, not engineered, so they use this rather than road_slope_cost — that curve prices grading a road and saturates at ten times base, which over eroded terrain shrinks a catchment to a third of its proper reach. Default: 125
+travel_ford_cost: 8.0      # Getting across away from a crossing, per multiple of the wadeable span, charged on each land–river edge. Deliberately has no fixed term, unlike road_river_crossing_base: that base is the capital of building a bridge, and somebody walking to market pays no capital — what stops them is how much water is in the way. Default: 8.0
+
+# ---------------------------------------------------------------------------
+# Market centres — § used by `--model organic`
+# ---------------------------------------------------------------------------
+# A market goes where it can gather the most surplus inside a day's return: central-place
+# logic with a real transport cost rather than an abstract one. There is no target count —
+# the number follows the land.
+market_day_radius: 10.0     # A day's return: out, business done, and home. Default: 10.0
+market_kernel_decay: 4.0    # d0 in the 1/(1 + d/d0) share a market takes from each hex it reaches. Default: 4.0
+market_min_separation: 5    # A suppression disc only, to stop two markets sharing a hexside. Real spacing comes from competition for surplus, which is what makes markets dense on rich ground and sparse on poor — a fixed separation cannot express that. Default: 5
+market_viability_floor: 5.0 # The one density knob, replacing target_city_count and target_town_count both: stop planting once the best remaining site scores below this. Calibrated against ~70–85 markets at 128x128 (England had ~700 markets in ~130,000 km2; this map is about an eighth of that). Default: 5.0
 
 # ---------------------------------------------------------------------------
 # Cultivation (farmland around settlements)
@@ -146,13 +262,13 @@ cultivation_village_radius: 2 # Farmland radius in hexes around villages. Defaul
 # World scale
 # ---------------------------------------------------------------------------
 hex_size_m: 1000.0        # Metres per hex; used for slope cost calculations. Default: 1000.0
-road_elev_range_m: 3000.0 # Elevation span in metres representing the full 0→1 range. Default: 3000.0
 
 # ---------------------------------------------------------------------------
 # Roads: base terrain costs (pathfinding multipliers by terrain type)
 # ---------------------------------------------------------------------------
-road_mountain_cost: 10.0  # Cost multiplier for mountain hexes. Default: 10.0
-road_hill_cost: 3.0       # Cost multiplier for hill hexes. Default: 3.0
+road_escarpment_cost: 20.0 # Cost multiplier for escarpment hexes. Default: 20.0
+road_steep_cost: 10.0      # Cost multiplier for steep hexes. Default: 10.0
+road_rolling_cost: 3.0     # Cost multiplier for rolling hexes. Default: 3.0
 road_flat_cost: 1.0       # Cost multiplier for flat hexes. Default: 1.0
 
 # ---------------------------------------------------------------------------
@@ -172,8 +288,8 @@ road_pheromone_factor: 0.1   # How strongly existing traffic attracts new routes
 # Per-hex cost across water is tiny so distance across a body barely matters;
 # the journey is paid for by the embark + disembark costs at the shores.
 road_water_cost: 0.05    # Per-hex pathfinding cost on OCEAN/LAKE hexes. Default: 0.05
-road_embark_cost: 20.0    # Cost charged on a land→water edge transition. Default: 8.0
-road_disembark_cost: 20.0 # Cost charged on a water→land edge transition. Default: 8.0
+road_embark_cost: 20.0    # Overridden: raised so routes take to the water only when the land way round is genuinely long. Default: 8.0
+road_disembark_cost: 20.0 # Overridden to match. Default: 8.0
 
 # ---------------------------------------------------------------------------
 # Roads: river crossings (charged on each land↔river edge, scales with flow)
