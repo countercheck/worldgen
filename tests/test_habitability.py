@@ -2,8 +2,8 @@ import pytest
 
 from tests.worlds import build_pipeline, build_world
 from worldgen.core.config import WorldConfig
-from worldgen.core.hex import Biome, Hex, LandCover, TerrainClass
-from worldgen.stages.habitability import catchment_means, food_value, moisture_factor
+from worldgen.core.hex import Biome, Hex, LandCover, LandUse, SoilQuality, TerrainClass
+from worldgen.stages.habitability import actual_food, catchment_means, potential_food
 
 TIERS = ("habitability_city", "habitability_town", "habitability_village")
 
@@ -16,96 +16,116 @@ def _build_pipeline(seed: int = 42, width: int = 48, height: int = 48):
     return build_pipeline(seed=seed, width=width, height=height, until=_HAB_STOP)
 
 
-# --- the moisture curve ------------------------------------------------------
+# --- what a hex is worth --------------------------------------------------------
 
 
-def test_moisture_factor_is_full_across_the_temperate_band():
-    for mm in (400, 600, 800, 1000):
-        assert moisture_factor(mm, 400, 1000, 3000) == pytest.approx(1.0)
+def _hex(soil=None, cover=None, use=None, precip_mm=700):
+    return Hex(coord=(0, 0), soil=soil, land_cover=cover, land_use=use, moisture=precip_mm)
 
 
-def test_moisture_factor_falls_off_both_ends():
-    """Not a ramp: a swamp must not outrank a meadow."""
-    assert moisture_factor(0, 400, 1000, 3000) == 0.0
-    assert moisture_factor(3000, 400, 1000, 3000) == 0.0, "drowned ground feeds nobody"
-    assert 0.0 < moisture_factor(200, 400, 1000, 3000) < 1.0
-    assert 0.0 < moisture_factor(2000, 400, 1000, 3000) < 1.0
+def test_unusable_ground_feeds_nobody():
+    assert potential_food(_hex(SoilQuality.UNUSABLE), WorldConfig()) == 0.0
 
 
-def test_moisture_factor_is_monotonic_toward_the_band():
-    dry_side = [moisture_factor(mm, 400, 1000, 3000) for mm in range(20, 400, 20)]
-    wet_side = [moisture_factor(mm, 400, 1000, 3000) for mm in range(1020, 3000, 100)]
-    assert dry_side == sorted(dry_side), "drier than the band should only improve"
-    assert wet_side == sorted(wet_side, reverse=True), "wetter than the band should only worsen"
+def test_the_soil_ladder_is_ordered():
+    """Each rung is worth strictly more than the one below.
 
-
-def test_moisture_factor_stays_in_unit_range():
-    for m in range(0, 101):
-        assert 0.0 <= moisture_factor(m * 40, 400, 1000, 3000) <= 1.0
-
-
-# --- the food bands ----------------------------------------------------------
-
-
-# Rainfall in millimetres a year. 700 sits inside the agricultural band, so a cover's own
-# value is what these tests are reading.
-_BAND = (400, 1000)
-
-
-def _hex(cover, precip_mm=700):
-    return Hex(coord=(0, 0), land_cover=cover, moisture=precip_mm)
-
-
-def test_barren_covers_feed_nobody():
+    The ordering is what every other claim in the model rests on, and it is asserted here
+    rather than assumed from the config defaults, which anybody may retune.
+    """
     cfg = WorldConfig()
-    for cover in (
-        LandCover.TUNDRA,
-        LandCover.DESERT,
-        LandCover.ALPINE,
-        LandCover.BARE_ROCK,
-    ):
-        assert food_value(_hex(cover), cfg, *_BAND) == 0.0
+    ladder = [
+        potential_food(_hex(s), cfg)
+        for s in (
+            SoilQuality.UNUSABLE,
+            SoilQuality.GRAZING,
+            SoilQuality.MARGINAL,
+            SoilQuality.ARABLE,
+            SoilQuality.PRIME,
+        )
+    ]
+    assert ladder == sorted(ladder), ladder
+    assert len(set(ladder)) == len(ladder), "two soil classes are worth the same"
 
 
 def test_water_is_worth_something_because_a_coast_fishes():
-    """The whole point of the band: sea in a catchment is not waste ground."""
+    """Sea in a catchment is not waste ground, and it is valued as a fishery rather than
+    as soil — the seabed has no soil class worth the name."""
     cfg = WorldConfig()
-    assert food_value(_hex(LandCover.OPEN_WATER), cfg, *_BAND) == cfg.food_water_value
+    assert potential_food(_hex(cover=LandCover.OPEN_WATER), cfg) == cfg.food_water_value
     assert cfg.food_water_value > 0
 
 
 def test_wetland_ranks_below_open_water():
-    """A marsh is neither good fishing nor good ploughing."""
+    """A marsh is neither good fishing nor good ploughing.
+
+    Valued on cover rather than on soil for the same reason water is: a fen is not
+    ploughland, whatever the ground under it would be once drained.
+    """
     cfg = WorldConfig()
-    marsh = food_value(_hex(LandCover.MARSH), cfg, *_BAND)
-    water = food_value(_hex(LandCover.OPEN_WATER), cfg, *_BAND)
+    marsh = potential_food(_hex(cover=LandCover.MARSH), cfg)
+    water = potential_food(_hex(cover=LandCover.OPEN_WATER), cfg)
     assert 0 < marsh < water
 
 
-def test_fertile_outranks_marginal():
-    cfg = WorldConfig()
-    fertile = food_value(_hex(LandCover.OPEN), cfg, *_BAND)
-    marginal = food_value(_hex(LandCover.SCRUB), cfg, *_BAND)
-    assert fertile > marginal > 0
-
-
-def test_moisture_discriminates_within_a_band():
-    """The detail land cover throws away: same cover, different ground."""
-    cfg = WorldConfig()
-    in_band = food_value(_hex(LandCover.OPEN, precip_mm=700), cfg, *_BAND)
-    parched = food_value(_hex(LandCover.OPEN, precip_mm=120), cfg, *_BAND)
-    drowned = food_value(_hex(LandCover.OPEN, precip_mm=2600), cfg, *_BAND)
-    assert in_band > parched
-    assert in_band > drowned
-
-
-def test_water_and_wetland_ignore_moisture():
-    """Fishing does not care about rainfall, and a bog is saturated by definition."""
+def test_water_and_wetland_ignore_the_soil_under_them():
+    """Fishing does not care what the seabed is like."""
     cfg = WorldConfig()
     for cover in (LandCover.OPEN_WATER, LandCover.BOG):
-        dry = food_value(_hex(cover, precip_mm=80), cfg, *_BAND)
-        wet = food_value(_hex(cover, precip_mm=2800), cfg, *_BAND)
-        assert dry == wet
+        poor = potential_food(_hex(soil=SoilQuality.UNUSABLE, cover=cover), cfg)
+        rich = potential_food(_hex(soil=SoilQuality.PRIME, cover=cover), cfg)
+        assert poor == rich
+
+
+def test_soil_ignores_rainfall_a_second_time():
+    """Rainfall enters once, in `SoilStage`, where it chooses the class.
+
+    The tent function it replaced was multiplied onto a cover band, so moving the rainfall
+    test into the class boundaries and leaving the multiplier in would have priced the same
+    rain twice.
+    """
+    cfg = WorldConfig()
+    parched = potential_food(_hex(SoilQuality.ARABLE, precip_mm=120), cfg)
+    watered = potential_food(_hex(SoilQuality.ARABLE, precip_mm=700), cfg)
+    assert parched == watered
+
+
+# --- what it is worth as it is being used ---------------------------------------
+
+
+def test_clearing_is_worth_something():
+    """The gap that gives assarting economic weight.
+
+    Wood standing on prime soil feeds far fewer people than the same soil under the plough,
+    which is why a settlement grows by clearing its hinterland rather than merely by
+    sitting in it.
+    """
+    cfg = WorldConfig()
+    ploughed = actual_food(_hex(SoilQuality.PRIME, use=LandUse.ARABLE), cfg)
+    grazed = actual_food(_hex(SoilQuality.PRIME, use=LandUse.PASTURE), cfg)
+    wooded = actual_food(_hex(SoilQuality.PRIME, use=LandUse.WOOD), cfg)
+    waste = actual_food(_hex(SoilQuality.PRIME, use=LandUse.WASTE), cfg)
+    assert ploughed > grazed > wooded > waste == 0.0
+
+
+def test_actual_never_exceeds_potential():
+    cfg = WorldConfig()
+    for soil in SoilQuality:
+        for use in LandUse:
+            hx = _hex(soil, use=use)
+            assert actual_food(hx, cfg) <= potential_food(hx, cfg) + 1e-12
+
+
+def test_ground_with_no_use_yet_reads_at_its_potential():
+    """Every stage before `LandUseStage` sees the surface it is entitled to.
+
+    Siting runs first and must score land for what it will be once worked, not for the
+    wildwood standing on it — so an unassigned hex is not silently discounted.
+    """
+    cfg = WorldConfig()
+    hx = _hex(SoilQuality.ARABLE)
+    assert hx.land_use is None
+    assert actual_food(hx, cfg) == potential_food(hx, cfg)
 
 
 # --- the catchment -----------------------------------------------------------
@@ -224,16 +244,13 @@ def test_a_wider_catchment_is_smoother():
     normalisation, not the smoothing, and gives an answer that flips with the seed.
     """
     from worldgen.core.hex_grid import neighbors
-    from worldgen.stages.habitability import catchment_means, food_value
+    from worldgen.stages.habitability import catchment_means, potential_food
 
     cfg = WorldConfig(width=48, height=48)
     state = build_world(width=48, height=48, until=_HAB_STOP)
     hexes = state.hexes
 
-    food = {
-        coord: food_value(hx, cfg, cfg.biome_dry_precip_mm, cfg.biome_wet_precip_mm)
-        for coord, hx in hexes.items()
-    }
+    food = {coord: potential_food(hx, cfg) for coord, hx in hexes.items()}
     wide, narrow = cfg.cultivation_city_radius, cfg.cultivation_village_radius
     means = catchment_means(hexes.keys(), food, [wide, narrow])
 

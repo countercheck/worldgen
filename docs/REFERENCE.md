@@ -104,11 +104,20 @@ physical stages and diverge after them:
   the road has no way round — a bridgehead or a pass — and are sized from a **morning's
   walk** out to the fields. None of the three is a target count.
 
+  Under all three sits a **soil** model (§ [3.7a](#37a-soil)): what the ground could
+  support, kept separate from what grows on it and from what is done with it. Good soil
+  carries wildwood until somebody clears it, cleared ground yields more than wood, and
+  where clearing stops is set by scarcity rather than by a radius
+  (§ [3.10c](#310c-land-use-clearing-and-rural-density--organic)) — so the map shows
+  assarted country round the markets and wood standing in the gaps.
+
   It runs none of `classic`'s village stages: the dispersed peasantry is a productive
-  surface rather than a list of hamlets (§ [3.10b](#310b-market-centres--organic)), so a
-  temperate map carries ~80 settlements where `classic` carries ~1,100 — 3 cities, 73
-  market towns and 6 villages, against 6 / 24 / 379. See
-  § [3.10a](#310a-river-crossings--organic), § [3.10b](#310b-market-centres--organic) and
+  surface rather than a list of hamlets (§ [3.10b](#310b-market-centres--organic)), and it
+  now carries an explicit population — about 38 people per km² on a temperate map, against
+  England's ~35 in 1300. A temperate map carries ~80 settlements where `classic` carries
+  ~1,100. See § [3.10a](#310a-river-crossings--organic),
+  § [3.10b](#310b-market-centres--organic),
+  § [3.10c](#310c-land-use-clearing-and-rural-density--organic) and
   § [3.11a](#311a-chokepoints--organic).
 
 The difference is not cosmetic. On one landlocked desert map at 128×128, `classic` places
@@ -117,9 +126,10 @@ those it produces on a fertile temperate coast, because they come from `rng.inte
 the land tells them nothing. `organic` caps the same map at 2,706 and rings its
 settlements around the shore of the inland sea.
 
-The diagram below shows the `classic` pipeline. `organic` replaces `CityTownStage` with
-`CrossingStage → MarketStage → CityPromotionStage`, inserts `ChokepointStage` after
-`InterurbanRoadStage`, and stops at `CultivationStage`.
+The diagram below shows the `classic` pipeline. `SoilStage` runs before `LandCoverStage` in both models. `organic`
+replaces `CityTownStage` with `CrossingStage → MarketStage → LandUseStage →
+CityPromotionStage`, inserts `ChokepointStage` after `InterurbanRoadStage`, and drops
+`CultivationStage` — `LandUseStage` does that job and more.
 
 ```mermaid
 flowchart TD
@@ -970,6 +980,90 @@ desert is a playa, not a swamp.
 
 ---
 
+### 3.7a Soil
+
+[stages/soil.py](../worldgen/stages/soil.py)
+
+**Purpose:** Say what the ground could support, before anything is done with it.
+
+**Reads:** `hex.terrain_class`, `hex.elevation` (through the gradient), `hex.moisture`,
+`hex.temperature`, `hex.biome`, `hex.tags`, `hex.catchment_km2`.
+**Writes:** `hex.soil`.
+
+**Config:** § [4.8](#48-soil-food-and-habitability--37a-soil-39-habitability).
+
+#### Why it exists
+
+`food_value` used to key on `land_cover`, which said a hex was fertile **because grass grew
+on it**. That is backwards, and it is why the map could not tell a floodplain from a chalk
+down. Grass on temperate lowland is what you get after clearing or on thin soil; the best
+ground in northern Europe carried wildwood until somebody assarted it.
+
+Soil is now asked about directly, and the answer is a ladder:
+`UNUSABLE < GRAZING < MARGINAL < ARABLE < PRIME`.
+
+```
+water, wetland, above the treeline          → UNUSABLE
+
+alluvium: gentle ground on or beside a
+river with catchment >= ford_max_catchment  → PRIME
+
+otherwise the worse of two arms:
+  slope    >= terrain_escarpment_gradient_m → UNUSABLE
+           >= terrain_steep_gradient_m      → GRAZING
+           otherwise                        → ARABLE
+  rainfall <  soil_dry_farming_min_precip_mm → UNUSABLE
+           <  biome_dry_precip_mm            → GRAZING
+           <= biome_wet_precip_mm            → ARABLE
+           <  food_drowned_precip_mm         → MARGINAL
+           otherwise                         → UNUSABLE
+
+then, last of all:
+  temperature < biome_cold_temp_c            → capped at MARGINAL
+```
+
+**Rainfall fails differently at each end.** Under the dry-farming limit nothing is grown at
+all. Between that and the arable band you get steppe, where grass grows and a crop will not,
+which is grazing. Above the band the ground is leached and waterlogged, which is poor
+*arable*, not pasture — the first version of this rule was symmetric, and calling a
+rainforest "grazing" was the tell that it was wrong.
+
+**Alluvium skips the rainfall arm, because the Nile does not need rain.** In a desert the
+floodplain is not merely the best land, it is the only land — which is why an arid map's
+settlements string along its rivers instead of being absent altogether.
+
+**The cold cap is applied last, so it binds alluvium too.** A flood meadow on the Lena is
+the best ground in the taiga and still will not grow wheat. Capping before that branch let a
+boreal floodplain out at PRIME, which would have said a subarctic river bottom is worth what
+Kent is; and without the cap at all, a boreal map comes out 13% arable and 42% richer.
+
+**One new threshold, and only one.** `soil_dry_farming_min_precip_mm` is the dry-farming
+limit; every other figure is a setting that already existed and already meant the right
+thing. `ford_max_catchment_km2` is the neatest of the reuses — it is the same question asked
+from the other side, since a river you cannot wade is one that floods and lays down silt.
+
+**Result at 128×128, seed 42:**
+
+| climate | unusable | grazing | marginal | arable | prime |
+|---|---|---|---|---|---|
+| temperate | 10.6% | 28.1% | 24.0% | **33.6%** | 3.7% |
+| mediterranean | 12.3% | **68.2%** | 8.6% | 10.2% | 0.7% |
+| arid | **84.8%** | 6.3% | 0.9% | 7.4% | 0.7% |
+| boreal | 57.4% | 20.0% | 19.7% | **0.0%** | 2.9% |
+| tropical | 19.1% | 24.1% | **48.8%** | 4.3% | 3.7% |
+
+Mediterranean comes out pastoral, arid is desert with its life on the rivers, the taiga
+grows no wheat at all, and the tropics are leached. One rule set; the region decides.
+
+#### Land cover follows soil
+
+`LandCoverStage` now takes the region's own woodland on PRIME and ARABLE ground — oak here,
+taiga there, gallery forest along a desert river — so **good soil is under trees until
+somebody clears it**. A temperate map went from 50% open grass to 41% woodland and 27% dense
+forest, which is what northern Europe looked like before the assarting centuries.
+
+---
+
 ### 3.8 Land Cover
 
 [stages/land_cover.py](../worldgen/stages/land_cover.py)
@@ -1029,8 +1123,8 @@ at each tier's cultivation radius (8 / 4 / 2).
 **Writes:** `hex.habitability_city`, `hex.habitability_town`,
 `hex.habitability_village`.
 
-**Config:** `food_fertile_value`, `food_marginal_value`,
-`food_wetland_value`, `food_water_value`, `habitability_agri_weight`,
+**Config:** `food_prime_value`, `food_arable_value`, `food_marginal_value`,
+`food_grazing_value`, `food_wetland_value`, `food_water_value`, `habitability_agri_weight`,
 `habitability_river_bonus`, `habitability_coast_bonus`,
 `habitability_hill_bonus`, `habitability_confluence_bonus`,
 `cultivation_city_radius`, `cultivation_town_radius`,
@@ -1041,10 +1135,13 @@ at each tier's cultivation radius (8 / 4 / 2).
 
 ```
 # Per-hex food value, by land cover band
-OPEN, WOODLAND            → food_fertile_value  × moisture_factor
-SCRUB, DENSE_FOREST       → food_marginal_value × moisture_factor
-BOG, MARSH                → food_wetland_value
-OPEN_WATER                → food_water_value
+PRIME soil                → food_prime_value
+ARABLE soil               → food_arable_value
+MARGINAL soil             → food_marginal_value
+GRAZING soil              → food_grazing_value
+UNUSABLE soil             → 0
+BOG, MARSH                → food_wetland_value    (cover, not soil: a fen is not ploughland)
+OPEN_WATER                → food_water_value      (cover, not soil: the sea is a fishery)
 TUNDRA/DESERT/ALPINE/ROCK → 0.0
 
 # Rainfall is not monotonic for farming — a tent, not a ramp.
@@ -1313,6 +1410,99 @@ catchment to a third of its proper reach.
 
 Catchments are terrain-shaped, not round: measured disc-fill is 0.43 at the median, and
 they visibly stop at ridges and stretch down valleys.
+
+---
+
+### 3.10c Land Use, Clearing and Rural Density — `organic`
+
+[stages/land_use.py](../worldgen/stages/land_use.py)
+
+**Purpose:** Decide what is actually done with each hex, size the markets on it, and count
+who lives on the land. Replaces `CultivationStage` in the `organic` model.
+
+**Reads:** `hex.soil`, `hex.territory`, `hex.territory_cost`, `state.metadata["market_seats"]`.
+**Writes:** `hex.land_use`, `hex.cultivated`, `hex.rural_population`, `state.settlements`.
+
+**Config:** § [4.8](#48-soil-food-and-habitability--37a-soil-39-habitability), § [4.10](#410-haulage-and-markets--the-organic-model).
+
+#### Clearing is priced, and the margin is set by scarcity
+
+The old rule drew a disc — eight hexes round a city, four round a town — so a city on thin
+ground cleared exactly as far as one on a floodplain. What decides it now is rent:
+
+```
+rent(hex) = potential_food * usable_fraction(territory_cost, market_day_radius)
+cleared   ⟺  rent >= clearing_margin * max(rent over that catchment)
+```
+
+Transport cost stands in for the effort of working land that far out, and **the bar is
+relative to the best land in reach**. A market with a floodplain has a high bar and leaves
+its hillsides to sheep; a market on uniformly thin ground has a low bar and ploughs the
+scrub. The worse the land, the more pressure to use bad land — the extensive margin set
+against the best alternative available, which is what rent theory actually says.
+
+Measured on a temperate 128×128: markets whose best ground is only ARABLE plough down to a
+mean soil rank of 2.29, markets with PRIME in reach stop at 2.69. An absolute threshold
+cannot produce that — under one, a poor market simply clears less.
+
+Von Thünen's rings still fall out, because rent falls with cost. What is new is that a
+ring's *width* varies with what its catchment holds.
+
+It needs one knob and one pass: no per-soil clearing costs, and no fixed point to iterate,
+because rent depends on the catchment and the soil and both are settled before this runs.
+
+```
+water                                   → WATER
+UNUSABLE soil                           → WASTE
+outside every catchment, ploughable     → WOOD     (the wildwood: reached by nobody)
+outside every catchment, otherwise      → WASTE
+GRAZING soil in a catchment             → PASTURE  (grazing needs no clearing)
+ploughable, rent clears the margin      → ARABLE
+ploughable, rent does not               → WOOD
+```
+
+`hex.cultivated` survives as a derived boolean (`land_use is ARABLE`) because the classic
+village stages and the JSON schema both read it.
+
+#### Cleared ground yields more, which is what makes clearing worth doing
+
+```
+actual_food = potential_food * yield_of[land_use]
+```
+
+Wood on prime soil feeds a third of what the same soil feeds under the plough. A settlement
+therefore grows by assarting its hinterland rather than merely by sitting in it, and the map
+shows cleared country round the markets with wood standing in the gaps.
+
+#### Sizing lives here, so population has one owner
+
+`MarketStage` plants and allocates on **potential** food — a settler picks land for what it
+will yield once worked, not for the wildwood standing on it. This stage clears, then founds
+and sizes each market from **actual** food. Nothing writes a provisional population that a
+later stage overwrites.
+
+#### Rural density is the same sum read the other way round
+
+```
+rural_population = actual_food * (1 - marketable_surplus_fraction) * people_per_food
+```
+
+The peasantry has been in the arithmetic since markets were built: a market draws
+`marketable_surplus_fraction` of what its catchment yields, so the other two thirds feeds the
+people who grew it. Defining it this way means the two figures reconcile by construction
+rather than by calibration.
+
+**Result at 128×128, seed 42:**
+
+| climate | arable | pasture | wood | waste | people/km² | rural share |
+|---|---|---|---|---|---|---|
+| temperate | 10% | 8% | 47% | 27% | 38.5 | 87% |
+| mediterranean | 4% | 7% | 15% | 66% | 17.6 | 85% |
+| arid | 2% | 2% | 7% | 81% | 10.8 | 88% |
+| boreal | 4% | 4% | 16% | 67% | 12.1 | 89% |
+| tropical | 6% | 9% | 47% | 30% | 24.0 | 90% |
+
+"Waste" is the medieval word and the right one: unenclosed ground nobody is working.
 
 ---
 
@@ -1882,17 +2072,24 @@ Real units throughout: Celsius for temperature bands, millimetres a year for rai
 | `biome_wet_precip_mm` | `float` | `1000.0` | `> dry` | Above about this, closed wet forest. Also gates DENSE_FOREST in Land Cover |
 | `food_drowned_precip_mm` | `float` | `3000.0` | `> biome_wet_precip_mm` | Annual rainfall at which ground is leached, waterlogged and worth nothing for farming. The wet arm of the agricultural curve falls to zero here |
 
-### 4.8 Habitability — § [3.9](#39-habitability)
+### 4.8 Soil, food and habitability — § [3.7a](#37a-soil), [3.9](#39-habitability)
 
 Food value of one hex, by land cover band. `TUNDRA`, `DESERT`, `ALPINE` and `BARE_ROCK`
 are always `0`.
 
 | Param | Type | Default | Range | Effect |
 |---|---|---|---|---|
-| `food_fertile_value` | `float` | `1.0` | ≥ 0 | `OPEN`, `WOODLAND` — prime arable |
-| `food_marginal_value` | `float` | `0.4` | ≥ 0 | `SCRUB`, `DENSE_FOREST` — grazing and hard-to-clear forest |
-| `food_wetland_value` | `float` | `0.15` | ≥ 0 | `BOG`, `MARSH` — deliberately below water; neither good fishing nor good ploughing |
-| `food_water_value` | `float` | `0.4` | ≥ 0 | `OPEN_WATER` — fishing. Non-zero so a coastal site is not penalised for having sea in its catchment |
+| `food_prime_value` | `float` | `1.4` | ≥ 0 | `PRIME` — alluvium: the floodplain of a river too big to wade |
+| `food_arable_value` | `float` | `1.0` | ≥ 0 | `ARABLE` — ordinary farmland |
+| `food_marginal_value` | `float` | `0.55` | ≥ 0 | `MARGINAL` — ploughable and poor: leached, waterlogged, or podzol |
+| `food_grazing_value` | `float` | `0.35` | ≥ 0 | `GRAZING` — too steep to plough or too dry to crop; run stock on it |
+| `food_wetland_value` | `float` | `0.15` | ≥ 0 | `BOG`, `MARSH` — valued on cover, not soil, because a fen is not ploughland. Deliberately below water: neither good fishing nor good ploughing |
+| `food_water_value` | `float` | `0.4` | ≥ 0 | `OPEN_WATER` — fishing, and valued on cover for the same reason. Non-zero so a coastal site is not penalised for having sea in its catchment |
+| `soil_dry_farming_min_precip_mm` | `float` | `250.0` | ≥ 0 | The dry-farming limit: annual rainfall below which no crop is grown without irrigation, whatever the ground is like. **The only new threshold the soil rules need** — everything else reuses `terrain_rolling_gradient_m`, `terrain_steep_gradient_m`, `terrain_escarpment_gradient_m`, `biome_dry_precip_mm`, `biome_wet_precip_mm`, `food_drowned_precip_mm`, `biome_cold_temp_c` and `ford_max_catchment_km2`, each of which already means the right thing. At `250` an arid map is 85% unusable with its life on the rivers; at `400` it is 87% and mediterranean loses a fifth of its grazing |
+| `yield_arable` | `float` | `1.0` | ≥ 0 | What cleared ground under the plough yields, as a fraction of its soil's potential |
+| `yield_pasture` | `float` | `0.55` | ≥ 0 | What grazed ground yields |
+| `yield_wood` | `float` | `0.30` | ≥ 0 | What ground still under trees yields. The gap between this and `yield_arable` is what gives clearing economic weight — a settlement grows by assarting its hinterland, not merely by sitting in it |
+| `clearing_margin` | `float` | `0.45` | ≥ 0 | Where clearing stops, as a fraction of the **best rent the settlement can reach**. Relative rather than absolute, and that is the substance: a market with a floodplain has a high bar and leaves its hillsides to sheep, while a market on uniformly thin ground has a low bar and ploughs the scrub — the worse the land, the more pressure to use bad land. The extensive margin set against the best alternative available, which is what rent theory actually says |
 
 Fertile and marginal hexes are additionally scaled by a rainfall curve peaking across
 `[biome_dry_precip_mm, biome_wet_precip_mm]` and falling to `0` at both ends — too dry is
@@ -1902,7 +2099,7 @@ desert, too wet is `food_drowned_precip_mm`. Water and wetland ignore it.
 |---|---|---|---|---|
 | `habitability_agri_weight` | `float` | `0.40` | ≥ 0 | Weight on the catchment mean |
 | `habitability_river_bonus` | `float` | `0.25` | ≥ 0 | Flat, if the hex or a neighbour carries a river |
-| `habitability_harbour_bonus` | `float` | `0.60` | Site bonus for access to water that will float a barge — sea, lake, or a river above `navigable_min_discharge`. Distinct from `habitability_coast_bonus`, which is amenity: a beach to land a boat on. This one is about **bulk**, and it is the largest site bonus there is because it is the largest thing about a site — a town on navigable water can be provisioned from fifteen times the distance, which is the whole reason cities exist in this model. It has to be this big to be visible: a harbour site loses about a fifth of its day-range catchment to sea, which scores `food_water_value` (0.4) against farmland's 1.0, so on agriculture alone it is worth ~22% less than an inland site and inland sites outnumber it nine to one. Before this term **not one of 74 markets stood on navigable water**, and no city could be maritime |
+| `habitability_harbour_bonus` | `float` | `0.60` | Site bonus for access to water that will float a barge — sea, lake, or a river above `navigable_min_discharge`. Distinct from `habitability_coast_bonus`, which is amenity: a beach to land a boat on. This one is about **bulk**, and it is the largest site bonus there is because it is the largest thing about a site — a town on navigable water can be provisioned from fifteen times the distance, which is the whole reason cities exist in this model. It has to be this big to be visible: a harbour site loses about a fifth of its day-range catchment to sea, which scores `food_water_value` (0.4) against arable's 1.0, so on agriculture alone it is worth ~22% less than an inland site and inland sites outnumber it nine to one. Before this term **not one of 74 markets stood on navigable water**, and no city could be maritime |
 | `habitability_coast_bonus` | `float` | `0.25` | ≥ 0 | Flat, if the hex or a neighbour is `COAST` |
 | `habitability_hill_bonus` | `float` | `0.15` | ≥ 0 | Flat, for a rise overlooking a plain |
 | `habitability_confluence_bonus` | `float` | `0.10` | ≥ 0 | Flat, on a river junction (this hex only) |
@@ -1954,11 +2151,11 @@ the surplus it draws on is depleted, and the scan repeats until nothing clears t
 
 | Param | Type | Default | Range | Effect |
 |---|---|---|---|---|
-| `city_min_draw` | `float` | `40.0` | How much *other markets'* surplus must be able to reach a town before it is a city. The one density knob for the tier above the market, and the same shape as `market_viability_floor` below it: an absolute threshold on what can be gathered rather than a target count, so a rich coast grows several cities and a landlocked desert grows none. Not comparable to the floor — a market gathers a countryside inside a day's cart, a city gathers *markets* over `haulage_range_land` with water counting fifteen times. At `40.0`: 3 cities on a temperate coast (39,805 / 25,547 / 19,773 against a median town of 967), 1 on a mediterranean map, **0 on an arid one whether coastal or landlocked**. Validated `> 0` |
-| `market_viability_floor` | `float` | `17.0` | `> 0` | The one density knob, replacing `target_city_count` and `target_town_count` both: stop planting once the best remaining site scores below this. Calibrated to ~70–85 markets at 128×128 (England had ~700 markets in ~130,000 km²; this map is about an eighth of that): a temperate map with `continent_falloff_edges: [south]` gives 74–81 across seeds 42/7/3/11/19 — one per ~205 km² of land, a 15 km lattice, each about 10 km from its nearest neighbour. An absolute threshold on gathered surplus rather than a target, so density follows the land — the same value yields 9 markets on an arid map and 74 on a temperate one |
+| `city_min_draw` | `float` | `40.0` | How much *other markets'* surplus must be able to reach a town before it is a city. The one density knob for the tier above the market, and the same shape as `market_viability_floor` below it: an absolute threshold on what can be gathered rather than a target count, so a rich coast grows several cities and a landlocked desert grows none. Not comparable to the floor — a market gathers a countryside inside a day's cart, a city gathers *markets* over `haulage_range_land` with water counting fifteen times. At `40.0`: 2 cities on a temperate coast (20,781 / 12,397 against a median town of 445), 1 on a mediterranean map, **0 on an arid one whether coastal or landlocked**. It survived the soil recalibration unchanged, which is worth recording rather than assuming — the surplus fraction rose by 1.6× while actual food fell, and the two shifts cancelled. Validated `> 0` |
+| `market_viability_floor` | `float` | `24.0` | `> 0` | The one density knob, replacing `target_city_count` and `target_town_count` both: stop planting once the best remaining site scores below this. Planting scores are *surplus*, so this scales with `marketable_surplus_fraction`, which the soil model moved from 0.20 to 0.32. At 24.0 a temperate map with `continent_falloff_edges: [south]` gives 76–92 markets across seeds 42/7/3/11/19, against 20 on an arid one — an absolute threshold on gathered surplus rather than a target, so density follows the land. **Lowering it raises the rural population too**, and that is a real feedback rather than rounding: more markets mean more catchments, more catchments mean more ground cleared, and cleared ground feeds more people than the wood it replaced — 38 per km² at 24.0 against 48 at 16.0 on the same terrain |
 | `chokepoint_min_road_tier` | `str` | `secondary` | `primary` \| `secondary` \| `track` | Least road tier a crossing must carry before it is worth a settlement. A bridge on a farm track is a plank, not a town. **This is what actually sets the size of the village tier**: on a 128×128 temperate map `secondary` admits about twenty candidate features, `track` admits a hundred and twenty |
 | `chokepoint_min_separation` | `int` | `2` | `>= 0` | Suppression disc, and how far a village must stand off an existing settlement. The economics would mostly do this anyway — there is no residual surplus close to a market — but a bridge on a town's own doorstep is the town's bridge whatever the arithmetic says |
-| `chokepoint_min_draw` | `float` | `0.25` | `>= 0` | The smallest village worth founding, in food units; multiply by `people_per_food` to read it as people, so `0.25` is a hundred. Applied to the real catchment draw rather than to the estimate planting ranks on, which is what makes that relation exact. What is gathered is *residual* surplus — what the markets could not haul — over `rural_field_radius`, so it is not comparable with `market_viability_floor` |
+| `chokepoint_min_draw` | `float` | `0.30` | `>= 0` | The smallest village worth founding, in food units; multiply by `people_per_food` to read it as people, so `0.30` is 54 — hamlet scale, which is what a bridgehead settlement was. It also has to be: this tier lives on *residual* surplus, and the residual thinned when the soil model raised the market count from 65 to 76 on the same map, so at the hundred-person figure this used to mean, a temperate map grows exactly one village. Applied to the real catchment draw rather than to the estimate planting ranks on, which is what makes that relation exact. What is gathered is *residual* surplus — what the markets could not haul — over `rural_field_radius`, so it is not comparable with `market_viability_floor` |
 | `market_min_separation` | `int` | `5` | `≥ 1` | A suppression disc only, to stop two markets sharing a hexside. Real spacing comes from competition for surplus, which is what makes markets dense on rich ground and sparse on poor — a fixed separation cannot express that |
 | `market_kernel_decay` | `float` | `4.0` | `> 0` | `d₀` in the `1/(1 + d/d₀)` share a market takes from each hex it reaches |
 

@@ -221,10 +221,42 @@ food_drowned_precip_mm: 3000.0 # Annual rainfall at which ground is leached and 
 #   fertile   = open ground, woodland          marginal = scrub, dense forest
 #   wetland   = bog, marsh                     water    = ocean, lake (fishing)
 #   tundra, desert, alpine and bare rock are always 0
-food_fertile_value: 1.0    # Prime arable. Default: 1.0
-food_marginal_value: 0.4   # Grazing and hard-to-clear forest. Default: 0.4
+# Soil — what the ground could yield, by quality class. This is the productive statement of
+# the model, and it is about the land rather than about what is growing on it. The old
+# version keyed on land cover, which said a hex was fertile because grass grew on it — and
+# that is backwards: grass on temperate lowland is what you get after clearing or on thin
+# soil, and the best ground in northern Europe carried wildwood until somebody assarted it.
+#
+# Water and wetland keep values of their own instead of a soil class, because neither is
+# ploughland: the sea is a fishery and a bog is a bog.
+food_prime_value: 1.4      # Alluvium: the floodplain of a river too big to wade. Default: 1.4
+food_arable_value: 1.0     # Ordinary farmland. Default: 1.0
+food_marginal_value: 0.55  # Ploughable and poor: leached, waterlogged, or podzol. Default: 0.55
+food_grazing_value: 0.35   # Too steep to plough or too dry to crop; run stock on it. Default: 0.35
 food_wetland_value: 0.15   # Neither good fishing nor good ploughing; below water on purpose. Default: 0.15
 food_water_value: 0.4      # Fishing. Non-zero so a coastal site is not penalised for having sea in its catchment. Default: 0.4
+
+# The dry-farming limit: annual rainfall below which no crop is grown without irrigation,
+# whatever the ground is like. About 250 mm is where the literature settles and it is what
+# separates steppe from desert in practice. It is the only new threshold the soil rules
+# need — everything else is read off settings that already exist and already mean the right
+# thing (terrain_rolling_gradient_m, terrain_steep_gradient_m, terrain_escarpment_gradient_m,
+# biome_dry_precip_mm, biome_wet_precip_mm, food_drowned_precip_mm, biome_cold_temp_c and
+# ford_max_catchment_km2), because a second copy of any of them could only drift.
+soil_dry_farming_min_precip_mm: 250.0 # Below this nothing is grown without irrigation. Default: 250
+
+# What ground yields relative to its soil, by what is done with it. Cleared land under the
+# plough is the full value; wood on the same soil feeds far fewer people, which is what
+# gives clearing economic weight and makes assarting visible on the map.
+yield_arable: 1.0    # Cleared and under the plough. Default: 1.0
+yield_pasture: 0.55  # Grazed. Default: 0.55
+yield_wood: 0.30     # Still under trees; nobody has cleared it. Default: 0.30
+
+# Where clearing stops, as a fraction of the best rent the settlement can reach. Relative
+# rather than absolute, and that is the substance of it: a market with a floodplain has a
+# high bar and leaves its hillsides to sheep, while a market on uniformly thin ground has a
+# low bar and ploughs the scrub. The worse the land, the more pressure to use bad land.
+clearing_margin: 0.45 # Fraction of the best rent in reach at which clearing stops. Default: 0.45
 
 # Fertile and marginal hexes are additionally scaled by a rainfall curve peaking across
 # the [biome_dry_precip_mm, biome_wet_precip_mm] band and falling to 0 at both ends — too
@@ -290,8 +322,8 @@ rural_field_radius: 2.5    # The daily walk to the fields; sets cultivated exten
 haulage_range_land: 40.0   # Travel cost at which bulk food is worth nothing overland. Default: 40.0
 haulage_transship_cost: 8.0 # What it costs to get a cargo onto the water and off again, charged once at each land-water transition, in the same units as haulage_range_land. Without it the sea is a teleport: at a fifteenth the cost per hex a cargo once afloat crosses the map for nothing, every coastal market reaches every other, and the city tier flattens. Default: 8.0
 haulage_range_water_mult: 15.0 # How much further the same cargo goes by water. Diocletian's Price Edict prices land carriage at roughly 55x sea and 11x river for the same tonne-kilometre. This is why large pre-industrial cities sit on navigable water and inland ones stay small: nothing gates a city, water simply extends what can feed it. Default: 15.0
-marketable_surplus_fraction: 0.20 # Share of what a farming household grows that can leave for a market; it eats the rest. Sizing markets off the surplus rather than the production is why the tier ratios come out right without target counts anywhere. Default: 0.20
-people_per_food: 400.0     # People supported per unit of haulage-weighted food. Calibrated so market towns land in their historical 500–2500 band: across five seeds at 128x128 this gives medians of 1260–1700 and a largest of 4200–5450. Default: 400
+marketable_surplus_fraction: 0.32 # What leaves the farm: not only what the household sells but the rent, the tithe and the dues, all of which end up feeding somebody in a town. It is the one number setting the ratio between town and countryside — rural/town = (1 - s) / (s x mean haulage weight) — so 0.32 puts 13% of the people in towns, the range England and France sat in around 1300. Default: 0.32
+people_per_food: 180.0     # People fed per unit of food, and the one scale factor for the whole population of the map — settlements and countryside alike, which is what makes the two reconcile by construction. Set from the rural side because that is where there is a figure to hit: 180 puts a temperate 128x128 map at 38 people per km2 against England's ~35 in 1300. At the old 400 the countryside came out at 88 per km2, which is Belgium in 1900. Default: 180
 travel_ascent_per_hex: 125.0 # Naismith's rule: metres of ascent that cost as much as one hex of level ground. Catchments are walked, not engineered, so they use this rather than road_delta_elevation_per_hex, which prices a graded road and is about five times stricter than a walker has reason to be. Default: 125
 travel_ford_cost: 8.0      # Getting across away from a crossing, per multiple of the wadeable span, charged on each land–river edge. Deliberately has no fixed term, unlike road_river_crossing_base: that base is the capital of building a bridge, and somebody walking to market pays no capital — what stops them is how much water is in the way. Default: 8.0
 
@@ -304,8 +336,8 @@ travel_ford_cost: 8.0      # Getting across away from a crossing, per multiple o
 market_day_radius: 10.0     # A day's return: out, business done, and home. Default: 10.0
 market_kernel_decay: 4.0    # d0 in the 1/(1 + d/d0) share a market takes from each hex it reaches. Default: 4.0
 market_min_separation: 5    # A suppression disc only, to stop two markets sharing a hexside. Real spacing comes from competition for surplus, which is what makes markets dense on rich ground and sparse on poor — a fixed separation cannot express that. Default: 5
-city_min_draw: 40.0 # How much other markets' surplus must reach a town before it is a city. The density knob for the tier above the market, and the same shape as market_viability_floor below it: an absolute threshold on what can be gathered, not a target count. A market gathers a countryside inside a day's cart; a city gathers markets, over haulage_range_land with water counting fifteen times — so the number is not comparable to the floor. 40.0 gives 3 cities on a temperate coast and none on an arid map. Default: 40.0
-market_viability_floor: 17.0 # The one density knob, replacing target_city_count and target_town_count both: stop planting once the best remaining site scores below this. Calibrated to ~70–85 markets at 128x128 (England had ~700 markets in ~130,000 km2; this map is about an eighth of that): on a temperate map with continent_falloff_edges = [south], seeds 42/7/3/11/19 give 74–81 markets — one per ~205 km2 of land, a 15 km lattice, each about 10 km from its nearest neighbour. An absolute threshold on gathered surplus rather than a target, so density follows the land: the same value yields 9 markets on an arid map and 74 on a temperate one, while median market population stays flat across climates. Default: 17.0
+city_min_draw: 40.0 # How much other markets' surplus must reach a town before it is a city. The density knob for the tier above the market, and the same shape as market_viability_floor below it: an absolute threshold on what can be gathered, not a target count. A market gathers a countryside inside a day's cart; a city gathers markets, over haulage_range_land with water counting fifteen times — so the number is not comparable to the floor. 40.0 gives 2 cities on a temperate coast and none on an arid map, and it survived the soil recalibration unchanged: the surplus fraction rose by 1.6x while actual food fell, and the two shifts cancelled. Default: 40.0
+market_viability_floor: 24.0 # The one density knob, replacing target_city_count and target_town_count both: stop planting once the best remaining site scores below this. Calibrated to ~70–85 markets at 128x128 (England had ~700 markets in ~130,000 km2; this map is about an eighth of that): on a temperate map with continent_falloff_edges = [south], seeds 42/7/3/11/19 give 76–92 markets. An absolute threshold on gathered surplus rather than a target, so density follows the land: the same value yields 20 markets on an arid map and 76 on a temperate one. Lowering it raises the rural population too, and that is a real feedback rather than rounding — more markets mean more catchments, more catchments mean more ground cleared, and cleared ground feeds more people than the wood it replaced. Default: 24.0
 
 # Chokepoints: the settlement tier below the market, founded on bridgeheads and passes
 # that carry real traffic. These are the places that exist because the road has no choice
@@ -315,10 +347,10 @@ market_viability_floor: 17.0 # The one density knob, replacing target_city_count
 # A bridge on a farm track is a plank, not a town, so `chokepoint_min_road_tier` decides
 # what counts as traffic; it is the setting that actually controls how many of these there
 # are. `chokepoint_min_draw` reads directly as people once multiplied by people_per_food:
-# 0.25 is a hundred, which is a village rather than a farmstead.
+# 0.30 is 54, which is a hamlet at a bridge — which is what these mostly were.
 chokepoint_min_road_tier: secondary # Least road tier a crossing must carry to be worth a settlement: primary | secondary | track. Default: secondary
 chokepoint_min_separation: 2 # Suppression disc, and how far one must stand off an existing settlement. Default: 2
-chokepoint_min_draw: 0.25  # Smallest village worth founding, in food units; times people_per_food for the population. Default: 0.25
+chokepoint_min_draw: 0.30  # Smallest village worth founding, in food units; times people_per_food for the population, so 54 people. Hamlet scale, and deliberately: that is what a bridgehead settlement was, and this tier lives on residual surplus, which thinned when the soil model raised the market count. Default: 0.30
 
 # ---------------------------------------------------------------------------
 # Cultivation (farmland around settlements)

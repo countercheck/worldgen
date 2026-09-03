@@ -21,13 +21,11 @@ glyph.  So the peasantry is present in the arithmetic and absent from the settle
 
 import heapq
 
-from ..core.hex import Settlement, SettlementTier
 from ..core.hex_grid import grade_reachable_count, hex_range, ring
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
-from .city_town import _assign_role
-from .habitability import food_value, site_bonus
-from .haulage import allocate_catchments, fishery_rim, gather, settleable, usable_fraction
+from .habitability import potential_food, site_bonus
+from .haulage import allocate_catchments, fishery_rim, settleable, usable_fraction
 from .road_cost import grade_is_under_cap
 
 # Float slop when comparing a recomputed score against the heap's next-best.  Without it,
@@ -51,17 +49,27 @@ def depletion_kernel(radius: float, decay: float) -> list[tuple[int, float]]:
 
 
 class MarketStage(GeneratorStage):
-    """Plants market centres, then gives each the catchment it can draw on."""
+    """Plants market centres and gives each the catchment it can draw on.
+
+    Siting only. `LandUseStage` founds and sizes them, because a market is worth what its
+    countryside actually sends and nothing has been cleared yet at this point in the
+    pipeline. Both halves read the same catchments — this stage writes them to
+    `hex.territory` — so nothing has to be recomputed, and population has one owner rather
+    than a provisional value that a later stage silently overwrites.
+
+    Planting reads *potential* food, which is the honest surface for the question it asks:
+    a settler picks land for what it will yield once worked, not for the wildwood standing
+    on it today.
+    """
 
     def run(self, state: WorldState) -> WorldState:
         hexes = state.hexes
         cfg = self.config
 
-        food = {
-            coord: food_value(hx, cfg, cfg.biome_dry_precip_mm, cfg.biome_wet_precip_mm)
+        surplus = {
+            coord: potential_food(hx, cfg) * cfg.marketable_surplus_fraction
             for coord, hx in hexes.items()
         }
-        surplus = {c: v * cfg.marketable_surplus_fraction for c, v in food.items()}
 
         seats = self._plant(hexes, surplus, cfg)
         if not seats:
@@ -73,8 +81,7 @@ class MarketStage(GeneratorStage):
             hexes[coord].territory = seat
             hexes[coord].territory_cost = cost[coord]
 
-        draw = gather(surplus, owner, cost, cfg.market_day_radius)
-        state.settlements.extend(self._found(seats, draw, hexes, cfg))
+        state.metadata["market_seats"] = sorted(seats)
         return state
 
     # -- planting -------------------------------------------------------------
@@ -149,35 +156,6 @@ class MarketStage(GeneratorStage):
                         remaining[n] *= 1.0 - share
 
         return seats
-
-    # -- founding -------------------------------------------------------------
-
-    def _found(self, seats, draw, hexes, cfg) -> list:
-        """Turn planted seats into settlements sized by the surplus they gather.
-
-        Population is what the catchment can actually send, not a random draw — so a
-        market on a wide fertile plain outgrows one wedged in a valley, and the difference
-        is visible on the map rather than an accident of the seed.
-        """
-        # One vectorised draw over coord-sorted seats: deterministic, and it keeps size
-        # from being a perfectly invertible function of catchment, which reads as
-        # mechanical when a player compares two towns.
-        jitter = self.rng.uniform(0.9, 1.1, size=len(seats))
-
-        out = []
-        for i, coord in enumerate(sorted(seats)):
-            hx = hexes[coord]
-            population = max(1, round(draw.get(coord, 0.0) * cfg.people_per_food * jitter[i]))
-            s = Settlement(
-                coord=coord,
-                tier=SettlementTier.TOWN,
-                role=_assign_role(coord, hx, hexes),
-                population=population,
-                name=f"{hx.biome.name.lower()}_market_{i}",
-            )
-            hx.settlement = s
-            out.append(s)
-        return out
 
 
 __all__ = ["MarketStage", "depletion_kernel", "usable_fraction"]

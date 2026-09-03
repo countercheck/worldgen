@@ -29,7 +29,7 @@ from ..core.hex import TerrainClass
 from ..core.hex_grid import hex_range, neighbors
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
-from .habitability import food_value
+from .habitability import potential_food
 from .road_cost import is_river
 
 FORD = "ford"
@@ -105,8 +105,7 @@ class CrossingStage(GeneratorStage):
         cfg = self.config
 
         surplus = {
-            coord: food_value(hx, cfg, cfg.biome_dry_precip_mm, cfg.biome_wet_precip_mm)
-            * cfg.marketable_surplus_fraction
+            coord: potential_food(hx, cfg) * cfg.marketable_surplus_fraction
             for coord, hx in hexes.items()
             if hx.terrain_class not in (TerrainClass.OCEAN, TerrainClass.LAKE)
         }

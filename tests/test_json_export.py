@@ -3,9 +3,11 @@ import pytest
 from worldgen.core.hex import (
     Biome,
     LandCover,
+    LandUse,
     Settlement,
     SettlementRole,
     SettlementTier,
+    SoilQuality,
     TerrainClass,
 )
 from worldgen.core.world_state import (
@@ -32,6 +34,9 @@ def _small_world() -> WorldState:
     h.habitability_city = 0.7
     h.habitability_town = 0.5
     h.habitability_village = 0.3
+    h.soil = SoilQuality.PRIME
+    h.land_use = LandUse.ARABLE
+    h.rural_population = 42.5
     h.cultivated = True
     h.tags = {"test"}
     ws.settlements = [
@@ -82,6 +87,9 @@ def test_hex_fields_preserved(tmp_path):
     assert abs(h.habitability_town - 0.5) < 1e-9
     assert abs(h.habitability_village - 0.3) < 1e-9
     assert h.cultivated is True
+    assert h.soil is SoilQuality.PRIME
+    assert h.land_use is LandUse.ARABLE
+    assert abs(h.rural_population - 42.5) < 1e-9
     assert "test" in h.tags
     s2 = ws2.settlements[0]
     assert s2.name == "Ironhaven"
@@ -161,7 +169,7 @@ def test_new_saves_carry_the_bumped_version(tmp_path):
 
     path = tmp_path / "world.json"
     json_export.save(_small_world(), path)
-    assert json.loads(path.read_text())["version"] == "1.5"
+    assert json.loads(path.read_text())["version"] == "1.6"
 
 
 def test_an_unknown_version_is_rejected_by_name(tmp_path):

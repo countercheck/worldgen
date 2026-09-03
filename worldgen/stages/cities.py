@@ -24,7 +24,7 @@ from ..core.hex import SettlementTier
 from ..core.hex_grid import neighbors
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
-from .habitability import food_value
+from .habitability import actual_food
 from .haulage import gather, make_bulk_cost, usable_fraction
 
 
@@ -60,8 +60,7 @@ class CityPromotionStage(GeneratorStage):
         recorded, and it agrees with the number that set each market's population.
         """
         surplus = {
-            coord: food_value(hx, cfg, cfg.biome_dry_precip_mm, cfg.biome_wet_precip_mm)
-            * cfg.marketable_surplus_fraction
+            coord: actual_food(hx, cfg) * cfg.marketable_surplus_fraction
             for coord, hx in hexes.items()
         }
         owner = {c: hx.territory for c, hx in hexes.items() if hx.territory is not None}

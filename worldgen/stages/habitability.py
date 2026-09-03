@@ -10,66 +10,66 @@ hex gets three scores, one per cultivation radius.  Each tier's placement stage 
 on its own.
 """
 
-from ..core.hex import STEEP_LAND, Biome, LandCover, TerrainClass
+from ..core.hex import STEEP_LAND, Biome, LandCover, LandUse, SoilQuality, TerrainClass
 from ..core.hex_grid import neighbors, ring
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
 
-# Land cover bands.  Cover is a better key than biome: it already folds in terrain and
-# moisture (the dense-forest/woodland split is a moisture threshold), and it is what
-# CultivationStage tests against, so the two cannot disagree about what is farmable.
-FERTILE = frozenset({LandCover.OPEN, LandCover.WOODLAND})
-MARGINAL = frozenset({LandCover.SCRUB, LandCover.DENSE_FOREST})
 WETLAND_COVER = frozenset({LandCover.BOG, LandCover.MARSH})
-# TUNDRA, DESERT, ALPINE and BARE_ROCK feed nobody and are worth zero.
 
 
-def moisture_factor(precip_mm: float, dry: float, wet: float, drowned: float = 3000.0) -> float:
-    """Agricultural suitability of an annual rainfall, as a factor in [0, 1].
+def soil_value(soil: SoilQuality | None, cfg) -> float:
+    """What a soil class could yield, per hex, if it were worked.
 
-    Rainfall is not monotonic for farming — desert at one end, waterlogged at the other —
-    so this is a tent, not a ramp: full value across the band `[dry, wet]`, falling to
-    zero at nothing and again at *drowned*.  The band is the same pair of thresholds
-    `BiomeStage` classifies on, so the two systems cannot drift.
-
-    The wet arm used to fall away to zero at 1.0, which was the ceiling of the old
-    normalised moisture scale rather than a fact about farming.  In millimetres there is
-    no such ceiling, so the point where ground drowns has to be stated: `drowned` is where
-    leaching and waterlogging have taken the yield to nothing, around 3000 mm a year.
-    Leaving the old 1.0 in place would have zeroed the food value of every hex on the map,
-    since all of them get more than a millimetre of rain.
+    This replaced a `moisture_factor` tent multiplied onto a cover band. Rainfall now
+    enters exactly once, in `SoilStage`, where it *chooses* the class — the tent's own
+    thresholds became the class boundaries, so the same three figures still draw the same
+    lines. Applying it again here would price rainfall twice.
     """
-    if precip_mm <= 0.0 or precip_mm >= drowned:
-        return 0.0
-    if precip_mm < dry:
-        return precip_mm / dry if dry > 0.0 else 1.0
-    if precip_mm <= wet:
-        return 1.0
-    return (drowned - precip_mm) / (drowned - wet) if wet < drowned else 1.0
+    return {
+        SoilQuality.PRIME: cfg.food_prime_value,
+        SoilQuality.ARABLE: cfg.food_arable_value,
+        SoilQuality.MARGINAL: cfg.food_marginal_value,
+        SoilQuality.GRAZING: cfg.food_grazing_value,
+    }.get(soil, 0.0)
 
 
-def food_value(hx, cfg, dry: float, wet: float) -> float:
-    """How much food one hex contributes to a catchment.
+def potential_food(hx, cfg) -> float:
+    """What one hex could contribute to a catchment, if it were worked as well as it can be.
 
-    Water is not zero: a coastal site fishes.  Scoring the sea at nothing penalised
-    coastal sites twice over — half their catchment counted as waste ground, and the flat
-    coastal bonus existed largely to repair the damage.
+    Water and wetland are valued in their own right rather than by a soil class, because
+    neither is ploughland: the sea is a fishery and a bog is a bog. Water is deliberately
+    non-zero — scoring it at nothing penalised coastal sites twice over, once for the waste
+    ground and once for the coast bonus that existed to repair the damage.
 
-    Wetland sits *below* open water, being neither good fishing nor good ploughing, which
-    matches bog and marsh already resisting cultivation outright.
+    This is what *siting* reads. A settler picks land for what it will be once worked, not
+    for the wildwood standing on it today.
     """
     cover = hx.land_cover
     if cover is LandCover.OPEN_WATER:
         return cfg.food_water_value
     if cover in WETLAND_COVER:
         return cfg.food_wetland_value
-    if cover in FERTILE:
-        base = cfg.food_fertile_value
-    elif cover in MARGINAL:
-        base = cfg.food_marginal_value
-    else:
-        return 0.0
-    return base * moisture_factor(hx.moisture, dry, wet, cfg.food_drowned_precip_mm)
+    return soil_value(hx.soil, cfg)
+
+
+def actual_food(hx, cfg) -> float:
+    """What the hex yields as it is actually being used.
+
+    The gap between this and `potential_food` is what gives clearing economic weight: wood
+    standing on prime soil feeds far fewer people than the same soil under the plough, so a
+    settlement that assarts its hinterland genuinely grows on it. Ground with no land use
+    yet assigned is read at its potential, so every stage before `LandUseStage` sees the
+    surface it is entitled to.
+    """
+    base = potential_food(hx, cfg)
+    if hx.land_use is None or hx.land_cover is LandCover.OPEN_WATER:
+        return base
+    return base * {
+        LandUse.ARABLE: cfg.yield_arable,
+        LandUse.PASTURE: cfg.yield_pasture,
+        LandUse.WOOD: cfg.yield_wood,
+    }.get(hx.land_use, 0.0)
 
 
 def site_bonus(coord, hx, hexes, cfg) -> float:
@@ -152,11 +152,12 @@ class HabitabilityStage(GeneratorStage):
     def run(self, state: WorldState) -> WorldState:
         hexes = state.hexes
         cfg = self.config
-        dry, wet = cfg.biome_dry_precip_mm, cfg.biome_wet_precip_mm
 
-        # One food value per hex, computed once — every catchment reads this table rather
-        # than re-deriving the value for each of its ~217 members.
-        food = {coord: food_value(hx, cfg, dry, wet) for coord, hx in hexes.items()}
+        # Potential, not actual: this stage runs before anything is cleared, and a site is
+        # chosen for what its hinterland will yield once worked. One value per hex,
+        # computed once — every catchment reads this table rather than re-deriving the
+        # value for each of its ~217 members.
+        food = {coord: potential_food(hx, cfg) for coord, hx in hexes.items()}
 
         radii = {
             "city": cfg.cultivation_city_radius,

@@ -209,9 +209,17 @@ cultivation radii (8 / 4 / 2 hexes) — and each tier is placed on its own surfa
 capital is chosen for the province it can draw on; a market town for the fields within
 walking distance.
 
-Food value comes from land cover, in four configurable bands: fertile (`OPEN`,
-`WOODLAND`), marginal (`SCRUB`, `DENSE_FOREST`), wetland (`BOG`, `MARSH`), and water
-(`OPEN_WATER`). Tundra, desert, alpine and bare rock are worth nothing.
+Food value comes from **soil quality**, a five-rung ladder — unusable, grazing, marginal,
+arable, prime — decided by gradient, rainfall and position in the drainage. It used to come
+from land cover, which said a hex was fertile *because grass grew on it*; that is backwards,
+and it meant the map could not tell a floodplain from a chalk down. Grass on temperate
+lowland is what you get after clearing or on thin soil, and the best ground in northern
+Europe carried wildwood until somebody assarted it — so on `organic` maps, prime and arable
+ground now stands under trees until a settlement clears it, and cleared ground yields more
+than wood.
+
+Water and wetland keep values of their own instead of a soil class, because neither is
+ploughland: the sea is a fishery and a bog is a bog.
 
 **Water is deliberately not zero** — a coastal site fishes. Scoring the sea at nothing
 penalised coastal sites twice over: half their catchment counted as waste ground, and the

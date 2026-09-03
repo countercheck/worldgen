@@ -13,16 +13,24 @@ from tests.worlds import build_pipeline
 from worldgen.core.config import WorldConfig
 from worldgen.core.hex import Biome, SettlementTier, TerrainClass
 from worldgen.core.hex_grid import distance
+from worldgen.stages.land_use import LandUseStage
 from worldgen.stages.markets import MarketStage, depletion_kernel
 
 _WATER = (TerrainClass.OCEAN, TerrainClass.LAKE)
 
 
 def _market_world(seed=42, width=64, height=64, **overrides):
+    """Sited *and* founded: `MarketStage` plants and allocates, `LandUseStage` sizes.
+
+    Both are needed for a world with settlements in it. A market is worth what its
+    countryside sends, and until the countryside has been put to use that is not known —
+    so population has one owner, one stage later than the siting.
+    """
     p = build_pipeline(
         seed=seed, width=width, height=height, until="HabitabilityStage", **overrides
     )
     p.add_stage(MarketStage)
+    p.add_stage(LandUseStage)
     return p.run()
 
 
@@ -193,16 +201,14 @@ def test_market_count_tracks_the_surplus_on_offer():
     stage owes is that it follows whatever surface it is given — so the surface is
     measured and the counts checked against it.
     """
-    from worldgen.stages.habitability import food_value
+    from worldgen.stages.habitability import potential_food
 
     rows = []
     for climate in ("boreal", "tropical", "temperate", "arid", "mediterranean"):
         state = _market_world(regional_climate=climate)
         cfg = state.metadata["config"]
         total = sum(
-            food_value(
-                h, WorldConfig(**cfg), cfg["biome_dry_precip_mm"], cfg["biome_wet_precip_mm"]
-            )
+            potential_food(h, WorldConfig(**cfg))
             for h in state.hexes.values()
             if h.terrain_class not in _WATER
         )

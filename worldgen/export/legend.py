@@ -109,6 +109,10 @@ def _fill_category(h, color_mode: str):
         return h.land_cover
     if color_mode == "biome":
         return h.biome if h.biome is not None else h.terrain_class
+    if color_mode == "soil":
+        return h.soil
+    if color_mode == "land_use":
+        return h.land_use
     return None  # "elevation" is continuous, not categorical
 
 

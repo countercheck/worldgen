@@ -26,7 +26,9 @@ def crossed():
 
 @pytest.fixture(scope="module")
 def settled():
-    return _crossing_world(stop="MarketStage")
+    # Through `LandUseStage`, not merely `MarketStage`: siting and sizing are separate
+    # stages now, and a world stopped at the first has catchments but no settlements.
+    return _crossing_world(stop="LandUseStage")
 
 
 # --- catchment area is a quantity, not a rank --------------------------------

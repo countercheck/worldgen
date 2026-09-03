@@ -57,6 +57,45 @@ class LandCover(Enum):
     BARE_ROCK = "bare_rock"
 
 
+class SoilQuality(Enum):
+    """What the ground could support, before anything is done with it.
+
+    A ladder, and the order is load-bearing — `SOIL_RANK` compares them, and the rules in
+    `SoilStage` take the worse of two arms. This is the *land*, not what is growing on it:
+    the best soil in northern Europe carried wildwood until somebody cleared it, so a hex
+    is not fertile because grass grows there.
+    """
+
+    UNUSABLE = "unusable"  # desert, bare rock, above the treeline, drowned
+    GRAZING = "grazing"  # too steep to plough or too dry to crop; run stock on it
+    MARGINAL = "marginal"  # ploughable and poor: leached, waterlogged, or podzol
+    ARABLE = "arable"  # ordinary farmland
+    PRIME = "prime"  # alluvium: the floodplain of a river too big to wade
+
+
+SOIL_RANK = {
+    SoilQuality.UNUSABLE: 0,
+    SoilQuality.GRAZING: 1,
+    SoilQuality.MARGINAL: 2,
+    SoilQuality.ARABLE: 3,
+    SoilQuality.PRIME: 4,
+}
+
+
+class LandUse(Enum):
+    """What people actually do with a hex, given the settlements that exist.
+
+    Distinct from `SoilQuality`, which is what the ground could take, and from `LandCover`,
+    which is what grows there. Good soil nobody has reached stays WOOD.
+    """
+
+    WATER = "water"
+    WASTE = "waste"  # nothing worth doing
+    WOOD = "wood"  # workable ground still under trees; nobody has cleared it
+    PASTURE = "pasture"
+    ARABLE = "arable"  # cleared and under the plough
+
+
 class Biome(Enum):
     TUNDRA = "tundra"
     BOREAL = "boreal"
@@ -117,7 +156,18 @@ class Hex:
     habitability_town: float = 0.0
     habitability_village: float = 0.0
     land_cover: LandCover | None = None
+    # Three orthogonal facts, and keeping them apart is the point. `soil` is what the
+    # ground could take, `land_cover` what grows on it, `land_use` what is done with it.
+    # `cultivated` is derived from `land_use` and kept because the classic village stages
+    # and the JSON schema both read it.
+    soil: SoilQuality | None = None
+    land_use: LandUse | None = None
     cultivated: bool = False
+    # People living on this hex and working it, as distinct from the population of any
+    # settlement. Four fifths of what the land yields feeds the people who grew it —
+    # `marketable_surplus_fraction` is the other fifth — so this is the same arithmetic
+    # markets are sized by, read the other way round.
+    rural_population: float = 0.0
     # Which settlement works this hex, and what it costs that settlement to reach it.
     # Catchments are allocated by travel cost rather than drawn as discs, so a ridge
     # between two settlements becomes a genuine watershed and the shapes follow valleys.

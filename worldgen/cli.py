@@ -173,7 +173,7 @@ def render_map(input_path: str, attribute: str, output: str):
 
 
 _STYLES = ["atlas", "topographic", "wargame"]
-_COLOR_MODES = ["biome", "terrain", "land_cover", "elevation"]
+_COLOR_MODES = ["biome", "terrain", "land_cover", "soil", "land_use", "elevation"]
 _DEFAULT_LAYERS = {
     "terrain",
     "rivers",
@@ -259,7 +259,7 @@ def _load_export_section(config_path: str) -> dict:
     "--color-mode",
     type=click.Choice(_COLOR_MODES, case_sensitive=False),
     default=None,
-    help="Hex fill color source (overrides config file). Choices: biome, terrain, land_cover, elevation.",
+    help="Hex fill color source (overrides config file). Choices: biome, terrain, land_cover, soil, land_use, elevation.",
 )
 @click.option(
     "--layers",

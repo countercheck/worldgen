@@ -27,7 +27,7 @@ from ..core.hex_grid import distance, hex_range, neighbors
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import ROAD_TIER_RANK, RoadTier, WorldState
 from .city_town import _assign_role
-from .habitability import food_value
+from .habitability import actual_food
 from .haulage import allocate_catchments, gather, settleable, usable_fraction
 
 PASS = "pass"
@@ -95,10 +95,7 @@ def residual_surplus(hexes, cfg) -> dict:
     """
     out = {}
     for coord, hx in hexes.items():
-        surplus = (
-            food_value(hx, cfg, cfg.biome_dry_precip_mm, cfg.biome_wet_precip_mm)
-            * cfg.marketable_surplus_fraction
-        )
+        surplus = actual_food(hx, cfg) * cfg.marketable_surplus_fraction
         if surplus <= 0.0:
             continue
         if hx.territory is not None:

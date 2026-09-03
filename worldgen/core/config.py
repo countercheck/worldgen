@@ -412,10 +412,17 @@ class WorldConfig:
             if getattr(self, name) < 0:
                 raise ValueError(f"{name} must be >= 0, got {getattr(self, name)}")
         for name in (
-            "food_fertile_value",
+            "food_prime_value",
+            "food_arable_value",
             "food_marginal_value",
+            "food_grazing_value",
             "food_wetland_value",
             "food_water_value",
+            "soil_dry_farming_min_precip_mm",
+            "yield_arable",
+            "yield_pasture",
+            "yield_wood",
+            "clearing_margin",
             "habitability_agri_weight",
             "habitability_river_bonus",
             "habitability_coast_bonus",
@@ -560,10 +567,23 @@ class WorldConfig:
     # upper quartile of river discharge here and gives 236 navigable hexes, which is a trunk
     # navigable through the lower half of its length rather than at its mouth alone.
     navigable_min_discharge: float = 60000.0
-    # A farming household eats most of what it grows; only this share can leave for a
-    # market. Sizing markets off the *surplus* rather than the production is why the tier
-    # ratios come out right without target counts anywhere.
-    marketable_surplus_fraction: float = 0.20
+    # What leaves the farm: not only what the household sells, but the rent, the tithe and
+    # the dues, all of which end up feeding somebody in a town. Sizing markets off the
+    # *surplus* rather than the production is why the tier ratios come out right without
+    # target counts anywhere.
+    #
+    # It became load-bearing when the countryside got a population of its own, because it
+    # is now the one number setting the ratio between the two:
+    #
+    #     town  = s       * sum(food * haulage weight) * people_per_food
+    #     rural = (1 - s) * sum(food)                  * people_per_food
+    #
+    # so `rural / town = (1 - s) / (s * mean weight)`, and the mean haulage weight over a
+    # catchment is about 0.31. 0.32 puts 13% of the people in towns, which is the range
+    # England and France sat in around 1300 — 0.20 gave 7%, too rural even for the period,
+    # and it could not be fixed with `people_per_food` because that scales both sides at
+    # once.
+    marketable_surplus_fraction: float = 0.32
     # Naismith's rule: this many metres of ascent cost as much as one hex of level
     # ground. Catchments are walked, not engineered, so they use this rather than
     # road_delta_elevation_per_hex, which prices a graded road and is five times stricter than a
@@ -666,9 +686,20 @@ class WorldConfig:
     # over the food field gives the same number as enumerating ~900 hamlets on a 128x128
     # map, almost none of which would carry military or administrative weight.
     rural_field_radius: float = 2.5  # the daily walk to the fields; sets cultivated extent
-    # Calibrated so market towns land in their historical 500-2500 band: across five
-    # seeds at 128x128 this gives medians of 1260-1700 and a largest of 4200-5450.
-    people_per_food: float = 400.0
+    # People fed per unit of food, and now the one scale factor for the whole population of
+    # the map — settlements and countryside alike, which is what makes the two reconcile by
+    # construction rather than by calibration.
+    #
+    # Set from the rural side, because that is where there is a figure to hit: 180 puts a
+    # temperate 128x128 map at 38 people per km2, and England in 1300 was about 35. It was
+    # 400 when it sized settlements alone and nothing else read it; at that value the
+    # countryside came out at 88 per km2, which is Belgium in 1900.
+    #
+    # The market towns that follow have a median near 450 and a largest around 20,000. That
+    # is a lower median than the figure this used to be tuned to, and the right one: England
+    # carried some 700 markets and most of them were villages with a charter, at 300-1000
+    # people. Only the top of the distribution reached the thousands.
+    people_per_food: float = 180.0
 
     # Market centres. A market goes where it can gather the most surplus inside a day's
     # return — central-place logic with a real transport cost rather than an abstract one.
@@ -693,10 +724,17 @@ class WorldConfig:
     # a temperate one, monotone in mean food per land hex, while median market population
     # stays flat across every climate.  Fertility decides how *many* markets a region carries,
     # not how big each one grows.
-    # Raised from 14.0 with `habitability_harbour_bonus`. Scoring a harbour lifts every
-    # coastal and river-mouth site, so the same floor admitted 93 markets where it had
-    # admitted 74. 17.0 restores the band: 72-79 across seeds 42/7/3/11/19.
-    market_viability_floor: float = 17.0
+    # Raised from 14.0 with `habitability_harbour_bonus`, then to 24.0 with the soil model:
+    # planting scores are surplus, so they scale with `marketable_surplus_fraction`, and
+    # that went 0.20 to 0.32. 24.0 gives 76-92 markets across seeds 42/7/3/11/19.
+    #
+    # One consequence worth knowing, because it is a real feedback and not a rounding
+    # effect: lowering this raises the *rural* population as well as the count. More markets
+    # mean more catchments, more catchments mean more ground cleared, and cleared ground
+    # feeds more people than the wood it replaced — 38 per km2 at 24.0 against 48 at 16.0 on
+    # the same terrain. Settlement improves the land, which is what the assarting centuries
+    # actually did.
+    market_viability_floor: float = 24.0
 
     # Chokepoints: the tier below the market, founded on bridgeheads and passes that carry
     # real traffic. Which road counts as real. A bridge on a farm track is a plank, not a
@@ -709,9 +747,16 @@ class WorldConfig:
     chokepoint_min_separation: int = 2
     # The smallest village worth founding, in food units — the same shape as
     # `market_viability_floor` one tier up, an absolute threshold on gathered surplus
-    # rather than a target count. Multiply by `people_per_food` to read it as people: 0.25
-    # is a hundred, which is a village rather than a farmstead, and the floor is applied to
-    # the real catchment draw so that relation holds exactly.
+    # rather than a target count. Multiply by `people_per_food` to read it as people: 0.30
+    # is 54, and the floor is applied to the real catchment draw so that relation holds
+    # exactly.
+    #
+    # That is hamlet scale rather than village scale, and deliberately, because it is what
+    # a bridgehead settlement was. It also has to be, for a reason worth recording: this
+    # tier lives on *residual* surplus, and the residual thinned when the soil model raised
+    # the market count from 65 to 76 on the same map. Denser markets leave less behind. At
+    # a floor of 0.55 — a hundred people, the figure this used to mean — a temperate map
+    # grows exactly one village, and a tier with one member is not a tier.
     #
     # What is gathered here is *residual* surplus — what the markets did not take — over
     # `rural_field_radius` rather than the market day return, so the number is not
@@ -722,7 +767,7 @@ class WorldConfig:
     # It is not the density knob the market floor is, and cannot be. `chokepoint_min_road_
     # tier` decides how many candidates there are at all, and on a temperate map only about
     # twenty ground features clear it; this only says which of those are worth a glyph.
-    chokepoint_min_draw: float = 0.25
+    chokepoint_min_draw: float = 0.30
 
     # How much *other markets'* surplus must be able to reach a town before it is a city.
     # The one density knob for the tier above the market, and the same shape as the floor
@@ -749,13 +794,45 @@ class WorldConfig:
     cultivation_town_radius: int = 4
     cultivation_village_radius: int = 2
 
-    # Habitability — food value of one hex, by land cover band.  Water is deliberately
-    # non-zero: a coastal site fishes, and scoring the sea at nothing penalised coastal
-    # sites twice. Tundra, desert, alpine and bare rock are always zero.
-    food_fertile_value: float = 1.0
-    food_marginal_value: float = 0.4
+    # Soil — what the ground could yield, by quality class. This is the productive
+    # statement of the model, and it is about the *land*: the old version keyed on land
+    # cover, which said a hex was fertile because grass grew on it. That is backwards.
+    # Grass on temperate lowland is what you get after clearing or on thin soil; the best
+    # ground in northern Europe carried wildwood until somebody assarted it.
+    #
+    # Water and wetland keep values of their own rather than a soil class, because neither
+    # is ploughland: the sea is a fishery and a bog is a bog. Water is deliberately
+    # non-zero — scoring it at nothing penalised coastal sites twice over.
+    food_prime_value: float = 1.4
+    food_arable_value: float = 1.0
+    food_marginal_value: float = 0.55
+    food_grazing_value: float = 0.35
     food_wetland_value: float = 0.15
     food_water_value: float = 0.4
+    # The dry-farming limit: annual rainfall below which no crop is grown without
+    # irrigation, whatever the ground is like. About 250 mm is the figure the literature
+    # settles on and it is what separates steppe from desert in practice.
+    #
+    # It is the only new threshold the soil rules need. Everything else is read off
+    # settings that already exist and already mean the right thing —
+    # `terrain_rolling_gradient_m`, `terrain_steep_gradient_m`,
+    # `terrain_escarpment_gradient_m`, `biome_dry_precip_mm`, `biome_wet_precip_mm`,
+    # `food_drowned_precip_mm`, `biome_cold_temp_c` and `ford_max_catchment_km2`. A second
+    # copy of any of them could only drift from the first.
+    soil_dry_farming_min_precip_mm: float = 250.0
+    # What ground yields relative to its soil, by what is done with it. Cleared land under
+    # the plough is the full value; wood on the same soil feeds far fewer people, which is
+    # what gives clearing economic weight and makes assarting visible on the map.
+    yield_arable: float = 1.0
+    yield_pasture: float = 0.55
+    yield_wood: float = 0.30
+    # Where clearing stops, as a fraction of the best rent the settlement can reach.
+    # Relative rather than absolute, and that is the substance of it: a market with a
+    # floodplain has a high bar and leaves its hillsides to sheep, while a market on
+    # uniformly thin ground has a low bar and ploughs the scrub. The worse the land, the
+    # more pressure to use bad land — the extensive margin set against the best
+    # alternative available, which is what rent theory actually says.
+    clearing_margin: float = 0.45
 
     # Habitability — weight on the catchment mean, plus flat site bonuses
     habitability_agri_weight: float = 0.40
@@ -989,6 +1066,11 @@ _RETIRED_FIELDS: dict[str, str] = {
     ),
     "altitude_lapse_rate": (
         "the lapse rate is a real rate now; use lapse_rate_c_per_km (6.5 is standard)"
+    ),
+    "food_fertile_value": (
+        "food is keyed on soil quality now, not on what is growing there — a hex is not "
+        "fertile because grass grows on it. Use food_arable_value (try 1.0), or "
+        "food_prime_value (1.4) for the alluvium that used to score the same as a chalk down"
     ),
     "biome_cold_temp": (
         "biome temperature bands are in Celsius now; use biome_cold_temp_c (try 5.0)"

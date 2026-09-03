@@ -10,7 +10,7 @@ import pytest
 
 from tests.worlds import build_pipeline, build_world
 from worldgen.core.config import WorldConfig
-from worldgen.core.hex import Hex, SettlementTier
+from worldgen.core.hex import SOIL_RANK, Hex, SettlementTier, SoilQuality
 from worldgen.core.hex_grid import neighbors
 from worldgen.core.world_state import ROAD_TIER_RANK, RoadTier
 from worldgen.stages.chokepoints import BRIDGE, PASS, is_pass, saddle_relief_m
@@ -136,16 +136,25 @@ def test_a_stricter_gate_founds_fewer():
     )
 
 
-def test_thin_country_grows_none():
-    """No traffic, no toll village.
+def test_thin_country_grows_few_villages_and_only_on_its_good_ground():
+    """A desert is mostly empty, and what lives in it lives on the exceptions.
 
-    An arid map has bridges on it and roads over them; what it has not got is enough
-    moving over them to pay for a settlement at the crossing. At the shipped gate rather
-    than this module's loosened one, because that is the claim — a desert grows no bridge
-    towns, not that it grows none if you also refuse to count farm tracks.
+    This used to assert an arid map grew no villages at all, and before soil existed that
+    was true because every desert hex was worth exactly nothing. The soil model gives an
+    arid map its exceptions — alluvium along the rivers it has, and the odd well-watered
+    corner the orography leaves — so the better claim is not that nobody lives there but
+    that nobody lives on the sand.
     """
     arid = _world(regional_climate="arid", chokepoint_min_road_tier="secondary")
-    assert not _villages(arid)
+    temperate = _world(chokepoint_min_road_tier="secondary")
+    assert len(_villages(arid)) < len(_villages(temperate)), (
+        "a desert should carry fewer bridge villages than well-watered country"
+    )
+    for v in _villages(arid):
+        soil = arid.hexes[v.coord].soil
+        assert SOIL_RANK[soil] >= SOIL_RANK[SoilQuality.ARABLE], (
+            f"village at {v.coord} stands on {soil.value} ground in a desert"
+        )
 
 
 # --- what it takes from the tier above ---------------------------------------

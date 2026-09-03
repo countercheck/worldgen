@@ -5,7 +5,13 @@ from pathlib import Path
 from ..core.hex import SettlementTier
 from ..core.hex_grid import axial_to_pixel, neighbors, road_polylines
 from ..core.world_state import RoadTier, WorldState
-from ..render.debug_viewer import BIOME_COLORS, LAND_COVER_COLORS, TERRAIN_COLORS
+from ..render.debug_viewer import (
+    BIOME_COLORS,
+    LAND_COVER_COLORS,
+    LAND_USE_COLORS,
+    SOIL_COLORS,
+    TERRAIN_COLORS,
+)
 from . import legend, rivers
 
 
@@ -13,7 +19,7 @@ from . import legend, rivers
 class SVGConfig:
     hex_size: float = 12.0
     padding: int = 20
-    color_mode: str = "biome"  # "terrain" | "biome" | "land_cover" | "elevation"
+    color_mode: str = "biome"  # terrain | biome | land_cover | soil | land_use | elevation
     layers: set[str] = field(
         default_factory=lambda: {
             "terrain",
@@ -89,6 +95,10 @@ def _get_hex_fill(h, color_mode: str) -> str:
             if h.land_cover is not None
             else (0.5, 0.5, 0.5)
         )
+    elif color_mode == "soil":
+        rgb = SOIL_COLORS.get(h.soil, (0.5, 0.5, 0.5))
+    elif color_mode == "land_use":
+        rgb = LAND_USE_COLORS.get(h.land_use, (0.5, 0.5, 0.5))
     elif color_mode == "elevation":
         v = h.elevation
         rgb = (v, v, v)

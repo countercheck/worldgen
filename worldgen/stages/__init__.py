@@ -47,6 +47,7 @@ def default_stages(model: str = "classic") -> tuple[type["GeneratorStage"], ...]
     from .hydrology import HydrologyStage
     from .interurban_roads import InterurbanRoadStage
     from .land_cover import LandCoverStage
+    from .soil import SoilStage
     from .terrain_class import TerrainClassificationStage
     from .village_placement import VillagePlacementStage
     from .village_tracks import VillageTrackStage
@@ -62,6 +63,11 @@ def default_stages(model: str = "classic") -> tuple[type["GeneratorStage"], ...]
         HydrologyStage,
         ClimateStage,
         BiomeStage,
+        # Soil before cover, because cover depends on it: good ground carries wildwood
+        # until somebody clears it, so what grows on a hex follows from what the hex is.
+        # Soil itself needs the gradient, the drainage, the rainfall and the cold biomes,
+        # which is every stage above.
+        SoilStage,
         LandCoverStage,
         HabitabilityStage,
     )
@@ -70,6 +76,7 @@ def default_stages(model: str = "classic") -> tuple[type["GeneratorStage"], ...]
         from .chokepoints import ChokepointStage
         from .cities import CityPromotionStage
         from .crossings import CrossingStage
+        from .land_use import LandUseStage
         from .markets import MarketStage
 
         return physical + (
@@ -78,6 +85,11 @@ def default_stages(model: str = "classic") -> tuple[type["GeneratorStage"], ...]
             # market grows there rather than something noticed afterwards.
             CrossingStage,
             MarketStage,
+            # Land use immediately after siting, and it founds the markets. A market is
+            # worth what its countryside actually sends, and until the countryside has
+            # been put to use that is not known — so `MarketStage` plants and allocates,
+            # and this clears, sizes and counts who lives on the land.
+            LandUseStage,
             # Cities before roads: promotion changes populations, and population is what
             # decides how many travellers a place sends.
             CityPromotionStage,
@@ -101,7 +113,6 @@ def default_stages(model: str = "classic") -> tuple[type["GeneratorStage"], ...]
             # traffic anyway, and only the built network can say which crossings carry
             # any. They sit on the road by construction, so nothing has to be recut.
             ChokepointStage,
-            CultivationStage,
         )
 
     return physical + (

@@ -45,8 +45,8 @@ ROAD_TIER_RANK = {RoadTier.TRACK: 0, RoadTier.SECONDARY: 1, RoadTier.PRIMARY: 2}
 # 1.5 put "delta_elevation_m" on each edge, signed in the direction of the key.  It is the
 # quantity that decides how slow a segment is, and nothing reading a world should have to
 # reconstruct the cost model to find it.  An older file loads with zeroes.
-SCHEMA_VERSION = "1.5"
-SUPPORTED_SCHEMA_VERSIONS = frozenset({"1.0", "1.1", "1.2", "1.3", "1.4", "1.5"})
+SCHEMA_VERSION = "1.6"
+SUPPORTED_SCHEMA_VERSIONS = frozenset({"1.0", "1.1", "1.2", "1.3", "1.4", "1.5", "1.6"})
 
 
 # Terrain classes before they were reframed as bands of gradient. "hill" and "mountain"
@@ -243,6 +243,9 @@ class WorldState:
                     "biome": h.biome.value if h.biome is not None else None,
                     "terrain_class": h.terrain_class.value,
                     "land_cover": h.land_cover.value if h.land_cover is not None else None,
+                    "soil": h.soil.value if h.soil is not None else None,
+                    "land_use": h.land_use.value if h.land_use is not None else None,
+                    "rural_population": h.rural_population,
                     "river_flow": h.river_flow,
                     "catchment_km2": h.catchment_km2,
                     "habitability_city": h.habitability_city,
@@ -298,9 +301,11 @@ class WorldState:
             Biome,
             Hex,
             LandCover,
+            LandUse,
             Settlement,
             SettlementRole,
             SettlementTier,
+            SoilQuality,
             TerrainClass,
         )
 
@@ -358,6 +363,12 @@ class WorldState:
                 habitability_town=hd.get("habitability_town", hd.get("habitability", 0.0)),
                 habitability_village=hd.get("habitability_village", hd.get("habitability", 0.0)),
                 cultivated=hd["cultivated"],
+                # Added at schema 1.6. Absent in anything older, and a world written before
+                # soil existed has no answer to give — reading one back leaves these None
+                # rather than inventing a class the generator never assigned.
+                soil=SoilQuality(hd["soil"]) if hd.get("soil") else None,
+                land_use=LandUse(hd["land_use"]) if hd.get("land_use") else None,
+                rural_population=hd.get("rural_population", 0.0),
                 # Absent before 1.2: such a file simply records no catchments.
                 territory=tuple(hd["territory"]) if hd.get("territory") is not None else None,
                 territory_cost=hd.get("territory_cost", 0.0),

@@ -114,11 +114,12 @@ def _before_and_after():
 
     Stopped at `CityPromotionStage` rather than run to the end, because `ChokepointStage`
     downstream founds a village tier of its own — real settlements that this stage did not
-    make and must not be blamed for.
+    make and must not be blamed for. The "before" world stops at `LandUseStage`, which is
+    where markets are founded and sized.
     """
     kw = dict(seed=42, width=96, height=96, model="organic", **_CITY_DEFAULTS)
     return (
-        build_world(until="MarketStage", **kw),
+        build_world(until="LandUseStage", **kw),
         build_world(until="CityPromotionStage", **kw),
     )
 
