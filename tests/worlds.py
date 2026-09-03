@@ -97,18 +97,24 @@ def build_world(
 
 
 def lay_road(ws, path, tier):
-    """Write a hex path into `ws.road_edges` as a road of *tier*.
+    """Write a hex path into the world as a route of *tier*.
 
-    The model stores one tier per edge, so a fixture laying two overlapping routes gets
-    the higher tier on the shared edges — the same rule the renderer used to apply at draw
-    time, and the one `VillageTrackStage` and the schema-1.2 migration both follow.
+    Mirrors what `InterurbanRoadStage` does on the way out, which a fixture has to or it
+    tests a shape the generator never produces: one tier per edge, the higher tier winning
+    where two routes overlap, and an edge with a foot in the water filed under `sea_edges`
+    rather than `road_edges`, because it is a sea leg and not a road.
     """
+    from worldgen.core.hex import TerrainClass
     from worldgen.core.world_state import ROAD_TIER_RANK, road_edge_key
 
+    water = (TerrainClass.OCEAN, TerrainClass.LAKE)
     for a, b in zip(path, path[1:], strict=False):
-        key = road_edge_key(tuple(a), tuple(b))
-        if ROAD_TIER_RANK[tier] > ROAD_TIER_RANK.get(ws.road_edges.get(key), -1):
-            ws.road_edges[key] = tier
-        ws.hexes[tuple(a)].road_connections.add(tuple(b))
-        ws.hexes[tuple(b)].road_connections.add(tuple(a))
+        a, b = tuple(a), tuple(b)
+        key = road_edge_key(a, b)
+        wet = any(ws.hexes[c].terrain_class in water for c in (a, b))
+        book = ws.sea_edges if wet else ws.road_edges
+        if ROAD_TIER_RANK[tier] > ROAD_TIER_RANK.get(book.get(key), -1):
+            book[key] = tier
+        ws.hexes[a].road_connections.add(b)
+        ws.hexes[b].road_connections.add(a)
     return ws

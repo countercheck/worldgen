@@ -47,6 +47,12 @@ class VillageTrackStage(GeneratorStage):
         settled = {s.coord for s in state.settlements}
 
         def node_cost(hx):
+            # Land only. A lane from a village to the nearest road is a walk, not a
+            # crossing, and a track drawn over a lake would land in `road_edges` as road —
+            # which is the confusion `sea_edges` exists to prevent. A village the water
+            # cuts off simply gets no track; `astar` returns nothing and it is skipped.
+            if hx.terrain_class in WATER:
+                return float("inf")
             base = terrain_base_cost(hx, cfg) + river_hex_cost(hx, cfg)
             return base * (1.0 - bank_discount(hx, hexes, cfg))
 

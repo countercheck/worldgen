@@ -36,8 +36,13 @@ ROAD_TIER_RANK = {RoadTier.TRACK: 0, RoadTier.SECONDARY: 1, RoadTier.PRIMARY: 2}
 # "road_edges", one tier per undirected edge.  A 1.2 file still loads: its paths are walked
 # into edges, the higher tier winning where journeys overlap, which is the rule the renderer
 # already applied when drawing them.  The reverse is not true, so 1.3 is a real bump.
-SCHEMA_VERSION = "1.3"
-SUPPORTED_SCHEMA_VERSIONS = frozenset({"1.0", "1.1", "1.2", "1.3"})
+#
+# 1.4 split "sea_edges" out of "road_edges": an edge with a foot in the water is a sea leg,
+# not a road, and while the two were mixed there was no way to ask whether two places were
+# joined *by land*.  A 1.3 file loads with no sea edges, which reads its water legs as
+# roads — the shape it was written with.
+SCHEMA_VERSION = "1.4"
+SUPPORTED_SCHEMA_VERSIONS = frozenset({"1.0", "1.1", "1.2", "1.3", "1.4"})
 
 
 # Terrain classes before they were reframed as bands of gradient. "hill" and "mountain"
@@ -116,6 +121,18 @@ class WorldState:
     # for anything that needs lines to draw, and `hex.road_connections` stays as the
     # adjacency index into it.
     road_edges: dict[tuple[HexCoord, HexCoord], RoadTier] = field(default_factory=dict)
+    # The water legs of the same network, kept apart from the roads rather than mixed in.
+    #
+    # Routes cross open water because water is cheap to cross — rightly, since sea carriage
+    # ran at a fraction of land carriage before the railway. But an edge with a foot in the
+    # sea is not a road, and while both lived in `road_edges` the distinction could not be
+    # drawn: half the network by hex count was water, "road coverage" counted the sea in,
+    # and the map's single connected network was single only *through* the sea. By land
+    # alone that map is forty networks tied together by eight crossings.
+    #
+    # Same shape as `road_edges`, so connectivity by land is the components of one and
+    # connectivity by any means is the components of both.
+    sea_edges: dict[tuple[HexCoord, HexCoord], RoadTier] = field(default_factory=dict)
     ferries: list[Ferry] = field(default_factory=list)
     metadata: dict = field(default_factory=dict)
 
@@ -233,6 +250,10 @@ class WorldState:
                 {"a": list(a), "b": list(b), "tier": tier.value}
                 for (a, b), tier in sorted(self.road_edges.items())
             ],
+            "sea_edges": [
+                {"a": list(a), "b": list(b), "tier": tier.value}
+                for (a, b), tier in sorted(self.sea_edges.items())
+            ],
             "ferries": [{"a": list(f.a), "b": list(f.b)} for f in self.ferries],
         }
 
@@ -316,6 +337,10 @@ class WorldState:
             River(hexes=[tuple(c) for c in rd["hexes"]], flow_volume=rd["flow_volume"])
             for rd in data.get("rivers", [])
         ]
+        ws.sea_edges = {
+            road_edge_key(tuple(ed["a"]), tuple(ed["b"])): RoadTier(ed["tier"])
+            for ed in data.get("sea_edges", [])
+        }
         if "road_edges" in data:
             ws.road_edges = {
                 road_edge_key(tuple(ed["a"]), tuple(ed["b"])): RoadTier(ed["tier"])

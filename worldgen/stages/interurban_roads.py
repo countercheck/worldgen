@@ -1,6 +1,7 @@
 from collections import defaultdict, deque
 from heapq import heappop, heappush
 
+from ..core.errors import RoutingError
 from ..core.hex import SettlementTier, TerrainClass
 from ..core.hex_grid import astar, astar_to_any, distance, neighbors
 from ..core.pipeline import GeneratorStage
@@ -184,18 +185,47 @@ class InterurbanRoadStage(GeneratorStage):
         # because stitching made almost every route a concatenation of the same few legs;
         # with routes pathfound independently the map broke into two components.
         if len(settlements) > 1:
-            road_edges, ferries = self._guarantee_connectivity(
+            road_edges, ferries, unreachable = self._guarantee_connectivity(
                 hexes, settlements, road_edges, cfg, blocked, settled
             )
             state.ferries.extend(ferries)
+            if unreachable:
+                # Kept on the world rather than logged away: a map in pieces is a fact a
+                # reader of the output should be able to see.
+                state.metadata.setdefault("unreachable_settlements", []).extend(
+                    {"coord": list(coord), "reason": reason} for coord, reason in unreachable
+                )
 
-        # Again over the finished network, on tiers this time: the connectivity guarantee
-        # lays trunk roads of its own, which can skirt a town like any other.
+        # An edge with a foot in the water is a sea leg, not a road. Splitting them here
+        # rather than at draw time is what makes "is there a land route" a question the
+        # world can answer: half this network by hex count is water, and by land alone the
+        # reference map is forty networks tied together by eight crossings.
+        sea_edges = {
+            key: tier
+            for key, tier in road_edges.items()
+            if any(hexes[c].terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE) for c in key)
+        }
+        for key in sea_edges:
+            del road_edges[key]
+
+        # Where land can join two places, roads should. Sea carriage is so much cheaper
+        # than land that routes will cross a bay rather than walk round it, which is right
+        # for a journey and wrong for a network: it left the reference map as forty land
+        # networks tied together by eight sea crossings, so a cart could not get from one
+        # market to the next without a boat. This adds what the traffic model declined to.
+        self._join_by_land(hexes, settlements, road_edges, cfg, blocked, settled)
+
+        # Last of all, on tiers: the connectivity guarantee and the land join both lay
+        # roads of their own, and either can skirt a town like any other route.
         route_through_settlements(road_edges, hexes, settled, cfg, blocked)
 
-        prune_orphan_roads(road_edges, settled | {c for f in state.ferries for c in (f.a, f.b)})
+        anchors = settled | {c for f in state.ferries for c in (f.a, f.b)}
+        # A land network reaching no settlement is a residue of the traffic threshold; one
+        # reaching only a shore is a road to a harbour, which is a road to somewhere.
+        anchors |= {c for key in sea_edges for c in key}
+        prune_orphan_roads(road_edges, anchors)
 
-        for a, b in road_edges:
+        for a, b in list(road_edges) + list(sea_edges):
             if a in hexes and b in hexes:
                 hexes[a].road_connections.add(b)
                 hexes[b].road_connections.add(a)
@@ -215,6 +245,7 @@ class InterurbanRoadStage(GeneratorStage):
                 hx.habitability_village = min(1.0, hx.habitability_village + 0.2)
 
         state.road_edges = road_edges
+        state.sea_edges = sea_edges
         return state
 
     def _route(self, hexes, origin, dest, net_adj, node_cost, edge_cost, cache, version):
@@ -238,9 +269,8 @@ class InterurbanRoadStage(GeneratorStage):
         The road home is *costed*, and weighed against the cost of reaching each possible
         join. Stopping at whichever road hex is cheapest to reach is not the same as the
         cheapest journey: a traveller would join at his own doorstep and follow the network
-        however far round it went. Measured over 1,186 routes, that took the wrong join on
-        24% of them, for a journey a median 9% longer, 33% at the ninetieth percentile and
-        360% at worst — 4.1% longer on average across every route.
+        however far round it went, so no road was ever built between two places the network
+        already joined badly, and the graph came out very nearly a tree.
 
         That weighing is why the search runs without a heuristic. `goal_cost` is real cost
         and the heuristic counts hexes at 1.0 apiece, which road travel is far below, so the
@@ -248,6 +278,9 @@ class InterurbanRoadStage(GeneratorStage):
         route every time. Dijkstra is slower and is the price of the comparison meaning
         anything.
         """
+        # Every hex from which dest is reachable on the network so far, with the way back
+        # and what it costs. Empty for the first traveller, who therefore paths the whole
+        # way and becomes the road that everyone after him joins.
         cached = cache.get(dest)
         if cached is not None and cached[0] == version:
             tree, home_cost = cached[1], cached[2]
@@ -271,6 +304,84 @@ class InterurbanRoadStage(GeneratorStage):
         if leg is None:
             return None
         return leg + road_home(tree[leg[-1]])
+
+    @staticmethod
+    def _join_by_land(hexes, places, road_edges, cfg, blocked, settled):
+        """Join settlements that share a landmass but not a road, by road.
+
+        The traffic model has no reason to build these: a traveller crossing a bay is doing
+        the sensible thing, since sea carriage cost a fraction of land carriage. But a
+        network in which neighbouring markets can only be reached by boat is not a road
+        network, and a wargame cannot march down it.
+
+        Land only, deliberately — the cost function refuses water outright, so this cannot
+        satisfy itself with the sea leg that already exists.
+        """
+        water = (TerrainClass.OCEAN, TerrainClass.LAKE)
+
+        def land_cost(hx):
+            if hx.terrain_class in water:
+                return float("inf")
+            return terrain_base_cost(hx, cfg) + river_hex_cost(hx, cfg)
+
+        land_edge = make_road_edge_cost(cfg, blocked, settled)
+
+        # Which settlements the ground itself connects, ignoring roads entirely.
+        dry = {c for c, hx in hexes.items() if hx.terrain_class not in water}
+        seats = [s.coord for s in places if s.coord in dry]
+        landmass: dict = {}
+        for seat in seats:
+            if seat in landmass:
+                continue
+            stack, seen = [seat], set()
+            while stack:
+                c = stack.pop()
+                if c in seen:
+                    continue
+                seen.add(c)
+                stack.extend(n for n in neighbors(c) if n in dry and n not in seen)
+            for c in seen & set(seats):
+                landmass[c] = seat
+
+        def road_component(start, edges):
+            adj: dict = defaultdict(set)
+            for a, b in edges:
+                adj[a].add(b)
+                adj[b].add(a)
+            seen, stack = {start}, [start]
+            while stack:
+                c = stack.pop()
+                for n in adj[c]:
+                    if n not in seen:
+                        seen.add(n)
+                        stack.append(n)
+            return seen
+
+        by_land: dict = defaultdict(list)
+        for seat in seats:
+            by_land[landmass[seat]].append(seat)
+
+        added = 0
+        for group in by_land.values():
+            if len(group) < 2:
+                continue
+            joined = road_component(group[0], road_edges)
+            for seat in group[1:]:
+                if seat in joined:
+                    continue
+                target = min(
+                    (c for c in joined if c in dry), key=lambda c: distance(seat, c), default=None
+                )
+                if target is None:
+                    continue
+                path = astar(hexes, seat, target, land_cost, land_edge)
+                if not path or len(path) < 2:
+                    continue
+                for a, b in zip(path, path[1:], strict=False):
+                    road_edges.setdefault(road_edge_key(a, b), RoadTier.TRACK)
+                joined |= set(path)
+                added += 1
+        return added
 
     @staticmethod
     def _road_home_tree(hexes, dest, net_adj, node_cost, edge_cost):
@@ -355,6 +466,8 @@ class InterurbanRoadStage(GeneratorStage):
                 road_edges.setdefault(road_edge_key(a, b), RoadTier.PRIMARY)
 
         ferries: list[Ferry] = []
+        # Settlements the terrain puts beyond both road and ferry. Reported, not raised.
+        unreachable: list = []
         max_iter = len(places) * 2
         for _ in range(max_iter):
             isolated = [s for s in places if s.coord not in main]
@@ -377,20 +490,32 @@ class InterurbanRoadStage(GeneratorStage):
                     progressed = True
                     break
             if not progressed:
-                # No land route to any settlement in the main component: the river channel
-                # cuts this one off. Join it by boat, or fail loudly if none is plausible.
+                # No land route to any settlement in the main component: the channel cuts
+                # this one off. Join it by boat where a boat is plausible — and where it is
+                # not, leave it apart. Some maps simply are in pieces: an island beyond
+                # ferry range cannot be reached by road, and that is a fact about the world
+                # rather than a failure of routing. Raising there would make an archipelago
+                # ungenerable, which is worse than a map that honestly shows two networks.
                 iso = isolated[0]
-                ferry, ferry_paths = ferry_link(
-                    hexes,
-                    iso.coord,
-                    iso.name,
-                    main,
-                    cfg,
-                    blocked,
-                    settled,
-                    plain_cost,
-                    plain_edge,
-                )
+                try:
+                    ferry, ferry_paths = ferry_link(
+                        hexes,
+                        iso.coord,
+                        iso.name,
+                        main,
+                        cfg,
+                        blocked,
+                        settled,
+                        plain_cost,
+                        plain_edge,
+                    )
+                except RoutingError as exc:
+                    unreachable.append((iso.coord, str(exc)))
+                    # Treat its component as settled so the loop moves on to the next one
+                    # rather than trying this same crossing again every pass.
+                    main |= bfs_component(iso.coord)
+                    main.add(iso.coord)
+                    continue
                 ferries.append(ferry)
                 for fp in ferry_paths:
                     adopt(fp)
@@ -398,4 +523,4 @@ class InterurbanRoadStage(GeneratorStage):
                 main.add(ferry.a)
                 main.add(ferry.b)
 
-        return road_edges, ferries
+        return road_edges, ferries, unreachable

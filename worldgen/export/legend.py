@@ -130,7 +130,7 @@ def anchorage_points(ws: WorldState) -> list:
     road leg happens to be drawable at either end.
     """
     drawn = {c for _, leg in road_polylines(ws.road_edges, ws.hexes) for c in leg}
-    points = {c for c in road_water_transitions(ws.road_edges, ws.hexes) if c in drawn}
+    points = {c for c in road_water_transitions(ws.sea_edges, ws.hexes) if c in drawn}
     points |= {c for ferry in ws.ferries for c in (ferry.a, ferry.b)}
     return sorted(points)
 

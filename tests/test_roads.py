@@ -532,52 +532,56 @@ def test_no_road_skirts_a_settlement_it_could_pass_through(road_state):
     r=1, 12% at r=2 and 22% at r=3, while the road distance to a nearby town already
     equals the crow-flies distance at every radius out to four.
 
-    "Could" is load-bearing: a road is allowed to decline a town that is dear to reach,
-    which on this map is mostly a town standing on a river channel, and occasionally one
-    up a bank. So the test applies the same bound the rule does, and only complains about
-    a skirt that was affordable.
+    "Could" is load-bearing: a road may decline a town that is dear to reach, up a bank it
+    cannot climb, or across a channel it has no business on. So the test asks the same
+    question the rule does, through the same function — `detour_is_allowed`. Writing the
+    guard out a second time here is exactly what went wrong before: the copy knew only
+    about the cost bound, so a skirt refused for a 30% grade read as a defect.
     """
     from worldgen.core.hex_grid import neighbors
-    from worldgen.stages.road_cost import river_hex_cost, road_edge_cost, terrain_base_cost
+    from worldgen.stages.road_cost import detour_is_allowed, river_edges
 
-    hexes = road_state.hexes
     cfg = WorldConfig(**road_state.metadata["config"])
-
-    def leg(start, end):
-        return (
-            terrain_base_cost(hexes[end], cfg)
-            + river_hex_cost(hexes[end], cfg)
-            + road_edge_cost(hexes[start], hexes[end], cfg)
-        )
+    settled = {s.coord for s in road_state.settlements}
+    blocked = river_edges(road_state.rivers)
 
     offenders = []
-    for seat in {s.coord for s in road_state.settlements}:
+    for seat in settled:
         ring = set(neighbors(seat))
         for a, b in road_state.road_edges:
             if a not in ring or b not in ring:
                 continue
-            direct = leg(a, b)
-            detour = leg(a, seat) + leg(seat, b)
-            if direct > 0 and detour <= direct * cfg.road_settlement_detour_max_mult:
-                offenders.append((seat, a, b, detour / direct))
+            if detour_is_allowed(road_state.hexes, settled, cfg, blocked, a, seat, b):
+                offenders.append((seat, a, b))
 
     assert not offenders, (
-        f"{len(offenders)} roads pass a settlement without entering it, at a detour they "
-        f"could afford. e.g. {offenders[0][1]}->{offenders[0][2]} around {offenders[0][0]} "
-        f"at {offenders[0][3]:.1f}x"
+        f"{len(offenders)} roads pass a settlement they could have been bent through, "
+        f"e.g. {offenders[0][1]}->{offenders[0][2]} around {offenders[0][0]}"
     )
 
 
 def test_the_road_network_is_all_one_piece(road_state):
-    """Every part of the network must reach a settlement, on land or by ferry.
+    """Every settlement must be reachable from every other **by road**.
 
-    Two things used to leave it in pieces. The connectivity guarantee only ran on maps with
+    Two things excuse a break, and both are narrow. Roads may not run down a river channel,
+    so a delta island or a braided confluence can be unreachable by land and
+    `_guarantee_connectivity` joins it by boat — but only after land routing has failed. And
+    some maps are simply in pieces: an island beyond ferry range cannot be reached at all,
+    which the stage records in `metadata["unreachable_settlements"]` rather than raising
+    over, because an archipelago should be generable.
+
+    What is *not* excused is two road networks sharing one landmass. Where land connects
+    two places, roads must.
+
+    Two things used to leave it that way. The connectivity guarantee only ran on maps with
     two or more *cities*, so the organic model — whose markets are all TOWN — had nothing
     watching it; and `road_river_traffic_min` admits a riverbank edge on a single traveller,
     so a stretch of towpath could qualify while joining nothing at all. Both were masked
     while `_stitch_via_junction` made almost every route a concatenation of the same few
     legs, which kept the map connected by accident.
     """
+    from worldgen.core.hex_grid import neighbors
+
     adj: dict = {}
     for a, b in road_state.road_edges:
         adj.setdefault(a, set()).add(b)
@@ -585,24 +589,86 @@ def test_the_road_network_is_all_one_piece(road_state):
     if not adj:
         return
 
-    anchors = {s.coord for s in road_state.settlements}
-    anchors |= {c for f in road_state.ferries for c in (f.a, f.b)}
-
-    seen: set = set()
-    for start in adj:
-        if start in seen:
-            continue
-        stack, comp = [start], set()
-        while stack:
-            c = stack.pop()
-            if c in comp:
+    def components(links):
+        seen, out = set(), []
+        for start in links:
+            if start in seen:
                 continue
-            comp.add(c)
-            stack.extend(adj[c] - comp)
-        seen |= comp
+            stack, comp = [start], set()
+            while stack:
+                c = stack.pop()
+                if c in comp:
+                    continue
+                comp.add(c)
+                stack.extend(links.get(c, ()) - comp)
+            seen |= comp
+            out.append(comp)
+        return out
+
+    seats = {s.coord for s in road_state.settlements}
+    by_road = components(adj)
+
+    # Nothing may be drawn that reaches neither a settlement nor a ferry landing.
+    anchors = seats | {c for f in road_state.ferries for c in (f.a, f.b)}
+    for comp in by_road:
         assert comp & anchors, (
             f"{len(comp)} road hexes near {sorted(comp)[0]} reach no settlement and no "
             "ferry — a road that connects nothing"
+        )
+
+    # Once ferries count as links there must be one network — except for anything the
+    # terrain genuinely severs, which the stage records rather than raising over.
+    linked = {c: set(v) for c, v in adj.items()}
+    for ferry in road_state.ferries:
+        linked.setdefault(ferry.a, set()).add(ferry.b)
+        linked.setdefault(ferry.b, set()).add(ferry.a)
+    reached = max(components(linked), key=len, default=set())
+    conceded = {
+        tuple(entry["coord"]) for entry in road_state.metadata.get("unreachable_settlements", [])
+    }
+    stranded = sorted(seats - reached - conceded)
+    assert not stranded, (
+        f"{len(stranded)} settlements are cut off from the main network even counting "
+        f"ferries, and the stage did not record them as unreachable, e.g. {stranded[0]}"
+    )
+
+    # And settlements standing on the same ground must be joined **by road**, not merely
+    # by sea. Sea carriage was so much cheaper than land that the traffic model will cross
+    # a bay rather than walk round it, which is right for a journey and wrong for a
+    # network: without `_join_by_land` the reference map came out forty land networks tied
+    # together by eight sea crossings, so a cart could not reach the next market without a
+    # boat. Roads must join what land can join.
+    dry = {
+        c
+        for c, hx in road_state.hexes.items()
+        if hx.terrain_class not in (TerrainClass.OCEAN, TerrainClass.LAKE)
+    }
+    landmass: dict = {}
+    for seat in seats & dry:
+        if seat in landmass:
+            continue
+        stack, reached = [seat], set()
+        while stack:
+            c = stack.pop()
+            if c in reached:
+                continue
+            reached.add(c)
+            stack.extend(n for n in neighbors(c) if n in dry and n not in reached)
+        for c in reached & seats:
+            landmass[c] = seat
+
+    home = {}
+    for i, comp in enumerate(by_road):
+        for c in comp:
+            home[c] = i
+    together: dict = {}
+    for seat, mass in landmass.items():
+        together.setdefault(mass, set()).add(home.get(seat))
+    for mass, roads in together.items():
+        real = roads - {None}
+        assert len(real) <= 1, (
+            f"settlements sharing the landmass around {mass} sit in {len(real)} separate "
+            "road networks — they can only reach each other by sea"
         )
 
 
@@ -626,3 +692,73 @@ def test_a_bigger_settlement_sends_more_travellers(road_state):
         f"the largest settlement ({large.population}) has a lesser road than the smallest "
         f"({small.population}) — travellers are not following population"
     )
+
+
+def test_an_island_beyond_ferry_range_does_not_break_generation():
+    """Some maps are in pieces, and that is a fact about the world rather than an error.
+
+    `ferry_link` raises when the nearest landing is further than `road_ferry_max_hop`, on
+    the grounds that a silent long-haul boat link reads worse than a loud failure. True of a
+    delta island a few hexes off the bank; wrong as a reason to refuse to generate an
+    archipelago at all — two islands twenty hexes apart cannot be joined by road and never
+    will be. The stage records what it could not join and carries on.
+
+    Both escapes are shut off here: no land route exists and no ferry is plausible, which is
+    exactly the archipelago case.
+    """
+    from worldgen.core.errors import RoutingError
+    from worldgen.stages import interurban_roads as ir
+
+    state = _build_pipeline(seed=42, width=48, height=48).run()
+    cfg = WorldConfig(**state.metadata["config"])
+    stage = ir.InterurbanRoadStage(cfg, None)
+
+    def no_land_route(*_a, **_k):
+        return None
+
+    def no_ferry(*_a, **_k):
+        raise RoutingError("no plausible ferry")
+
+    real_astar, real_ferry = ir.astar, ir.ferry_link
+    ir.astar, ir.ferry_link = no_land_route, no_ferry
+    try:
+        edges, ferries, unreachable = stage._guarantee_connectivity(
+            state.hexes,
+            state.settlements,
+            {},  # nothing joined yet, so every settlement is its own component
+            cfg,
+            frozenset(),
+            {s.coord for s in state.settlements},
+        )
+    finally:
+        ir.astar, ir.ferry_link = real_astar, real_ferry
+
+    # It came back rather than raising, and it said what it could not reach.
+    assert ferries == []
+    assert unreachable, "nothing was recorded as unreachable — the test did not bite"
+    assert len(unreachable) >= len(state.settlements) - 1
+    coord, reason = unreachable[0]
+    assert coord in {s.coord for s in state.settlements}
+    assert "ferry" in reason
+
+
+def test_unreachable_settlements_are_recorded_on_the_world():
+    """A map in pieces is something a reader of the output should be able to see."""
+    from worldgen.core.errors import RoutingError
+    from worldgen.stages import interurban_roads as ir
+
+    def no_ferry(*_a, **_k):
+        raise RoutingError("no plausible ferry")
+
+    real = ir.ferry_link
+    ir.ferry_link = no_ferry
+    try:
+        state = _build_pipeline(seed=42, width=48, height=48).run()
+    finally:
+        ir.ferry_link = real
+
+    # This map needs no ferries, so nothing should be recorded — but the key, when it is
+    # written at all, has to be shaped for the reader.
+    for entry in state.metadata.get("unreachable_settlements", []):
+        assert set(entry) == {"coord", "reason"}
+        assert len(entry["coord"]) == 2

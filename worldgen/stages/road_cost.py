@@ -3,7 +3,7 @@ from collections import deque
 from ..core.errors import RoutingError
 from ..core.hex import TerrainClass
 from ..core.hex_grid import astar, distance, neighbors
-from ..core.world_state import ROAD_TIER_RANK, Ferry, RoadTier
+from ..core.world_state import ROAD_TIER_RANK, Ferry, RoadTier, road_edge_key
 
 WATER = (TerrainClass.OCEAN, TerrainClass.LAKE)
 
@@ -418,6 +418,41 @@ def add_traffic(existing, incoming):
     return incoming if existing is None else existing + incoming
 
 
+def detour_is_allowed(hexes, settled, cfg, blocked, a, seat, b) -> bool:
+    """Could a road skirting *seat* on the edge (a, b) be bent through it instead?
+
+    Three things forbid it, and they are why "no road skirts a town" is not an invariant on
+    its own: the legs may not cross a river channel they have no business on, may not climb
+    a grade a laden cart cannot, and may not cost more than `road_settlement_detour_max_mult`
+    times the edge they replace — a road is allowed to decline a town that is dear to reach.
+
+    Split out so the rule has one statement. It was written twice, once here and once in the
+    test that guards it, and the copies disagreed: the test knew only about the cost bound,
+    so a skirt refused for a 30% grade or a channel crossing read as a defect.
+    """
+
+    def leg_cost(start, end) -> float:
+        return (
+            terrain_base_cost(hexes[end], cfg)
+            + river_hex_cost(hexes[end], cfg)
+            + road_edge_cost(hexes[start], hexes[end], cfg)
+        )
+
+    legs = ((a, seat), (seat, b))
+    for start, end in legs:
+        if end not in hexes or start not in hexes:
+            return False
+        if frozenset((start, end)) in blocked and not _settlement_exempt(
+            hexes, settled, start, end
+        ):
+            return False
+        if not grade_is_under_cap(hexes[start], hexes[end], cfg):
+            return False
+    direct = leg_cost(a, b)
+    detour = leg_cost(a, seat) + leg_cost(seat, b)
+    return not (direct > 0 and detour > direct * cfg.road_settlement_detour_max_mult)
+
+
 def route_through_settlements(
     road_edges, hexes, settled, cfg, blocked=frozenset(), combine=_keep_higher_tier
 ) -> int:
@@ -439,14 +474,6 @@ def route_through_settlements(
     it in place; returns how many bypasses were rerouted.
     """
 
-    def leg_cost(start, end) -> float:
-        """What one step onto *end* costs: the ground there, plus getting onto it."""
-        return (
-            terrain_base_cost(hexes[end], cfg)
-            + river_hex_cost(hexes[end], cfg)
-            + road_edge_cost(hexes[start], hexes[end], cfg)
-        )
-
     rerouted = 0
     for seat in settled:
         seat_hx = hexes.get(seat)
@@ -454,26 +481,9 @@ def route_through_settlements(
             continue
         ring = set(neighbors(seat))
         for a, b in [(a, b) for a, b in road_edges if a in ring and b in ring]:
+            if not detour_is_allowed(hexes, settled, cfg, blocked, a, seat, b):
+                continue
             legs = ((a, seat), (seat, b))
-            if any(
-                end not in hexes
-                or (
-                    frozenset((start, end)) in blocked
-                    and not _settlement_exempt(hexes, settled, start, end)
-                )
-                or not grade_is_under_cap(hexes[start], hexes[end], cfg)
-                for start, end in legs
-            ):
-                continue
-            # And the town has to be worth reaching. A detour is two legs where there was
-            # one, so it costs double on even ground and the bound is on what lies beyond
-            # that: the far bank of a river, an escarpment, the top of a cliff.
-            direct = leg_cost(a, b)
-            detour = leg_cost(a, seat) + leg_cost(seat, b)
-            if direct > 0 and detour > direct * cfg.road_settlement_detour_max_mult:
-                continue
-            from ..core.world_state import road_edge_key
-
             carried = road_edges.pop(road_edge_key(a, b))
             for start, end in legs:
                 key = road_edge_key(start, end)

@@ -296,16 +296,15 @@ def water_transitions(path: list[HexCoord], hexes: dict[HexCoord, Hex]) -> list[
     return out
 
 
-def road_water_transitions(road_edges, hexes: dict[HexCoord, Hex]) -> set[HexCoord]:
-    """Land hexes where the road network meets water — where a route takes to a boat.
+def road_water_transitions(sea_edges, hexes: dict[HexCoord, Hex]) -> set[HexCoord]:
+    """The shores a sea leg lands on — where a route takes to a boat and comes off again.
 
-    `road_polylines` drops edges with a foot in a lake or the sea, so a crossing leaves two
-    drawn lines stopping dead at opposite shores.  Renderers mark these hexes so the two
-    read as one route.  The graph answers this directly: a land hex holding a road edge
-    into water is a landing.
+    The water itself is not drawn, so a crossing leaves two lines stopping dead at opposite
+    shores; renderers mark these hexes so the two read as one route.  Pass `sea_edges`: a
+    dry hex holding an edge into the water is a landing.
     """
     out: set[HexCoord] = set()
-    for a, b in road_edges:
+    for a, b in sea_edges:
         a_wet, b_wet = _is_water(hexes, a), _is_water(hexes, b)
         if a_wet != b_wet:
             out.add(b if a_wet else a)
@@ -322,18 +321,18 @@ def road_polylines(road_edges, hexes: dict[HexCoord, Hex]) -> list[tuple]:
     to deduplicate, and this only has to decide where one drawn line stops and the next
     begins.
 
-    A run breaks at three things — a junction, a change of tier, and water.  Junctions,
-    because a line through a fork would draw an edge that is not there; tier, because a
-    polyline carries one style; water, because a road may path across a lake (see
-    `road_cost.py`) but a straight line drawn over open water reads as a bridge.
+    A run breaks at two things — a junction and a change of tier.  Junctions, because a
+    line through a fork would draw an edge that is not there; tier, because a polyline
+    carries one style.  Water needs no handling here: a leg with a foot in the sea lives in
+    `WorldState.sea_edges` and is not a road.
 
     Results come back in ascending tier rank, so a renderer drawing them in order paints
     primary roads last and a track never overdraws a highway.
     """
     from .world_state import ROAD_TIER_RANK
 
-    # Water is dropped rather than split around: an edge with a foot in a lake is part of
-    # a crossing, and `water_transitions` is what marks where the line resumes.
+    # Water is skipped defensively: `road_edges` should hold none, but a world loaded from
+    # a schema-1.3 file has its sea legs mixed in and must still draw.
     adjacency: dict[HexCoord, list[tuple[HexCoord, object]]] = {}
     edges: dict[frozenset, object] = {}
     for (a, b), tier in road_edges.items():

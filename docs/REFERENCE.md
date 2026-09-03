@@ -1443,7 +1443,23 @@ became legs for the next stitch. Measured at 128×128: **1,690 of 1,944 routes
 66 for a routed one, and the worst was 1,047 hexes between endpoints 24 km
 apart. It is deleted.
 
-After tiering, two passes tidy the network. `route_through_settlements` bends
+After tiering the network is **split into road and sea**. An edge with a foot in
+open water is a sea leg, not a road, and goes to `WorldState.sea_edges`; only dry
+edges stay in `road_edges`. Routes cross water because water is cheap to cross,
+rightly so — sea carriage ran at a fraction of land carriage before the railway —
+but while the two were mixed the distinction could not be drawn. On the 128×128
+reference map **half the network by hex count was water**, "road coverage" of
+9.4% was really 6.0%, and the single connected network was single only *through*
+the sea: by land alone it was forty networks tied together by eight crossings
+averaging 62 water hexes apiece.
+
+`_join_by_land` then adds what the traffic model declined to. Settlements sharing
+a landmass must be joined **by road**, on a cost function that refuses water
+outright, because a network in which neighbouring markets can only be reached by
+boat is not a road network and a wargame cannot march down it. `VillageTrackStage`
+is land-only for the same reason.
+
+After that, two passes tidy the network. `route_through_settlements` bends
 any road skirting a settlement so it passes through instead (§ 4.19), and
 `prune_orphan_roads` drops any component reaching neither a settlement nor a
 ferry landing — `road_river_traffic_min` admits a riverbank edge on a single
