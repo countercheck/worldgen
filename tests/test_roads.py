@@ -724,6 +724,37 @@ def test_the_road_network_is_all_one_piece(connected_state):
             "road networks — they can only reach each other by sea"
         )
 
+    # And the stronger claim the settlement one is a corollary of: **one road network per
+    # landmass**, whether or not the pieces hold settlements. `_join_by_land` joins
+    # components rather than seats, so a spur that holds nothing today cannot strand
+    # whatever is founded on it tomorrow — which is exactly how a chokepoint village once
+    # ended up cut off from the 37 settlements it shared ground with.
+    mass_id: dict = {}
+    for start in dry:
+        if start in mass_id:
+            continue
+        stack, reached = [start], set()
+        while stack:
+            c = stack.pop()
+            if c in reached:
+                continue
+            reached.add(c)
+            stack.extend(n for n in neighbors(c) if n in dry and n not in reached)
+        for c in reached:
+            mass_id[c] = start
+
+    nets_per_mass: dict = {}
+    for i, comp in enumerate(by_road):
+        for c in comp:
+            if c in mass_id:
+                nets_per_mass.setdefault(mass_id[c], set()).add(i)
+                break
+    for mass, nets in nets_per_mass.items():
+        assert len(nets) == 1, (
+            f"the landmass around {mass} carries {len(nets)} separate road networks; "
+            "where land joins two roads, a road should join them"
+        )
+
 
 def test_a_bigger_settlement_sends_more_travellers(road_state):
     """Travellers come from population, so the roads out of a big market are the busier.

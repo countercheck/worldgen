@@ -314,17 +314,29 @@ class InterurbanRoadStage(GeneratorStage):
 
     @staticmethod
     def _join_by_land(hexes, places, road_edges, cfg, blocked, settled):
-        """Join settlements that share a landmass but not a road, by road.
+        """Join everything that shares a landmass into one road network.
 
         The traffic model has no reason to build these: a traveller crossing a bay is doing
         the sensible thing, since sea carriage cost a fraction of land carriage. But a
         network in which neighbouring markets can only be reached by boat is not a road
         network, and a wargame cannot march down it.
 
+        Joins **road components**, not merely settlements. Those are not the same thing and
+        the difference bit: a spur that lands a sea leg is kept by `prune_orphan_roads` —
+        a road to a harbour is a road to somewhere — but it holds no settlement, so a
+        settlement-only rule had nothing to join it to. `ChokepointStage` then founded a
+        village on such a spur, and the village came out cut off by land from the 37
+        settlements it shared ground with. Joining the networks means anything founded
+        later is on the one network by construction, whatever founds it.
+
+        A settlement on no road at all is treated as a component of one, so this subsumes
+        the rule it replaces.
+
         Land only, deliberately — the cost function refuses water outright, so this cannot
         satisfy itself with the sea leg that already exists.
         """
         water = (TerrainClass.OCEAN, TerrainClass.LAKE)
+        dry = {c for c, hx in hexes.items() if hx.terrain_class not in water}
 
         def land_cost(hx):
             if hx.terrain_class in water:
@@ -333,60 +345,77 @@ class InterurbanRoadStage(GeneratorStage):
 
         land_edge = make_road_edge_cost(cfg, blocked, settled)
 
-        # Which settlements the ground itself connects, ignoring roads entirely.
-        dry = {c for c, hx in hexes.items() if hx.terrain_class not in water}
-        seats = [s.coord for s in places if s.coord in dry]
-        landmass: dict = {}
-        for seat in seats:
-            if seat in landmass:
+        # What the ground itself connects, ignoring roads entirely.
+        mass_of: dict = {}
+        for seed in dry:
+            if seed in mass_of:
                 continue
-            stack, seen = [seat], set()
+            stack, reached = [seed], set()
             while stack:
                 c = stack.pop()
-                if c in seen:
+                if c in reached:
                     continue
-                seen.add(c)
-                stack.extend(n for n in neighbors(c) if n in dry and n not in seen)
-            for c in seen & set(seats):
-                landmass[c] = seat
+                reached.add(c)
+                stack.extend(n for n in neighbors(c) if n in dry and n not in reached)
+            for c in reached:
+                mass_of[c] = seed
 
-        def road_component(start, edges):
-            adj: dict = defaultdict(set)
-            for a, b in edges:
-                adj[a].add(b)
-                adj[b].add(a)
-            seen, stack = {start}, [start]
+        # The things that need joining: every road component, plus any settlement standing
+        # on no road at all.
+        adj: dict = defaultdict(set)
+        for a, b in road_edges:
+            adj[a].add(b)
+            adj[b].add(a)
+        units: list = []
+        seen: set = set()
+        for node in adj:
+            if node in seen:
+                continue
+            stack, comp = [node], set()
             while stack:
                 c = stack.pop()
-                for n in adj[c]:
-                    if n not in seen:
-                        seen.add(n)
-                        stack.append(n)
-            return seen
+                if c in comp:
+                    continue
+                comp.add(c)
+                stack.extend(adj[c] - comp)
+            seen |= comp
+            on_land = comp & dry
+            if on_land:
+                units.append(on_land)
+        for place in places:
+            if place.coord in dry and place.coord not in seen:
+                units.append({place.coord})
 
-        by_land: dict = defaultdict(list)
-        for seat in seats:
-            by_land[landmass[seat]].append(seat)
+        by_mass: dict = defaultdict(list)
+        for unit in units:
+            by_mass[mass_of[next(iter(unit))]].append(unit)
 
         added = 0
-        for group in by_land.values():
+        for group in by_mass.values():
             if len(group) < 2:
                 continue
-            joined = road_component(group[0], road_edges)
-            for seat in group[1:]:
-                if seat in joined:
+            # Largest first, so the small pieces are drawn onto the trunk rather than the
+            # trunk onto a spur.
+            group.sort(key=len, reverse=True)
+            joined = set(group[0])
+            for unit in group[1:]:
+                if unit & joined:
                     continue
-                target = min(
-                    (c for c in joined if c in dry), key=lambda c: distance(seat, c), default=None
-                )
-                if target is None:
+                # From the piece to whatever part of the network is cheapest to reach,
+                # rather than to the hex that happens to be nearest as the crow flies.
+                # The nearest one can be unreachable — across a gorge, or up a grade the
+                # road rules refuse — and the old version silently gave up when it was,
+                # which is how a settlement could stay stranded with a route ten hexes away.
+                best = None
+                for src in sorted(unit):
+                    path = astar_to_any(hexes, src, joined, land_cost, land_edge)
+                    if path and len(path) > 1 and (best is None or len(path) < len(best)):
+                        best = path
+                if best is None:
                     continue
-                path = astar(hexes, seat, target, land_cost, land_edge)
-                if not path or len(path) < 2:
-                    continue
-                for a, b in zip(path, path[1:], strict=False):
+                for a, b in zip(best, best[1:], strict=False):
                     road_edges.setdefault(road_edge_key(a, b), RoadTier.TRACK)
-                joined |= set(path)
+                joined |= set(best) | unit
                 added += 1
         return added
 

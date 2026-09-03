@@ -8,7 +8,7 @@ import pytest
 
 from tests.worlds import build_pipeline, build_world
 from worldgen.core.config import WorldConfig
-from worldgen.core.hex import SettlementTier
+from worldgen.core.hex import SettlementTier, TerrainClass
 from worldgen.core.hex_grid import neighbors
 from worldgen.stages.haulage import navigable
 
@@ -69,6 +69,59 @@ def test_every_city_stands_on_navigable_water(city_world):
         f"{len(inland)} cities stand away from navigable water, e.g. {inland[0]} — "
         "bulk haulage is not what promoted them"
     )
+
+
+def test_cities_sharing_ground_are_joined_by_road(city_world):
+    """An army marches; it does not take ship between two cities on one landmass.
+
+    A corollary of the network guarantee rather than a rule of its own — `_join_by_land`
+    puts one road network on each landmass — but cities are the tier this matters most for,
+    and a corollary nobody asserts is a corollary that can quietly stop holding. Land only:
+    `sea_edges` are deliberately kept apart from `road_edges` so that "is there a land
+    route" is a question the world can answer, and this asks it.
+    """
+    cities = [c.coord for c in _split(city_world)[0]]
+    if len(cities) < 2:
+        pytest.skip(f"{len(cities)} cities on this map; nothing to join")
+
+    water = (TerrainClass.OCEAN, TerrainClass.LAKE)
+    dry = {c for c, hx in city_world.hexes.items() if hx.terrain_class not in water}
+
+    adj: dict = {}
+    for a, b in city_world.road_edges:
+        adj.setdefault(a, set()).add(b)
+        adj.setdefault(b, set()).add(a)
+
+    def reachable_from(start):
+        seen, stack = {start}, [start]
+        while stack:
+            c = stack.pop()
+            for n in adj.get(c, ()):
+                if n not in seen:
+                    seen.add(n)
+                    stack.append(n)
+        return seen
+
+    def shares_ground(a, b):
+        seen, stack = {a}, [a]
+        while stack:
+            c = stack.pop()
+            if c == b:
+                return True
+            for n in neighbors(c):
+                if n in dry and n not in seen:
+                    seen.add(n)
+                    stack.append(n)
+        return False
+
+    for i, a in enumerate(cities):
+        by_road = reachable_from(a)
+        for b in cities[i + 1 :]:
+            if shares_ground(a, b):
+                assert b in by_road, (
+                    f"cities at {a} and {b} stand on the same landmass but no road joins "
+                    "them — they can only reach each other by sea"
+                )
 
 
 def test_a_city_is_far_larger_than_the_markets_around_it(city_world):

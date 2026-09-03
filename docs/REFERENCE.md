@@ -1636,11 +1636,26 @@ reference map **half the network by hex count was water**, "road coverage" of
 the sea: by land alone it was forty networks tied together by eight crossings
 averaging 62 water hexes apiece.
 
-`_join_by_land` then adds what the traffic model declined to. Settlements sharing
-a landmass must be joined **by road**, on a cost function that refuses water
-outright, because a network in which neighbouring markets can only be reached by
-boat is not a road network and a wargame cannot march down it. `VillageTrackStage`
-is land-only for the same reason.
+`_join_by_land` then adds what the traffic model declined to, on a cost function
+that refuses water outright: **one road network per landmass**. A network in which
+neighbouring markets can only be reached by boat is not a road network and a
+wargame cannot march down it. `VillageTrackStage` is land-only for the same reason.
+
+It joins **road components, not settlements**, and the difference is load-bearing.
+A spur that lands a sea leg survives `prune_orphan_roads` — a road to a harbour is
+a road to somewhere — but it holds no settlement, so a settlement-only rule had
+nothing to join it to; `ChokepointStage` then founded a village on such a spur and
+the village came out cut off by land from the 37 settlements it shared ground with.
+Joining components means anything founded later is on the one network by
+construction, whatever founds it. A settlement standing on no road at all counts as
+a component of one, so the component rule subsumes the seat rule it replaced.
+
+It also builds *less* road than the seat rule did. That version added only the
+routed path to its joined set rather than the whole component the seat belonged to,
+so a second seat in the same stranded piece was routed again and got a road of its
+own to the trunk. Merging whole components connects each piece once: on the 128×128
+temperate reference map the network fell from 1,560 hexes to 1,338 with the same
+connectivity.
 
 After that, two passes tidy the network. `route_through_settlements` bends
 any road skirting a settlement so it passes through instead (§ 4.19), and
