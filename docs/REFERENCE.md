@@ -861,23 +861,22 @@ moisture, elevation, and water/river adjacency.
 `hex.moisture`, `hex.tags`.
 **Writes:** `hex.biome`.
 
-**Config:** `regional_climate`, `biome_treeline_temp_c`, `biome_cold_temp_c`,
+**Config:** `regional_climate`, `biome_treeline_temp_c`, `biome_snowline_temp_c`,
+`biome_cold_temp_c`,
 `biome_warm_temp_c`, `biome_dry_precip_mm`, `biome_wet_precip_mm`,
 `wetland_min_runoff_mm`, `endorheic_marsh_min_precip_mm`.
 
 **Algorithm** ([biomes.py](../worldgen/stages/biomes.py)):
 
 ```
-treeline_m = max(0, (mean_temperature_c - biome_treeline_temp_c)
-                    / lapse_rate_c_per_km * 1000)
-
 if terrain_class in (OCEAN, LAKE):
     biome = OCEAN
-elif elevation_m > treeline_m:
+elif temperature_c < biome_snowline_temp_c:                 # default -8 C
     biome = ALPINE
+elif temperature_c < biome_treeline_temp_c:                 # default -2 C
+    biome = TUNDRA
 elif temperature_c < biome_cold_temp_c:                     # default 5 C
-    biome = pick(TUNDRA, ...)  if precip_mm < biome_dry_precip_mm     # default 400 mm
-            pick(BOREAL, ...)  otherwise
+    biome = pick(BOREAL, ...)
 elif temperature_c >= biome_warm_temp_c:                    # default 18 C
     biome = pick(DESERT, ...)    if precip_mm < biome_dry_precip_mm
             pick(GRASSLAND, ...) if dry <= precip_mm < biome_wet_precip_mm  # 1000 mm
@@ -899,7 +898,26 @@ the cool-and-dry branch because a dry region does not stop being a desert for be
 region's warmth and the lapse rate: ~1850 m temperate, ~500 m boreal, above 4300 m
 tropical. A fixed altitude could not say any of that, and the fraction-of-range version it
 replaced said the opposite — it gave every map the same share of alpine ground however low
-its hills.
+its hills. `WorldConfig.treeline_m()` reports that altitude, but the stage tests each
+hex's own temperature, so the line bends with latitude instead of being computed once at
+the map's mean.
+
+**Two lines divide cold country, not one.** Above the treeline nothing grows tall; above
+the *snowline* nothing grows at all. Between them is tundra — treeless but vegetated, and
+that is most of what stands above a subarctic treeline. Only above `biome_snowline_temp_c`
+is ground genuinely barren, and that is ALPINE. At the default -8 °C no map with 1500 m of
+relief has any permanent snow on it, which is correct: a temperate range that high has no
+glaciers either. Raise `max_elevation_m` towards 2400 and bare peaks appear on their own.
+
+**Below the treeline and cold is taiga, whatever the rainfall.** The cold band used to
+split TUNDRA from BOREAL on `biome_dry_precip_mm` — the same 400 mm that separates desert
+from steppe — which made rain the thing that stops trees in the subarctic. It is not; cold
+is, and the treeline already says so. Siberian larch grows on 200–400 mm, and the boreal
+region's own mean is 450, so any rain shadow tipped land into tundra at zero food value.
+Between the elevation-keyed ALPINE test and this one, a boreal map came out 41% bare rock
+and 23% tundra, and supported five settlements on fifteen thousand land hexes. It is now
+49% taiga and 41% tundra, with no bare rock at all, and supports fourteen. No other
+climate's map changes by a single hex — none of them has land below -2 °C.
 
 **Wetland overrides**, applied afterwards:
 
@@ -907,13 +925,13 @@ its hills.
 # Riverside waterlogging
 if terrain_class in (FLAT, COAST) and "river" in tags
    and runoff_mm(precip, temp) > wetland_min_runoff_mm
-   and elevation_m <= treeline_m:
+   and temperature_c >= biome_treeline_temp_c:
     biome = WETLAND
 
 # The shore of a closed basin
 if "endorheic_shore" in tags and terrain_class in (FLAT, COAST)
    and precip_mm >= endorheic_marsh_min_precip_mm
-   and elevation_m <= treeline_m:
+   and temperature_c >= biome_treeline_temp_c:
     biome = WETLAND
 ```
 
@@ -932,10 +950,13 @@ desert is a playa, not a swamp.
 
 - Both wetland rules depend on a tag, so they fire only on or beside the feature — not as
   a thick buffer. For wider wetlands raise `moisture_bleed_passes`.
-- Keep `biome_treeline_temp_c` clear of every climate's own mean temperature. The alpine
-  test runs ahead of every temperature rule, so a treeline landing at sea level makes a
-  whole region bare rock: at `1.0`, which is the boreal region's mean, a boreal map grew
+- Keep `biome_treeline_temp_c` clear of every climate's own mean temperature. The cold
+  tests run ahead of every other temperature rule, so a treeline landing at sea level puts
+  a whole region above it: at `1.0`, which is the boreal region's mean, a boreal map grew
   no taiga at all and supported five settlements on sixteen thousand hexes.
+- ALPINE and TUNDRA do not go through `pick`. They are what happens when ground is too
+  cold to grow anything, which every region has somewhere above it, so `_ALWAYS` lists
+  them both and any palette can produce them.
 
 ---
 
@@ -1752,6 +1773,7 @@ Real units throughout: Celsius for temperature bands, millimetres a year for rai
 | Param | Type | Default | Range | Effect |
 |---|---|---|---|---|
 | `biome_treeline_temp_c` | `float` | `-2.0` | `≤ biome_cold_temp_c` | Mean annual temperature at which trees stop. **The treeline is a temperature, not a height** — the altitude it falls at follows from the region's warmth and the lapse rate: ~1850 m temperate, ~500 m boreal, above 4300 m tropical. Replaces `biome_alpine_elev`, a fixed fraction that gave every map the same share of alpine ground however low its hills. Keep it clear of every climate's own mean: the alpine test runs ahead of every temperature rule, so a treeline landing at sea level makes a whole region bare rock |
+| `biome_snowline_temp_c` | `float` | `-8.0` | `< biome_treeline_temp_c` | Mean annual temperature at which continuous plant cover stops — the second of the two lines that divide cold country. Between snowline and treeline is tundra: treeless but vegetated, and most of what stands above a subarctic treeline. Only above this is ground barren, and that is ALPINE. Deliberately colder than 1500 m of relief can reach, so a default map has no permanent snow — a temperate range that high has no glaciers either. Raise `max_elevation_m` towards 2400 and bare peaks appear |
 | `biome_cold_temp_c` | `float` | `5.0` | `< warm` | Below this the cold biomes take over — taiga gives way to broadleaf woodland around here |
 | `biome_warm_temp_c` | `float` | `18.0` | `> cold` | Above this the warm biomes take over, where subtropical vegetation begins |
 | `biome_dry_precip_mm` | `float` | `400.0` | `< wet` | Below about this you get steppe and desert |

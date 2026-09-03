@@ -31,13 +31,15 @@ def _palette(*names: str) -> frozenset:
 
 
 # Biomes every region can produce regardless of climate, because they are made by
-# terrain rather than by climate: bare peaks, and waterlogged ground beside rivers.
-_ALWAYS = ("ALPINE", "WETLAND", "OCEAN")
+# terrain rather than by climate: bare peaks, the treeless ground below them, and
+# waterlogged ground beside rivers.  TUNDRA belongs here for the same reason ALPINE does
+# — it is what stands above the treeline, and every region has a treeline somewhere.
+_ALWAYS = ("ALPINE", "TUNDRA", "WETLAND", "OCEAN")
 
 CLIMATE_CONTEXTS: dict[str, ClimateContext] = {
     # Mean annual temperature at sea level, in degrees Celsius — real figures for the
     # regions these name, rather than positions on an abstract 0-1 axis.
-    "boreal": ClimateContext(1.0, 450.0, _palette("TUNDRA", "BOREAL", "GRASSLAND", *_ALWAYS)),
+    "boreal": ClimateContext(1.0, 450.0, _palette("BOREAL", "GRASSLAND", *_ALWAYS)),
     "temperate": ClimateContext(
         10.0, 800.0, _palette("TEMPERATE_FOREST", "GRASSLAND", "BOREAL", "SHRUBLAND", *_ALWAYS)
     ),
@@ -320,6 +322,12 @@ class WorldConfig:
             )
         if self.lapse_rate_c_per_km < 0.0:
             raise ValueError(f"lapse_rate_c_per_km must be >= 0, got {self.lapse_rate_c_per_km}")
+        if self.biome_snowline_temp_c >= self.biome_treeline_temp_c:
+            raise ValueError(
+                "biome_snowline_temp_c must be below biome_treeline_temp_c — the ground "
+                "goes bare above the treeline, not below it, got "
+                f"{self.biome_snowline_temp_c} and {self.biome_treeline_temp_c}"
+            )
         if self.biome_treeline_temp_c > self.biome_cold_temp_c:
             raise ValueError(
                 "biome_treeline_temp_c must be at or below biome_cold_temp_c — trees stop "
@@ -604,6 +612,18 @@ class WorldConfig:
     # so a boreal map came out as bare rock from shore to shore with no boreal forest
     # anywhere in it, and supported five settlements on 16 000 hexes.
     biome_treeline_temp_c: float = -2.0
+    # The mean annual temperature at which continuous plant cover stops, in Celsius —
+    # the snowline, the second of the two lines that divide cold country. Between the two
+    # is tundra: treeless, but vegetated, and it is most of what stands above the treeline
+    # in the subarctic. Only above the snowline is ground actually barren, and that is
+    # ALPINE.
+    #
+    # -8 C is about where the climatic snowline falls in the Alps and in Scandinavia,
+    # near 3000 m. It is deliberately colder than anything 1500 m of relief can reach, so
+    # a default map has no permanent snow on it at all — which is correct, since a
+    # temperate range 1500 m high has no glaciers either. Raise max_elevation_m towards
+    # 2400 and bare peaks appear on their own.
+    biome_snowline_temp_c: float = -8.0
     # Mean annual temperature bounding the cold and warm biome bands, in Celsius. Taiga
     # gives way to broadleaf woodland around 5 C; the warm band begins where subtropical
     # vegetation takes over, around 18 C.
@@ -847,6 +867,11 @@ class WorldConfig:
         annual temperature down to the point trees stop. About 1400 m in temperate
         country, at sea level in the subarctic, near 4000 m in the tropics — all from one
         temperature and one rate, none of it configured per map.
+
+        Reported rather than used. `BiomeStage` tests each hex's own temperature against
+        `biome_treeline_temp_c` directly, which is the same line but drawn per hex, so it
+        bends with latitude and does not care that this figure is computed at the map's
+        mean. This is the number to quote when asking how high a region's treeline stands.
         """
         if self.lapse_rate_c_per_km <= 0.0:
             return float("inf")

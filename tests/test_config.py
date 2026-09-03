@@ -104,6 +104,9 @@ def test_world_config_validates_vector_fields(kwargs, message):
         ({"moisture_bleed_passes": -1}, "moisture_bleed_passes"),
         ({"moisture_bleed_strength": -0.1}, "moisture_bleed_strength"),
         ({"moisture_bleed_strength": 1.1}, "moisture_bleed_strength"),
+        # The ground goes bare above the treeline, not below it.
+        ({"biome_snowline_temp_c": 0.0}, "biome_snowline_temp_c"),
+        ({"biome_snowline_temp_c": -2.0}, "biome_snowline_temp_c"),
     ],
 )
 def test_world_config_validates_new_road_and_settlement_fields(kwargs, message):

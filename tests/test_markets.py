@@ -56,6 +56,25 @@ def test_slower_decay_leaves_less_behind_further_out():
 # --- where markets land ------------------------------------------------------
 
 
+def test_a_subarctic_region_is_settled_but_thinly():
+    """Cold country supports people; it just does not support many of them.
+
+    Boreal used to come out all but empty — five markets on fifteen thousand land hexes —
+    and the cause was the biome rule rather than anything about haulage: two-fifths of the
+    map was bare rock by an elevation test and another quarter was tundra because the same
+    400 mm that separates desert from steppe was being asked where trees stop. Both are
+    worth no food at all, so there was nothing to gather. Taiga is poor ground, not dead
+    ground, and the difference is the whole tier.
+    """
+    boreal = len(_market_world(regional_climate="boreal").settlements)
+    temperate = len(_market_world(regional_climate="temperate").settlements)
+    assert boreal >= 3, f"a subarctic region supported {boreal} markets — it is not empty land"
+    assert boreal < temperate, (
+        f"boreal grew {boreal} markets against temperate's {temperate}; cold country should "
+        "be the thinner of the two"
+    )
+
+
 def test_markets_are_planted(markets):
     assert markets.settlements, "no markets on a 64x64 temperate map"
 

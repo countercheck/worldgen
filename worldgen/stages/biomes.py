@@ -6,7 +6,8 @@ from ..core.world_state import WorldState
 
 class BiomeStage(GeneratorStage):
     def run(self, state: WorldState) -> WorldState:
-        alpine_elev = self.config.treeline_m()
+        treeline_temp = self.config.biome_treeline_temp_c
+        snowline_temp = self.config.biome_snowline_temp_c
         cold_temp = self.config.biome_cold_temp_c
         warm_temp = self.config.biome_warm_temp_c
         dry_moist = self.config.biome_dry_precip_mm
@@ -32,14 +33,25 @@ class BiomeStage(GeneratorStage):
         for h in state.hexes.values():
             if h.terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE):
                 h.biome = Biome.OCEAN
-            elif h.elevation > alpine_elev:
+            # Two lines divide cold country, and both are temperatures: the treeline,
+            # above which nothing grows tall, and the snowline, above which nothing grows
+            # at all.  Between them is tundra — treeless but vegetated, which is what most
+            # ground above the subarctic treeline actually is.  Neither goes through
+            # `pick`: they are what happens when ground is too cold to grow anything,
+            # which every region has somewhere above it, so `_ALWAYS` lists them both.
+            elif h.temperature < snowline_temp:
                 h.biome = Biome.ALPINE
+            elif h.temperature < treeline_temp:
+                h.biome = Biome.TUNDRA
             elif h.temperature < cold_temp:
-                h.biome = (
-                    pick(Biome.TUNDRA, Biome.SHRUBLAND, Biome.GRASSLAND)
-                    if h.moisture < dry_moist
-                    else pick(Biome.BOREAL, Biome.TEMPERATE_FOREST, Biome.GRASSLAND)
-                )
+                # Below the treeline and cold is taiga, whatever the rainfall.  This used
+                # to split on `biome_dry_precip_mm` — the same 400 mm that separates
+                # desert from steppe — which made rain the thing that stops trees in the
+                # subarctic.  It is not; cold is, and the treeline above already says so.
+                # Siberian larch grows on 200-400 mm, and the boreal region's own mean is
+                # 450, so any rain shadow tipped land into tundra: 23% of a boreal map,
+                # all of it at zero food value.
+                h.biome = pick(Biome.BOREAL, Biome.TEMPERATE_FOREST, Biome.GRASSLAND)
             elif h.temperature >= warm_temp:
                 if h.moisture < dry_moist:
                     h.biome = pick(Biome.DESERT, Biome.SHRUBLAND, Biome.GRASSLAND)
@@ -75,7 +87,7 @@ class BiomeStage(GeneratorStage):
                 h.terrain_class in (TerrainClass.FLAT, TerrainClass.COAST)
                 and self.config.runoff_mm(h.moisture, h.temperature) > min_runoff
                 and "river" in h.tags
-                and h.elevation <= alpine_elev
+                and h.temperature >= treeline_temp
             ):
                 h.biome = Biome.WETLAND
 
@@ -83,7 +95,7 @@ class BiomeStage(GeneratorStage):
         # lake receives rivers but has no outlet: the water that arrives leaves by
         # evaporation, spreading out into marsh and bog around the rim rather than
         # running off.  The moisture floor keeps arid basins as salt pans — a closed
-        # basin in a desert is a playa, not a swamp — and the terrain and elevation
+        # basin in a desert is a playa, not a swamp — and the terrain and treeline
         # tests match the river-wetland rule above so the two look consistent.
         marsh_min_moisture = self.config.endorheic_marsh_min_precip_mm
         for h in state.hexes.values():
@@ -91,7 +103,7 @@ class BiomeStage(GeneratorStage):
                 "endorheic_shore" in h.tags
                 and h.terrain_class in (TerrainClass.FLAT, TerrainClass.COAST)
                 and h.moisture >= marsh_min_moisture
-                and h.elevation <= alpine_elev
+                and h.temperature >= treeline_temp
             ):
                 h.biome = Biome.WETLAND
 

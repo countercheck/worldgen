@@ -200,6 +200,15 @@ moisture_bleed_strength: 0.3 # Share of the difference moved per pass, 0–1. De
 # every temperature rule, so a treeline that lands at sea level makes a whole region bare
 # rock: at 1.0 C, which is the boreal region's own mean, a boreal map grew no taiga at all.
 biome_treeline_temp_c: -2.0 # Mean annual Celsius at which trees stop. The height that falls at follows from the region's warmth and the lapse rate: ~1800 m temperate, ~500 m boreal, >4000 m tropical. Default: -2.0
+# The snowline: the mean annual temperature at which continuous plant cover stops, and the
+# second of the two lines that divide cold country. Between snowline and treeline is
+# tundra — treeless but vegetated, which is most of what stands above a subarctic
+# treeline. Only above this is ground actually barren, and that is ALPINE.
+#
+# -8 C is deliberately colder than 1500 m of relief can reach, so a default map carries no
+# permanent snow at all. That is correct: a temperate range 1500 m high has no glaciers
+# either. Raise max_elevation_m towards 2400 and bare peaks appear on their own.
+biome_snowline_temp_c: -8.0 # Mean annual Celsius at which plant cover stops altogether. Above the treeline is tundra; above this is bare rock. Default: -8.0
 biome_cold_temp_c: 5.0   # Mean annual Celsius below which the cold biomes take over — taiga gives way to broadleaf around here. Default: 5.0
 biome_warm_temp_c: 18.0  # Mean annual Celsius above which the warm biomes take over. Default: 18.0
 biome_dry_precip_mm: 400.0   # Annual rainfall below which the dry biomes take over — steppe and desert. Default: 400
