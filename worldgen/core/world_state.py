@@ -32,8 +32,12 @@ ROAD_TIER_RANK = {RoadTier.TRACK: 0, RoadTier.SECONDARY: 1, RoadTier.PRIMARY: 2}
 # written before the other half existed, since neither half is required.  The bump exists
 # so the schema cannot change shape under a fixed version string: an old reader handed a
 # newer file fails with a clear message instead of silently missing fields.
-SCHEMA_VERSION = "1.2"
-SUPPORTED_SCHEMA_VERSIONS = frozenset({"1.0", "1.1", "1.2"})
+# 1.3 replaced "roads" — a list of whole journeys, each with its own path and tier — with
+# "road_edges", one tier per undirected edge.  A 1.2 file still loads: its paths are walked
+# into edges, the higher tier winning where journeys overlap, which is the rule the renderer
+# already applied when drawing them.  The reverse is not true, so 1.3 is a real bump.
+SCHEMA_VERSION = "1.3"
+SUPPORTED_SCHEMA_VERSIONS = frozenset({"1.0", "1.1", "1.2", "1.3"})
 
 
 # Terrain classes before they were reframed as bands of gradient. "hill" and "mountain"
@@ -51,8 +55,25 @@ class River:
 
 @dataclass
 class Road:
+    """A drawable run of road: consecutive hexes, all of one tier.
+
+    Not what the model stores.  The network lives in `WorldState.road_edges` as one tier
+    per edge; this is what `road_polylines` hands a renderer, split at junctions, at tier
+    changes and at water.  Building it is a view over the graph, so nothing needs to keep
+    a list of these in sync with the edges they came from.
+    """
+
     path: list[HexCoord]
     tier: RoadTier
+
+
+def road_edge_key(a: HexCoord, b: HexCoord) -> tuple[HexCoord, HexCoord]:
+    """The canonical key for the edge between two hexes.
+
+    A road edge is undirected, so both endpoints order into one key and `(a, b)` and
+    `(b, a)` cannot become two half-roads that disagree about their tier.
+    """
+    return (a, b) if a <= b else (b, a)
 
 
 @dataclass
@@ -81,7 +102,20 @@ class WorldState:
     hexes: dict[HexCoord, Hex] = field(default_factory=dict)
     rivers: list[River] = field(default_factory=list)
     settlements: list[Settlement] = field(default_factory=list)
-    roads: list[Road] = field(default_factory=list)
+    # The road network, as one tier per undirected edge — keyed by `road_edge_key`.
+    #
+    # It used to be a list of `Road` objects, one per journey between a pair of
+    # settlements, each holding the whole path end to end.  Those overlapped almost
+    # completely: on a 128x128 map, 1,941 of them stored 322,730 hex entries covering
+    # 3,645 distinct edges, so every edge was written about ninety times and the drawn
+    # network existed only as a transient the renderer rebuilt each time.  Tier was worse
+    # than redundant — it belonged to a whole journey, so one quiet hex demoted a trunk
+    # route end to end, and a map came out 1,935 secondary against 6 primary.
+    #
+    # An edge is the thing a tier is actually a property of.  `road_polylines` walks this
+    # for anything that needs lines to draw, and `hex.road_connections` stays as the
+    # adjacency index into it.
+    road_edges: dict[tuple[HexCoord, HexCoord], RoadTier] = field(default_factory=dict)
     ferries: list[Ferry] = field(default_factory=list)
     metadata: dict = field(default_factory=dict)
 
@@ -195,8 +229,9 @@ class WorldState:
                 }
                 for s in self.settlements
             ],
-            "roads": [
-                {"path": [list(c) for c in r.path], "tier": r.tier.value} for r in self.roads
+            "road_edges": [
+                {"a": list(a), "b": list(b), "tier": tier.value}
+                for (a, b), tier in sorted(self.road_edges.items())
             ],
             "ferries": [{"a": list(f.a), "b": list(f.b)} for f in self.ferries],
         }
@@ -281,10 +316,22 @@ class WorldState:
             River(hexes=[tuple(c) for c in rd["hexes"]], flow_volume=rd["flow_volume"])
             for rd in data.get("rivers", [])
         ]
-        ws.roads = [
-            Road(path=[tuple(c) for c in rd["path"]], tier=RoadTier(rd["tier"]))
-            for rd in data.get("roads", [])
-        ]
+        if "road_edges" in data:
+            ws.road_edges = {
+                road_edge_key(tuple(ed["a"]), tuple(ed["b"])): RoadTier(ed["tier"])
+                for ed in data["road_edges"]
+            }
+        else:
+            # Schema 1.2 and earlier stored whole journeys, which overlap. Where two of
+            # them share an edge the higher tier wins, which is the rule the renderer
+            # applied at draw time anyway — so an old file loads as the network it drew.
+            for rd in data.get("roads", []):
+                tier = RoadTier(rd["tier"])
+                path = [tuple(c) for c in rd["path"]]
+                for a, b in zip(path, path[1:], strict=False):
+                    key = road_edge_key(a, b)
+                    if ROAD_TIER_RANK[tier] > ROAD_TIER_RANK.get(ws.road_edges.get(key), -1):
+                        ws.road_edges[key] = tier
         ws.ferries = [Ferry(a=tuple(fd["a"]), b=tuple(fd["b"])) for fd in data.get("ferries", [])]
 
         return ws

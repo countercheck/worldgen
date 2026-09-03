@@ -1,6 +1,7 @@
 import pytest
 from PIL import Image
 
+from tests.worlds import lay_road
 from worldgen.core.hex import (
     Biome,
     LandCover,
@@ -9,7 +10,7 @@ from worldgen.core.hex import (
     SettlementTier,
     TerrainClass,
 )
-from worldgen.core.world_state import Ferry, River, Road, RoadTier, WorldState
+from worldgen.core.world_state import Ferry, River, RoadTier, WorldState
 from worldgen.export.png_export import _RIVER_COLOR, _ROAD_COLOR, PNGConfig, render, save
 
 
@@ -44,7 +45,7 @@ def _small_world() -> WorldState:
         ),
     ]
     ws.rivers = [River(hexes=[(0, 0), (1, 0), (2, 0)], flow_volume=1.5)]
-    ws.roads = [Road(path=[(1, 1), (2, 1), (3, 1)], tier=RoadTier.PRIMARY)]
+    lay_road(ws, [(1, 1), (2, 1), (3, 1)], RoadTier.PRIMARY)
     return ws
 
 
@@ -163,7 +164,7 @@ def _sheared_world() -> WorldState:
     """A world wide enough that the axial shear opens up real corner space."""
     ws = WorldState.empty(seed=7, width=32, height=32)
     ws.rivers = [River(hexes=[(0, 0), (1, 0), (2, 0)], flow_volume=1.5)]
-    ws.roads = [Road(path=[(1, 1), (2, 1), (3, 1)], tier=RoadTier.PRIMARY)]
+    lay_road(ws, [(1, 1), (2, 1), (3, 1)], RoadTier.PRIMARY)
     ws.settlements = [
         Settlement(
             coord=(4, 4),
@@ -306,7 +307,7 @@ def _water_crossing_world() -> WorldState:
     ws = WorldState.empty(seed=99, width=6, height=3)
     for r in range(3):
         ws.hexes[(3, r)].terrain_class = TerrainClass.OCEAN
-    ws.roads = [Road(path=[(1, 1), (2, 1), (3, 1), (4, 1), (5, 1)], tier=RoadTier.PRIMARY)]
+    lay_road(ws, [(1, 1), (2, 1), (3, 1), (4, 1), (5, 1)], RoadTier.PRIMARY)
     return ws
 
 
@@ -339,10 +340,8 @@ def test_track_duplicating_a_primary_road_is_never_drawn():
     """The overdraw bug: a track sharing every edge used to paint over the primary road."""
     ws = WorldState.empty(seed=99, width=5, height=3)
     path = [(0, 1), (1, 1), (2, 1), (3, 1)]
-    ws.roads = [
-        Road(path=path, tier=RoadTier.PRIMARY),
-        Road(path=list(path), tier=RoadTier.TRACK),
-    ]
+    lay_road(ws, path, RoadTier.PRIMARY)
+    lay_road(ws, list(path), RoadTier.TRACK)
     img = render(ws, PNGConfig(layers={"terrain", "roads"}))
     assert _has_color(img, _ROAD_COLOR[RoadTier.PRIMARY])
     assert not _has_color(img, _ROAD_COLOR[RoadTier.TRACK])
@@ -351,10 +350,8 @@ def test_track_duplicating_a_primary_road_is_never_drawn():
 def test_branching_track_keeps_its_own_spur():
     """Deduping must not swallow the part of the track that is genuinely its own."""
     ws = WorldState.empty(seed=99, width=5, height=4)
-    ws.roads = [
-        Road(path=[(0, 1), (1, 1), (2, 1), (3, 1)], tier=RoadTier.PRIMARY),
-        Road(path=[(0, 1), (1, 1), (2, 1), (2, 2)], tier=RoadTier.TRACK),
-    ]
+    lay_road(ws, [(0, 1), (1, 1), (2, 1), (3, 1)], RoadTier.PRIMARY)
+    lay_road(ws, [(0, 1), (1, 1), (2, 1), (2, 2)], RoadTier.TRACK)
     img = render(ws, PNGConfig(layers={"terrain", "roads"}))
     assert _has_color(img, _ROAD_COLOR[RoadTier.PRIMARY])
     assert _has_color(img, _ROAD_COLOR[RoadTier.TRACK])
@@ -385,7 +382,7 @@ def _crossing_world() -> WorldState:
         ws.hexes[(2, r)].tags.add("river")
     ws.hexes[(2, 1)].tags.add("ford")
     ws.hexes[(2, 2)].tags.add("bridge")
-    ws.roads = [Road(path=[(1, 1), (2, 1), (3, 1)], tier=RoadTier.PRIMARY)]
+    lay_road(ws, [(1, 1), (2, 1), (3, 1)], RoadTier.PRIMARY)
     return ws
 
 
@@ -496,7 +493,7 @@ def test_river_line_thickness_scales_with_hex_size():
 
 def test_road_line_thickness_scales_with_hex_size():
     ws = WorldState.empty(seed=4, width=6, height=3)
-    ws.roads = [Road(path=[(q, 1) for q in range(6)], tier=RoadTier.PRIMARY)]
+    lay_road(ws, [(q, 1) for q in range(6)], RoadTier.PRIMARY)
     color = _ROAD_COLOR[RoadTier.PRIMARY]
     small = _thickest_run(render(ws, PNGConfig(hex_size=12.0, layers={"roads"})), color)
     large = _thickest_run(render(ws, PNGConfig(hex_size=36.0, layers={"roads"})), color)

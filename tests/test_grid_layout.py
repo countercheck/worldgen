@@ -182,7 +182,7 @@ def test_offset_world_has_sea_land_rivers_and_settlements(offset_world):
     assert offset_world.all_land()
     assert offset_world.rivers
     assert offset_world.settlements
-    assert offset_world.roads
+    assert offset_world.road_edges
 
 
 def test_offset_rivers_run_downhill_to_water_or_the_border(offset_world):
@@ -206,10 +206,8 @@ def test_offset_rivers_run_downhill_to_water_or_the_border(offset_world):
 
 
 def test_offset_roads_are_connected_paths(offset_world):
-    for road in offset_world.roads:
-        assert len(road.path) >= 2
-        for a, b in zip(road.path, road.path[1:], strict=False):
-            assert b in neighbors(a), f"road path breaks at {a} -> {b}"
+    for a, b in offset_world.road_edges:
+        assert b in neighbors(a), f"road edge joins non-neighbours {a} -> {b}"
 
 
 def test_offset_worlds_are_reproducible_from_the_seed():

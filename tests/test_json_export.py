@@ -8,7 +8,7 @@ from worldgen.core.hex import (
     SettlementTier,
     TerrainClass,
 )
-from worldgen.core.world_state import Ferry, River, Road, RoadTier, WorldState
+from worldgen.core.world_state import Ferry, River, RoadTier, WorldState, road_edge_key
 from worldgen.export import json_export
 
 
@@ -39,7 +39,10 @@ def _small_world() -> WorldState:
     ws.hexes[(1, 1)].settlement = ws.settlements[0]
     ws.hexes[(1, 1)].road_connections = {(2, 1)}
     ws.rivers = [River(hexes=[(0, 0), (1, 0), (2, 0)], flow_volume=1.5)]
-    ws.roads = [Road(path=[(1, 1), (2, 1), (3, 1)], tier=RoadTier.PRIMARY)]
+    ws.road_edges = {
+        road_edge_key((1, 1), (2, 1)): RoadTier.PRIMARY,
+        road_edge_key((2, 1), (3, 1)): RoadTier.PRIMARY,
+    }
     return ws
 
 
@@ -54,7 +57,7 @@ def test_round_trip(tmp_path):
     assert len(ws2.hexes) == len(ws.hexes)
     assert len(ws2.settlements) == len(ws.settlements)
     assert len(ws2.rivers) == len(ws.rivers)
-    assert len(ws2.roads) == len(ws.roads)
+    assert ws2.road_edges == ws.road_edges
 
 
 def test_hex_fields_preserved(tmp_path):
@@ -151,7 +154,7 @@ def test_new_saves_carry_the_bumped_version(tmp_path):
 
     path = tmp_path / "world.json"
     json_export.save(_small_world(), path)
-    assert json.loads(path.read_text())["version"] == "1.2"
+    assert json.loads(path.read_text())["version"] == "1.3"
 
 
 def test_an_unknown_version_is_rejected_by_name(tmp_path):
@@ -201,7 +204,24 @@ def test_road_tier_preserved(tmp_path):
     path = tmp_path / "world.json"
     json_export.save(ws, path)
     ws2 = json_export.load(path)
-    assert ws2.roads[0].tier == RoadTier.PRIMARY
+    assert set(ws2.road_edges.values()) == {RoadTier.PRIMARY}
+
+
+def test_a_schema_1_2_file_loads_its_journeys_as_a_network():
+    """1.2 stored a path per journey; overlapping journeys collapse onto shared edges,
+    the higher tier winning — which is what the renderer did at draw time anyway."""
+    data = _small_world().to_dict()
+    del data["road_edges"]
+    data["version"] = "1.2"
+    data["roads"] = [
+        {"path": [[1, 1], [2, 1], [3, 1]], "tier": "track"},
+        {"path": [[2, 1], [3, 1]], "tier": "primary"},
+    ]
+    ws = WorldState.from_dict(data)
+    assert ws.road_edges == {
+        road_edge_key((1, 1), (2, 1)): RoadTier.TRACK,
+        road_edge_key((2, 1), (3, 1)): RoadTier.PRIMARY,
+    }
 
 
 def test_empty_world(tmp_path):

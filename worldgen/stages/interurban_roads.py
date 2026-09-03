@@ -3,11 +3,12 @@ from collections import defaultdict, deque
 from ..core.hex import SettlementTier, TerrainClass
 from ..core.hex_grid import astar, distance, neighbors
 from ..core.pipeline import GeneratorStage
-from ..core.world_state import Ferry, Road, RoadTier, WorldState
+from ..core.world_state import Ferry, RoadTier, WorldState, road_edge_key
 from .road_cost import (
     bank_discount,
     ferry_link,
     make_road_edge_cost,
+    pheromone_discount,
     river_edges,
     river_hex_cost,
     tag_river_crossings,
@@ -33,6 +34,7 @@ class InterurbanRoadStage(GeneratorStage):
             return state
 
         hex_traffic: dict = defaultdict(float)
+        edge_traffic: dict = defaultdict(float)
         canonical_routes: dict = {}
 
         # Hexsides the rivers run along — roads may cross a river but never travel down
@@ -43,8 +45,7 @@ class InterurbanRoadStage(GeneratorStage):
         def node_cost(hx):
             base = terrain_base_cost(hx, cfg) + river_hex_cost(hx, cfg)
             base *= 1.0 - bank_discount(hx, hexes, cfg)
-            pheromone = cfg.road_pheromone_factor * hex_traffic[hx.coord]
-            return max(0.0, base - pheromone)
+            return pheromone_discount(base, hex_traffic[hx.coord], cfg)
 
         edge_cost = make_road_edge_cost(cfg, blocked, settled)
 
@@ -96,58 +97,66 @@ class InterurbanRoadStage(GeneratorStage):
 
             for c in path:
                 hex_traffic[c] += 1.0
+            for a, b in zip(path, path[1:], strict=False):
+                edge_traffic[road_edge_key(a, b)] += 1.0
 
-        # River hexes use the lower `road_river_traffic_min` threshold so that
+        # Tier is a property of an edge, not of a journey.  It used to be taken per hex and
+        # then collapsed onto whole routes by `_path_min_tier`, which handed a 157-hex route
+        # the weakest tier any hex on it earned — one quiet hex demoted a trunk road end to
+        # end, and a map came out 1,935 secondary against 6 primary.
+        #
+        # River edges use the lower `road_river_traffic_min` threshold so that
         # well-trafficked riverbanks become drawn roads (towpaths, river roads).
-        eligible = [
-            c
-            for c, t in hex_traffic.items()
-            if t >= cfg.road_min_traffic
-            or (c in hexes and hexes[c].river_flow > 0 and t >= cfg.road_river_traffic_min)
-        ]
-        eligible.sort(key=lambda c: hex_traffic[c], reverse=True)
-        n_elig = len(eligible)
-        hex_tier: dict = {}
-        if n_elig > 0:
-            p_cut = max(1, round(n_elig * cfg.road_primary_pct))
+        def eligible_edge(key) -> bool:
+            t = edge_traffic[key]
+            if t >= cfg.road_min_traffic:
+                return True
+            a, b = key
+            on_river = any(c in hexes and hexes[c].river_flow > 0 for c in (a, b))
+            return on_river and t >= cfg.road_river_traffic_min
+
+        eligible = sorted(
+            (k for k in edge_traffic if eligible_edge(k)),
+            key=lambda k: (-edge_traffic[k], k),
+        )
+        # `road_min_traffic` decides what is a road; the percentiles only decide how it is
+        # drawn. They used to do both, which is why raising it from 3 to 1000 moved road
+        # coverage by 0.4% of the map — it shrank the eligible set, and the percentiles
+        # promptly re-cut the same fractions of whatever survived. Everything eligible is
+        # now drawn, and a quiet lane is a TRACK rather than nothing at all.
+        road_edges: dict = {}
+        if eligible:
+            p_cut = max(1, round(len(eligible) * cfg.road_primary_pct))
             s_cut = max(
                 p_cut + 1,
-                round(n_elig * (cfg.road_primary_pct + cfg.road_secondary_pct)),
+                round(len(eligible) * (cfg.road_primary_pct + cfg.road_secondary_pct)),
             )
-            for i, c in enumerate(eligible):
+            for i, key in enumerate(eligible):
                 if i < p_cut:
-                    hex_tier[c] = RoadTier.PRIMARY
+                    road_edges[key] = RoadTier.PRIMARY
                 elif i < s_cut:
-                    hex_tier[c] = RoadTier.SECONDARY
+                    road_edges[key] = RoadTier.SECONDARY
+                else:
+                    road_edges[key] = RoadTier.TRACK
 
         cities = [s for s in settlements if s.tier == SettlementTier.CITY]
-        fallback_paths: list[list] = []
         if len(cities) > 1:
-            hex_tier, fallback_paths, ferries = self._guarantee_city_connectivity(
-                hexes, cities, hex_tier, canonical_routes, cfg, blocked, settled
+            road_edges, ferries = self._guarantee_city_connectivity(
+                hexes, cities, road_edges, canonical_routes, cfg, blocked, settled
             )
             state.ferries.extend(ferries)
 
-        roads: list[Road] = []
-        for path in canonical_routes.values():
-            tier = self._path_min_tier(path, hex_tier)
-            if tier is not None:
-                roads.append(Road(path=path, tier=tier))
-        for path in fallback_paths:
-            roads.append(Road(path=path, tier=RoadTier.PRIMARY))
+        for a, b in road_edges:
+            if a in hexes and b in hexes:
+                hexes[a].road_connections.add(b)
+                hexes[b].road_connections.add(a)
 
-        for road in roads:
-            for a, b in zip(road.path, road.path[1:], strict=False):
-                if a in hexes and b in hexes:
-                    hexes[a].road_connections.add(b)
-                    hexes[b].road_connections.add(a)
-
-        tag_river_crossings(roads, hexes)
+        tag_river_crossings(road_edges, hexes)
 
         # Re-score habitability near roads so VillagePlacementStage benefits.  Only the
         # village score: cities and towns are already sited by this point, and a road
         # they caused should not retroactively flatter the ground it runs over.
-        road_hex_set = set(hex_tier.keys())
+        road_hex_set = {c for edge in road_edges for c in edge}
         for coord, hx in hexes.items():
             if hx.settlement is not None:
                 continue
@@ -156,7 +165,7 @@ class InterurbanRoadStage(GeneratorStage):
             if any(n in road_hex_set for n in neighbors(coord)):
                 hx.habitability_village = min(1.0, hx.habitability_village + 0.2)
 
-        state.roads = roads
+        state.road_edges = road_edges
         return state
 
     def _stitch_via_junction(
@@ -198,42 +207,19 @@ class InterurbanRoadStage(GeneratorStage):
             best_path if best_path is not None else astar(hexes, origin, dest, node_cost, edge_cost)
         )
 
-    def _path_min_tier(self, path, hex_tier) -> RoadTier | None:
-        """The *weakest* tier along the path — the name is literal, not a typo.
-
-        `order` is deliberately the reverse of `ROAD_TIER_RANK` in world_state.py, which
-        ranks by importance for draw precedence.  Here lower means more important, so
-        `max` returns the least important tier the path touches.  Read them together and
-        one looks like a sign error; they answer different questions.
-
-        A route is drawn primary only where every qualifying hex on it is primary, so a
-        long route that merely clips a busy corridor is not painted as a highway end to
-        end.  The corridor still reads as primary, because the short route that *is*
-        uniformly busy claims those shared edges in `dedupe_road_paths`, which awards each
-        edge to its highest-ranked user.  Per-edge tier is emergent from that pairing
-        rather than decided here.
-
-        Note `hex_tier` only ever holds PRIMARY or SECONDARY: hexes below the secondary
-        cut get no entry at all, and TRACK comes solely from VillageTrackStage.  So this
-        chooses between two tiers, never three.
-        """
-        tiers = [hex_tier[c] for c in path if c in hex_tier]
-        if not tiers:
-            return None
-        order = {RoadTier.PRIMARY: 0, RoadTier.SECONDARY: 1, RoadTier.TRACK: 2}
-        return max(tiers, key=lambda t: order[t])
-
     def _guarantee_city_connectivity(
-        self, hexes, cities, hex_tier, canonical_routes, cfg, blocked, settled
+        self, hexes, cities, road_edges, canonical_routes, cfg, blocked, settled
     ):
-        # Build road adjacency from actual road path edges (not hex-neighbour proximity).
-        # Only include paths that contribute a tier (i.e. pass the traffic threshold).
+        """Join any city the traffic model left off the network, by land or by boat.
+
+        Adjacency is the drawn network itself.  It used to be rebuilt from whichever
+        canonical routes contributed a tier, which was a second, subtly different answer to
+        "what counts as a road" — with edges as the stored form there is only one.
+        """
         road_adj: dict = defaultdict(set)
-        for path in canonical_routes.values():
-            if self._path_min_tier(path, hex_tier) is not None:
-                for a, b in zip(path, path[1:], strict=False):
-                    road_adj[a].add(b)
-                    road_adj[b].add(a)
+        for a, b in road_edges:
+            road_adj[a].add(b)
+            road_adj[b].add(a)
 
         city_coords = {s.coord for s in cities}
 
@@ -257,7 +243,7 @@ class InterurbanRoadStage(GeneratorStage):
             visited_global |= comp
             components.append(comp)
         if not components:
-            return hex_tier, [], []
+            return road_edges, []
         main = max(components, key=len)
 
         def plain_cost(hx):
@@ -274,7 +260,13 @@ class InterurbanRoadStage(GeneratorStage):
                 total += plain_edge(hexes[p[i - 1]], hexes[p[i]])
             return total
 
-        fallback_paths: list[list] = []
+        def adopt(path) -> None:
+            """Lay *path* into the network as primary, without demoting anything."""
+            for a, b in zip(path, path[1:], strict=False):
+                road_adj[a].add(b)
+                road_adj[b].add(a)
+                road_edges.setdefault(road_edge_key(a, b), RoadTier.PRIMARY)
+
         ferries: list[Ferry] = []
         max_iter = len(cities) * 2
         for _ in range(max_iter):
@@ -293,14 +285,7 @@ class InterurbanRoadStage(GeneratorStage):
                             best_path = p
                             best_cost = cost
                 if best_path:
-                    # Update road adjacency so the next BFS sees the new edges.
-                    for a, b in zip(best_path, best_path[1:], strict=False):
-                        road_adj[a].add(b)
-                        road_adj[b].add(a)
-                    for c in best_path:
-                        if c not in hex_tier:
-                            hex_tier[c] = RoadTier.PRIMARY
-                    fallback_paths.append(best_path)
+                    adopt(best_path)
                     main |= bfs_component(iso.coord)
                     progressed = True
                     break
@@ -320,18 +305,10 @@ class InterurbanRoadStage(GeneratorStage):
                     plain_edge,
                 )
                 ferries.append(ferry)
-                for p in ferry_paths:
-                    for a, b in zip(p, p[1:], strict=False):
-                        road_adj[a].add(b)
-                        road_adj[b].add(a)
-                    for c in p:
-                        if c not in hex_tier:
-                            hex_tier[c] = RoadTier.PRIMARY
-                    fallback_paths.append(p)
-                hex_tier.setdefault(ferry.a, RoadTier.PRIMARY)
-                hex_tier.setdefault(ferry.b, RoadTier.PRIMARY)
+                for fp in ferry_paths:
+                    adopt(fp)
                 main |= bfs_component(iso.coord)
                 main.add(ferry.a)
                 main.add(ferry.b)
 
-        return hex_tier, fallback_paths, ferries
+        return road_edges, ferries

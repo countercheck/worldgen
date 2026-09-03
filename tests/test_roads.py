@@ -3,7 +3,8 @@ import pytest
 from tests.worlds import build_pipeline
 from worldgen.core.config import WorldConfig
 from worldgen.core.hex import Hex, SettlementTier, TerrainClass
-from worldgen.core.world_state import RoadTier
+from worldgen.core.hex_grid import road_polylines
+from worldgen.core.world_state import ROAD_TIER_RANK, RoadTier, road_edge_key
 from worldgen.stages.road_cost import slope_edge_cost
 
 # Traveller counts are turned well down from production so the gravity simulation stays
@@ -47,34 +48,32 @@ def any_road_state(request):
 
 
 def test_has_roads(road_state):
-    assert len(road_state.roads) >= 1
+    assert len(road_state.road_edges) >= 1
 
 
-def test_road_paths_min_length(road_state):
-    for road in road_state.roads:
-        assert len(road.path) >= 2, f"Road has path length {len(road.path)}"
-
-
-def test_road_paths_connected(road_state):
+def test_every_road_edge_joins_two_neighbouring_hexes(road_state):
     from worldgen.core.hex_grid import distance
 
-    for road in road_state.roads:
-        for a, b in zip(road.path, road.path[1:], strict=False):
-            assert distance(a, b) == 1, f"Non-adjacent coords in road path: {a} -> {b}"
+    for a, b in road_state.road_edges:
+        assert distance(a, b) == 1, f"road edge between non-adjacent hexes: {a} -> {b}"
 
 
-def test_road_water_segments_are_bracketed(road_state):
-    """Roads may now traverse water (oceans + lakes are traversable as a single piece
-    of terrain), but every water segment must be bracketed by land hexes — a road
-    cannot start, end, or consist entirely of water hexes."""
+def test_road_edges_are_stored_under_one_canonical_key(road_state):
+    """An edge is undirected, so (a, b) and (b, a) must not both exist and disagree."""
+    for key in road_state.road_edges:
+        assert key == road_edge_key(*key)
+
+
+def test_the_drawn_network_never_starts_or_ends_on_water(road_state):
+    """Roads may traverse water — oceans and lakes are one piece of terrain to the
+    router — but a drawn leg is land only, so no polyline may begin or end wet."""
     water = (TerrainClass.OCEAN, TerrainClass.LAKE)
-    for road in road_state.roads:
-        first = road_state.hexes[road.path[0]]
-        last = road_state.hexes[road.path[-1]]
-        assert first.terrain_class not in water, f"Road begins on water at {road.path[0]}"
-        assert last.terrain_class not in water, f"Road ends on water at {road.path[-1]}"
-        on_land = [c for c in road.path if road_state.hexes[c].terrain_class not in water]
-        assert on_land, f"Road has no land hexes: {road.path}"
+    for _, leg in road_polylines(road_state.road_edges, road_state.hexes):
+        assert len(leg) >= 2
+        for end in (leg[0], leg[-1]):
+            assert road_state.hexes[end].terrain_class not in water, (
+                f"drawn road leg terminates on water at {end}"
+            )
 
 
 def test_road_connections_symmetric(road_state):
@@ -87,24 +86,23 @@ def test_road_connections_symmetric(road_state):
 
 
 def test_river_crossing_hexes_tagged(road_state):
-    """Road hexes that enter a river from a non-river hex must be tagged ford/bridge."""
-    for road in road_state.roads:
-        path = road.path
-        for i, c in enumerate(path):
-            hx = road_state.hexes.get(c)
+    """A river hex the road network reaches from dry land is a crossing, and is tagged."""
+    for a, b in road_state.road_edges:
+        for coord, other in ((a, b), (b, a)):
+            hx = road_state.hexes.get(coord)
+            other_hx = road_state.hexes.get(other)
             if hx is None or "river" not in hx.tags:
                 continue
-            prev_c = path[i - 1] if i > 0 else None
-            prev_hx = road_state.hexes.get(prev_c) if prev_c is not None else None
-            if prev_hx is None or "river" not in prev_hx.tags:
-                assert "ford" in hx.tags or "bridge" in hx.tags, (
-                    f"River crossing hex {c} on road not tagged ford/bridge"
-                )
+            if other_hx is not None and "river" in other_hx.tags:
+                continue
+            assert "ford" in hx.tags or "bridge" in hx.tags, (
+                f"River crossing hex {coord} on road not tagged ford/bridge"
+            )
 
 
 def test_valid_road_tiers(road_state):
-    for road in road_state.roads:
-        assert isinstance(road.tier, RoadTier)
+    for tier in road_state.road_edges.values():
+        assert isinstance(tier, RoadTier)
 
 
 def test_cities_mutually_reachable(road_state):
@@ -163,7 +161,7 @@ def test_roads_route_when_river_flow_is_continuous():
     plain = _build_pipeline(seed=42).run()
     continuous = _build_pipeline(seed=42, river_flow_continuous=True).run()
 
-    assert continuous.roads, "no roads generated with river_flow_continuous"
+    assert continuous.road_edges, "no roads generated with river_flow_continuous"
     flowing = [h for h in continuous.hexes.values() if h.river_flow > 0]
     tagged = [h for h in continuous.hexes.values() if "river" in h.tags]
     assert len(flowing) > len(tagged) * 2, (
@@ -171,10 +169,10 @@ def test_roads_route_when_river_flow_is_continuous():
         "if it does not, this test is no longer exercising the case it was written for"
     )
 
-    def paths(ws):
-        return sorted(tuple(r.path) for r in ws.roads)
+    def network(ws):
+        return sorted((k, t.value) for k, t in ws.road_edges.items())
 
-    assert paths(continuous) == paths(plain), (
+    assert network(continuous) == network(plain), (
         "roads differ between flow modes: something is still identifying a river channel "
         "by river_flow rather than by the tag"
     )
@@ -190,7 +188,7 @@ def test_river_corridor_preference_in_roads(road_state):
     from worldgen.core.hex_grid import neighbors
 
     hexes = road_state.hexes
-    road_hexes = {c for road in road_state.roads for c in road.path if c in hexes}
+    road_hexes = {c for edge in road_state.road_edges for c in edge if c in hexes}
     all_land = {c for c, h in hexes.items() if h.terrain_class != TerrainClass.OCEAN}
 
     if not road_hexes or not all_land:
@@ -228,7 +226,7 @@ def test_roads_decline_the_channel_itself(road_state):
     land they make up.
     """
     hexes = road_state.hexes
-    road_hexes = {c for road in road_state.roads for c in road.path if c in hexes}
+    road_hexes = {c for edge in road_state.road_edges for c in edge if c in hexes}
     all_land = {c for c, h in hexes.items() if h.terrain_class != TerrainClass.OCEAN}
     river = {c for c in all_land if "river" in hexes[c].tags}
     if not road_hexes or not river:
@@ -254,7 +252,7 @@ def test_road_river_traffic_threshold_draws_more_river_roads():
     s_off = _build_pipeline(seed=seed, road_river_traffic_min=3).run()
 
     def river_road_hexes(state):
-        rh = {c for road in state.roads for c in road.path}
+        rh = {c for edge in state.road_edges for c in edge}
         return {c for c in rh if state.hexes[c].river_flow > 0}
 
     low_river_roads = river_road_hexes(s_low)
@@ -272,9 +270,9 @@ def test_road_river_traffic_threshold_draws_more_river_roads():
 def test_reproducibility():
     s1 = _build_pipeline(seed=99).run()
     s2 = _build_pipeline(seed=99).run()
-    tiers1 = sorted((r.tier.value, tuple(r.path)) for r in s1.roads)
-    tiers2 = sorted((r.tier.value, tuple(r.path)) for r in s2.roads)
-    assert tiers1 == tiers2, "Roads differ between identical seeds"
+    net1 = sorted((k, t.value) for k, t in s1.road_edges.items())
+    net2 = sorted((k, t.value) for k, t in s2.road_edges.items())
+    assert net1 == net2, "Roads differ between identical seeds"
 
 
 def test_slope_edge_cost_formula():
@@ -344,11 +342,9 @@ def test_roads_never_run_along_a_river_channel(any_road_state):
             b in settled and hexes[a].river_flow <= 0
         )
 
-    offenders = []
-    for road in state.roads:
-        for a, b in zip(road.path, road.path[1:], strict=False):
-            if frozenset((a, b)) in channel and not exempt(a, b):
-                offenders.append((a, b))
+    offenders = [
+        (a, b) for a, b in state.road_edges if frozenset((a, b)) in channel and not exempt(a, b)
+    ]
     assert not offenders, f"roads run along the river channel at {offenders[:5]}"
 
 
@@ -383,20 +379,24 @@ def test_roads_cross_rivers_on_opposite_sides(road_state):
         between = lo < pi < hi
         return between == (lo < ni < hi)
 
+    # The graph answers this directly: a crossing is a river hex whose road edges reach
+    # exactly two banks, and those two must lie on opposite arcs of the channel.
+    road_adj: dict = {}
+    for a, b in road_state.road_edges:
+        road_adj.setdefault(a, set()).add(b)
+        road_adj.setdefault(b, set()).add(a)
+
     offenders = []
-    for road in road_state.roads:
-        path = road.path
-        for k in range(1, len(path) - 1):
-            c = path[k]
-            if c in settled or c not in channel_dirs:
-                continue
-            # Only a bank->river->bank step is a crossing; a step whose neighbour is
-            # itself a river hex is channel travel, covered by its own test below.
-            if hexes[path[k - 1]].river_flow > 0 or hexes[path[k + 1]].river_flow > 0:
-                continue
-            i, j = channel_dirs[c]
-            if same_arc(c, i, j, path[k - 1], path[k + 1]):
-                offenders.append((path[k - 1], c, path[k + 1]))
+    for c, (i, j) in channel_dirs.items():
+        if c in settled or c not in road_adj:
+            continue
+        # Only a bank->river->bank crossing is in question; a neighbour that is itself a
+        # river hex is channel travel, covered by its own test below.
+        banks = [n for n in road_adj[c] if hexes[n].river_flow <= 0]
+        if len(banks) != 2 or len(banks) != len(road_adj[c]):
+            continue
+        if same_arc(c, i, j, banks[0], banks[1]):
+            offenders.append((banks[0], c, banks[1]))
     assert not offenders, f"road re-enters the bank it came from at {offenders[:5]}"
 
 
@@ -428,18 +428,16 @@ def test_roads_never_occupy_consecutive_river_hexes(any_road_state):
     hexes = state.hexes
     settled = {s.coord for s in state.settlements}
 
-    worst = []
-    for road in state.roads:
-        run: list = []
-        for c in road.path:
-            if hexes[c].river_flow > 0 and c not in settled:
-                run.append(c)
-            else:
-                if len(run) > 1:
-                    worst.append(list(run))
-                run = []
-        if len(run) > 1:
-            worst.append(list(run))
+    # A run of channel travel is an edge joining two river hexes: on the graph there is
+    # no need to reconstruct the sequence, since the offending step *is* the edge.
+    worst = [
+        (a, b)
+        for a, b in state.road_edges
+        if hexes[a].river_flow > 0
+        and hexes[b].river_flow > 0
+        and a not in settled
+        and b not in settled
+    ]
 
     assert not worst, f"roads travel along {len(worst)} river runs, e.g. {worst[:3]}"
 
@@ -448,11 +446,79 @@ def test_road_hexes_on_rivers_are_rare(any_road_state):
     """Whatever the route, a road should almost always have a bank under it."""
     state = any_road_state
     hexes = state.hexes
-    road_hexes = {c for road in state.roads for c in road.path if c in hexes}
+    road_hexes = {c for edge in state.road_edges for c in edge if c in hexes}
     settled = {s.coord for s in state.settlements}
     if not road_hexes:
         return
     on_river = {c for c in road_hexes if hexes[c].river_flow > 0 and c not in settled}
     assert len(on_river) / len(road_hexes) < 0.10, (
         f"{len(on_river)}/{len(road_hexes)} road hexes sit in a river channel"
+    )
+
+
+def test_no_two_important_roads_run_side_by_side_for_long(road_state):
+    """Two roads a kilometre apart are fine; two *highways* a kilometre apart are not.
+
+    A hex is beside another road all the time — at junctions, at a town, where a valley
+    route passes under a hillside one. What no map should show is a pair of roads of the
+    same tier, at the same height, keeping each other company for miles: that is one road
+    drawn twice, and it is what the pathfinder produces when it cannot find the same
+    corridor twice running.
+
+    So this measures the thing that matters rather than raw adjacency. A *parallel pair* is
+    two road hexes that are neighbours with no edge between them; a *run* chains pairs that
+    advance together. Tracks are exempt — a lane beside a road is a lane.
+    """
+    from worldgen.core.hex_grid import neighbors
+
+    edges = road_state.road_edges
+    hex_tier: dict = {}
+    for (a, b), tier in edges.items():
+        for c in (a, b):
+            if ROAD_TIER_RANK[tier] > ROAD_TIER_RANK.get(hex_tier.get(c), -1):
+                hex_tier[c] = tier
+    important = {c for c, t in hex_tier.items() if t is not RoadTier.TRACK}
+
+    pairs = {
+        tuple(sorted((c, n)))
+        for c in important
+        for n in neighbors(c)
+        if n in important and road_edge_key(c, n) not in edges and hex_tier[c] is hex_tier[n]
+    }
+    if not pairs:
+        return
+
+    adj: dict = {}
+    for a, b in edges:
+        adj.setdefault(a, set()).add(b)
+        adj.setdefault(b, set()).add(a)
+
+    def advances_to(pair):
+        a, b = pair
+        return {
+            cand
+            for a2 in adj.get(a, ())
+            for b2 in adj.get(b, ())
+            if (cand := tuple(sorted((a2, b2)))) != pair and cand in pairs
+        }
+
+    seen: set = set()
+    worst: set = set()
+    for start in pairs:
+        if start in seen:
+            continue
+        stack, run = [start], set()
+        while stack:
+            x = stack.pop()
+            if x in run:
+                continue
+            run.add(x)
+            stack.extend(advances_to(x) - run)
+        seen |= run
+        if len(run) > len(worst):
+            worst = run
+
+    assert len(worst) <= 4, (
+        f"{len(worst)} hexes of primary/secondary road run parallel to another of the same "
+        f"tier — one road drawn twice. Near {sorted(worst)[0]}"
     )

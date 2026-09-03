@@ -10,7 +10,7 @@ import math
 from dataclasses import dataclass
 
 from ..core.hex import SettlementTier
-from ..core.hex_grid import split_path_on_water, water_transitions
+from ..core.hex_grid import road_polylines, road_water_transitions
 from ..core.world_state import RoadTier, WorldState
 
 # Stand-in steps for the continuous greyscale used by color_mode="elevation".
@@ -124,15 +124,13 @@ def anchorage_points(ws: WorldState) -> list:
     in for a road where a river channel cuts the network in two.
 
     Shore points are filtered to hexes that a drawn road leg actually reaches.  A land
-    leg of a single hex cannot be drawn as a polyline (`split_path_on_water` discards
-    it), and marking its shore would leave an anchor sitting on the coast with no road
-    attached to it.  Ferry landings are never filtered — the ferry is the connection,
-    whether or not a road leg happens to be drawable at either end.
+    leg of a single hex cannot be drawn as a polyline (`road_polylines` discards it), and
+    marking its shore would leave an anchor sitting on the coast with no road attached to
+    it.  Ferry landings are never filtered — the ferry is the connection, whether or not a
+    road leg happens to be drawable at either end.
     """
-    drawn = {
-        c for road in ws.roads for leg in split_path_on_water(road.path, ws.hexes) for c in leg
-    }
-    points = {c for road in ws.roads for c in water_transitions(road.path, ws.hexes) if c in drawn}
+    drawn = {c for _, leg in road_polylines(ws.road_edges, ws.hexes) for c in leg}
+    points = {c for c in road_water_transitions(ws.road_edges, ws.hexes) if c in drawn}
     points |= {c for ferry in ws.ferries for c in (ferry.a, ferry.b)}
     return sorted(points)
 
@@ -186,8 +184,8 @@ def rows(ws: WorldState, color_mode: str, layers: set[str]) -> list[LegendRow]:
     if "rivers" in layers and ws.rivers:
         out.append(LegendRow("river", "River"))
 
-    if "roads" in layers and ws.roads:
-        present = {road.tier for road in ws.roads}
+    if "roads" in layers and ws.road_edges:
+        present = set(ws.road_edges.values())
         for tier in RoadTier:
             if tier in present:
                 out.append(LegendRow("road", f"{_label(tier)} road", tier))

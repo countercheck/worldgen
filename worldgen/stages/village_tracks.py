@@ -1,7 +1,7 @@
 from ..core.hex import SettlementTier
 from ..core.hex_grid import astar
 from ..core.pipeline import GeneratorStage
-from ..core.world_state import Road, RoadTier, WorldState
+from ..core.world_state import RoadTier, WorldState, road_edge_key
 from .road_cost import (
     WATER,
     bank_discount,
@@ -51,7 +51,7 @@ class VillageTrackStage(GeneratorStage):
 
         edge_cost = make_road_edge_cost(cfg, blocked, settled)
 
-        new_roads: list[Road] = []
+        new_edges: dict = {}
 
         for village in villages:
             if not targets:
@@ -68,15 +68,17 @@ class VillageTrackStage(GeneratorStage):
                 if path and len(path) >= 2:
                     break
             if path and len(path) >= 2:
-                new_roads.append(Road(path=path, tier=RoadTier.TRACK))
                 for a, b in zip(path, path[1:], strict=False):
                     if a in hexes and b in hexes:
+                        # A track never demotes a road already laid: where a village lane
+                        # joins the highway it is the highway that gets drawn.
+                        new_edges.setdefault(road_edge_key(a, b), RoadTier.TRACK)
                         hexes[a].road_connections.add(b)
                         hexes[b].road_connections.add(a)
                 # Village's hex is now a road endpoint — add to targets for later villages
                 targets.add(village.coord)
 
-        tag_river_crossings(new_roads, hexes)
-
-        state.roads.extend(new_roads)
+        for key, tier in new_edges.items():
+            state.road_edges.setdefault(key, tier)
+        tag_river_crossings(new_edges, hexes)
         return state

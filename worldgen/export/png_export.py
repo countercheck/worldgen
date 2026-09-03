@@ -4,8 +4,8 @@ from dataclasses import dataclass, field
 from PIL import Image, ImageDraw, ImageFont
 
 from ..core.hex import SettlementTier
-from ..core.hex_grid import axial_to_pixel, dedupe_road_paths, neighbors
-from ..core.world_state import ROAD_TIER_RANK, RoadTier, WorldState
+from ..core.hex_grid import axial_to_pixel, neighbors, road_polylines
+from ..core.world_state import RoadTier, WorldState
 from ..render.debug_viewer import BIOME_COLORS, LAND_COVER_COLORS, TERRAIN_COLORS
 from . import legend, rivers
 
@@ -460,15 +460,15 @@ def render(ws: WorldState, config: PNGConfig | None = None) -> Image.Image:
             draw.line(pts, fill=_RIVER_COLOR, width=lw)
 
     if "roads" in layers:
-        # Deduped and ordered by tier, so shared trunk segments are drawn once and a
-        # track never paints over the primary road it branches from.
+        # One tier per edge and runs split at junctions, so a shared trunk is drawn
+        # once and a track never paints over the primary road it branches from.
         legs = []
-        for road, leg in dedupe_road_paths(ws.roads, ws.hexes, lambda r: ROAD_TIER_RANK[r.tier]):
+        for tier, leg in road_polylines(ws.road_edges, ws.hexes):
             pts = []
             for coord in leg:
                 px, py = axial_to_pixel(coord, size)
                 pts.append((int(px + ox), int(py + oy)))
-            legs.append((pts, max(1, round(_ROAD_WIDTH[road.tier] * line_scale)), road.tier))
+            legs.append((pts, max(1, round(_ROAD_WIDTH[tier] * line_scale)), tier))
         outline = config.feature_outline * line_scale
         if outline > 0.0:
             # Casings for every road before any road line, or a branch's casing would

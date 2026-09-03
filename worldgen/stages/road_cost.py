@@ -3,7 +3,7 @@ from collections import deque
 from ..core.errors import RoutingError
 from ..core.hex import TerrainClass
 from ..core.hex_grid import astar, distance, neighbors
-from ..core.world_state import Ferry
+from ..core.world_state import ROAD_TIER_RANK, Ferry, RoadTier
 
 WATER = (TerrainClass.OCEAN, TerrainClass.LAKE)
 
@@ -223,28 +223,47 @@ def make_road_edge_cost(cfg, blocked_edges=None, exempt_coords=frozenset()):
     return edge_cost
 
 
-def tag_river_crossings(roads, hexes) -> None:
-    """Tag river-entry hexes on each road as ford → bridge on second visit.
+def tag_river_crossings(road_edges, hexes) -> None:
+    """Tag river hexes the road network crosses: ford, or bridge where the road is primary.
 
     Mutates `hex.tags` in place. Purely cosmetic (used by renderers); does
     not feed back into pathfinding cost.
+
+    It used to walk each route in turn and promote a ford to a bridge the second time a
+    route entered the same river hex — "more than one road uses this, so build a bridge".
+    With the network stored as edges there are no routes to count, and no need to: edge
+    tier already *is* how busy a crossing is, taken from the same traffic the old
+    second-visit rule was standing in for. A primary crossing gets a bridge, a quieter one
+    a ford, and the result no longer depends on the order routes happened to be built in.
+
+    `CrossingStage` (the organic model) tags its own fords and bridges before roads exist;
+    those are left alone, since a bridge is not demoted by carrying a quiet road.
     """
-    for road in roads:
-        path = road.path
-        for i, c in enumerate(path):
-            if c not in hexes:
+    incident: dict = {}
+    for (a, b), tier in road_edges.items():
+        for coord in (a, b):
+            hx = hexes.get(coord)
+            if hx is None or "river" not in hx.tags:
                 continue
-            hx = hexes[c]
-            if "river" not in hx.tags:
+            # Only a road arriving from off the channel is a crossing; one running along
+            # the bank is not, and roads may not run down a channel in any case.
+            other = b if coord == a else a
+            other_hx = hexes.get(other)
+            if other_hx is not None and "river" in other_hx.tags:
                 continue
-            prev_c = path[i - 1] if i > 0 else None
-            prev_hx = hexes.get(prev_c) if prev_c is not None else None
-            if (prev_hx is None or "river" not in prev_hx.tags) and "bridge" not in hx.tags:
-                if "ford" not in hx.tags:
-                    hx.tags.add("ford")
-                else:
-                    hx.tags.discard("ford")
-                    hx.tags.add("bridge")
+            best = incident.get(coord)
+            if best is None or ROAD_TIER_RANK[tier] > ROAD_TIER_RANK[best]:
+                incident[coord] = tier
+
+    for coord, tier in incident.items():
+        tags = hexes[coord].tags
+        if "bridge" in tags:
+            continue
+        if tier is RoadTier.PRIMARY:
+            tags.discard("ford")
+            tags.add("bridge")
+        else:
+            tags.add("ford")
 
 
 def reachable_under_constraint(hexes, start, blocked, settled) -> set:
@@ -332,3 +351,12 @@ def ferry_link(hexes, origin, label, main, cfg, blocked, settled, plain_cost, pl
             raise RoutingError(f"{label} at {origin} cannot reach its own ferry landing at {a}.")
         paths.append(p)
     return Ferry(a=a, b=b), paths
+
+
+def pheromone_discount(base: float, traffic: float, cfg) -> float:
+    """What a hex costs a traveller once earlier travellers have worn a path across it.
+
+    Extracted so the shape can be measured.  It was inline in `InterurbanRoadStage`, and
+    `_guarantee_city_connectivity`'s `plain_cost` quietly used a different formula.
+    """
+    return max(0.0, base - cfg.road_pheromone_factor * traffic)

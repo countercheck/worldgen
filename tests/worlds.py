@@ -94,3 +94,21 @@ def build_world(
             **cfg_overrides,
         ).run()
     return _WORLD_CACHE[key]
+
+
+def lay_road(ws, path, tier):
+    """Write a hex path into `ws.road_edges` as a road of *tier*.
+
+    The model stores one tier per edge, so a fixture laying two overlapping routes gets
+    the higher tier on the shared edges — the same rule the renderer used to apply at draw
+    time, and the one `VillageTrackStage` and the schema-1.2 migration both follow.
+    """
+    from worldgen.core.world_state import ROAD_TIER_RANK, road_edge_key
+
+    for a, b in zip(path, path[1:], strict=False):
+        key = road_edge_key(tuple(a), tuple(b))
+        if ROAD_TIER_RANK[tier] > ROAD_TIER_RANK.get(ws.road_edges.get(key), -1):
+            ws.road_edges[key] = tier
+        ws.hexes[tuple(a)].road_connections.add(tuple(b))
+        ws.hexes[tuple(b)].road_connections.add(tuple(a))
+    return ws

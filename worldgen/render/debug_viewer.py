@@ -4,8 +4,8 @@ from pathlib import Path
 import matplotlib as mpl
 
 from ..core.hex import Biome, LandCover, SettlementTier, TerrainClass
-from ..core.hex_grid import axial_to_pixel, dedupe_road_paths
-from ..core.world_state import ROAD_TIER_RANK, RoadTier, WorldState
+from ..core.hex_grid import axial_to_pixel, road_polylines
+from ..core.world_state import RoadTier, WorldState
 
 # Degrees Celsius spanned by the temperature ramp. Fixed rather than per-map so two
 # worlds can be compared by eye.
@@ -232,12 +232,10 @@ def render_svg(state: WorldState, attribute: str, hex_size: float = 20) -> str:
     if road_overlay:
         out.append('  <g id="layer-roads">')
         # Iterating RoadTier drew PRIMARY first and TRACK last, so a track painted over
-        # the primary road it branches from. dedupe_road_paths awards each shared edge to
-        # its highest tier and returns them in ascending order, so primaries land on top.
-        for road, leg in dedupe_road_paths(
-            state.roads, state.hexes, lambda r: ROAD_TIER_RANK[r.tier]
-        ):
-            style = _ROAD_STYLE[road.tier]
+        # the primary road it branches from. road_polylines returns runs in ascending tier
+        # order, so primaries land on top.
+        for tier, leg in road_polylines(state.road_edges, state.hexes):
+            style = _ROAD_STYLE[tier]
             da = f' stroke-dasharray="{style["dasharray"]}"' if "dasharray" in style else ""
             pts = [(px + ox, py + oy) for px, py in (axial_to_pixel(c, hex_size) for c in leg)]
             out.append(

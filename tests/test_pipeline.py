@@ -121,7 +121,7 @@ def test_pipeline_runs_and_populates_a_world():
     assert isinstance(state, WorldState)
     assert len(state.hexes) == 48 * 48
     assert state.settlements, "a 48x48 world produced no settlements"
-    assert state.roads, "a 48x48 world produced no roads"
+    assert state.road_edges, "a 48x48 world produced no roads"
 
 
 def test_until_truncates_the_run():
@@ -144,7 +144,7 @@ def test_same_seed_same_world():
 
     assert [h.elevation for h in a.hexes.values()] == [h.elevation for h in b.hexes.values()]
     assert sorted(s.coord for s in a.settlements) == sorted(s.coord for s in b.settlements)
-    assert sorted(tuple(r.path) for r in a.roads) == sorted(tuple(r.path) for r in b.roads)
+    assert sorted(a.road_edges.items()) == sorted(b.road_edges.items())
 
 
 def test_different_seed_different_world():

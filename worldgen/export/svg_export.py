@@ -3,8 +3,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..core.hex import SettlementTier
-from ..core.hex_grid import axial_to_pixel, dedupe_road_paths, neighbors
-from ..core.world_state import ROAD_TIER_RANK, RoadTier, WorldState
+from ..core.hex_grid import axial_to_pixel, neighbors, road_polylines
+from ..core.world_state import RoadTier, WorldState
 from ..render.debug_viewer import BIOME_COLORS, LAND_COVER_COLORS, TERRAIN_COLORS
 from . import legend, rivers
 
@@ -498,11 +498,11 @@ def render(ws: WorldState, config: SVGConfig | None = None) -> str:
 
     if "roads" in layers:
         out.append('  <g id="layer-roads">')
-        # Deduped and ordered by tier, so shared trunk segments are drawn once and a
-        # track never paints over the primary road it branches from.
+        # One tier per edge and runs split at junctions, so a shared trunk is drawn
+        # once and a track never paints over the primary road it branches from.
         legs = []
-        for road, leg in dedupe_road_paths(ws.roads, ws.hexes, lambda r: ROAD_TIER_RANK[r.tier]):
-            style = _ROAD_SVG[road.tier]
+        for tier, leg in road_polylines(ws.road_edges, ws.hexes):
+            style = _ROAD_SVG[tier]
             da = ""
             if style["dasharray"]:
                 # The dash pattern scales too, or a track's dashes crowd into a solid

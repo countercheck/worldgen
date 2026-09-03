@@ -1,16 +1,17 @@
 from worldgen.core.hex import Hex, TerrainClass
 from worldgen.core.hex_grid import (
     astar,
-    dedupe_road_paths,
     distance,
     grade_reachable_count,
     hex_range,
     neighbors,
     ring,
+    road_polylines,
+    road_water_transitions,
     split_path_on_water,
     water_transitions,
 )
-from worldgen.core.world_state import ROAD_TIER_RANK, Road, RoadTier
+from worldgen.core.world_state import ROAD_TIER_RANK, RoadTier, road_edge_key
 
 
 def test_neighbor_distance():
@@ -266,7 +267,7 @@ def test_water_transitions_single_hex_path():
     assert water_transitions([(0, 0)], _water_grid(set())) == []
 
 
-# --- dedupe_road_paths -------------------------------------------------------
+# --- road_polylines ----------------------------------------------------------
 
 
 def _grid(*paths, water: frozenset = frozenset()) -> dict:
@@ -278,152 +279,94 @@ def _grid(*paths, water: frozenset = frozenset()) -> dict:
     }
 
 
-def _tier_rank(road) -> int:
-    return ROAD_TIER_RANK[road.tier]
+def _edges(path, tier) -> dict:
+    """The edges of a hex path, all of one tier."""
+    return {road_edge_key(a, b): tier for a, b in zip(path, path[1:], strict=False)}
 
 
 def _drawn_edges(result) -> list:
-    """Every edge in a dedupe result, as unordered pairs, in draw order."""
     return [frozenset((a, b)) for _, leg in result for a, b in zip(leg, leg[1:], strict=False)]
 
 
-def _legs_of(result, road) -> list:
-    return [leg for r, leg in result if r is road]
+def test_a_single_corridor_comes_back_as_one_run():
+    edges = _edges(_path(), RoadTier.PRIMARY)
+    assert road_polylines(edges, _grid(_path())) == [(RoadTier.PRIMARY, _path())]
 
 
-def test_dedupe_single_road_keeps_its_whole_path():
-    road = Road(path=_path(), tier=RoadTier.PRIMARY)
-    grid = _grid(road.path)
-    assert dedupe_road_paths([road], grid, _tier_rank) == [(road, _path())]
+def test_no_edges_draw_nothing():
+    assert road_polylines({}, _water_grid(set())) == []
 
 
-def test_dedupe_no_roads():
-    assert dedupe_road_paths([], _water_grid(set()), _tier_rank) == []
+def test_every_edge_is_drawn_exactly_once():
+    """The point of the graph: there is nothing left to deduplicate."""
+    trunk = _path(6)
+    branch = [(2, 0), (2, 1), (2, 2)]
+    edges = _edges(trunk, RoadTier.PRIMARY) | _edges(branch, RoadTier.TRACK)
+    drawn = _drawn_edges(road_polylines(edges, _grid(trunk, branch)))
+    assert sorted(map(sorted, drawn)) == sorted(map(sorted, (set(k) for k in edges)))
+    assert len(drawn) == len(set(drawn))
 
 
-def test_dedupe_draws_every_edge_exactly_once():
-    """The whole point: two routes down a shared trunk must not stack polylines."""
-    trunk = Road(path=_path(4), tier=RoadTier.PRIMARY)
-    branch = Road(path=[(0, 0), (1, 0), (2, 0), (2, 1)], tier=RoadTier.TRACK)
-    grid = _grid(trunk.path, branch.path)
-
-    edges = _drawn_edges(dedupe_road_paths([trunk, branch], grid, _tier_rank))
-    assert len(edges) == len(set(edges)), "an edge was drawn more than once"
-    # Nothing is lost either — every edge either road travels is still drawn.
-    expected = {
-        frozenset((a, b))
-        for road in (trunk, branch)
-        for a, b in zip(road.path, road.path[1:], strict=False)
-    }
-    assert set(edges) == expected
+def test_a_run_breaks_at_a_junction():
+    """A polyline through a fork would draw an edge that is not in the graph."""
+    trunk = _path(5)
+    branch = [(2, 0), (2, 1)]
+    result = road_polylines(
+        _edges(trunk, RoadTier.PRIMARY) | _edges(branch, RoadTier.PRIMARY),
+        _grid(trunk, branch),
+    )
+    assert all(len(leg) >= 2 for _, leg in result)
+    # The trunk is cut either side of the fork rather than swept through it.
+    assert (2, 0) in {c for _, leg in result for c in (leg[0], leg[-1])}
 
 
-def test_dedupe_awards_shared_edges_to_the_higher_tier():
-    """The track keeps only the spur it does not share with the primary road."""
-    trunk = Road(path=_path(4), tier=RoadTier.PRIMARY)
-    branch = Road(path=[(0, 0), (1, 0), (2, 0), (2, 1)], tier=RoadTier.TRACK)
-    grid = _grid(trunk.path, branch.path)
-
-    result = dedupe_road_paths([trunk, branch], grid, _tier_rank)
-    assert _legs_of(result, trunk) == [_path(4)]
-    assert _legs_of(result, branch) == [[(2, 0), (2, 1)]]
+def test_a_run_breaks_where_the_tier_changes():
+    path = _path(5)
+    edges = _edges(path[:3], RoadTier.PRIMARY) | _edges(path[2:], RoadTier.TRACK)
+    result = road_polylines(edges, _grid(path))
+    assert {tier for tier, _ in result} == {RoadTier.PRIMARY, RoadTier.TRACK}
+    for _tier, leg in result:
+        assert len(leg) == 3
 
 
-def test_dedupe_returns_legs_in_ascending_rank():
-    """Renderers paint in order, so the important roads must come last."""
-    track = Road(path=[(0, 1), (1, 1)], tier=RoadTier.TRACK)
-    secondary = Road(path=[(0, 2), (1, 2)], tier=RoadTier.SECONDARY)
-    primary = Road(path=[(0, 0), (1, 0)], tier=RoadTier.PRIMARY)
-    grid = _grid(track.path, secondary.path, primary.path)
-
-    result = dedupe_road_paths([primary, track, secondary], grid, _tier_rank)
-    assert [road.tier for road, _ in result] == [
-        RoadTier.TRACK,
-        RoadTier.SECONDARY,
-        RoadTier.PRIMARY,
-    ]
+def test_runs_come_back_with_the_most_important_last():
+    """A renderer drawing in order must paint a primary road over a track."""
+    trunk = _path(5)
+    branch = [(2, 0), (2, 1)]
+    result = road_polylines(
+        _edges(trunk, RoadTier.PRIMARY) | _edges(branch, RoadTier.TRACK),
+        _grid(trunk, branch),
+    )
+    ranks = [ROAD_TIER_RANK[tier] for tier, _ in result]
+    assert ranks == sorted(ranks)
 
 
-def test_dedupe_ties_go_to_the_first_road_in_list_order():
-    first = Road(path=[(0, 0), (1, 0), (2, 0)], tier=RoadTier.TRACK)
-    second = Road(path=[(0, 0), (1, 0), (1, 1)], tier=RoadTier.TRACK)
-    grid = _grid(first.path, second.path)
-
-    result = dedupe_road_paths([first, second], grid, _tier_rank)
-    assert _legs_of(result, first) == [[(0, 0), (1, 0), (2, 0)]]
-    assert _legs_of(result, second) == [[(1, 0), (1, 1)]]
+def test_edges_touching_water_are_not_drawn():
+    path = _path(6)
+    grid = _grid(path, water=frozenset({(2, 0), (3, 0)}))
+    result = road_polylines(_edges(path, RoadTier.PRIMARY), grid)
+    assert _drawn_edges(result) == [frozenset({(0, 0), (1, 0)}), frozenset({(4, 0), (5, 0)})]
 
 
-def test_dedupe_tie_break_follows_list_order_when_reversed():
-    """Same two roads, swapped — the shared trunk changes hands."""
-    first = Road(path=[(0, 0), (1, 0), (2, 0)], tier=RoadTier.TRACK)
-    second = Road(path=[(0, 0), (1, 0), (1, 1)], tier=RoadTier.TRACK)
-    grid = _grid(first.path, second.path)
-
-    result = dedupe_road_paths([second, first], grid, _tier_rank)
-    assert _legs_of(result, second) == [[(0, 0), (1, 0), (1, 1)]]
-    assert _legs_of(result, first) == [[(1, 0), (2, 0)]]
+def test_a_network_entirely_on_water_draws_nothing():
+    path = _path(4)
+    assert road_polylines(_edges(path, RoadTier.PRIMARY), _grid(path, water=frozenset(path))) == []
 
 
-def test_dedupe_breaks_a_run_claimed_in_its_middle():
-    """A higher road taking the middle edges leaves two separate runs, not one."""
-    track = Road(path=_path(), tier=RoadTier.TRACK)
-    primary = Road(path=[(2, 0), (3, 0)], tier=RoadTier.PRIMARY)
-    grid = _grid(track.path, primary.path)
-
-    result = dedupe_road_paths([track, primary], grid, _tier_rank)
-    assert _legs_of(result, track) == [[(0, 0), (1, 0), (2, 0)], [(3, 0), (4, 0), (5, 0)]]
-    assert _legs_of(result, primary) == [[(2, 0), (3, 0)]]
+def test_a_closed_loop_is_still_drawn():
+    """A ring has no end to start walking from, and must not be silently dropped."""
+    loop = [(0, 0), (1, 0), (1, 1), (0, 1), (0, 0)]
+    edges = _edges(loop, RoadTier.SECONDARY)
+    result = road_polylines(edges, _grid(loop))
+    assert len(_drawn_edges(result)) == len(edges)
 
 
-def test_dedupe_drops_a_leg_claimed_end_to_end():
-    """A track duplicating a primary road contributes nothing to draw."""
-    primary = Road(path=_path(4), tier=RoadTier.PRIMARY)
-    track = Road(path=_path(4), tier=RoadTier.TRACK)
-    grid = _grid(primary.path)
-
-    result = dedupe_road_paths([primary, track], grid, _tier_rank)
-    assert _legs_of(result, track) == []
-    assert _legs_of(result, primary) == [_path(4)]
+def test_road_water_transitions_marks_the_land_side():
+    path = _path(5)
+    grid = _grid(path, water=frozenset({(2, 0)}))
+    assert road_water_transitions(_edges(path, RoadTier.PRIMARY), grid) == {(1, 0), (3, 0)}
 
 
-def test_dedupe_splits_on_water_and_never_bridges_it():
-    """Legs stop at the shore; no polyline spans the water gap."""
-    road = Road(path=_path(), tier=RoadTier.PRIMARY)
-    grid = _grid(road.path, water=frozenset({(2, 0), (3, 0)}))
-
-    result = dedupe_road_paths([road], grid, _tier_rank)
-    assert _legs_of(result, road) == [[(0, 0), (1, 0)], [(4, 0), (5, 0)]]
-    for _, leg in result:
-        for a, b in zip(leg, leg[1:], strict=False):
-            assert distance(a, b) == 1, "a leg jumped across the water gap"
-
-
-def test_dedupe_never_draws_a_water_hex():
-    track = Road(path=_path(), tier=RoadTier.TRACK)
-    primary = Road(path=_path(4), tier=RoadTier.PRIMARY)
-    water = frozenset({(2, 0)})
-    grid = _grid(track.path, water=water)
-
-    result = dedupe_road_paths([track, primary], grid, _tier_rank)
-    drawn = {c for _, leg in result for c in leg}
-    assert not (drawn & water)
-
-
-def test_dedupe_water_split_still_dedupes_the_shared_trunk():
-    """Deduping and water splitting compose: shared edges go once, on the land side."""
-    primary = Road(path=_path(), tier=RoadTier.PRIMARY)
-    track = Road(path=_path(), tier=RoadTier.TRACK)
-    grid = _grid(primary.path, water=frozenset({(2, 0)}))
-
-    result = dedupe_road_paths([primary, track], grid, _tier_rank)
-    assert _legs_of(result, track) == []
-    assert _legs_of(result, primary) == [[(0, 0), (1, 0)], [(3, 0), (4, 0), (5, 0)]]
-    edges = _drawn_edges(result)
-    assert len(edges) == len(set(edges))
-
-
-def test_dedupe_road_entirely_on_water_draws_nothing():
-    road = Road(path=_path(4), tier=RoadTier.PRIMARY)
-    grid = _grid(road.path, water=frozenset(road.path))
-    assert dedupe_road_paths([road], grid, _tier_rank) == []
+def test_road_water_transitions_none_on_a_dry_network():
+    path = _path()
+    assert road_water_transitions(_edges(path, RoadTier.PRIMARY), _grid(path)) == set()

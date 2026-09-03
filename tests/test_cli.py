@@ -11,7 +11,7 @@ from worldgen.core.hex import (
     SettlementTier,
     TerrainClass,
 )
-from worldgen.core.world_state import River, Road, RoadTier, WorldState
+from worldgen.core.world_state import River, RoadTier, WorldState, road_edge_key
 from worldgen.export.json_export import save as save_json
 
 
@@ -33,7 +33,7 @@ def _small_world() -> WorldState:
         )
     ]
     ws.rivers = [River(hexes=[(0, 0), (1, 0)], flow_volume=1.0)]
-    ws.roads = [Road(path=[(1, 1), (2, 1)], tier=RoadTier.PRIMARY)]
+    ws.road_edges = {road_edge_key((1, 1), (2, 1)): RoadTier.PRIMARY}
     return ws
 
 
