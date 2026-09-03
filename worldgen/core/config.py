@@ -610,10 +610,21 @@ class WorldConfig:
     # on poor — a fixed separation cannot express that.
     market_min_separation: int = 5
     # The one density knob, replacing target_city_count and target_town_count both: stop
-    # planting once the best remaining site scores below this. Calibrated against ~70-85
-    # markets at 128x128 (England had ~700 markets in ~130,000 km2; this map is about an
-    # eighth of that).
-    market_viability_floor: float = 5.0
+    # planting once the best remaining site scores below this. Calibrated to ~70-85 markets
+    # at 128x128 (England had ~700 markets in ~130,000 km2; this map is about an eighth of
+    # that): on a temperate map with continent_falloff_edges = ("south",), seeds 42/7/3/11/19
+    # give 74-81 markets — one per ~205 km2 of land, which is a 15 km lattice, with each
+    # market about 10 km from its nearest neighbour. Those two figures bracket Bracton's
+    # 6 2/3-mile rule read as a third of a day out and back, and observed English market
+    # clustering at 10-15 km. They differ because markets cluster on good ground rather
+    # than tiling evenly, so quote whichever one the question is actually about.
+    #
+    # It is an absolute threshold on gathered surplus, not a target, so density follows the
+    # land with no further machinery: the same 14.0 yields 9 markets on an arid map and 74 on
+    # a temperate one, monotone in mean food per land hex, while median market population
+    # stays flat across every climate.  Fertility decides how *many* markets a region carries,
+    # not how big each one grows.
+    market_viability_floor: float = 14.0
 
     # Cultivation radii — also the catchment each tier is scored on by HabitabilityStage
     cultivation_city_radius: int = 8

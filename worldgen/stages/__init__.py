@@ -28,10 +28,11 @@ def default_stages(model: str = "classic") -> tuple[type["GeneratorStage"], ...]
 
     ``organic`` derives the hierarchy from pre-industrial haulage economics: markets go
     where the most surplus can reach them inside a day's return, and their number follows
-    the land rather than a target.  It is being built stage by stage, so it currently
-    replaces settlement placement only and still runs the classic road stages over the
-    result.  The two live side by side so they can be compared in the debug viewer before
-    either is retired.
+    the land rather than a target.  It models the countryside as a productive surface
+    rather than a list of hamlets, so it runs no village stages; it is still being built
+    stage by stage, so the classic road stages run over the new settlements for now.  The
+    two live side by side so they can be compared in the debug viewer before either is
+    retired.
     """
     if model not in MODELS:
         raise ValueError(f"Unknown pipeline model {model!r}. Supported: {', '.join(MODELS)}")
@@ -77,13 +78,21 @@ def default_stages(model: str = "classic") -> tuple[type["GeneratorStage"], ...]
             MarketStage,
             # Interim: the classic road stages still run over the new settlements, so
             # there is something to look at in the viewer. Markets are all TOWN tier for
-            # now, which is what InterurbanRoadStage expects. Villages, cities, lanes and
-            # trade roads each replace one of these in turn.
+            # now, which is what InterurbanRoadStage expects. Cities and trade roads each
+            # replace one of these in turn.
+            #
+            # The three classic village stages are deliberately absent. They exist to serve
+            # a village tier the organic model does not have: every hex clearing a
+            # habitability bar becomes a hamlet, which buried 74 markets under 835
+            # settlements on a 128x128 temperate map, so what the viewer showed was mostly
+            # not the haulage model. Organic will get a settlement tier below the market,
+            # but gated on holding something — a bridge, a pass — rather than sprinkled,
+            # and not until roads exist to say which crossings carry traffic.
+            #
+            # The win is legibility, not speed: the three stages cost 0.8 s of a 15.2 s
+            # pipeline. InterurbanRoadStage is 12.3 s of what remains.
             InterurbanRoadStage,
             CultivationStage,
-            VillagePlacementStage,
-            VillageTrackStage,
-            VillageCultivationStage,
         )
 
     return physical + (

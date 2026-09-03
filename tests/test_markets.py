@@ -5,6 +5,8 @@ rather than a config target, that every market is a plausible site with a real c
 and that the same seed gives the same markets.
 """
 
+import statistics
+
 import pytest
 
 from tests.worlds import build_pipeline
@@ -202,6 +204,40 @@ def test_market_count_tracks_the_surplus_on_offer():
                 )
 
     assert rows[-1][1] > rows[0][1], f"richest and poorest supported the same count. {summary}"
+
+
+def test_fertility_decides_how_many_markets_not_how_big():
+    """The other half of the claim `test_market_count_tracks_the_surplus_on_offer` makes.
+
+    A rich region does not grow bigger market towns than a poor one — it grows *more* of
+    them, because a market is bounded by what a cart can reach in a day's return and
+    surplus beyond that radius founds the next market rather than swelling this one.  So
+    counts diverge across climates (the sibling test) while the typical market stays the
+    same size, which is why the same absolute `market_viability_floor` calibrates on every
+    map instead of needing a per-climate target.
+
+    Climates supporting fewer than three markets are skipped: a median over two is an
+    accident, not a distribution.
+    """
+    medians = {}
+    for climate in ("boreal", "tropical", "temperate", "arid", "mediterranean"):
+        pops = [s.population for s in _market_world(regional_climate=climate).settlements]
+        if len(pops) >= 3:
+            medians[climate] = statistics.median(pops)
+
+    assert len(medians) >= 3, f"too few climates produced markets to compare: {medians}"
+    summary = ", ".join(f"{c}={m:.0f}" for c, m in sorted(medians.items()))
+
+    lo, hi = min(medians.values()), max(medians.values())
+    assert hi <= lo * 2.5, (
+        f"median market population varies {hi / lo:.1f}x across climates — fertility is "
+        f"sizing markets rather than counting them. {summary}"
+    )
+    # And it lands where a market town historically did, on every climate rather than on
+    # a calibration climate. `people_per_food` is what sets the level.
+    assert all(500 <= m <= 4000 for m in medians.values()), (
+        f"a median market fell outside the 500-4000 band of a real market town. {summary}"
+    )
 
 
 def test_raising_the_floor_plants_fewer_markets():

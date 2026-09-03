@@ -293,7 +293,7 @@ travel_ford_cost: 8.0      # Getting across away from a crossing, per multiple o
 market_day_radius: 10.0     # A day's return: out, business done, and home. Default: 10.0
 market_kernel_decay: 4.0    # d0 in the 1/(1 + d/d0) share a market takes from each hex it reaches. Default: 4.0
 market_min_separation: 5    # A suppression disc only, to stop two markets sharing a hexside. Real spacing comes from competition for surplus, which is what makes markets dense on rich ground and sparse on poor — a fixed separation cannot express that. Default: 5
-market_viability_floor: 5.0 # The one density knob, replacing target_city_count and target_town_count both: stop planting once the best remaining site scores below this. Calibrated against ~70–85 markets at 128x128 (England had ~700 markets in ~130,000 km2; this map is about an eighth of that). Default: 5.0
+market_viability_floor: 14.0 # The one density knob, replacing target_city_count and target_town_count both: stop planting once the best remaining site scores below this. Calibrated to ~70–85 markets at 128x128 (England had ~700 markets in ~130,000 km2; this map is about an eighth of that): on a temperate map with continent_falloff_edges = [south], seeds 42/7/3/11/19 give 74–81 markets — one per ~205 km2 of land, a 15 km lattice, each about 10 km from its nearest neighbour. An absolute threshold on gathered surplus rather than a target, so density follows the land: the same value yields 9 markets on an arid map and 74 on a temperate one, while median market population stays flat across climates. Default: 14.0
 
 # ---------------------------------------------------------------------------
 # Cultivation (farmland around settlements)

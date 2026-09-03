@@ -88,6 +88,30 @@ def test_stage_order_is_load_bearing():
     assert positions == sorted(positions), f"Stage order violated: {names}"
 
 
+_VILLAGE_STAGES = {
+    "VillagePlacementStage",
+    "VillageTrackStage",
+    "VillageCultivationStage",
+}
+
+
+def test_organic_runs_no_village_stages():
+    """The organic countryside is a productive surface, not a list of hamlets.
+
+    The village stages site a settlement on every hex clearing a habitability bar, which
+    buried ~80 markets under ~1,100 hamlets.  Sizing a market off a food surface and then
+    also enumerating that surface as settlements is double-counting the same peasantry.
+    """
+    names = {s.__name__ for s in default_stages("organic")}
+    assert not (names & _VILLAGE_STAGES), f"organic still plants villages: {names}"
+
+
+def test_classic_still_runs_the_village_stages():
+    """Removing them from organic must not touch classic — it is the comparison case."""
+    names = {s.__name__ for s in default_stages("classic")}
+    assert names >= _VILLAGE_STAGES, f"classic lost its village stages: {names}"
+
+
 def test_pipeline_runs_and_populates_a_world():
     # 48x48 rather than 32x32: `continent_shelf_hexes` is capped at a quarter of the
     # shorter side, so a 32-hex map is mostly coastal shelf and cannot muster the

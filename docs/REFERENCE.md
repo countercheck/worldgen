@@ -99,8 +99,10 @@ physical stages and diverge after them:
   drawn at random from a per-tier band and nothing about the site enters the number.
 - **`organic`** derives the hierarchy from pre-industrial haulage economics. Markets go
   where the most surplus can reach them inside a day's return, and their number follows
-  the land rather than a target. See § [3.10a](#310a-river-crossings--organic) and
-  § [3.10b](#310b-market-centres--organic).
+  the land rather than a target. It runs no village stages at all: the countryside is a
+  productive surface rather than a list of hamlets (§ [3.10b](#310b-market-centres--organic)),
+  so a temperate map carries ~80 settlements where `classic` carries ~1,100. See
+  § [3.10a](#310a-river-crossings--organic) and § [3.10b](#310b-market-centres--organic).
 
 The difference is not cosmetic. On one landlocked desert map at 128×128, `classic` places
 a city of 48,000 — and its five largest populations are identical, figure for figure, to
@@ -1209,6 +1211,17 @@ surface and never enumerated**. Historically faithful village density would be ~
 objects on a 128×128 map (Domesday: ~13,000 vills over ~130,000 km²), almost none of which
 carry military or administrative weight.
 
+**This is why `organic` omits `VillagePlacementStage`, `VillageTrackStage` and
+`VillageCultivationStage`.** They site a hamlet on every hex clearing a habitability bar,
+which buried 74 markets under 835 settlements on a 128×128 temperate map — so most of what
+the viewer showed was not the haulage model. `classic` keeps all three and is unchanged. A
+settlement tier *below* the market will return, but gated on holding something — a bridge,
+a pass — rather than sprinkled across the countryside.
+
+The win is legibility rather than speed. The three stages cost 0.8 s of a 15.2 s pipeline;
+`InterurbanRoadStage` is 12.3 s of the 14.4 s that remain, and SVG export of a map with 835
+settlements dominated the wall clock of a full `generate` run either way.
+
 **Surplus, not production, is what travels.** A farming household eats most of what it
 grows; `marketable_surplus_fraction` (~20%) is what can leave. Sizing markets off the
 surplus is why the tier ratios come out right with no target counts anywhere.
@@ -1792,7 +1805,7 @@ the surplus it draws on is depleted, and the scan repeats until nothing clears t
 
 | Param | Type | Default | Range | Effect |
 |---|---|---|---|---|
-| `market_viability_floor` | `float` | `5.0` | `> 0` | The one density knob, replacing `target_city_count` and `target_town_count` both: stop planting once the best remaining site scores below this. Calibrated against ~70–85 markets at 128×128 (England had ~700 markets in ~130,000 km²; this map is about an eighth of that) |
+| `market_viability_floor` | `float` | `14.0` | `> 0` | The one density knob, replacing `target_city_count` and `target_town_count` both: stop planting once the best remaining site scores below this. Calibrated to ~70–85 markets at 128×128 (England had ~700 markets in ~130,000 km²; this map is about an eighth of that): a temperate map with `continent_falloff_edges: [south]` gives 74–81 across seeds 42/7/3/11/19 — one per ~205 km² of land, a 15 km lattice, each about 10 km from its nearest neighbour. An absolute threshold on gathered surplus rather than a target, so density follows the land — the same value yields 9 markets on an arid map and 74 on a temperate one |
 | `market_min_separation` | `int` | `5` | `≥ 1` | A suppression disc only, to stop two markets sharing a hexside. Real spacing comes from competition for surplus, which is what makes markets dense on rich ground and sparse on poor — a fixed separation cannot express that |
 | `market_kernel_decay` | `float` | `4.0` | `> 0` | `d₀` in the `1/(1 + d/d₀)` share a market takes from each hex it reaches |
 
