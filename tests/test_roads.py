@@ -1,6 +1,6 @@
 import pytest
 
-from tests.worlds import build_pipeline
+from tests.worlds import build_pipeline, build_world
 from worldgen.core.config import WorldConfig
 from worldgen.core.hex import Hex, SettlementTier, TerrainClass
 from worldgen.core.hex_grid import road_polylines
@@ -589,7 +589,26 @@ def test_no_road_skirts_a_settlement_it_could_pass_through(road_state):
     )
 
 
-def test_the_road_network_is_all_one_piece(road_state):
+@pytest.fixture(scope="module", params=["classic", "organic"])
+def connected_state(request, road_state):
+    """The connectivity invariant, checked on both settlement models.
+
+    It used to be checked on `classic` alone, which cannot break it: the guarantee lives in
+    `InterurbanRoadStage`, and `classic` founds nothing afterwards. `organic` does —
+    `ChokepointStage` adds the village tier after the roads are built — so the one model
+    that can strand a settlement was the one nobody was watching.
+
+    This will not catch a rare case on its own: the failure that prompted it appears on one
+    map in sixty (128x128 mediterranean, seed 42) and on none at 48, 64 or 96. What it
+    catches is gross breakage, and the specific rule is tested directly in
+    `test_chokepoints.py`.
+    """
+    if request.param == "classic":
+        return road_state
+    return build_world(seed=42, width=64, height=64, model="organic")
+
+
+def test_the_road_network_is_all_one_piece(connected_state):
     """Every settlement must be reachable from every other **by road**.
 
     Two things excuse a break, and both are narrow. Roads may not run down a river channel,
@@ -612,7 +631,7 @@ def test_the_road_network_is_all_one_piece(road_state):
     from worldgen.core.hex_grid import neighbors
 
     adj: dict = {}
-    for a, b in road_state.road_edges:
+    for a, b in connected_state.road_edges:
         adj.setdefault(a, set()).add(b)
         adj.setdefault(b, set()).add(a)
     if not adj:
@@ -634,11 +653,15 @@ def test_the_road_network_is_all_one_piece(road_state):
             out.append(comp)
         return out
 
-    seats = {s.coord for s in road_state.settlements}
+    seats = {s.coord for s in connected_state.settlements}
     by_road = components(adj)
 
     # Nothing may be drawn that reaches neither a settlement nor a ferry landing.
-    anchors = seats | {c for f in road_state.ferries for c in (f.a, f.b)}
+    anchors = seats | {c for f in connected_state.ferries for c in (f.a, f.b)}
+    # `prune_orphan_roads` keeps a component that lands a sea leg — a road to a harbour is
+    # a road to somewhere — so this has to allow what the pruner allows, or it fails on
+    # ground the model deliberately keeps.
+    anchors |= {c for key in connected_state.sea_edges for c in key}
     for comp in by_road:
         assert comp & anchors, (
             f"{len(comp)} road hexes near {sorted(comp)[0]} reach no settlement and no "
@@ -648,12 +671,13 @@ def test_the_road_network_is_all_one_piece(road_state):
     # Once ferries count as links there must be one network — except for anything the
     # terrain genuinely severs, which the stage records rather than raising over.
     linked = {c: set(v) for c, v in adj.items()}
-    for ferry in road_state.ferries:
+    for ferry in connected_state.ferries:
         linked.setdefault(ferry.a, set()).add(ferry.b)
         linked.setdefault(ferry.b, set()).add(ferry.a)
     reached = max(components(linked), key=len, default=set())
     conceded = {
-        tuple(entry["coord"]) for entry in road_state.metadata.get("unreachable_settlements", [])
+        tuple(entry["coord"])
+        for entry in connected_state.metadata.get("unreachable_settlements", [])
     }
     stranded = sorted(seats - reached - conceded)
     assert not stranded, (
@@ -669,7 +693,7 @@ def test_the_road_network_is_all_one_piece(road_state):
     # boat. Roads must join what land can join.
     dry = {
         c
-        for c, hx in road_state.hexes.items()
+        for c, hx in connected_state.hexes.items()
         if hx.terrain_class not in (TerrainClass.OCEAN, TerrainClass.LAKE)
     }
     landmass: dict = {}

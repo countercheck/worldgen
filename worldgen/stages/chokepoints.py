@@ -153,6 +153,14 @@ class ChokepointStage(GeneratorStage):
 
         Both halves are needed. A bridge on a farm track is a plank, not a town; and a
         busy road crossing open country is passing through nowhere in particular.
+
+        And the road has to be part of the network that joins settlements to each other.
+        `road_tier` alone cannot say that, because the tiers are percentile cuts — a fixed
+        *share* of edges is secondary however little uses them — so a short spur can hold a
+        secondary road on no traffic at all. `prune_orphan_roads` keeps such a spur where it
+        lands a sea leg, since a road to a harbour is a road to somewhere; but a settlement
+        founded on one is a landing place, not a chokepoint, and it would be cut off from
+        every other settlement by land while sharing their ground.
         """
         hexes = state.hexes
         floor = ROAD_TIER_RANK[RoadTier(cfg.chokepoint_min_road_tier)]
@@ -161,6 +169,7 @@ class ChokepointStage(GeneratorStage):
             if ROAD_TIER_RANK[edge.tier] >= floor:
                 carries.add(a)
                 carries.add(b)
+        carries &= self._through_network(state)
 
         occupied = {s.coord for s in state.settlements}
         held = set()
@@ -174,6 +183,36 @@ class ChokepointStage(GeneratorStage):
                 held.add(coord)  # the bridgehead, which is where the town stands
 
         return sorted(held & settleable(hexes, cfg) - occupied)
+
+    @staticmethod
+    def _through_network(state) -> set:
+        """Road hexes on a component that already joins settlements to each other.
+
+        A component holding fewer than two settlements carries no journey between them,
+        whatever tier its edges came out at.
+        """
+        adj: dict = {}
+        for a, b in state.road_edges:
+            adj.setdefault(a, set()).add(b)
+            adj.setdefault(b, set()).add(a)
+
+        seats = {s.coord for s in state.settlements}
+        through: set = set()
+        seen: set = set()
+        for start in adj:
+            if start in seen:
+                continue
+            stack, comp = [start], set()
+            while stack:
+                c = stack.pop()
+                if c in comp:
+                    continue
+                comp.add(c)
+                stack.extend(adj[c] - comp)
+            seen |= comp
+            if len(comp & seats) >= 2:
+                through |= comp
+        return through
 
     # -- planting --------------------------------------------------------------
 

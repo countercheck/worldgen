@@ -6,14 +6,34 @@ behind — so what these test is that both halves of the gate bind, and that the
 nothing from the tier above.
 """
 
+import numpy as np
 import pytest
 
 from tests.worlds import build_pipeline, build_world
 from worldgen.core.config import WorldConfig
-from worldgen.core.hex import SOIL_RANK, Hex, SettlementTier, SoilQuality
+from worldgen.core.hex import (
+    SOIL_RANK,
+    Hex,
+    Settlement,
+    SettlementRole,
+    SettlementTier,
+    SoilQuality,
+)
 from worldgen.core.hex_grid import neighbors
-from worldgen.core.world_state import ROAD_TIER_RANK, RoadTier
-from worldgen.stages.chokepoints import BRIDGE, PASS, is_pass, saddle_relief_m
+from worldgen.core.world_state import (
+    ROAD_TIER_RANK,
+    RoadEdge,
+    RoadTier,
+    WorldState,
+    road_edge_key,
+)
+from worldgen.stages.chokepoints import (
+    BRIDGE,
+    PASS,
+    ChokepointStage,
+    is_pass,
+    saddle_relief_m,
+)
 
 # 96x96 with the gate opened to `track`, rather than the 128x128 and `secondary` that ship.
 # At production's settings this map grows a single village, and one instance cannot show
@@ -123,6 +143,52 @@ def test_every_village_carries_traffic(choke_world):
         assert max(ROAD_TIER_RANK[t] for t in carried) >= floor, (
             f"village at {s.coord} carries only {[t.value for t in carried]}"
         )
+
+
+def test_a_spur_that_joins_no_settlements_is_not_a_chokepoint():
+    """The third half of the gate, and the one a generated map will rarely show you.
+
+    Road tiers are percentile cuts — a fixed *share* of edges comes out secondary however
+    little uses them — so a short spur can hold a secondary road on no traffic at all.
+    `prune_orphan_roads` keeps such a spur where it lands a sea leg, because a road to a
+    harbour is a road to somewhere. A village founded on one is a landing place rather than
+    a chokepoint, and it ends up cut off by land from every settlement it shares ground
+    with, which is the invariant `_join_by_land` exists to hold.
+
+    Built by hand rather than sampled, because the case is rare: it appears on one map in
+    sixty (128x128 mediterranean, seed 42) and on none at 48, 64 or 96, so a test that
+    generates worlds and looks would have gone on passing.
+    """
+    cfg = WorldConfig(width=12, height=12, chokepoint_min_road_tier="secondary")
+    state = WorldState.empty(1, cfg.width, cfg.height, cfg.grid_layout)
+
+    # A through road joining two settlements, and a spur joining nothing. Both carry a
+    # bridge, and both are secondary.
+    through = [(1, 1), (2, 1), (3, 1)]
+    spur = [(8, 8), (9, 8)]
+    for a, b in zip(through, through[1:], strict=False):
+        state.road_edges[road_edge_key(a, b)] = RoadEdge(RoadTier.SECONDARY, 0.0)
+    state.road_edges[road_edge_key(*spur)] = RoadEdge(RoadTier.SECONDARY, 0.0)
+    for coord in (through[1], spur[0]):
+        state.hexes[coord].tags.add(BRIDGE)
+
+    for coord in (through[0], through[2]):
+        s = Settlement(
+            coord=coord,
+            tier=SettlementTier.TOWN,
+            role=SettlementRole.MARKET,
+            population=500,
+            name="market",
+        )
+        state.settlements.append(s)
+        state.hexes[coord].settlement = s
+
+    stage = ChokepointStage(cfg, np.random.default_rng(0))
+    candidates = stage._candidates(state, cfg)
+    assert through[1] in candidates, "the bridge on the through road should be a candidate"
+    assert spur[0] not in candidates, (
+        f"the bridge on a spur joining no settlements was accepted: {candidates}"
+    )
 
 
 def test_a_stricter_gate_founds_fewer():
