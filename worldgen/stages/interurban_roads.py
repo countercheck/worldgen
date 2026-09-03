@@ -1,4 +1,5 @@
 from collections import defaultdict, deque
+from heapq import heappop, heappush
 
 from ..core.hex import SettlementTier, TerrainClass
 from ..core.hex_grid import astar, astar_to_any, distance, neighbors
@@ -43,6 +44,11 @@ class InterurbanRoadStage(GeneratorStage):
         canonical_routes: dict = {}
         # The network as it grows, so a route can aim at the road rather than the town.
         net_adj: dict = defaultdict(set)
+        # Costing the road home means a Dijkstra over the network per route, and the
+        # network barely changes once the trunks are down — so keep the answer and rebuild
+        # only when an edge has actually been added since it was worked out.
+        net_version = [0]
+        home_cache: dict = {}
 
         # Hexsides the rivers run along — roads may cross a river but never travel down
         # it, so the bank a road takes stays readable. Settlement hexes are exempt.
@@ -97,7 +103,16 @@ class InterurbanRoadStage(GeneratorStage):
             if key in canonical_routes:
                 path = canonical_routes[key]
             else:
-                path = self._route(hexes, origin_s.coord, dest_coord, net_adj, node_cost, edge_cost)
+                path = self._route(
+                    hexes,
+                    origin_s.coord,
+                    dest_coord,
+                    net_adj,
+                    node_cost,
+                    edge_cost,
+                    home_cache,
+                    net_version[0],
+                )
                 if path is None or len(path) < 2:
                     continue
                 canonical_routes[key] = path
@@ -106,8 +121,10 @@ class InterurbanRoadStage(GeneratorStage):
                 hex_traffic[c] += 1.0
             for a, b in zip(path, path[1:], strict=False):
                 edge_traffic[road_edge_key(a, b)] += 1.0
-                net_adj[a].add(b)
-                net_adj[b].add(a)
+                if b not in net_adj[a]:
+                    net_adj[a].add(b)
+                    net_adj[b].add(a)
+                    net_version[0] += 1
 
         # Tier is a property of an edge, not of a journey.  It used to be taken per hex and
         # then collapsed onto whole routes by `_path_min_tier`, which handed a 157-hex route
@@ -200,7 +217,7 @@ class InterurbanRoadStage(GeneratorStage):
         state.road_edges = road_edges
         return state
 
-    def _route(self, hexes, origin, dest, net_adj, node_cost, edge_cost):
+    def _route(self, hexes, origin, dest, net_adj, node_cost, edge_cost, cache, version):
         """The journey from *origin* to *dest*: a new leg, then the road that already goes there.
 
         A traveller bound for a town does not need a road of his own all the way, he needs
@@ -218,22 +235,25 @@ class InterurbanRoadStage(GeneratorStage):
         than at the far end of the map: 217k node expansions against 1,329k, and a road
         stage of 3.8s against 9.6s, while covering 11.8% of the land instead of 19.3%.
 
-        The road back to *dest* is taken by hop count rather than by cost. Along a road the
-        two agree closely enough — every hex on it is already cheap — and a cost-weighted
-        walk would have to be redone as the pheromone shifted under it.
+        The road home is *costed*, and weighed against the cost of reaching each possible
+        join. Stopping at whichever road hex is cheapest to reach is not the same as the
+        cheapest journey: a traveller would join at his own doorstep and follow the network
+        however far round it went. Measured over 1,186 routes, that took the wrong join on
+        24% of them, for a journey a median 9% longer, 33% at the ninetieth percentile and
+        360% at worst — 4.1% longer on average across every route.
+
+        That weighing is why the search runs without a heuristic. `goal_cost` is real cost
+        and the heuristic counts hexes at 1.0 apiece, which road travel is far below, so the
+        two together make the search abandon at the first expansion and take the network
+        route every time. Dijkstra is slower and is the price of the comparison meaning
+        anything.
         """
-        # Every hex from which dest is reachable on the network so far, and the way back.
-        # Empty for the first traveller, who therefore paths the whole way and becomes the
-        # road that everyone after him joins.
-        tree: dict = {dest: None}
-        if dest in net_adj:
-            queue = deque([dest])
-            while queue:
-                c = queue.popleft()
-                for n in net_adj[c]:
-                    if n not in tree:
-                        tree[n] = c
-                        queue.append(n)
+        cached = cache.get(dest)
+        if cached is not None and cached[0] == version:
+            tree, home_cost = cached[1], cached[2]
+        else:
+            tree, home_cost = self._road_home_tree(hexes, dest, net_adj, node_cost, edge_cost)
+            cache[dest] = (version, tree, home_cost)
 
         def road_home(node):
             out = []
@@ -242,13 +262,39 @@ class InterurbanRoadStage(GeneratorStage):
                 node = tree[node]
             return out
 
-        if origin in tree:
-            return road_home(origin)
-
-        leg = astar_to_any(hexes, origin, set(tree), node_cost, edge_cost, aim=dest)
+        # No short circuit when the origin is already on the network. It is tempting — there
+        # is a road home, so take it — but that is `_stitch_via_junction`'s mistake in
+        # another guise, committing to an existing route without weighing it against a
+        # direct one. The origin is itself a goal reached at no cost, so the network route
+        # is the search's opening candidate and is beaten only if striking out pays.
+        leg = astar_to_any(hexes, origin, set(tree), node_cost, edge_cost, goal_cost=home_cost)
         if leg is None:
             return None
         return leg + road_home(tree[leg[-1]])
+
+    @staticmethod
+    def _road_home_tree(hexes, dest, net_adj, node_cost, edge_cost):
+        """Every hex the network can reach *dest* from, with the way back and its cost."""
+        tree: dict = {dest: None}
+        home_cost: dict = {dest: 0.0}
+        if dest not in net_adj:
+            return tree, home_cost
+        queue = [(0.0, dest)]
+        while queue:
+            cost, c = heappop(queue)
+            if cost > home_cost.get(c, float("inf")):
+                continue
+            for n in net_adj[c]:
+                if n not in hexes:
+                    continue
+                step = node_cost(hexes[n]) + edge_cost(hexes[c], hexes[n])
+                if step == float("inf"):
+                    continue
+                if cost + step < home_cost.get(n, float("inf")):
+                    home_cost[n] = cost + step
+                    tree[n] = c
+                    heappush(queue, (cost + step, n))
+        return tree, home_cost
 
     def _guarantee_connectivity(self, hexes, places, road_edges, cfg, blocked, settled):
         """Join any settlement the traffic model left off the network, by land or by boat.

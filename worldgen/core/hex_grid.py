@@ -191,17 +191,28 @@ def astar_to_any(
     cost_fn: Callable[[Hex], float],
     edge_cost_fn: Callable[[Hex, Hex], float] | None = None,
     aim: HexCoord | None = None,
+    goal_cost: dict | None = None,
 ) -> list[HexCoord] | None:
-    """`astar`, but it stops at the first hex in *goals* rather than at one named hex.
+    """`astar`, but it ends at the best hex in *goals* rather than at one named hex.
 
     What it is for: a traveller bound for a town does not need a road of his own the whole
     way there, he needs to reach the road that already goes there.  So the search runs
     against the set of hexes from which the destination is already reachable, and stops at
     whichever it touches first.
 
-    *aim* steers the heuristic — the destination itself, so the search still heads the right
-    way rather than sprawling in all directions.  Without it the search is a Dijkstra that
-    happens to stop early.
+    *aim* steers the heuristic — the destination itself, so the search heads the right way
+    rather than sprawling.  Without it this is a Dijkstra that happens to stop early.
+
+    *goal_cost* is what remains to be travelled after reaching each goal, so that the search
+    minimises the whole journey rather than the cost of reaching the network.  Those are not
+    the same thing: without it a traveller joins the road at whatever hex is cheapest to
+    reach and follows it however far round it goes.
+
+    **Pass `goal_cost` only with `aim=None`.**  The two are in different units — `goal_cost`
+    is real cost, while the heuristic counts hexes at 1.0 apiece, and road travel costs a
+    fraction of that.  Mixing them makes the cutoff below fire on the first expansion, so
+    the search returns the network route every time without ever looking at an alternative.
+    With `aim=None` the frontier is ordered by true cost and the comparison is sound.
     """
     if start not in grid or not goals:
         return None
@@ -212,20 +223,25 @@ def astar_to_any(
     came_from: dict = {start: None}
     g_score = {start: 0.0}
     visited = set()
+    best_total, best_node = float("inf"), None
 
     while open_set:
-        _, current = heapq.heappop(open_set)
+        f, current = heapq.heappop(open_set)
+        # Nothing left on the frontier can better the journey already found. Sound only
+        # because f and best_total are in the same units, which is what `aim` would break.
+        if f > best_total:
+            break
         if current in visited:
             continue
         visited.add(current)
 
         if current in goals:
-            path = []
-            node = current
-            while node is not None:
-                path.append(node)
-                node = came_from[node]
-            return list(reversed(path))
+            total = g_score[current] + (goal_cost.get(current, 0.0) if goal_cost else 0.0)
+            if total < best_total:
+                best_total, best_node = total, current
+            # With no residual to weigh, the first goal reached is the cheapest reached.
+            if goal_cost is None:
+                break
 
         for neighbor in neighbors(current):
             if neighbor not in grid or neighbor in visited:
@@ -242,7 +258,14 @@ def astar_to_any(
                 h = distance(neighbor, aim) if aim is not None else 0.0
                 heapq.heappush(open_set, (tentative_g + h, neighbor))
 
-    return None
+    if best_node is None:
+        return None
+    path = []
+    node = best_node
+    while node is not None:
+        path.append(node)
+        node = came_from[node]
+    return list(reversed(path))
 
 
 def _is_water(hexes: dict[HexCoord, Hex], coord: HexCoord) -> bool:
