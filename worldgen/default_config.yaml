@@ -127,7 +127,7 @@ base_precip_mm: 0.0
 # The treeline is a temperature, not a height. The altitude it falls at follows from how
 # warm the region is and how fast air cools with height — about 1400 m in temperate
 # country, sea level in the subarctic, near 4000 m in the tropics.
-biome_treeline_temp_c: 1.0 # Mean annual Celsius at which trees stop. Default: 1.0
+biome_treeline_temp_c: -2.0 # Mean annual Celsius at which trees stop. The height that falls at follows from the region's warmth and the lapse rate: ~1800 m temperate, ~500 m boreal, >4000 m tropical. Default: -2.0
 biome_cold_temp_c: 5.0   # Mean annual Celsius below which the cold biomes take over — taiga gives way to broadleaf around here. Default: 5.0
 biome_warm_temp_c: 18.0  # Mean annual Celsius above which the warm biomes take over. Default: 18.0
 biome_dry_precip_mm: 400.0   # Annual rainfall below which the dry biomes take over — steppe and desert. Default: 400

@@ -1,6 +1,8 @@
+from collections import Counter
+
 import pytest
 
-from worldgen.core.config import WorldConfig
+from worldgen.core.config import CLIMATE_CONTEXTS, WorldConfig
 from worldgen.core.hex import Biome, TerrainClass
 from worldgen.core.pipeline import GeneratorPipeline
 from worldgen.stages.biomes import BiomeStage
@@ -56,6 +58,56 @@ def test_biome_distribution_sanity(biome_state):
     # A 32×32 map should produce at least a few distinct biome types
     biomes_present = {h.biome for h in biome_state.hexes.values()}
     assert len(biomes_present) >= 4, f"Too few distinct biomes: {biomes_present}"
+
+
+def test_every_climate_has_a_treeline_above_its_own_lowland():
+    """No region may have its treeline at sea level.
+
+    The alpine test runs before every temperature rule, so a treeline at 0 m makes the
+    whole of a region bare rock — no forest, no tundra, nothing its palette says it should
+    grow.  That is what happened when `biome_treeline_temp_c` was set to the same 1 C as
+    the boreal region's own mean: the boreal map came out entirely ALPINE and supported
+    five settlements on sixteen thousand hexes.
+
+    A quarter of the map's vertical scale is the bar, not merely "above zero", because a
+    treeline just above the shoreline is the same failure in slower motion.
+    """
+    for climate in CLIMATE_CONTEXTS:
+        cfg = WorldConfig(regional_climate=climate)
+        assert cfg.treeline_m() > 0.25 * cfg.max_elevation_m, (
+            f"{climate} region has its treeline at {cfg.treeline_m():.0f} m, so most of it "
+            f"is above the treeline before any terrain is generated"
+        )
+
+
+def test_a_boreal_region_grows_boreal_forest():
+    """A region named for its forest must actually produce it.
+
+    The palette test alone does not catch this: TUNDRA and BOREAL stayed in the boreal
+    palette throughout, they were simply never reached.
+    """
+    state = _build_pipeline(width=48, height=48).run()
+    cfg = WorldConfig(**state.metadata["config"])
+    assert cfg.regional_climate == "temperate", "fixture climate changed; update this test"
+
+    p = GeneratorPipeline(42, WorldConfig(width=48, height=48, regional_climate="boreal"))
+    for stage in (
+        ElevationStage,
+        ErosionStage,
+        TerrainClassificationStage,
+        HydrologyStage,
+        ClimateStage,
+        BiomeStage,
+    ):
+        p.add_stage(stage)
+    boreal = p.run()
+
+    land = [h for h in boreal.hexes.values() if h.terrain_class != TerrainClass.OCEAN]
+    wooded = sum(1 for h in land if h.biome in (Biome.BOREAL, Biome.TUNDRA))
+    assert wooded / len(land) > 0.1, (
+        f"Only {wooded / len(land):.1%} of a boreal region is taiga or tundra; "
+        f"got {Counter(h.biome.name for h in land).most_common(4)}"
+    )
 
 
 def test_reproducibility():

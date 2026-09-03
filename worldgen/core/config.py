@@ -496,11 +496,19 @@ class WorldConfig:
     # The mean annual temperature at which trees stop, in Celsius. The treeline is not a
     # height — it is a temperature, and the height it happens to fall at follows from how
     # warm the region is and how fast air cools with altitude. That is why it stands at
-    # about 1400 m in temperate country, near sea level in the subarctic, and close to
-    # 4000 m in the tropics. A fixed altitude could not say any of that, and a fraction of
-    # the elevation range said the opposite: it gave every map the same share of alpine
-    # ground however low its hills.
-    biome_treeline_temp_c: float = 1.0
+    # about 1800 m in temperate country, some 500 m in the subarctic, and above 4000 m in
+    # the tropics. A fixed altitude could not say any of that, and a fraction of the
+    # elevation range said the opposite: it gave every map the same share of alpine ground
+    # however low its hills.
+    #
+    # -2 C rather than the 1 C first set here, for two reasons. It is the better figure:
+    # treelines sit near -1 to -2 C mean annual in the Alps and in Scandinavia, and
+    # Siberian larch grows a great deal colder than that, so 1 C put the line too low
+    # everywhere. And 1 C collided exactly with the boreal region's own mean of 1 C, which
+    # put its treeline at sea level — the alpine test runs before every temperature rule,
+    # so a boreal map came out as bare rock from shore to shore with no boreal forest
+    # anywhere in it, and supported five settlements on 16 000 hexes.
+    biome_treeline_temp_c: float = -2.0
     # Mean annual temperature bounding the cold and warm biome bands, in Celsius. Taiga
     # gives way to broadleaf woodland around 5 C; the warm band begins where subtropical
     # vegetation takes over, around 18 C.
