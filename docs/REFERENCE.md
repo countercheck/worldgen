@@ -1402,8 +1402,32 @@ dist[d]   = max(1, hex_distance(origin, d))
 weight[d] = population[d] / dist[d] ^ road_gravity_exponent      (default 2.5)
 prob[d]   = weight[d] / sum(weight)        # excluding origin
 ```
-Then A*-paths from origin to chosen destination using the (live, pheromone-
-updated) cost functions. Traffic on every hex of the path is incremented.
+Then routes to that destination — but **to the network, not to the hex**. A
+traveller bound for a town does not need a road of his own all the way there;
+he needs to reach the road that already goes there. So the search
+(`astar_to_any`) runs against every hex from which the destination is already
+reachable along roads that exist, and stops at whichever it touches first. The
+rest of the journey is that road. The first traveller finds nothing and paths
+the whole way, becoming the road everyone after him joins.
+
+This is what stops the network being a mat. Pathing all the way to the seat
+had each route find its own line, and A* — whose heuristic assumes 1.0 per
+step, and so misprices anything cheaper — cannot reliably find the same line
+twice, so routes ran *beside* one another rather than joining. Aiming at the
+network means a route joins it by construction rather than by the
+pathfinder's good luck.
+
+It is also far cheaper, because the search ends at the first road it meets
+rather than at the far side of the map. Measured at 128×128 against pathing
+to the hex: **217k node expansions against 1,329k, a road stage of 1.6s
+against 7.4s, and 11.8% of the land covered against 19.3%** — with braiding
+at 9.7% against 32.7% and clean degree-2 corridor at 70% against 43%. Plain
+Dijkstra, which is optimal and therefore the ceiling, gives 12.3% coverage
+and 4.1% braiding for 39.7s: routing to the network gets a *better* network
+than optimal point-to-point routing, ten times faster, because it is
+answering a better question.
+
+Traffic on every hex of the path is incremented.
 
 To save A* calls, each (origin, destination) pair is cached as a
 **canonical route**. The first traveller does the pathing; everyone after

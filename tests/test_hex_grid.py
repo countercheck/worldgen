@@ -1,6 +1,7 @@
 from worldgen.core.hex import Hex, TerrainClass
 from worldgen.core.hex_grid import (
     astar,
+    astar_to_any,
     distance,
     grade_reachable_count,
     hex_range,
@@ -370,3 +371,41 @@ def test_road_water_transitions_marks_the_land_side():
 def test_road_water_transitions_none_on_a_dry_network():
     path = _path()
     assert road_water_transitions(_edges(path, RoadTier.PRIMARY), _grid(path)) == set()
+
+
+# --- astar_to_any ------------------------------------------------------------
+
+
+def test_astar_to_any_stops_at_the_nearest_goal():
+    grid = {(q, r): Hex(coord=(q, r)) for q in range(8) for r in range(3)}
+    path = astar_to_any(grid, (0, 0), {(6, 0), (2, 0)}, lambda h: 1.0, aim=(6, 0))
+    assert path[0] == (0, 0)
+    assert path[-1] == (2, 0), "walked past the nearer goal"
+
+
+def test_astar_to_any_returns_a_single_hex_when_it_starts_on_one():
+    grid = {(0, 0): Hex(coord=(0, 0))}
+    assert astar_to_any(grid, (0, 0), {(0, 0)}, lambda h: 1.0) == [(0, 0)]
+
+
+def test_astar_to_any_with_no_goals():
+    grid = {(0, 0): Hex(coord=(0, 0))}
+    assert astar_to_any(grid, (0, 0), set(), lambda h: 1.0) is None
+
+
+def test_astar_to_any_returns_none_when_every_goal_is_walled_off():
+    grid = {(q, r): Hex(coord=(q, r)) for q in range(3) for r in range(3)}
+    cost = lambda h: float("inf") if h.coord[0] == 1 else 1.0  # noqa: E731
+    assert astar_to_any(grid, (0, 0), {(2, 0)}, cost) is None
+
+
+def test_astar_to_any_takes_the_cheapest_goal_not_the_closest():
+    """Nearest in hexes is not nearest in cost, and cost is what decides."""
+    grid = {(q, r): Hex(coord=(q, r)) for q in range(6) for r in range(3)}
+
+    def cost(h):
+        return 50.0 if h.coord == (1, 0) else 1.0
+
+    # (2,0) is two hexes away but behind an expensive hex; (0,2) is further but cheap.
+    path = astar_to_any(grid, (0, 0), {(2, 0), (0, 2)}, cost)
+    assert path[-1] == (0, 2)

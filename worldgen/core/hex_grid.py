@@ -184,6 +184,67 @@ def astar(
     return None
 
 
+def astar_to_any(
+    grid: dict[HexCoord, Hex],
+    start: HexCoord,
+    goals,
+    cost_fn: Callable[[Hex], float],
+    edge_cost_fn: Callable[[Hex, Hex], float] | None = None,
+    aim: HexCoord | None = None,
+) -> list[HexCoord] | None:
+    """`astar`, but it stops at the first hex in *goals* rather than at one named hex.
+
+    What it is for: a traveller bound for a town does not need a road of his own the whole
+    way there, he needs to reach the road that already goes there.  So the search runs
+    against the set of hexes from which the destination is already reachable, and stops at
+    whichever it touches first.
+
+    *aim* steers the heuristic — the destination itself, so the search still heads the right
+    way rather than sprawling in all directions.  Without it the search is a Dijkstra that
+    happens to stop early.
+    """
+    if start not in grid or not goals:
+        return None
+    if start in goals:
+        return [start]
+
+    open_set = [(0.0, start)]
+    came_from: dict = {start: None}
+    g_score = {start: 0.0}
+    visited = set()
+
+    while open_set:
+        _, current = heapq.heappop(open_set)
+        if current in visited:
+            continue
+        visited.add(current)
+
+        if current in goals:
+            path = []
+            node = current
+            while node is not None:
+                path.append(node)
+                node = came_from[node]
+            return list(reversed(path))
+
+        for neighbor in neighbors(current):
+            if neighbor not in grid or neighbor in visited:
+                continue
+            cost = cost_fn(grid[neighbor])
+            if edge_cost_fn is not None:
+                cost += edge_cost_fn(grid[current], grid[neighbor])
+            if cost == float("inf"):
+                continue
+            tentative_g = g_score[current] + cost
+            if neighbor not in g_score or tentative_g < g_score[neighbor]:
+                came_from[neighbor] = current
+                g_score[neighbor] = tentative_g
+                h = distance(neighbor, aim) if aim is not None else 0.0
+                heapq.heappush(open_set, (tentative_g + h, neighbor))
+
+    return None
+
+
 def _is_water(hexes: dict[HexCoord, Hex], coord: HexCoord) -> bool:
     """Water test used by the path helpers.
 
