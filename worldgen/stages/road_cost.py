@@ -362,7 +362,28 @@ def pheromone_discount(base: float, traffic: float, cfg) -> float:
     return max(0.0, base - cfg.road_pheromone_factor * traffic)
 
 
-def route_through_settlements(road_edges, hexes, settled, cfg, blocked=frozenset()) -> int:
+def _keep_higher_tier(existing, incoming):
+    """Merge rule for a tier map: a road laid here is never demoted by one bent onto it."""
+    if existing is None or ROAD_TIER_RANK[incoming] > ROAD_TIER_RANK[existing]:
+        return incoming
+    return existing
+
+
+def add_traffic(existing, incoming):
+    """Merge rule for a traffic map: two roads meeting carry the sum of what each carried.
+
+    This is why consolidation happens *before* tiering rather than after. Bending a bypass
+    through a town merges two flows onto one pair of edges, and the merged edge should be
+    ranked on what it now carries — two secondary roads meeting can make a primary. Taking
+    the higher of two tiers after the fact cannot express that; adding the traffic and
+    then cutting the percentiles does it for nothing.
+    """
+    return incoming if existing is None else existing + incoming
+
+
+def route_through_settlements(
+    road_edges, hexes, settled, cfg, blocked=frozenset(), combine=_keep_higher_tier
+) -> int:
     """Bend any road skirting a settlement so that it passes through it instead.
 
     A road whose two ends are both neighbours of a town enters the ring around it and
@@ -372,11 +393,23 @@ def route_through_settlements(road_edges, hexes, settled, cfg, blocked=frozenset
 
     So the edge (a, b) is replaced by (a, s) and (s, b): one hex longer, and the traffic
     now calls. Where those two already exist the bypass was pure redundancy and simply
-    goes. Neither replacement may demote a road already laid, cross a river channel it has
-    no business on, or climb a grade a laden cart cannot.
+    goes. A replacement may not cross a river channel it has no business on, climb a grade
+    a laden cart cannot, or cost more than `road_settlement_detour_max_mult` times the edge
+    it replaces — a road is allowed to decline a town that is dear to reach.
 
-    Mutates *road_edges*; returns how many bypasses were rerouted.
+    *road_edges* maps an edge to whatever *combine* knows how to merge: traffic before
+    tiering (`add_traffic`), or tiers after it (the default, which never demotes). Mutates
+    it in place; returns how many bypasses were rerouted.
     """
+
+    def leg_cost(start, end) -> float:
+        """What one step onto *end* costs: the ground there, plus getting onto it."""
+        return (
+            terrain_base_cost(hexes[end], cfg)
+            + river_hex_cost(hexes[end], cfg)
+            + road_edge_cost(hexes[start], hexes[end], cfg)
+        )
+
     rerouted = 0
     for seat in settled:
         seat_hx = hexes.get(seat)
@@ -395,12 +428,18 @@ def route_through_settlements(road_edges, hexes, settled, cfg, blocked=frozenset
                 for start, end in legs
             ):
                 continue
+            # And the town has to be worth reaching. A detour is two legs where there was
+            # one, so it costs double on even ground and the bound is on what lies beyond
+            # that: the far bank of a river, an escarpment, the top of a cliff.
+            direct = leg_cost(a, b)
+            detour = leg_cost(a, seat) + leg_cost(seat, b)
+            if direct > 0 and detour > direct * cfg.road_settlement_detour_max_mult:
+                continue
             from ..core.world_state import road_edge_key
 
-            tier = road_edges.pop(road_edge_key(a, b))
+            carried = road_edges.pop(road_edge_key(a, b))
             for start, end in legs:
                 key = road_edge_key(start, end)
-                if ROAD_TIER_RANK[tier] > ROAD_TIER_RANK.get(road_edges.get(key), -1):
-                    road_edges[key] = tier
+                road_edges[key] = combine(road_edges.get(key), carried)
             rerouted += 1
     return rerouted

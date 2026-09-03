@@ -5,6 +5,7 @@ from ..core.hex_grid import astar, distance, neighbors
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import Ferry, RoadTier, WorldState, road_edge_key
 from .road_cost import (
+    add_traffic,
     bank_discount,
     ferry_link,
     make_road_edge_cost,
@@ -106,6 +107,14 @@ class InterurbanRoadStage(GeneratorStage):
         # the weakest tier any hex on it earned — one quiet hex demoted a trunk road end to
         # end, and a map came out 1,935 secondary against 6 primary.
         #
+        # Consolidation happens here, on the traffic, and not after the tiers are cut.
+        # Bending a bypass through a town merges two flows onto one pair of edges, and the
+        # merged edge has to be ranked on what it now carries — two secondary roads meeting
+        # at a market can make a primary. Taking the higher of two tiers afterwards cannot
+        # express that; adding the traffic first and cutting the percentiles after does it
+        # for nothing.
+        route_through_settlements(edge_traffic, hexes, settled, cfg, blocked, combine=add_traffic)
+
         # River edges use the lower `road_river_traffic_min` threshold so that
         # well-trafficked riverbanks become drawn roads (towpaths, river roads).
         def eligible_edge(key) -> bool:
@@ -147,7 +156,8 @@ class InterurbanRoadStage(GeneratorStage):
             )
             state.ferries.extend(ferries)
 
-        # Last, once the network is settled: no road passes a town at a field's width.
+        # Again over the finished network, on tiers this time: the connectivity guarantee
+        # lays trunk roads of its own, which can skirt a town like any other.
         route_through_settlements(road_edges, hexes, settled, cfg, blocked)
 
         for a, b in road_edges:

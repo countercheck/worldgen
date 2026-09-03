@@ -1915,6 +1915,7 @@ settlement should be placed where its only escape requires one.
 
 | Param | Type | Default | Effect |
 |---|---|---|---|
+| `road_settlement_detour_max_mult` | `float` | `4.0` | A road passing a settlement at one hex is bent through it instead — a road skirting a town at the width of a field is a motor-age idea. This caps what the detour may cost, as a multiple of the edge it replaces; validated `≥ 2.0`, since a detour is two legs where there was one and so costs double on even ground by construction. What it bounds is the ground *beyond* that: the town on the far bank of a river, or up an escarpment. It catches a dear crossing and a steep bank together, which a grade cap would not — the worst case measured cost 31× its bypass at a grade of 4%, having been hauled onto a river channel rather than up anything |
 | `road_min_traffic` | `int` | `3` | Minimum traffic for a hex to count as a road at all |
 | `road_river_traffic_min` | `int` | `1` | Lower threshold for river hexes (validated `≥ 0`). Lets riverbanks become roads on light traffic |
 | `road_primary_pct` | `float` | `0.10` | Top fraction of eligible hexes, by traffic, that become PRIMARY |

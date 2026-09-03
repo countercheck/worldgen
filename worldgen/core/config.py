@@ -357,6 +357,12 @@ class WorldConfig:
             )
         if self.road_slope_cap_mult <= 0:
             raise ValueError(f"road_slope_cap_mult must be > 0, got {self.road_slope_cap_mult}")
+        # Below 2.0 the rule can never fire: a detour is two legs where there was one.
+        if self.road_settlement_detour_max_mult < 2.0:
+            raise ValueError(
+                "road_settlement_detour_max_mult must be >= 2.0 (a detour is two legs "
+                f"where there was one), got {self.road_settlement_detour_max_mult}"
+            )
         if self.settlement_min_reachable < 1:
             raise ValueError(
                 f"settlement_min_reachable must be >= 1, got {self.settlement_min_reachable}"
@@ -690,6 +696,20 @@ class WorldConfig:
     road_slope_free_pct: float = 3.0  # grade % below which slope costs nothing
     road_slope_cap_pct: float = 25.0  # grade % at which cost saturates
     road_slope_cap_mult: float = 10.0  # saturation multiplier at cap grade
+    # A road passing a settlement at one hex is bent through it instead, because a road
+    # that skirts a town at the width of a field is a motor-age idea. This is what the
+    # detour may cost, as a multiple of the edge it replaces.
+    #
+    # 2.0 is free: the detour is two legs where there was one, so on even ground it costs
+    # exactly double by construction. What this bounds is the ground *beyond* that — the
+    # town on the far bank of a river, up an escarpment, or above a cliff. Those are
+    # caught together because they are all simply dear, which a grade cap would miss: the
+    # worst case measured on a 128x128 map cost 31 times its bypass at a grade of 4%,
+    # having been hauled onto a river channel rather than up anything.
+    #
+    # The slope cap still refuses outright what a laden cart cannot climb at all; this
+    # decides what is merely not worth it.
+    road_settlement_detour_max_mult: float = 4.0
     road_min_traffic: int = 3
     road_river_traffic_min: int = 1
     road_primary_pct: float = 0.10

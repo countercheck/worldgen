@@ -537,15 +537,38 @@ def test_no_road_skirts_a_settlement_it_could_pass_through(road_state):
     passed. Measured on a 128x128 map, "both ends within r" covers 5% of the network at
     r=1, 12% at r=2 and 22% at r=3, while the road distance to a nearby town already
     equals the crow-flies distance at every radius out to four.
+
+    "Could" is load-bearing: a road is allowed to decline a town that is dear to reach,
+    which on this map is mostly a town standing on a river channel, and occasionally one
+    up a bank. So the test applies the same bound the rule does, and only complains about
+    a skirt that was affordable.
     """
     from worldgen.core.hex_grid import neighbors
+    from worldgen.stages.road_cost import river_hex_cost, road_edge_cost, terrain_base_cost
+
+    hexes = road_state.hexes
+    cfg = WorldConfig(**road_state.metadata["config"])
+
+    def leg(start, end):
+        return (
+            terrain_base_cost(hexes[end], cfg)
+            + river_hex_cost(hexes[end], cfg)
+            + road_edge_cost(hexes[start], hexes[end], cfg)
+        )
 
     offenders = []
     for seat in {s.coord for s in road_state.settlements}:
         ring = set(neighbors(seat))
-        offenders += [(seat, a, b) for a, b in road_state.road_edges if a in ring and b in ring]
+        for a, b in road_state.road_edges:
+            if a not in ring or b not in ring:
+                continue
+            direct = leg(a, b)
+            detour = leg(a, seat) + leg(seat, b)
+            if direct > 0 and detour <= direct * cfg.road_settlement_detour_max_mult:
+                offenders.append((seat, a, b, detour / direct))
 
     assert not offenders, (
-        f"{len(offenders)} roads pass a settlement without entering it, e.g. "
-        f"{offenders[0][1]}->{offenders[0][2]} around {offenders[0][0]}"
+        f"{len(offenders)} roads pass a settlement without entering it, at a detour they "
+        f"could afford. e.g. {offenders[0][1]}->{offenders[0][2]} around {offenders[0][0]} "
+        f"at {offenders[0][3]:.1f}x"
     )
