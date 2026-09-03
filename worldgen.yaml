@@ -14,6 +14,18 @@
 # ---------------------------------------------------------------------------
 width: 128    # Map width in hexes. Default: 128
 height: 128   # Map height in hexes. Default: 128
+
+# How width x height are laid onto the hex grid.
+#   axial   Hex coordinates run q in [0, width), r in [0, height). The flat-top pixel
+#           transform shears that rhombus, so the drawn map is a leaning parallelogram
+#           with a straight edge on all four sides. Default.
+#   offset  Odd-q offset column/row. The drawn map is a rectangle; odd columns sit half
+#           a hex lower than even ones, so the north and south edges are ragged while
+#           east and west stay straight.
+# Columns are spaced 1.5 hex-sizes apart and rows sqrt(3), so an offset map is square
+# when height is about 0.87 * width — 128 x 111, say.
+grid_layout: axial
+
 # Elevation is metres above sea level, so sea level is zero by definition and is not a
 # setting. How the map looks is set by how high the land stands and how deep the sea lies.
 max_elevation_m: 1500.0  # Highest ground above sea level. The map's vertical scale, and the single most consequential setting for what country this is: 800 gives downland, 1500 mixed uplands, 3000 an Alpine massif. Default: 1500
@@ -48,6 +60,44 @@ continent_shelf_hexes: 10 # Width in hexes (km) of the coastal shelf over which 
 #   [-600.0, 0.0]  →  west stands 600 m higher, map runs downhill to the east
 #   [0.0, 0.0]     →  no tilt (default)
 elevation_gradient_m: [0.0, 0.0]  # Tilt across the map in metres: [east, south].
+
+# ---------------------------------------------------------------------------
+# Elevation from an image
+# ---------------------------------------------------------------------------
+# Set heightmap_path to take the terrain from a picture instead of generating it. The
+# image replaces the noise elevation stage; erosion, rivers, climate, biomes, settlements
+# and roads all run on top of it unchanged. A relative path resolves against the working
+# directory, the same as --config. The image is stretched to fill the grid on each axis,
+# and each hex averages the pixels its footprint covers.
+#
+# Two notes. The path is copied into world.json as part of the config dump, so it travels
+# with any world you export. And erosion still runs afterwards, carving the imported
+# terrain as it would a generated one — use `worldgen import-heightmap` when you need the
+# image reproduced exactly, since that skips erosion. Erosion no longer renormalises the
+# elevation range, so an imported coast stays where you drew it.
+#
+# Sizing: use grid_layout "offset" with height about 0.87 * width, or the imported map is
+# sheared into a parallelogram. Give an image at least as large as the grid; a smaller one
+# is upsampled into blocks of equal elevation, which flattens terrain classification.
+heightmap_path: null      # Path to the image, or null to generate terrain as usual. Default: null
+
+# How the image is read.
+#   elevation  A greyscale heightmap. Luminance maps linearly onto the map's vertical
+#              scale, black at -seabed_depth_m and white at max_elevation_m.
+#   coastline  A land/sea stencil only. Heights still come from the noise, shaped so
+#              everything drawn as land sits above sea level and everything drawn as sea
+#              below it — so the coastline you drew is the coastline you get.
+heightmap_mode: elevation # Default: elevation
+
+# Coastline mode only. Where the image has a meaningful alpha channel, alpha decides what
+# is land; otherwise luminance is compared against this threshold.
+heightmap_land_threshold: 0.5 # Brightness at or above which a pixel is land. Default: 0.5
+heightmap_invert: false   # True: the darker side of the threshold is the land instead. Default: false
+# Coastline mode only. The stencil is authoritative by default, so land drawn running off
+# the edge of the map stays land. Set true to also apply the rectangular edge falloff,
+# which rings the map with sea and so guarantees every river a coast to reach — at the
+# cost of eating a landmass you deliberately ran off the border.
+heightmap_coast_falloff: false # Default: false
 
 # ---------------------------------------------------------------------------
 # Terrain classification
@@ -357,7 +407,8 @@ export:
   contour_max_stroke: 4.0            # Maximum contour stroke width in pixels. Default: 4.0
 
   # Legend settings — only used when "legend" is in the layers list above.
-  # The hex grid is sheared into a parallelogram, leaving the top-right and
-  # bottom-left of the canvas empty; the legend goes into one of them.
+  # On an axial grid the hexes are sheared into a parallelogram, leaving the top-right
+  # and bottom-left of the canvas empty; the legend goes into one of them. An offset
+  # grid fills its canvas, so there the legend sits in the corner over the map.
   legend_corner: top-right  # Which empty corner to use: top-right | bottom-left. Default: top-right
   legend_scale: 1.0         # Legend size as a multiple of hex_size. Default: 1.0

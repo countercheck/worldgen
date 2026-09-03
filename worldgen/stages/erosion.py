@@ -181,12 +181,18 @@ class ErosionStage(GeneratorStage):
         span = cfg.max_elevation_m + cfg.seabed_depth_m
         sea_shaped = cfg.seabed_depth_m / span
 
+        # Indexed by grid column/row throughout; `state.coord_at` turns an index back
+        # into a hex on the way in and out, so droplets run over the same rectangular
+        # field whichever layout the grid uses.
         arr = np.zeros((w, h))
-        for q in range(w):
-            for r in range(h):
-                arr[q, r] = (state.hexes[(q, r)].elevation + cfg.seabed_depth_m) / span
+        for col in range(w):
+            for row in range(h):
+                elevation = state.hexes[state.coord_at(col, row)].elevation
+                arr[col, row] = (elevation + cfg.seabed_depth_m) / span
 
-        land_coords = [(q, r) for q in range(w) for r in range(h) if arr[q, r] >= sea_shaped]
+        land_coords = [
+            (col, row) for col in range(w) for row in range(h) if arr[col, row] >= sea_shaped
+        ]
 
         if land_coords:
             land_arr = np.array(land_coords)
@@ -245,8 +251,9 @@ class ErosionStage(GeneratorStage):
         # has to stay where it is for the word to mean anything, and a landscape that has
         # been worn down should read as worn down rather than being scaled back up to
         # fill the range it started with.
-        for q in range(w):
-            for r in range(h):
-                state.hexes[(q, r)].elevation = float(arr[q, r]) * span - cfg.seabed_depth_m
+        for col in range(w):
+            for row in range(h):
+                metres = float(arr[col, row]) * span - cfg.seabed_depth_m
+                state.hexes[state.coord_at(col, row)].elevation = metres
 
         return state

@@ -222,8 +222,7 @@ def test_lake_drainage_merges_without_rewiring_existing_river():
         lakes=lakes,
         acc=acc,
         filled=filled,
-        w=ws.width,
-        h=ws.height,
+        on_border=ws.on_border,
     )
 
     assert flow_dir[spillway] == merge

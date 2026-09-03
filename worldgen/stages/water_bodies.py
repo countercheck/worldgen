@@ -20,7 +20,6 @@ class WaterBodiesStage(GeneratorStage):
     """
 
     def run(self, state: WorldState) -> WorldState:
-        w, h = state.width, state.height
         hexes = state.hexes
 
         water: set = {c for c, hx in hexes.items() if hx.terrain_class == TerrainClass.OCEAN}
@@ -31,7 +30,7 @@ class WaterBodiesStage(GeneratorStage):
                 continue
             component = _bfs_component(seed, water)
             visited |= component
-            touches_edge = any(_on_border(c, w, h) for c in component)
+            touches_edge = any(state.on_border(c) for c in component)
             if not touches_edge:
                 for c in component:
                     hexes[c].terrain_class = TerrainClass.LAKE
@@ -51,11 +50,6 @@ def _bfs_component(seed, water: set) -> set:
                 component.add(nbr)
                 queue.append(nbr)
     return component
-
-
-def _on_border(coord, w: int, h: int) -> bool:
-    q, r = coord
-    return q == 0 or q == w - 1 or r == 0 or r == h - 1
 
 
 def _fix_coast_hexes(state: WorldState, cfg) -> None:

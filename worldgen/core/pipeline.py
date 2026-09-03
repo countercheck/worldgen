@@ -42,7 +42,9 @@ class GeneratorPipeline:
         """Run all stages in sequence."""
         from .world_state import WorldState
 
-        state = WorldState.empty(self.seed, self.config.width, self.config.height)
+        state = WorldState.empty(
+            self.seed, self.config.width, self.config.height, self.config.grid_layout
+        )
         state.metadata["seed"] = self.seed
         state.metadata["config"] = self.config.__dict__
 

@@ -1,6 +1,12 @@
 import json
+import os
 from dataclasses import asdict, dataclass, fields
 from typing import Any
+
+from .hex_grid import GRID_LAYOUTS
+
+# How an imported image is read.  See `WorldConfig.heightmap_mode`.
+HEIGHTMAP_MODES = ("elevation", "coastline")
 
 
 @dataclass(frozen=True)
@@ -51,6 +57,14 @@ class WorldConfig:
 
     width: int = 128
     height: int = 128
+    # How width x height are laid out on the hex grid:
+    #   "axial"   q in [0, width), r in [0, height).  The flat-top pixel transform
+    #             shears that rhombus, so the drawn map is a leaning parallelogram.
+    #   "offset"  odd-q offset column/row.  The drawn map is a rectangle; odd columns
+    #             sit half a hex lower than even ones, so the north and south edges are
+    #             ragged.  A square needs height about 0.87 * width, since hex columns
+    #             are spaced 1.5 hex-sizes apart and rows sqrt(3).
+    grid_layout: str = "axial"
     # Sea level is the datum: elevation is metres above it, so it is zero by
     # definition and is no longer a setting. What the map looks like is set by how
     # high the land stands and how deep the sea lies, below.
@@ -86,10 +100,30 @@ class WorldConfig:
     # raises the eastern edge, positive south the southern one.
     elevation_gradient_m: tuple[float, float] = (0.0, 0.0)
 
+    # Elevation from an image.  Setting a path swaps ImageElevationStage in for
+    # ElevationStage, so the terrain comes from the picture rather than from noise.
+    # A relative path resolves against the working directory, as `--config` does.
+    #   "elevation"  the image is a greyscale heightmap: luminance maps linearly onto
+    #                the elevation range, black at the sea floor and white at
+    #                max_elevation_m.
+    #   "coastline"  the image is only a land/sea stencil.  Heights still come from the
+    #                noise, shaped so that land sits above sea level and sea below it,
+    #                which makes the drawn coastline the coastline.
+    heightmap_path: str | None = None
+    heightmap_mode: str = "elevation"
+    # Coastline mode only.  Alpha decides land where the image has a meaningful alpha
+    # channel; otherwise luminance is compared against this threshold.
+    heightmap_land_threshold: float = 0.5
+    heightmap_invert: bool = False  # True: the darker side of the threshold is the land
+    # Coastline mode only.  The stencil is authoritative by default, so land drawn
+    # running off the edge stays land.  Set true to also apply the rectangular edge
+    # falloff, which rings the map with sea and guarantees rivers a coast to reach.
+    heightmap_coast_falloff: bool = False
+
     # Terrain classification — bands of gradient, in metres of rise per kilometre.
     # Absolute, not a fraction of the elevation range: the old fractional thresholds moved
-    # with road_elev_range_m, so what counted as a mountain was 120 m/km at the 3000 m
-    # default and 20 m/km on a 500 m map, where it called rolling downland a peak.
+    # with the map's vertical scale, so what counted as a mountain was 120 m/km at a
+    # 3000 m span and 20 m/km on a 500 m map, where it called rolling downland a peak.
     #   under 30    FLAT        level going: plough it, cart across it
     #   30 to 100   ROLLING     undulating; farmed, and a laden cart manages
     #   100 to 250  STEEP       pack animals, terraces, no wheels
@@ -162,6 +196,10 @@ class WorldConfig:
     endorheic_marsh_min_precip_mm: float = 300.0
 
     def __post_init__(self) -> None:
+        if self.grid_layout not in GRID_LAYOUTS:
+            raise ValueError(
+                f"unknown grid_layout {self.grid_layout!r}; choose from {', '.join(GRID_LAYOUTS)}"
+            )
         self.wind_direction = _coerce_pair("wind_direction", self.wind_direction)
         self.elevation_gradient_m = _coerce_pair("elevation_gradient_m", self.elevation_gradient_m)
         if self.channel_min_discharge < 0:
@@ -212,6 +250,26 @@ class WorldConfig:
             raise ValueError(
                 "seabed_depth_m is a depth below sea level and must be positive, got "
                 f"{self.seabed_depth_m}"
+            )
+        if self.heightmap_path is not None:
+            # A programmatic caller reaches for a Path; everything downstream, including
+            # the JSON and YAML dumps, wants a plain string.
+            if isinstance(self.heightmap_path, os.PathLike):
+                self.heightmap_path = os.fspath(self.heightmap_path)
+            if not isinstance(self.heightmap_path, str):
+                raise ValueError(
+                    f"heightmap_path must be a path or None, got {type(self.heightmap_path).__name__}"
+                )
+            if not self.heightmap_path:
+                raise ValueError("heightmap_path must not be empty; use null to disable it")
+        if self.heightmap_mode not in HEIGHTMAP_MODES:
+            raise ValueError(
+                f"unknown heightmap_mode {self.heightmap_mode!r}; "
+                f"choose from {', '.join(HEIGHTMAP_MODES)}"
+            )
+        if not (0.0 <= self.heightmap_land_threshold <= 1.0):
+            raise ValueError(
+                f"heightmap_land_threshold must be in [0, 1], got {self.heightmap_land_threshold}"
             )
         if self.endorheic_marsh_radius < 0:
             raise ValueError(

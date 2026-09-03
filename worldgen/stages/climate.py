@@ -17,15 +17,17 @@ class ClimateStage(GeneratorStage):
 
     def _compute_temperature(self, state: WorldState) -> None:
         w, h = state.width, state.height
-        height = state.height
         cfg = self.config
         base = cfg.mean_temperature_c
         lat_range = cfg.latitude_temp_range_c
         # The lapse rate is quoted per kilometre of ascent and elevation is metres above
         # sea level, so this is a division by a thousand and nothing more.
 
-        for (_, r), hx in state.hexes.items():
-            row_frac = r / max(height - 1, 1)
+        # Latitude is the grid *row*, which on an offset grid is the true north-south
+        # axis; on an axial grid it is r, as before.
+        for coord, hx in state.hexes.items():
+            row = state.grid_index(coord)[1]
+            row_frac = row / max(h - 1, 1)
             lat_temp = math.sin(row_frac * math.pi)
             # Subtract the mean of sin over [0, π] (= 2/π ≈ 0.637) so that
             # mean_temperature_c is the true map mean.
@@ -36,11 +38,12 @@ class ClimateStage(GeneratorStage):
             hx.temperature = temp
 
         # Smooth temperature with gaussian_filter (replaces 5 manual neighbor-average passes)
-        temp_arr = np.array([[state.hexes[(q, r)].temperature for r in range(h)] for q in range(w)])
+        coords = [[state.coord_at(col, row) for row in range(h)] for col in range(w)]
+        temp_arr = np.array([[state.hexes[c].temperature for c in column] for column in coords])
         temp_arr = gaussian_filter(temp_arr, sigma=1.0)
-        for q in range(w):
-            for r in range(h):
-                state.hexes[(q, r)].temperature = float(temp_arr[q, r])
+        for col in range(w):
+            for row in range(h):
+                state.hexes[coords[col][row]].temperature = float(temp_arr[col, row])
 
     def _compute_moisture(self, state: WorldState) -> None:
         wind = self.config.wind_direction
@@ -49,6 +52,8 @@ class ClimateStage(GeneratorStage):
             wlen = 1.0
         wd = (wind[0] / wlen, wind[1] / wlen)
 
+        # A linear function of the axial coord, as is the pixel transform, so the
+        # direction this sweeps is the same one whatever layout the grid uses.
         def pos(coord):
             q, r = coord
             return (q + r * 0.5, float(r))
@@ -121,12 +126,15 @@ class ClimateStage(GeneratorStage):
         # Smear the pattern, the way the temperature field is smeared. Weather systems
         # are wide, and rain falls either side of the ridge that lifted it rather than
         # only on the hex that did the lifting.
-        w, h = state.width, state.height
-        arr = np.array([[state.hexes[(q, r)].moisture for r in range(h)] for q in range(w)])
+        # Indexed by grid column/row, like the temperature smear above: `state.coord_at`
+        # is what makes the field the same rectangle whichever layout the grid uses.
+        width, height = state.width, state.height
+        coords = [[state.coord_at(col, row) for row in range(height)] for col in range(width)]
+        arr = np.array([[state.hexes[c].moisture for c in column] for column in coords])
         arr = gaussian_filter(arr, sigma=2.0)
-        for q in range(w):
-            for r in range(h):
-                state.hexes[(q, r)].moisture = float(arr[q, r])
+        for col in range(width):
+            for row in range(height):
+                state.hexes[coords[col][row]].moisture = float(arr[col, row])
 
         # Then put the pattern into millimetres a year.
         #

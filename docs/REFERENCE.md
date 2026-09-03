@@ -23,6 +23,7 @@ shape every map.
 2. [Data Model](#2-data-model)
 3. [Pipeline & Algorithms](#3-pipeline--algorithms)
    - [3.1 Elevation](#31-elevation)
+   - [3.1a Elevation from an Image](#31a-elevation-from-an-image)
    - [3.2 Erosion](#32-erosion)
    - [3.3 Terrain Classification](#33-terrain-classification)
    - [3.4 Water Bodies](#34-water-bodies)
@@ -165,7 +166,8 @@ flowchart TD
 |---|---|---|
 | `seed` | `int` | The RNG seed for this run |
 | `width`, `height` | `int` | Grid dimensions in hexes |
-| `hexes` | `dict[HexCoord, Hex]` | Every cell, keyed by `(q, r)` |
+| `layout` | `str` | `"axial"` or `"offset"` — how `width`/`height` map onto hex coordinates |
+| `hexes` | `dict[HexCoord, Hex]` | Every cell, keyed by axial `(q, r)` in either layout |
 | `rivers` | `list[River]` | Source-to-confluence (or source-to-sea) paths |
 | `settlements` | `list[Settlement]` | Cities, towns, and villages combined |
 | `roads` | `list[Road]` | PRIMARY / SECONDARY / TRACK paths |
@@ -317,6 +319,84 @@ of anchorages) rather than a road in the channel; if the gap is wider than
 - The shelf width is capped at a quarter of the shorter side. On a map smaller than the
   shelf there is no interior left to be a continent and the whole thing sinks; real maps
   never hit this.
+
+---
+
+### 3.1a Elevation from an Image
+
+[stages/image_elevation.py](../worldgen/stages/image_elevation.py),
+[export/heightmap_import.py](../worldgen/export/heightmap_import.py)
+
+**Purpose:** Take the terrain from a picture instead of generating it.
+
+**Reads:** nothing from `WorldState`; the image named by `heightmap_path`.
+**Writes:** `hex.elevation` for every hex — the same contract as `ElevationStage`.
+
+**Config:** `heightmap_path`, `heightmap_mode`, `heightmap_land_threshold`,
+`heightmap_invert`, `heightmap_coast_falloff`, plus `sea_level` and
+`continent_shelf_hexes` in coastline mode.
+
+Selected by `stages.stages_for(config)`, which substitutes this stage for
+`ElevationStage` when `heightmap_path` is set. The substitution is positional and
+keeps the stage count, so every later stage draws the same child RNG it would
+have in a generated world.
+
+**Algorithm**
+
+1. `export/heightmap_import.load_luminance` reads the file — the only file I/O in
+   the feature, kept in the layer that is allowed to do it. It branches on the
+   Pillow mode *before* converting: `convert("L")` clamps a 16-bit image at 255
+   rather than rescaling it, which would silently reduce a real DEM to a
+   silhouette. Alpha comes back only when the band actually varies.
+2. The pixels are **area-averaged** onto the grid, stretched to fill it on each
+   axis independently. Each hex takes the mean of the pixels its footprint covers,
+   computed exactly via prefix sums in `O(n + m)`, so downsampling a large image
+   does not alias a coastline into a staircase. Image row 0 maps to grid row 0 —
+   both are north, so there is no flip.
+3. In `elevation` mode that resampled luminance *is* the terrain, mapped linearly
+   from `0..255` (or `0..65535`) onto `[0, 1]`.
+4. In `coastline` mode the image is reduced to a land/sea mask instead — by alpha
+   where it is meaningful, otherwise by `heightmap_land_threshold`. The mask is
+   resampled as floats and re-thresholded at 0.5, which antialiases it rather than
+   dropping islands and pinching straits. `noise_field` from `ElevationStage` then
+   supplies the heights, and `shape_to_mask` fits them to the stencil: land ramps
+   from just above `sea_level` up into the noise's full range over
+   `continent_shelf_hexes` inland, and sea ramps from just below `sea_level` down
+   to the deep floor, both eased with the same smoothstep the continent falloff
+   uses. The result is stretched to fill `[0, 1]` with sea level pinned in place.
+
+**Why the range is filled.** `ErosionStage` ends by renormalising whatever range it
+is handed onto `[0, 1]`, which moves `sea_level` relative to the terrain. A
+coastline field is built against a *fixed* sea level, so without this it would have
+its whole shelf dragged under: measured on a 96×83 import, a stencil covering 32% of
+the map came out of the full pipeline at 2%, the continent broken into specks.
+Filling the range makes that renormalisation a no-op, and erosion then carves the
+imported terrain exactly as it does a generated one.
+
+**Notes**
+
+- `elevation` mode gets no such protection, by design — it has no fixed reference to
+  preserve. Erosion will stretch a low-contrast heightmap's contrast and move its
+  coast. Use `worldgen import-heightmap`, which skips erosion, when the image must be
+  reproduced exactly.
+- The range is re-anchored again after `heightmap_coast_falloff`, since that blend moves
+  the waterline and takes the field back off `[0, 1]`. Without it the opt-in path walks
+  straight back into the renormalisation the anchoring exists to defuse.
+- Nothing forces an imported field below `sea_level`, so a stencil with no sea in it
+  produces a world with no ocean. "Rivers reach the ocean" stops being an invariant
+  there, and the range cannot be anchored at both ends — no all-land field both stays
+  above `sea_level` and reaches zero — so erosion will flood part of the map. The stage
+  warns.
+- Alpha is only taken as the stencil when a real share of the image (≥1%) is transparent.
+  A single antialiased or lossily-round-tripped pixel would otherwise outrank the
+  brightness threshold and carry the whole map with it.
+- Mode `"I"` (32-bit integer) is the one ambiguous case: a DEM stored in metres is
+  indistinguishable from 16-bit-scaled data, and `0–3000 / 65535` is a map entirely below
+  sea level. Scaling by the observed peak would be the histogram stretch this importer
+  refuses to do, so a suspiciously low peak warns instead.
+- An image smaller than the grid is upsampled by replication — a box filter has
+  nothing else to do — giving blocks of equal elevation that read as `FLAT` to terrain
+  classification. The stage warns.
 
 ---
 
@@ -691,7 +771,9 @@ what stops an arid region growing a jungle three valleys over.
 #### Temperature — degrees Celsius
 
 ```
-row_frac    = r / max(height - 1, 1)          # 0 at top, 1 at bottom
+row_frac    = row / max(height - 1, 1)        # 0 at top, 1 at bottom; `row` is the grid
+                                              # row, which is `r` on an axial grid and
+                                              # the true north-south axis on an offset one
 lat_temp    = sin(row_frac * π)               # 0 at poles, 1 at equator
 temperature = mean_temperature_c
             + (lat_temp - 2/π) * latitude_temp_range_c
@@ -1495,12 +1577,34 @@ from the dataclass again without the suite failing.
 |---|---|---|---|---|
 | `width` | `int` | `128` | ≥ 1 | Map width in hexes (`1 hex = 1 km` by convention) |
 | `height` | `int` | `128` | ≥ 1 | Map height in hexes |
+| `grid_layout` | `str` | `"axial"` | `axial` \| `offset` | Grid shape — see below |
+
+`grid_layout` decides which hexes a world is built from:
+
+- **`axial`** — `q` runs `[0, width)`, `r` runs `[0, height)`. That rhombus is sheared
+  by the flat-top pixel transform, so the drawn map is a leaning parallelogram with a
+  straight edge on all four sides.
+- **`offset`** — odd-q offset column/row, stored as the axial coordinate each
+  column/row names. The drawn map is a **rectangle**: odd columns sit half a hex lower
+  than even ones, so the north and south edges are **ragged** while east and west stay
+  straight.
+
+Hexes are keyed by axial coordinates in both layouts, so adjacency, distance and
+pathfinding are identical; only the set of hexes differs. Stages that work on a
+`(width, height)` array go through `WorldState.coord_at(col, row)` and
+`WorldState.grid_index(coord)` to cross between array indices and hex coordinates, and
+`WorldState.on_border(coord)` is the layout-aware map-edge test the hydrology and
+water-body stages drain to.
+
+Columns are spaced `1.5 * hex_size` apart and rows `sqrt(3) * hex_size`, so an offset
+map comes out square at `height ≈ 0.87 * width` — `128 x 111`, for instance.
 
 ### 4.2 Elevation — § [3.1](#31-elevation)
 
 Elevation is **metres above sea level**. Sea level is the datum, so it is zero by
 definition and is not a setting — the old `sea_level` fraction is retired. What kind of
 country the map is comes from the two vertical-scale settings below.
+
 
 | Param | Type | Default | Range | Effect |
 |---|---|---|---|---|
@@ -1517,6 +1621,16 @@ country the map is comes from the two vertical-scale settings below.
 | `continent_shelf_hexes` | `int` | `10` | `≥ 1` | Width in hexes (km) of the shelf over which land drops to the sea. In hexes rather than a fraction of the map, so the coastal gradient is the same per km at any size. Capped at a quarter of the shorter side |
 | `continent_shelf_variance` | `float` | `0.35` | `[0, 1]` | How much the shelf's inner edge wanders. `0` gives a coast of even width; higher makes bays and headlands. The terrain noise already moves the shoreline a good deal, so this is a nudge |
 | `elevation_gradient_m` | `(float, float)` | `(0.0, 0.0)` | — | Directional tilt `[east, south]` **in metres**, applied after shaping. `(0, -600)` stands the north edge 600 m higher and runs the map downhill to the south. Replaces `elevation_gradient`, which was a fraction of an abstract range |
+
+### 4.2a Elevation from an Image — § [3.1a](#31a-elevation-from-an-image)
+
+| Param | Type | Default | Range | Effect |
+|---|---|---|---|---|
+| `heightmap_path` | `str \| None` | `None` | — | Path to an image to read the terrain from, resolved against the working directory. Setting it swaps `ImageElevationStage` in for `ElevationStage` |
+| `heightmap_mode` | `str` | `"elevation"` | `elevation`, `coastline` | `elevation` reads the image as a greyscale heightmap; `coastline` reads it as a land/sea stencil and fills it with generated terrain |
+| `heightmap_land_threshold` | `float` | `0.5` | `[0, 1]` | Coastline mode. Brightness at or above which a pixel is land. Ignored where the image has a meaningful alpha channel |
+| `heightmap_invert` | `bool` | `False` | — | Coastline mode. Treat the darker side of the threshold as the land instead |
+| `heightmap_coast_falloff` | `bool` | `False` | — | Coastline mode. Also apply the rectangular edge falloff, ringing the map with sea. Off by default, so the stencil is authoritative |
 
 ### 4.3 Terrain Classification — § [3.3](#33-terrain-classification)
 

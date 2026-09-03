@@ -96,3 +96,29 @@ def default_stages(model: str = "classic") -> tuple[type["GeneratorStage"], ...]
         VillageTrackStage,
         VillageCultivationStage,
     )
+
+
+def stages_for(config, model: str = "classic") -> tuple[type["GeneratorStage"], ...]:
+    """`default_stages(model)`, resolved against a config.
+
+    Today that means one substitution: a world with `heightmap_path` set reads its terrain
+    from that image instead of generating it, so `ImageElevationStage` takes
+    `ElevationStage`'s place.
+
+    The swap is positional and the tuple keeps its length, which is what makes an imported
+    world comparable with a generated one.  `GeneratorPipeline.run` draws a child seed per
+    stage from the parent stream before constructing it, so as long as the count does not
+    change, hydrology, climate and settlement all see exactly the seed they would have.
+
+    Kept separate from `default_stages` rather than folded into it: that function is the
+    declarative statement of what the pipeline *is*, and both the ordering test and
+    `build_pipeline`'s `until=` look stages up in it by name.
+    """
+    stages = default_stages(model)
+    if not getattr(config, "heightmap_path", None):
+        return stages
+
+    from .elevation import ElevationStage
+    from .image_elevation import ImageElevationStage
+
+    return tuple(ImageElevationStage if s is ElevationStage else s for s in stages)
