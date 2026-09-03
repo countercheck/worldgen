@@ -311,7 +311,20 @@ market_day_radius: 10.0     # A day's return: out, business done, and home. Defa
 market_kernel_decay: 4.0    # d0 in the 1/(1 + d/d0) share a market takes from each hex it reaches. Default: 4.0
 market_min_separation: 5    # A suppression disc only, to stop two markets sharing a hexside. Real spacing comes from competition for surplus, which is what makes markets dense on rich ground and sparse on poor — a fixed separation cannot express that. Default: 5
 city_min_draw: 40.0 # How much other markets' surplus must reach a town before it is a city. The density knob for the tier above the market, and the same shape as market_viability_floor below it: an absolute threshold on what can be gathered, not a target count. A market gathers a countryside inside a day's cart; a city gathers markets, over haulage_range_land with water counting fifteen times — so the number is not comparable to the floor. 40.0 gives 3 cities on a temperate coast and none on an arid map. Default: 40.0
-market_viability_floor: 17.0 # The one density knob, replacing target_city_count and target_town_count both: stop planting once the best remaining site scores below this. Calibrated to ~70–85 markets at 128x128 (England had ~700 markets in ~130,000 km2; this map is about an eighth of that): on a temperate map with continent_falloff_edges = [south], seeds 42/7/3/11/19 give 74–81 markets — one per ~205 km2 of land, a 15 km lattice, each about 10 km from its nearest neighbour. An absolute threshold on gathered surplus rather than a target, so density follows the land: the same value yields 9 markets on an arid map and 74 on a temperate one, while median market population stays flat across climates. Default: 14.0
+market_viability_floor: 17.0 # The one density knob, replacing target_city_count and target_town_count both: stop planting once the best remaining site scores below this. Calibrated to ~70–85 markets at 128x128 (England had ~700 markets in ~130,000 km2; this map is about an eighth of that): on a temperate map with continent_falloff_edges = [south], seeds 42/7/3/11/19 give 74–81 markets — one per ~205 km2 of land, a 15 km lattice, each about 10 km from its nearest neighbour. An absolute threshold on gathered surplus rather than a target, so density follows the land: the same value yields 9 markets on an arid map and 74 on a temperate one, while median market population stays flat across climates. Default: 17.0
+
+# Chokepoints: the settlement tier below the market, founded on bridgeheads and passes
+# that carry real traffic. These are the places that exist because the road has no choice
+# — Oxford, Cambridge, Frankfurt, Innsbruck are all named for their crossing — rather than
+# because the ground is good, which is why the stage runs after the roads are built.
+#
+# A bridge on a farm track is a plank, not a town, so `chokepoint_min_road_tier` decides
+# what counts as traffic; it is the setting that actually controls how many of these there
+# are. `chokepoint_min_draw` reads directly as people once multiplied by people_per_food:
+# 0.25 is a hundred, which is a village rather than a farmstead.
+chokepoint_min_road_tier: secondary # Least road tier a crossing must carry to be worth a settlement: primary | secondary | track. Default: secondary
+chokepoint_min_separation: 2 # Suppression disc, and how far one must stand off an existing settlement. Default: 2
+chokepoint_min_draw: 0.25  # Smallest village worth founding, in food units; times people_per_food for the population. Default: 0.25
 
 # ---------------------------------------------------------------------------
 # Cultivation (farmland around settlements)

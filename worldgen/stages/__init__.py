@@ -67,6 +67,7 @@ def default_stages(model: str = "classic") -> tuple[type["GeneratorStage"], ...]
     )
 
     if model == "organic":
+        from .chokepoints import ChokepointStage
         from .cities import CityPromotionStage
         from .crossings import CrossingStage
         from .markets import MarketStage
@@ -82,20 +83,24 @@ def default_stages(model: str = "classic") -> tuple[type["GeneratorStage"], ...]
             CityPromotionStage,
             # Interim: the classic road stages still run over the new settlements, so
             # there is something to look at in the viewer. Markets are all TOWN tier for
-            # now, which is what InterurbanRoadStage expects. Cities and trade roads each
-            # replace one of these in turn.
+            # now, which is what InterurbanRoadStage expects. Trade roads replace this
+            # in turn.
             #
             # The three classic village stages are deliberately absent. They exist to serve
-            # a village tier the organic model does not have: every hex clearing a
-            # habitability bar becomes a hamlet, which buried 74 markets under 835
-            # settlements on a 128x128 temperate map, so what the viewer showed was mostly
-            # not the haulage model. Organic will get a settlement tier below the market,
-            # but gated on holding something — a bridge, a pass — rather than sprinkled,
-            # and not until roads exist to say which crossings carry traffic.
+            # a village tier built the other way round: every hex clearing a habitability
+            # bar becomes a hamlet, which buried 74 markets under 835 settlements on a
+            # 128x128 temperate map, so what the viewer showed was mostly not the haulage
+            # model. `ChokepointStage` below is the organic village tier — gated on holding
+            # something rather than sprinkled.
             #
             # The win is legibility, not speed: the three stages cost 0.8 s of a 15.2 s
             # pipeline. InterurbanRoadStage is 12.3 s of what remains.
             InterurbanRoadStage,
+            # Chokepoints after roads, and that ordering is the whole idea. A chokepoint
+            # is not a good site that happens to have traffic; it is a bad site that has
+            # traffic anyway, and only the built network can say which crossings carry
+            # any. They sit on the road by construction, so nothing has to be recut.
+            ChokepointStage,
             CultivationStage,
         )
 

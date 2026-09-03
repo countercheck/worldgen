@@ -322,6 +322,18 @@ class WorldConfig:
             )
         if self.lapse_rate_c_per_km < 0.0:
             raise ValueError(f"lapse_rate_c_per_km must be >= 0, got {self.lapse_rate_c_per_km}")
+        if self.chokepoint_min_separation < 0:
+            raise ValueError(
+                f"chokepoint_min_separation must be >= 0, got {self.chokepoint_min_separation}"
+            )
+        if self.chokepoint_min_draw < 0.0:
+            raise ValueError(f"chokepoint_min_draw must be >= 0, got {self.chokepoint_min_draw}")
+        _road_tiers = ("primary", "secondary", "track")
+        if self.chokepoint_min_road_tier not in _road_tiers:
+            raise ValueError(
+                "chokepoint_min_road_tier must be one of "
+                f"{', '.join(_road_tiers)}, got {self.chokepoint_min_road_tier!r}"
+            )
         if self.biome_snowline_temp_c >= self.biome_treeline_temp_c:
             raise ValueError(
                 "biome_snowline_temp_c must be below biome_treeline_temp_c — the ground "
@@ -685,6 +697,32 @@ class WorldConfig:
     # coastal and river-mouth site, so the same floor admitted 93 markets where it had
     # admitted 74. 17.0 restores the band: 72-79 across seeds 42/7/3/11/19.
     market_viability_floor: float = 17.0
+
+    # Chokepoints: the tier below the market, founded on bridgeheads and passes that carry
+    # real traffic. Which road counts as real. A bridge on a farm track is a plank, not a
+    # town — the capital that builds a village at a crossing is only laid out where enough
+    # traffic uses it, which is the same argument `crossing_min_pressure` makes about the
+    # bridge itself one tier down.
+    chokepoint_min_road_tier: str = "secondary"
+    # A suppression disc, and it also holds these off existing settlements: a bridge on a
+    # market town's doorstep is the town's bridge whatever the arithmetic says.
+    chokepoint_min_separation: int = 2
+    # The smallest village worth founding, in food units — the same shape as
+    # `market_viability_floor` one tier up, an absolute threshold on gathered surplus
+    # rather than a target count. Multiply by `people_per_food` to read it as people: 0.25
+    # is a hundred, which is a village rather than a farmstead, and the floor is applied to
+    # the real catchment draw so that relation holds exactly.
+    #
+    # What is gathered here is *residual* surplus — what the markets did not take — over
+    # `rural_field_radius` rather than the market day return, so the number is not
+    # comparable with the floor above it. Reading the residual is what stops the tier
+    # double-counting the one above: a village on a market's doorstep finds nothing left
+    # and is not founded, with no rule anywhere saying villages may not stand near markets.
+    #
+    # It is not the density knob the market floor is, and cannot be. `chokepoint_min_road_
+    # tier` decides how many candidates there are at all, and on a temperate map only about
+    # twenty ground features clear it; this only says which of those are worth a glyph.
+    chokepoint_min_draw: float = 0.25
 
     # How much *other markets'* surplus must be able to reach a town before it is a city.
     # The one density knob for the tier above the market, and the same shape as the floor

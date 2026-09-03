@@ -97,12 +97,19 @@ physical stages and diverge after them:
 - **`classic`** (default) ranks hexes on habitability and places a *configured number* of
   cities and towns at a fixed minimum separation, then sprinkles villages. Population is
   drawn at random from a per-tier band and nothing about the site enters the number.
-- **`organic`** derives the hierarchy from pre-industrial haulage economics. Markets go
-  where the most surplus can reach them inside a day's return, and their number follows
-  the land rather than a target. It runs no village stages at all: the countryside is a
-  productive surface rather than a list of hamlets (§ [3.10b](#310b-market-centres--organic)),
-  so a temperate map carries ~80 settlements where `classic` carries ~1,100. See
-  § [3.10a](#310a-river-crossings--organic) and § [3.10b](#310b-market-centres--organic).
+- **`organic`** derives the hierarchy from pre-industrial haulage economics, and each of
+  its three tiers is a different question about reach. Markets go where the most surplus
+  can reach them inside a **day's return**; cities are markets that other *markets* can
+  reach over `haulage_range_land` with water counting fifteen times; villages stand where
+  the road has no way round — a bridgehead or a pass — and are sized from a **morning's
+  walk** out to the fields. None of the three is a target count.
+
+  It runs none of `classic`'s village stages: the dispersed peasantry is a productive
+  surface rather than a list of hamlets (§ [3.10b](#310b-market-centres--organic)), so a
+  temperate map carries ~80 settlements where `classic` carries ~1,100 — 3 cities, 73
+  market towns and 6 villages, against 6 / 24 / 379. See
+  § [3.10a](#310a-river-crossings--organic), § [3.10b](#310b-market-centres--organic) and
+  § [3.11a](#311a-chokepoints--organic).
 
 The difference is not cosmetic. On one landlocked desert map at 128×128, `classic` places
 a city of 48,000 — and its five largest populations are identical, figure for figure, to
@@ -110,7 +117,9 @@ those it produces on a fertile temperate coast, because they come from `rng.inte
 the land tells them nothing. `organic` caps the same map at 2,706 and rings its
 settlements around the shore of the inland sea.
 
-The diagram below shows the `classic` pipeline.
+The diagram below shows the `classic` pipeline. `organic` replaces `CityTownStage` with
+`CrossingStage → MarketStage → CityPromotionStage`, inserts `ChokepointStage` after
+`InterurbanRoadStage`, and stops at `CultivationStage`.
 
 ```mermaid
 flowchart TD
@@ -225,7 +234,8 @@ Convenience accessors: `all_land()`, `all_ocean()`, `all_lakes()`,
 | `"river_mouth"` | River hex on map border or adjacent to ocean/lake | Hydrology |
 | `"ford"` | First road crossing of a river hex | `tag_river_crossings` |
 | `"bridge"` | Second road to cross the same river hex (upgrades a ford) | `tag_river_crossings` |
-| `"pass"` | HILL hex that's a local-max `habitability_town` within 3-hex range, no settlement | City/Town |
+| `"prominent_site"` | ROLLING hex that is a local-max `habitability_town` within 3-hex range, no settlement | City/Town (`classic`) |
+| `"pass"` | A col: a saddle whose flanks both rise at least `terrain_steep_gradient_m` | Chokepoints (`organic`) |
 | `"confluence_town"` | TOWN settled on a hex already tagged `"confluence"` | City/Town |
 
 Roads may cross a river but never travel along one: the hexsides a river is drawn
@@ -1098,7 +1108,7 @@ constraints.
 **Reads:** `hex.habitability_city`, `hex.habitability_town`,
 `hex.terrain_class`, `hex.biome`,
 `hex.elevation`, neighbours.
-**Writes:** `hex.settlement`, `state.settlements`, `hex.tags` (`"pass"`,
+**Writes:** `hex.settlement`, `state.settlements`, `hex.tags` (`"prominent_site"`,
 `"confluence_town"`).
 
 **Model:** `classic` only. The `organic` model replaces this stage with
@@ -1159,7 +1169,7 @@ villages, and organic markets — so the roles mean the same thing whichever mod
 > `Settlement.role` except the renderer's glyph choice.
 
 **Pass tagging:** after settlements are placed, every empty ROLLING hex that is the
-local-max `habitability_town` within 3-hex range gets the `"pass"` tag. Used for rendering
+local-max `habitability_town` within 3-hex range gets the `"prominent_site"` tag. Nothing reads it. Used for rendering
 mountain passes and as a convenient query for module authors.
 
 ---
@@ -1488,6 +1498,98 @@ component, and inserts those paths as PRIMARY roads. Bounded to
   ([interurban_roads.py:140–147](../worldgen/stages/interurban_roads.py#L140)).
   This feeds VillagePlacementStage so that road corridors attract
   villages.
+
+---
+
+### 3.11a Chokepoints — `organic`
+
+[stages/chokepoints.py](../worldgen/stages/chokepoints.py)
+
+**Purpose:** Found the settlement tier below the market, on bridgeheads and passes that
+carry real traffic. This is the tier `organic` withholds from `VillagePlacementStage` —
+gated on holding something rather than sprinkled across the countryside.
+
+**Reads:** `state.road_edges`, `hex.tags`, `hex.elevation`, `hex.territory`,
+`hex.territory_cost`, the food surface.
+**Writes:** `state.settlements`, `hex.settlement`, and a `pass` tag on every saddle that
+qualifies.
+
+**Config:** § [4.10](#410-haulage-and-markets--the-organic-model).
+
+#### It runs after the roads, and that is the whole idea
+
+A chokepoint is not a good site that happens to have traffic; it is a bad site that has
+traffic anyway. Only the built network can say which crossings carry any, so this cannot
+run before `InterurbanRoadStage` — and because every candidate already sits on a road, the
+settlements it founds perturb nothing. No route is recut, so the traffic that justified a
+village is the same traffic after it exists.
+
+#### Both halves of the gate bind
+
+```
+candidate  =  carries a road of at least chokepoint_min_road_tier
+              AND (is a bridge, is beside one, or is a pass)
+              AND is settleable, and unoccupied
+```
+
+A bridge on a farm track is a plank, not a town; a busy road over open country is passing
+through nowhere in particular. On a 128×128 temperate map about twenty features clear
+both, which is what actually sets the size of this tier — `chokepoint_min_draw` only says
+which of those are worth a glyph.
+
+#### A pass is a saddle the ground either side forbids going round
+
+Read off the neighbour ring: walk the six in order and count the *runs* of ground standing
+above you. None is a summit or a pit, one is a hillside, two or more is a col. The relief
+reported is the **lesser** of the two flanks, because a pass is only as walled as its
+weaker side — one cliff and one gentle rise is somewhere you simply walk over.
+
+The threshold is `terrain_steep_gradient_m` rather than a setting of its own. A hex is
+1 km across, so that figure is already the gradient at which the map says "pack animals,
+terraces, no wheels", and a separate knob could only disagree with the terrain bands about
+what a road cannot climb.
+
+**Passes are rare, and that is the model working.** `slope_edge_cost` charges every metre
+of climb, so a router offered a way round a ridge takes it. On 1500 m of relief a temperate
+map has 19 qualifying saddles and roads use 2 of them; at 2400 m there are 70 and roads use
+none. A pass settlement appears only where the ground leaves no way round.
+
+#### Sized from what the markets left behind
+
+```
+residual(hex)  =  surplus * (1 - usable_fraction(territory_cost, market_day_radius))
+                  if the hex is in a market's catchment, else surplus
+```
+
+`gather` weights every hex by `usable_fraction` of the distance to its market, falling to
+exactly zero at `market_day_radius` — so the complement is precisely the fraction the
+market could not haul, and ground outside every catchment was never drawn on at all.
+
+This is what stops the tier double-counting the one above it: **a village on a market's
+doorstep finds nothing left and is not founded**, with no rule anywhere saying villages may
+not stand near markets. Market populations are unchanged by this stage.
+
+Planting is greedy over the residual, claiming a village's fields **outright** rather than
+taking the decaying share markets use. Markets compete for the same countryside, which is
+what makes their spacing follow the land; the fields around a village are walked out to and
+back from daily and are not shared with anybody.
+
+The floor is then applied to the **real** catchment draw, not to the estimate planting ranks
+on, and the survivors are re-partitioned — so `chokepoint_min_draw × people_per_food` is
+exactly the smallest village in people, and no village is left holding the smaller catchment
+it had while a rejected neighbour was still in.
+
+**Result at 128×128, seed 42, `continent_falloff_edges: [south]`:**
+
+| climate | cities | towns | villages | of which on passes | median village |
+|---|---|---|---|---|---|
+| temperate | 3 | 73 | 6 | 2 | 277 |
+| mediterranean | 1 | 38 | 1 | 0 | 120 |
+| arid | 0 | 14 | 0 | — | — |
+| boreal | 0 | 14 | 0 | — | — |
+
+Against a median market town of 967 on the temperate map, and a largest city of 39,805 —
+three tiers, each an order apart, and none of them a target count.
 
 ---
 
@@ -1854,6 +1956,9 @@ the surplus it draws on is depleted, and the scan repeats until nothing clears t
 |---|---|---|---|---|
 | `city_min_draw` | `float` | `40.0` | How much *other markets'* surplus must be able to reach a town before it is a city. The one density knob for the tier above the market, and the same shape as `market_viability_floor` below it: an absolute threshold on what can be gathered rather than a target count, so a rich coast grows several cities and a landlocked desert grows none. Not comparable to the floor — a market gathers a countryside inside a day's cart, a city gathers *markets* over `haulage_range_land` with water counting fifteen times. At `40.0`: 3 cities on a temperate coast (39,805 / 25,547 / 19,773 against a median town of 967), 1 on a mediterranean map, **0 on an arid one whether coastal or landlocked**. Validated `> 0` |
 | `market_viability_floor` | `float` | `17.0` | `> 0` | The one density knob, replacing `target_city_count` and `target_town_count` both: stop planting once the best remaining site scores below this. Calibrated to ~70–85 markets at 128×128 (England had ~700 markets in ~130,000 km²; this map is about an eighth of that): a temperate map with `continent_falloff_edges: [south]` gives 74–81 across seeds 42/7/3/11/19 — one per ~205 km² of land, a 15 km lattice, each about 10 km from its nearest neighbour. An absolute threshold on gathered surplus rather than a target, so density follows the land — the same value yields 9 markets on an arid map and 74 on a temperate one |
+| `chokepoint_min_road_tier` | `str` | `secondary` | `primary` \| `secondary` \| `track` | Least road tier a crossing must carry before it is worth a settlement. A bridge on a farm track is a plank, not a town. **This is what actually sets the size of the village tier**: on a 128×128 temperate map `secondary` admits about twenty candidate features, `track` admits a hundred and twenty |
+| `chokepoint_min_separation` | `int` | `2` | `>= 0` | Suppression disc, and how far a village must stand off an existing settlement. The economics would mostly do this anyway — there is no residual surplus close to a market — but a bridge on a town's own doorstep is the town's bridge whatever the arithmetic says |
+| `chokepoint_min_draw` | `float` | `0.25` | `>= 0` | The smallest village worth founding, in food units; multiply by `people_per_food` to read it as people, so `0.25` is a hundred. Applied to the real catchment draw rather than to the estimate planting ranks on, which is what makes that relation exact. What is gathered is *residual* surplus — what the markets could not haul — over `rural_field_radius`, so it is not comparable with `market_viability_floor` |
 | `market_min_separation` | `int` | `5` | `≥ 1` | A suppression disc only, to stop two markets sharing a hexside. Real spacing comes from competition for surplus, which is what makes markets dense on rich ground and sparse on poor — a fixed separation cannot express that |
 | `market_kernel_decay` | `float` | `4.0` | `> 0` | `d₀` in the `1/(1 + d/d₀)` share a market takes from each hex it reaches |
 
@@ -2000,7 +2105,7 @@ shape map output. Change these by editing the source file.
 | City population range | `[10_000, 50_000]` | [city_town.py:69](../worldgen/stages/city_town.py#L69) | Uniform random per city |
 | Town population range | `[1_000, 10_000]` | [city_town.py:113](../worldgen/stages/city_town.py#L113) | |
 | Town placement role: AGRICULTURAL fertile-neighbour count | `>= 3` | [city_town.py:26](../worldgen/stages/city_town.py#L26) | GRASSLAND or TEMPERATE_FOREST neighbours required |
-| Pass tag radius | `3` hexes | [city_town.py:137](../worldgen/stages/city_town.py#L137) | Local-max `habitability_town` neighbourhood for `"pass"` tag |
+| Prominent-site tag radius | `3` hexes | [city_town.py:137](../worldgen/stages/city_town.py#L137) | Local-max `habitability_town` neighbourhood for `"prominent_site"` tag |
 | Village population range | `[100, 1_000]` | [village_placement.py:90](../worldgen/stages/village_placement.py#L90) | |
 | Village minimum separation | `3` hexes | [village_placement.py:89](../worldgen/stages/village_placement.py#L89) | Hardcoded — not a `WorldConfig` parameter |
 | Village frontier weight bonus | `× 2.0` | [village_placement.py:67](../worldgen/stages/village_placement.py#L67) | |

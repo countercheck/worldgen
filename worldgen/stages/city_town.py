@@ -133,7 +133,12 @@ class CityTownStage(GeneratorStage):
                 settlements.append(s)
                 town_idx += 1
 
-        # Pass tags for mountain passes
+        # `prominent_site` was called `pass` until the organic model grew a real
+        # topographic one (`chokepoints.saddle_relief_m`, a col read off the neighbour
+        # ring). Nothing about this test is a pass: it finds the ROLLING hex that scores
+        # highest for a town within three hexes, which is a prominent site and not a gap
+        # in a ridge. Two meanings for one tag name, differing by which model ran, is a
+        # trap; nothing reads either tag, so the mislabelled one is the one that moved.
         all_coords = set(city_coords + town_coords)
         for coord, hx in hexes.items():
             if hx.terrain_class != TerrainClass.ROLLING:
@@ -145,7 +150,7 @@ class CityTownStage(GeneratorStage):
                 (hexes[c].habitability_town for c in nearby if c in hexes),
                 default=hx.habitability_town,
             ):
-                hx.tags.add("pass")
+                hx.tags.add("prominent_site")
 
         state.settlements = settlements
         return state

@@ -109,12 +109,23 @@ def test_raising_the_threshold_promotes_fewer():
     assert len(_split(low)[0]) >= len(_split(high)[0])
 
 
+def _before_and_after():
+    """The world either side of promotion, and nothing after it.
+
+    Stopped at `CityPromotionStage` rather than run to the end, because `ChokepointStage`
+    downstream founds a village tier of its own — real settlements that this stage did not
+    make and must not be blamed for.
+    """
+    kw = dict(seed=42, width=96, height=96, model="organic", **_CITY_DEFAULTS)
+    return (
+        build_world(until="MarketStage", **kw),
+        build_world(until="CityPromotionStage", **kw),
+    )
+
+
 def test_promotion_founds_nothing():
     """The stage changes tiers and sizes; it must not add or remove a settlement."""
-    before = build_world(
-        seed=42, width=96, height=96, model="organic", until="MarketStage", **_CITY_DEFAULTS
-    )
-    after = _world()
+    before, after = _before_and_after()
     assert len(after.settlements) == len(before.settlements)
     assert sorted(s.coord for s in after.settlements) == sorted(s.coord for s in before.settlements)
 
@@ -126,10 +137,7 @@ def test_a_city_takes_its_surplus_from_the_markets_it_reaches():
     added tens of thousands of people without taking them from anywhere would mean the
     surplus was being counted twice.
     """
-    before = build_world(
-        seed=42, width=96, height=96, model="organic", until="MarketStage", **_CITY_DEFAULTS
-    )
-    after = _world()
+    before, after = _before_and_after()
     if not _split(after)[0]:
         return
     was = sum(s.population for s in before.settlements)
