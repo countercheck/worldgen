@@ -1299,8 +1299,7 @@ with self-reinforcing pheromone trails.
 (`"ford"` / `"bridge"`), `hex.habitability_village` (+0.2 boost).
 
 **Config:** `road_travellers_per_pop`, `road_travellers_max`,
-`road_gravity_exponent`, `road_bank_discount`,
-`road_bank_discount_min_flow`, `road_pheromone_factor`,
+`road_gravity_exponent`, `road_pheromone_factor`,
 `road_escarpment_cost`, `road_steep_cost`, `road_rolling_cost`, `road_flat_cost`,
 `road_water_cost`, `road_embark_cost`, `road_disembark_cost`,
 `road_river_crossing_base`, `road_river_crossing_flow`,
@@ -1328,64 +1327,27 @@ base_cost = match terrain_class:
 
 river_hex_cost = road_river_hex_cost if on a river else 0
 
-# A *fraction* of the hex's cost, not a flat subtraction
-discount  = road_bank_discount * max(adjacent_flow, road_bank_discount_min_flow)
-            if beside a river and not on one else 0
-base     *= (1 - discount)
-
 pheromone = road_pheromone_factor * traffic_so_far[hex]
 
 node_cost = max(0, base + river_hex_cost - pheromone)
 ```
 
-The bank discount makes routes prefer to follow river valleys (Roman "river roads")
-**along the bank rather than down the channel**, so which side of a river a road — and
-anything standing on it — is on stays readable.
+Roads follow river valleys — Roman "river roads" — but **nothing pays them to**.
+There was a `road_bank_discount` here, a fraction knocked off the cost of any hex beside
+a river. It was deleted, because the pull it claimed was almost entirely geometry: a
+valley floor is the low, level, well-watered ground that already leads somewhere, and the
+cost model rewards all three without being told about rivers at all.
 
-**It is a fraction, and that matters.** Subtracting a fixed 0.5 is half the cost of level
-ground but a twentieth of an escarpment, so the pull quietly evaporated exactly where a
-valley route is worth most: on rough country, where the alternative is going over the top.
-When the terrain bands were re-cut as gradients and the average land cost rose from 2.9 to
-4.6, that dilution was enough to invert the preference outright — roads began *under*-using
-river corridors relative to how much of the map they cover. As a fraction the pull holds
-its meaning at any cost scale, and on flat ground at the default it is arithmetically what
-it always was.
+Measured on a 128×128 temperate map, roads run on a riverbank **2.78×** as often as bank
+occurs in the dry land. With the discount removed that falls to **2.52×** — nine tenths of
+the effect survives the term that was supposed to cause it. What the discount bought was
+not worth two config knobs and a paragraph of tuning.
 
-The matching `river_hex_cost` prices out threading a meander or a braid, where two river
-hexes sit side by side without a drawn hexside between them for the channel exclusion to
-catch. The pheromone term makes the *order* of traveller processing matter — once enough
-travellers have used a path it becomes cheap and subsequent travellers reinforce it, which
-is what concentrates random travellers onto a small number of recognisable highways.
-
-**Edge cost** ([road_cost.py:62–92](../worldgen/stages/road_cost.py#L62)):
-```
-edge_cost = slope_edge_cost + water_edge_cost + river_crossing_edge_cost
-
-# slope_edge_cost — elevation is already metres, so nothing needs converting
-grade_pct = |Δelevation_m| * 100 / hex_size_m                # percent
-if grade_pct <= road_slope_free_pct:                # default 3 %
-    slope = 0
-elif grade_pct >= road_slope_cap_pct:               # default 25 %
-    slope = road_slope_cost * road_slope_cap_mult   # = 2 * 10 = 20
-else:
-    raw = road_slope_cost * (grade_pct - free) / (cap - grade_pct)
-    slope = min(raw, road_slope_cost * road_slope_cap_mult)
-
-# water_edge_cost (charged on land↔water transitions)
-embark    = road_embark_cost     (8.0)   if to_water and not from_water
-disembark = road_disembark_cost  (8.0)   if from_water and not to_water
-
-# river_crossing_edge_cost (charged on land↔river transitions)
-flow = max(from.river_flow, to.river_flow)
-crossing = road_river_crossing_base + road_river_crossing_flow * flow
-                                    (default 4 + 12*flow)
-```
-
-A perpendicular crossing of a 1-hex-wide river hits `river_crossing_edge_cost`
-twice (entering, then leaving the river hex), so the base+flow values
-represent **half** the total perpendicular-crossing cost. Travelling
-*along* a river never triggers it, since both hexes are river hexes
-([road_cost.py:78–83](../worldgen/stages/road_cost.py#L78)).
+`river_hex_cost` is the term that does earn its place, and it pulls the other way: it
+keeps roads *off* the channel, so which side of a river a road — and anything standing on
+it — is on stays readable. Travelling along the channel is excluded outright by
+`make_road_edge_cost`; `river_hex_cost` covers the meander and braid cases that hexside
+rule cannot see.
 
 #### Traveller simulation — [interurban_roads.py:44–91](../worldgen/stages/interurban_roads.py#L44)
 
@@ -1930,8 +1892,6 @@ Node cost (cost to *enter* a hex) by `terrain_class`. See
 | `road_travellers_per_pop` | `float` | `0.04` | `> 0` | Travellers emitted per head of population. Replaces the three per-tier counts, which made a market of 6,200 and one of 900 each send the same hundred people — population entered only on the *destination* side of the gravity term, so every origin wore the same road out of its gates. `0.04` keeps the total near what the tier counts gave (about 8,000 over 74 markets at 128×128), so it redistributes rather than changes the dose |
 | `road_travellers_max` | `int` | `500` | `≥ 1` | Cap per settlement, so one large city cannot drown the map. Reached only above 12,500 people |
 | `road_gravity_exponent` | `float` | `2.5` | `≥ 0` | Distance exponent in the gravity model: a destination's appeal is `pop / distance ** this`. `2.5` rather than the `1.5` a modern gravity model would use, because a laden cart is not a lorry — at `1.5` a traveller was nearly as likely to make for a town 40 km off as one 10 km away, so 72% of every possible pair of settlements ended up with a road of its own and the network came out a mat rather than a hierarchy |
-| `road_bank_discount` | `float` | `0.5` | `[0, 1]` typ. | Maximum node-cost reduction on a hex *beside* a river, as a fraction of the hex's base cost, scaled by the largest adjacent river's flow. Proportional rather than absolute so it is not diluted when the cost scale changes. River hexes themselves get nothing |
-| `road_bank_discount_min_flow` | `float` | `0.2` | `[0, 1]` (validated) | Floor on `river_flow` used in the discount. Prevents tiny headwaters from losing their corridor pull |
 | `road_pheromone_factor` | `float` | `0.1` | `≥ 0` | Cost reduction per unit traffic. Higher = stronger highway-reinforcement effect |
 
 ### 4.16 Roads — Water Transitions

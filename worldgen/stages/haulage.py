@@ -85,7 +85,7 @@ def make_travel_cost(hexes, cfg):
       infinity for the same reason.  Applied to a catchment it severs one along every
       watercourse — the exact inverse of the truth, since a river valley is the best land
       and the thing that holds a district together.
-    - `bank_discount` pulls roads onto riverbanks so the side a road runs on stays
+    - `river_hex_cost` keeps roads off the channel so the side a road runs on stays
       readable.  Nothing to do with how far a farmer walks.
 
     River crossings are charged, but by `ford_cost` below rather than by

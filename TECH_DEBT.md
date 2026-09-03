@@ -24,6 +24,7 @@
 | 12 | `_get_lake_components` dead code in `hydrology.py` | Code | **10** | XS |
 | 13 | `hydrology.py` is 781 lines — prime split candidate | Code | **9** | M |
 | 14 | Bare `dict`/`list` type annotations throughout stages | Code | **8** | S |
+| 15 | Rivers stay a list of paths while roads became a graph | Architecture | **8** | S |
 
 ---
 
@@ -296,3 +297,37 @@ Highest-effort structural change — do last when Phase B tests provide a safety
 
 ### Phase F — Optional, low priority
 16. Split `hydrology.py` into two modules (**item 13**) — only if hydrology needs active development
+
+---
+
+### 15 — Rivers stay a list of paths while roads became a graph
+**Category:** Architecture | **Priority: 8** | **Effort: S**
+
+`WorldState.road_edges` is now `{edge: RoadEdge}` — one tier and one delta elevation per
+undirected edge. `WorldState.rivers` is still `list[River]`, each a whole path with a
+`flow_volume`. The asymmetry is deliberate and this entry exists so nobody "fixes" it by
+mistake, but two things in it are worth revisiting.
+
+**Why rivers were left alone.** The redundancy that made the road conversion worth doing
+is not there. Measured at 128×128: 98 rivers, 970 hex entries over 872 distinct edges —
+**1.11 entries per edge, against 89 for roads before the change** — and *no* edge shared
+between two rivers, because a tributary terminates at its confluence rather than
+continuing down the trunk. A drainage network is a tree; road journeys shared trunks
+almost entirely. A river is also genuinely a path — source, mouth, direction, one day a
+name — where a `Road` was only a journey someone happened to make.
+
+**The actual debt is two representations of flow.** `River.flow_volume` sits alongside
+`Hex.river_flow`, at different granularities, with nothing keeping them in step. The
+stages all read the per-hex value; `flow_volume` is written by hydrology and read by the
+renderers only. They have not drifted, and there is no test that would notice if they did.
+
+**And one asymmetry that has been checked and is fine.** `river_edges()` derives the
+hexsides a road may not travel from the *paths*, while `is_river()` and every road cost
+term read the `"river"` *tag*. If those disagreed a road could be blocked from a hexside
+whose hexes it does not consider river at all. Measured: 46 hexes sit on a river path
+untagged, and every one is the discharge — 33 LAKE, 13 OCEAN. No hex carries the tag
+without being on a path. The two agree exactly on land.
+
+**Do this if** rivers gain per-segment attributes the way roads did (navigability by
+tonnage, a ford's difficulty, a named reach), at which point an edge map earns its place.
+Until then the path form carries information the graph would lose.

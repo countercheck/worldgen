@@ -5,7 +5,6 @@ from ..core.world_state import RoadTier, WorldState, road_edge_key
 from .road_cost import (
     WATER,
     as_road_edges,
-    bank_discount,
     make_road_edge_cost,
     river_edges,
     river_hex_cost,
@@ -55,8 +54,7 @@ class VillageTrackStage(GeneratorStage):
             # cuts off simply gets no track; `astar` returns nothing and it is skipped.
             if hx.terrain_class in WATER:
                 return float("inf")
-            base = terrain_base_cost(hx, cfg) + river_hex_cost(hx, cfg)
-            return base * (1.0 - bank_discount(hx, hexes, cfg))
+            return terrain_base_cost(hx, cfg) + river_hex_cost(hx, cfg)
 
         edge_cost = make_road_edge_cost(cfg, blocked, settled)
 

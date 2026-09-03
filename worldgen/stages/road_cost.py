@@ -93,40 +93,6 @@ def is_river(hx) -> bool:
     return "river" in hx.tags
 
 
-def bank_discount(hx, hexes, cfg) -> float:
-    """Along-river discount as a *fraction* of the hex's cost, applied to the bank.
-
-    Roads follow river valleys, but a road drawn down the channel itself hides which
-    side of the river it — and anything standing on it — is on.  So the pull lives on
-    the land hexes beside the river instead: a road runs along the bank, and the side it
-    takes is a fact about the world rather than an accident of rendering.
-
-    A fraction rather than a flat subtraction, and that distinction matters.  Subtracting
-    a fixed 0.5 is half the cost of level ground and a twentieth of an escarpment, so the
-    pull quietly evaporated exactly where a valley route is worth most — on rough country,
-    where the alternative is going over the top.  When the terrain bands were re-cut and
-    the average land cost rose from 2.9 to 4.6, that dilution was enough to invert the
-    preference outright: roads began under-using river corridors relative to how much of
-    the map they cover.  As a fraction the pull holds its meaning at any cost scale, and
-    on flat ground at the default 0.5 it is arithmetically what it always was.
-
-    Scaled by the largest adjacent river's flow (bigger river → bigger pull), with a
-    `min_flow` floor so small headwater rivers keep a usable discount.  River hexes
-    themselves get nothing; visiting one is a crossing, not a route.
-    """
-    if is_river(hx):
-        return 0.0
-    flow = 0.0
-    for n in neighbors(hx.coord):
-        n_hx = hexes.get(n)
-        if n_hx is not None and is_river(n_hx) and n_hx.river_flow > flow:
-            flow = n_hx.river_flow
-    if flow <= 0:
-        return 0.0
-    fraction = cfg.road_bank_discount * max(flow, cfg.road_bank_discount_min_flow)
-    return min(fraction, 1.0)
-
-
 def river_hex_cost(hx, cfg) -> float:
     """Penalty for a road standing on a river hex rather than beside it.
 

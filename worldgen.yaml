@@ -328,8 +328,6 @@ road_flat_cost: 1.0       # Cost multiplier for flat hexes. Default: 1.0
 road_travellers_per_pop: 0.04 # Simulated travellers emitted per head of population. 0.04 keeps the total near what the old per-tier counts gave (about 8,000 over 74 markets on a 128x128 map). Default: 0.04
 road_travellers_max: 500      # Cap per settlement, so one large city cannot drown the map. Reached above 12,500 people. Default: 500
 road_gravity_exponent: 2.5   # Distance-decay exponent for the gravity model: a destination's appeal is pop / distance**this. 2.5 rather than the 1.5 a modern model would use, because a laden cart is not a lorry — at 1.5 a traveller was nearly as likely to make for a town 40 km off as one 10 km away, and 72% of every possible pair of settlements ended up with a road of its own. Default: 2.5
-road_bank_discount: 0.5      # Maximum cost reduction on a hex *beside* a river; multiplied by the largest adjacent river_flow. Roads follow the bank, not the channel, so which side they run on stays readable. Default: 0.5
-road_bank_discount_min_flow: 0.2   # Floor on river_flow used in the discount calc; prevents tiny streams losing all their corridor pull. Default: 0.2
 road_pheromone_factor: 0.1   # How strongly existing traffic attracts new routes. Default: 0.1
 
 # ---------------------------------------------------------------------------

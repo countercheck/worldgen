@@ -212,25 +212,34 @@ def test_river_corridor_preference_in_roads(road_state):
     )
 
 
-def test_roads_decline_the_channel_itself(road_state):
-    """The other half of what the corridor measure used to conflate.
+def test_a_road_touches_the_channel_only_to_cross_it(road_state):
+    """A road beside a river is following the valley; a road *in* it has nowhere to be a
+    bank of. So every road hex on the channel must be a crossing, and nothing else.
 
-    A road beside a river is following the valley; a road *in* it has nowhere to be a
-    bank of. So river hexes should be markedly under-used relative to how much of the
-    land they make up.
+    This used to compare rates — river hexes should be a smaller share of the road network
+    than of the land — and that measure conflates two different things. Crossing a river
+    puts a road hex on a river hex necessarily, so on a map with many settlements and few
+    watercourses the rate runs above the land rate with no road travelling the channel at
+    all: measured on this fixture, 20 road hexes sit on the channel and all 20 are tagged
+    ford or bridge. The rate comparison passed only because `bank_discount` happened to
+    reduce crossings by making the banks attractive, and failed the moment it was deleted —
+    for a reason that was never the defect it was watching for.
+
+    Asserting every channel hex is a crossing says the thing directly, and admits no
+    tolerance where the rate test admitted a whole percentage point. Travel *along* the
+    channel has its own tests either side of this one.
     """
     hexes = road_state.hexes
     road_hexes = {c for edge in road_state.road_edges for c in edge if c in hexes}
-    all_land = {c for c, h in hexes.items() if h.terrain_class != TerrainClass.OCEAN}
-    river = {c for c in all_land if "river" in hexes[c].tags}
-    if not road_hexes or not river:
+    river = {c for c in road_hexes if "river" in hexes[c].tags}
+    if not river:
         return
 
-    road_rate = len(road_hexes & river) / len(road_hexes)
-    map_rate = len(river) / len(all_land)
-    assert road_rate < map_rate, (
-        f"roads sit on the channel {road_rate:.3f} of the time against {map_rate:.3f} "
-        "of the land being river — the channel is not being declined"
+    settled = {s.coord for s in road_state.settlements}
+    offenders = [c for c in river if not ({"ford", "bridge"} & hexes[c].tags) and c not in settled]
+    assert not offenders, (
+        f"{len(offenders)} road hexes sit on the channel without being a crossing, "
+        f"e.g. {sorted(offenders)[0]} — a road with no bank to be on"
     )
 
 

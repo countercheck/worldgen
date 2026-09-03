@@ -10,10 +10,9 @@ import pytest
 from worldgen.core.config import WorldConfig
 from worldgen.core.errors import RoutingError
 from worldgen.core.hex import Hex, TerrainClass
-from worldgen.core.hex_grid import astar, distance, neighbors
+from worldgen.core.hex_grid import astar, distance
 from worldgen.core.world_state import River
 from worldgen.stages.road_cost import (
-    bank_discount,
     ferry_link,
     make_road_edge_cost,
     reachable_under_constraint,
@@ -73,53 +72,6 @@ def test_terrain_base_cost_land_classes():
     assert terrain_base_cost(_flat((0, 0)), cfg) == cfg.road_flat_cost
     assert terrain_base_cost(_hill((0, 0)), cfg) == cfg.road_rolling_cost
     assert terrain_base_cost(_mountain((0, 0)), cfg) == cfg.road_steep_cost
-
-
-# ---------- bank_discount --------------------------------------------------
-
-
-def _bank_grid(flow=0.8):
-    """A river hex at (1, 0) with its neighbours as plain land."""
-    hexes = {(1, 0): _river_flat((1, 0), flow=flow)}
-    for n in neighbors((1, 0)):
-        hexes[n] = _flat(n)
-    hexes[(9, 9)] = _flat((9, 9))  # far from any river
-    return hexes
-
-
-def test_bank_discount_zero_away_from_any_river():
-    cfg = WorldConfig()
-    hexes = _bank_grid()
-    assert bank_discount(hexes[(9, 9)], hexes, cfg) == 0.0
-
-
-def test_bank_discount_zero_on_the_river_itself():
-    """The pull belongs on the bank; a river hex is a crossing, not a route."""
-    cfg = WorldConfig()
-    hexes = _bank_grid()
-    assert bank_discount(hexes[(1, 0)], hexes, cfg) == 0.0
-
-
-def test_bank_discount_applies_beside_the_river():
-    cfg = WorldConfig()
-    hexes = _bank_grid()
-    for n in neighbors((1, 0)):
-        assert bank_discount(hexes[n], hexes, cfg) > 0.0
-
-
-def test_bank_discount_scales_with_adjacent_flow():
-    cfg = WorldConfig()
-    small = _bank_grid(flow=0.3)
-    big = _bank_grid(flow=1.0)
-    bank = next(iter(neighbors((1, 0))))
-    assert bank_discount(big[bank], big, cfg) > bank_discount(small[bank], small, cfg)
-
-
-def test_bank_discount_min_flow_floor():
-    cfg = WorldConfig(road_bank_discount_min_flow=0.4)
-    hexes = _bank_grid(flow=0.05)
-    bank = next(iter(neighbors((1, 0))))
-    assert bank_discount(hexes[bank], hexes, cfg) == pytest.approx(cfg.road_bank_discount * 0.4)
 
 
 # ---------- water_edge_cost ------------------------------------------------
@@ -322,16 +274,20 @@ def _valley_grid(cfg, flow=0.8):
 
 
 def test_astar_follows_the_bank_not_the_channel():
-    """The valley still pulls routes in, but along the bank rather than down the river.
+    """The valley pulls routes in, but along the bank rather than down the river.
 
-    A road drawn on the channel hides which side of the river it is on, so the discount
-    lives on the bank and the river's own hexsides are excluded outright.
+    It used to be `bank_discount` that did the pulling. That is deleted, and this is the
+    test that says the behaviour did not go with it: the valley is low, level ground that
+    leads somewhere, which the cost model already rewards without being told about rivers.
+    What keeps a road off the water is `river_hex_cost` and the channel hexsides excluded
+    outright by `make_road_edge_cost` — so which side of a river a road runs on, and
+    anything standing on it, stays readable.
     """
     cfg = WorldConfig()
     hexes, blocked = _valley_grid(cfg)
 
     def node_cost(hx):
-        return max(0.1, terrain_base_cost(hx, cfg) - bank_discount(hx, hexes, cfg))
+        return terrain_base_cost(hx, cfg) + river_hex_cost(hx, cfg)
 
     edge_cost = make_road_edge_cost(cfg, blocked)
 
@@ -350,7 +306,7 @@ def test_astar_may_still_cross_the_river():
     hexes, blocked = _valley_grid(cfg)
 
     def node_cost(hx):
-        return max(0.1, terrain_base_cost(hx, cfg) - bank_discount(hx, hexes, cfg))
+        return terrain_base_cost(hx, cfg) + river_hex_cost(hx, cfg)
 
     path = astar(hexes, (0, 0), (0, 2), node_cost, make_road_edge_cost(cfg, blocked))
     assert path is not None

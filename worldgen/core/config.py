@@ -429,11 +429,6 @@ class WorldConfig:
                 "marketable_surplus_fraction must be in (0, 1], got "
                 f"{self.marketable_surplus_fraction}"
             )
-        if not (0.0 <= self.road_bank_discount_min_flow <= 1.0):
-            raise ValueError(
-                "road_bank_discount_min_flow must be in [0, 1], "
-                f"got {self.road_bank_discount_min_flow}"
-            )
         if self.road_river_hex_cost < 0:
             raise ValueError(f"road_river_hex_cost must be >= 0, got {self.road_river_hex_cost}")
         if self.road_ferry_max_hop < 1:
@@ -694,11 +689,6 @@ class WorldConfig:
     # hierarchy. Pre-industrial traffic is overwhelmingly local; the exponent is what says
     # so.
     road_gravity_exponent: float = 2.5
-    # Roads follow river valleys along the *bank*, never down the channel itself, so the
-    # side of the river a road runs on stays readable. Discount applies to land hexes
-    # adjacent to a river, scaled by the largest adjacent river's flow.
-    road_bank_discount: float = 0.5
-    road_bank_discount_min_flow: float = 0.2
     road_pheromone_factor: float = 0.1
 
     # Roads — water bodies (oceans + lakes treated as traversable)

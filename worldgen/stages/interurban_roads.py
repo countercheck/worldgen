@@ -9,7 +9,6 @@ from ..core.world_state import Ferry, RoadTier, WorldState, road_edge_key
 from .road_cost import (
     add_traffic,
     as_road_edges,
-    bank_discount,
     ferry_link,
     is_river,
     make_road_edge_cost,
@@ -61,8 +60,10 @@ class InterurbanRoadStage(GeneratorStage):
         ring = settlement_rings(settled)
 
         def node_cost(hx):
+            # No discount for running beside a river. Roads follow valleys because valleys
+            # are the low, level, well-watered ground that leads somewhere, not because a
+            # rule pays them to — see `river_hex_cost` for the term that does earn its place.
             base = terrain_base_cost(hx, cfg) + river_hex_cost(hx, cfg)
-            base *= 1.0 - bank_discount(hx, hexes, cfg)
             return pheromone_discount(base, hex_traffic[hx.coord], cfg)
 
         edge_cost = make_road_edge_cost(cfg, blocked, settled, ring)
