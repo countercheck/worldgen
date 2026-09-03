@@ -67,6 +67,7 @@ def default_stages(model: str = "classic") -> tuple[type["GeneratorStage"], ...]
     )
 
     if model == "organic":
+        from .cities import CityPromotionStage
         from .crossings import CrossingStage
         from .markets import MarketStage
 
@@ -76,6 +77,9 @@ def default_stages(model: str = "classic") -> tuple[type["GeneratorStage"], ...]
             # market grows there rather than something noticed afterwards.
             CrossingStage,
             MarketStage,
+            # Cities before roads: promotion changes populations, and population is what
+            # decides how many travellers a place sends.
+            CityPromotionStage,
             # Interim: the classic road stages still run over the new settlements, so
             # there is something to look at in the viewer. Markets are all TOWN tier for
             # now, which is what InterurbanRoadStage expects. Cities and trade roads each

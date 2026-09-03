@@ -358,6 +358,12 @@ class WorldConfig:
                 f"road_slope_cap_pct ({self.road_slope_cap_pct}), got "
                 f"{self.road_switchback_grade_pct}"
             )
+        if self.haulage_transship_cost < 0:
+            raise ValueError(
+                f"haulage_transship_cost must be >= 0, got {self.haulage_transship_cost}"
+            )
+        if self.city_min_draw <= 0:
+            raise ValueError(f"city_min_draw must be > 0, got {self.city_min_draw}")
         if self.road_settlement_skirt_cost < 0:
             raise ValueError(
                 f"road_settlement_skirt_cost must be >= 0, got {self.road_settlement_skirt_cost}"
@@ -509,12 +515,31 @@ class WorldConfig:
     # navigable water and inland ones stay small: nothing gates a city, water simply
     # extends what can feed it.
     haulage_range_water_mult: float = 15.0
+    # What it costs to get a cargo onto the water and off again, charged once at each
+    # land-water transition and expressed in the same units as `haulage_range_land`.
+    #
+    # Without it the sea is a teleport. Water at a fifteenth the cost per hex means that
+    # once a cargo is afloat it can cross the whole map for almost nothing, so every
+    # coastal market reaches every other one and the tier flattens: 55 of 74 markets
+    # reachable from each, and no port distinguishable from any other. A quay is real
+    # capital — wharfage, lighters, the risk — and charging it is what makes a short hop
+    # not worth the trouble while a long haul plainly is. That asymmetry is the shape of
+    # pre-industrial trade, and it is why a few great ports emerge rather than a coastline
+    # of equals.
+    haulage_transship_cost: float = 8.0
     # river_flow at or above which a river floats a boat. Below it a river is something
     # you ford, not something you ship grain down.
     # Discharge at which a river will float a boat, in the same km2 x mm as
     # channel_min_discharge. Well above it: most of a drainage net is wadeable
     # headwater, and only the trunk carries cargo.
-    navigable_min_discharge: float = 150000.0
+    # Discharge at which a watercourse floats a barge, in km2 of catchment times mm of
+    # runoff. 150,000 admitted only the top 1% of river hexes on a 128x128 map — 25 of 887 —
+    # so "navigable river" was effectively a synonym for "the last few hexes before the
+    # sea", and a river port could not exist. Real lowland rivers are navigable a long way
+    # up: the Thames some 200 km, the Severn and the Rhine further. 60,000 is about the
+    # upper quartile of river discharge here and gives 236 navigable hexes, which is a trunk
+    # navigable through the lower half of its length rather than at its mouth alone.
+    navigable_min_discharge: float = 60000.0
     # A farming household eats most of what it grows; only this share can leave for a
     # market. Sizing markets off the *surplus* rather than the production is why the tier
     # ratios come out right without target counts anywhere.
@@ -636,7 +661,30 @@ class WorldConfig:
     # a temperate one, monotone in mean food per land hex, while median market population
     # stays flat across every climate.  Fertility decides how *many* markets a region carries,
     # not how big each one grows.
-    market_viability_floor: float = 14.0
+    # Raised from 14.0 with `habitability_harbour_bonus`. Scoring a harbour lifts every
+    # coastal and river-mouth site, so the same floor admitted 93 markets where it had
+    # admitted 74. 17.0 restores the band: 72-79 across seeds 42/7/3/11/19.
+    market_viability_floor: float = 17.0
+
+    # How much *other markets'* surplus must be able to reach a town before it is a city.
+    # The one density knob for the tier above the market, and the same shape as the floor
+    # below it: an absolute threshold on what can be gathered, not a target count, so a rich
+    # coast grows several cities and a landlocked desert grows none.
+    #
+    # Distinct from `market_viability_floor` in what it measures. A market gathers a
+    # countryside inside a day's cart; a city gathers *markets*, over `haulage_range_land`
+    # with water counting fifteen times — which is why the number is not comparable to the
+    # floor and has to be calibrated on its own.
+    #
+    # It is *not* scale-free, and unlike `market_viability_floor` it was never going to be.
+    # A market's catchment is bounded at `market_day_radius` whatever the map, so the same
+    # floor means the same thing at any size. A city's reach runs along water, and a bigger
+    # map has more coastline inside it: the best draw goes 30.8 at 64x64, 39.2 at 96, 97.7
+    # at 128 and 179.0 at 192, because the markets within bulk reach go 15, 14, 31, 51. That
+    # is right rather than convenient — a port on a long coast commands more trade than one
+    # on a small island — but it means a small map grows no cities at this value, and that
+    # this figure belongs to a 128x128 world.
+    city_min_draw: float = 40.0
 
     # Cultivation radii — also the catchment each tier is scored on by HabitabilityStage
     cultivation_city_radius: int = 8
@@ -655,6 +703,19 @@ class WorldConfig:
     habitability_agri_weight: float = 0.40
     habitability_river_bonus: float = 0.25
     habitability_coast_bonus: float = 0.25
+    # Access to water that will float a barge — sea, lake, or a river above
+    # `navigable_min_discharge`. Distinct from the coast bonus above, which is amenity: a
+    # beach to land a boat on and fish from. This one is about *bulk*, and it is the largest
+    # site bonus there is because it is the largest thing about a site. A town on navigable
+    # water can be provisioned from fifteen times the distance, which is the whole reason
+    # cities exist in this model.
+    #
+    # It has to be this big to be visible at all. A site on the coast loses about a fifth of
+    # its day-range catchment to sea, which scores 0.4 against farmland's 1.0 — so on
+    # agriculture alone a harbour site is worth about 22% less than an inland one, and
+    # inland sites outnumber it nine to one. Before this term, not one of 74 markets on the
+    # reference map stood on navigable water.
+    habitability_harbour_bonus: float = 0.60
     habitability_hill_bonus: float = 0.15
     habitability_confluence_bonus: float = 0.10
 

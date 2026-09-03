@@ -135,6 +135,46 @@ def make_travel_cost(hexes, cfg):
     return node_cost, edge_cost
 
 
+def make_bulk_cost(hexes, cfg):
+    """Node and edge cost closures for *bulk goods*, which travel by water where they can.
+
+    The counterpart to `make_travel_cost`, and the difference between them is the whole of
+    what separates a city from a market.  That function makes water impassable on purpose —
+    a catchment is ground somebody works, and a traversable sea would let one coastal
+    settlement claim a strait.  A cargo is not a farmer: it goes by ship, and before the
+    railway that was the only way to move anything heavy any distance at all.
+
+    Diocletian's Price Edict puts land carriage at roughly fifty-five times sea and eleven
+    times river for the same tonne-kilometre.  `haulage_range_water_mult` stands in for both
+    at fifteen, applied as a *divisor on the step* rather than a larger budget, so the reach
+    it buys runs along the water rather than in a circle around the port.
+
+    Boarding is not free.  `haulage_transship_cost` is charged once at each land-water
+    transition, and without it the sea is a teleport: at a fifteenth the cost per hex, a
+    cargo once afloat crosses the map for nothing and every coastal market reaches every
+    other, which flattens the tier it is supposed to create.  A quay is real capital, and
+    charging it is what makes a short hop not worth the trouble while a long haul plainly
+    is.
+    """
+    node_cost, edge_cost = make_travel_cost(hexes, cfg)
+    mult = cfg.haulage_range_water_mult
+
+    def bulk_node(hx) -> float:
+        if navigable(hx, cfg):
+            return cfg.road_flat_cost / mult
+        return node_cost(hx)
+
+    def bulk_edge(from_hx, to_hx) -> float:
+        afloat_from, afloat_to = navigable(from_hx, cfg), navigable(to_hx, cfg)
+        if afloat_from != afloat_to:
+            return cfg.haulage_transship_cost  # over the quay, one way or the other
+        if afloat_from:
+            return 0.0  # already afloat: no ascent, and a navigable river is a road
+        return edge_cost(from_hx, to_hx)
+
+    return bulk_node, bulk_edge
+
+
 def ford_cost(from_hx, to_hx, hexes, cfg) -> float:
     """What it costs to get across a watercourse on foot.
 

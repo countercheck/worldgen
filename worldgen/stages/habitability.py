@@ -86,6 +86,15 @@ def site_bonus(coord, hx, hexes, cfg) -> float:
     if "river" in hx.tags or any("river" in n.tags for n in nbrs):
         bonus += cfg.habitability_river_bonus
 
+    # Water that floats a barge, which is a different question from a pleasant shore: a
+    # navigable river twenty miles inland is a port, and a rocky coast on a dead-end bay is
+    # not. Imported here rather than at module scope because `haulage` reads this module's
+    # `food_value`; the cycle is only a problem at import time.
+    from .haulage import navigable
+
+    if navigable(hx, cfg) or any(navigable(n, cfg) for n in nbrs):
+        bonus += cfg.habitability_harbour_bonus
+
     if hx.terrain_class == TerrainClass.COAST or any(
         n.terrain_class == TerrainClass.COAST for n in nbrs
     ):

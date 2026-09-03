@@ -139,7 +139,7 @@ erosion_delta_min_load: 0.15 # Sediment a droplet must still carry when it reach
 # depth. This replaced a threshold that was really a rank — the top 5% of land by
 # accumulation — which gave desert and rainforest alike 5.6% of their land under channel.
 channel_min_discharge: 20000.0   # Catchment km2 x runoff mm needed to cut a channel. Default: 20000
-navigable_min_discharge: 150000.0 # ...and to float a boat. Default: 150000
+navigable_min_discharge: 60000.0 # ...and to float a boat. Default: 150000
 river_flow_continuous: false # Record a flow figure on every draining land hex, not only on hexes that carry a channel. Off by default: it is a diagnostic for inspecting the drainage field in the viewer, and turning it on does not add rivers to the map. Default: false
 # Rain the ground and its plants take before anything runs off. Rises with temperature,
 # which is why cold country sheds nearly all its rain and the taiga is full of rivers.
@@ -230,6 +230,7 @@ food_water_value: 0.4      # Fishing. Non-zero so a coastal site is not penalise
 
 habitability_agri_weight: 0.40      # Weight on the catchment mean. Default: 0.40
 habitability_river_bonus: 0.25      # Flat bonus if the hex or a neighbour carries a river. Default: 0.25
+habitability_harbour_bonus: 0.60 # Site bonus for access to water that floats a barge — sea, lake, or a river above navigable_min_discharge. Distinct from habitability_coast_bonus, which is amenity; this is about bulk, and it is the largest site bonus because it is the largest thing about a site. Before it, not one of 74 markets on the reference map stood on navigable water: a harbour site loses about a fifth of its catchment to sea, which scores 0.4 against farmland's 1.0. Default: 0.60
 habitability_coast_bonus: 0.25      # Flat bonus if the hex or a neighbour is coast. Default: 0.25
 habitability_hill_bonus: 0.15       # Flat bonus for a hill overlooking a plain. Default: 0.15
 habitability_confluence_bonus: 0.10 # Flat bonus on a river junction (this hex only). Default: 0.10
@@ -284,6 +285,7 @@ crossing_use_cost: 0.5        # Cost of using an existing ford or bridge. Defaul
 #                                water ratio below, not this absolute.
 rural_field_radius: 2.5    # The daily walk to the fields; sets cultivated extent. Default: 2.5
 haulage_range_land: 40.0   # Travel cost at which bulk food is worth nothing overland. Default: 40.0
+haulage_transship_cost: 8.0 # What it costs to get a cargo onto the water and off again, charged once at each land-water transition, in the same units as haulage_range_land. Without it the sea is a teleport: at a fifteenth the cost per hex a cargo once afloat crosses the map for nothing, every coastal market reaches every other, and the city tier flattens. Default: 8.0
 haulage_range_water_mult: 15.0 # How much further the same cargo goes by water. Diocletian's Price Edict prices land carriage at roughly 55x sea and 11x river for the same tonne-kilometre. This is why large pre-industrial cities sit on navigable water and inland ones stay small: nothing gates a city, water simply extends what can feed it. Default: 15.0
 marketable_surplus_fraction: 0.20 # Share of what a farming household grows that can leave for a market; it eats the rest. Sizing markets off the surplus rather than the production is why the tier ratios come out right without target counts anywhere. Default: 0.20
 people_per_food: 400.0     # People supported per unit of haulage-weighted food. Calibrated so market towns land in their historical 500–2500 band: across five seeds at 128x128 this gives medians of 1260–1700 and a largest of 4200–5450. Default: 400
@@ -299,7 +301,8 @@ travel_ford_cost: 8.0      # Getting across away from a crossing, per multiple o
 market_day_radius: 10.0     # A day's return: out, business done, and home. Default: 10.0
 market_kernel_decay: 4.0    # d0 in the 1/(1 + d/d0) share a market takes from each hex it reaches. Default: 4.0
 market_min_separation: 5    # A suppression disc only, to stop two markets sharing a hexside. Real spacing comes from competition for surplus, which is what makes markets dense on rich ground and sparse on poor — a fixed separation cannot express that. Default: 5
-market_viability_floor: 14.0 # The one density knob, replacing target_city_count and target_town_count both: stop planting once the best remaining site scores below this. Calibrated to ~70–85 markets at 128x128 (England had ~700 markets in ~130,000 km2; this map is about an eighth of that): on a temperate map with continent_falloff_edges = [south], seeds 42/7/3/11/19 give 74–81 markets — one per ~205 km2 of land, a 15 km lattice, each about 10 km from its nearest neighbour. An absolute threshold on gathered surplus rather than a target, so density follows the land: the same value yields 9 markets on an arid map and 74 on a temperate one, while median market population stays flat across climates. Default: 14.0
+city_min_draw: 40.0 # How much other markets' surplus must reach a town before it is a city. The density knob for the tier above the market, and the same shape as market_viability_floor below it: an absolute threshold on what can be gathered, not a target count. A market gathers a countryside inside a day's cart; a city gathers markets, over haulage_range_land with water counting fifteen times — so the number is not comparable to the floor. 40.0 gives 3 cities on a temperate coast and none on an arid map. Default: 40.0
+market_viability_floor: 17.0 # The one density knob, replacing target_city_count and target_town_count both: stop planting once the best remaining site scores below this. Calibrated to ~70–85 markets at 128x128 (England had ~700 markets in ~130,000 km2; this map is about an eighth of that): on a temperate map with continent_falloff_edges = [south], seeds 42/7/3/11/19 give 74–81 markets — one per ~205 km2 of land, a 15 km lattice, each about 10 km from its nearest neighbour. An absolute threshold on gathered surplus rather than a target, so density follows the land: the same value yields 9 markets on an arid map and 74 on a temperate one, while median market population stays flat across climates. Default: 14.0
 
 # ---------------------------------------------------------------------------
 # Cultivation (farmland around settlements)
