@@ -19,8 +19,6 @@ _RESISTANT = {
 _CULT_DEFAULTS = {
     "target_city_count": 3,
     "target_town_count": 8,
-    "road_travellers_city": 100,
-    "road_travellers_town": 20,
     "cultivation_city_radius": 6,
     "cultivation_town_radius": 3,
     "cultivation_village_radius": 2,

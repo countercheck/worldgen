@@ -443,3 +443,45 @@ def route_through_settlements(
                 road_edges[key] = combine(road_edges.get(key), carried)
             rerouted += 1
     return rerouted
+
+
+def prune_orphan_roads(road_edges, anchors) -> int:
+    """Drop any part of the network that connects nothing.
+
+    `road_river_traffic_min` admits a riverbank edge on a single traveller, so a stretch of
+    towpath can qualify without joining anything — a five-hex road in the middle of a
+    valley, reaching no settlement and no ferry. That is not a road, it is a residue of the
+    threshold, and it is what leaves the network in more than one piece.
+
+    *anchors* is what makes a component worth keeping: settlement seats, and the landings
+    of any ferry, since a component reachable only by boat is legitimately separate on land.
+
+    Mutates *road_edges*; returns how many edges were dropped.
+    """
+    adj: dict = {}
+    for a, b in road_edges:
+        adj.setdefault(a, set()).add(b)
+        adj.setdefault(b, set()).add(a)
+
+    seen: set = set()
+    doomed: set = set()
+    for start in adj:
+        if start in seen:
+            continue
+        stack, comp = [start], set()
+        while stack:
+            c = stack.pop()
+            if c in comp:
+                continue
+            comp.add(c)
+            stack.extend(adj[c] - comp)
+        seen |= comp
+        if not (comp & anchors):
+            doomed |= comp
+
+    if not doomed:
+        return 0
+    dropped = [k for k in road_edges if k[0] in doomed or k[1] in doomed]
+    for k in dropped:
+        del road_edges[k]
+    return len(dropped)

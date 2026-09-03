@@ -166,9 +166,6 @@ def offset_world():
         grid_layout="offset",
         target_city_count=3,
         target_town_count=8,
-        road_travellers_city=60,
-        road_travellers_town=10,
-        road_travellers_village=2,
     )
 
 

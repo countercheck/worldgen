@@ -12,9 +12,6 @@ from worldgen.stages.road_cost import slope_edge_cost
 _ROAD_DEFAULTS = {
     "target_city_count": 4,
     "target_town_count": 10,
-    "road_travellers_city": 100,
-    "road_travellers_town": 20,
-    "road_travellers_village": 5,
 }
 
 
@@ -41,9 +38,6 @@ def any_road_state(request):
         height=48,
         target_city_count=3,
         target_town_count=6,
-        road_travellers_city=50,
-        road_travellers_town=10,
-        road_travellers_village=2,
     ).run()
 
 
@@ -571,4 +565,64 @@ def test_no_road_skirts_a_settlement_it_could_pass_through(road_state):
         f"{len(offenders)} roads pass a settlement without entering it, at a detour they "
         f"could afford. e.g. {offenders[0][1]}->{offenders[0][2]} around {offenders[0][0]} "
         f"at {offenders[0][3]:.1f}x"
+    )
+
+
+def test_the_road_network_is_all_one_piece(road_state):
+    """Every part of the network must reach a settlement, on land or by ferry.
+
+    Two things used to leave it in pieces. The connectivity guarantee only ran on maps with
+    two or more *cities*, so the organic model — whose markets are all TOWN — had nothing
+    watching it; and `road_river_traffic_min` admits a riverbank edge on a single traveller,
+    so a stretch of towpath could qualify while joining nothing at all. Both were masked
+    while `_stitch_via_junction` made almost every route a concatenation of the same few
+    legs, which kept the map connected by accident.
+    """
+    adj: dict = {}
+    for a, b in road_state.road_edges:
+        adj.setdefault(a, set()).add(b)
+        adj.setdefault(b, set()).add(a)
+    if not adj:
+        return
+
+    anchors = {s.coord for s in road_state.settlements}
+    anchors |= {c for f in road_state.ferries for c in (f.a, f.b)}
+
+    seen: set = set()
+    for start in adj:
+        if start in seen:
+            continue
+        stack, comp = [start], set()
+        while stack:
+            c = stack.pop()
+            if c in comp:
+                continue
+            comp.add(c)
+            stack.extend(adj[c] - comp)
+        seen |= comp
+        assert comp & anchors, (
+            f"{len(comp)} road hexes near {sorted(comp)[0]} reach no settlement and no "
+            "ferry — a road that connects nothing"
+        )
+
+
+def test_a_bigger_settlement_sends_more_travellers(road_state):
+    """Travellers come from population, so the roads out of a big market are the busier.
+
+    Population used to enter only on the *destination* side of the gravity term, so a market
+    of 6,200 and one of 900 each sent the same flat per-tier count and wore the same road
+    out of their own gates.
+    """
+    by_pop = sorted(road_state.settlements, key=lambda s: s.population)
+    small, large = by_pop[0], by_pop[-1]
+    if small.population == large.population:
+        return
+
+    def busiest_road_at(seat):
+        tiers = [ROAD_TIER_RANK[t] for edge, t in road_state.road_edges.items() if seat in edge]
+        return max(tiers, default=-1)
+
+    assert busiest_road_at(large.coord) >= busiest_road_at(small.coord), (
+        f"the largest settlement ({large.population}) has a lesser road than the smallest "
+        f"({small.population}) — travellers are not following population"
     )

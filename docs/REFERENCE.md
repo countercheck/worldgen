@@ -1298,7 +1298,7 @@ with self-reinforcing pheromone trails.
 **Writes:** `state.roads`, `hex.road_connections`, `hex.tags`
 (`"ford"` / `"bridge"`), `hex.habitability_village` (+0.2 boost).
 
-**Config:** `road_travellers_city`, `road_travellers_town`,
+**Config:** `road_travellers_per_pop`, `road_travellers_max`,
 `road_gravity_exponent`, `road_bank_discount`,
 `road_bank_discount_min_flow`, `road_pheromone_factor`,
 `road_escarpment_cost`, `road_steep_cost`, `road_rolling_cost`, `road_flat_cost`,
@@ -1389,31 +1389,52 @@ represent **half** the total perpendicular-crossing cost. Travelling
 
 #### Traveller simulation — [interurban_roads.py:44–91](../worldgen/stages/interurban_roads.py#L44)
 
-For each settlement, emit `road_travellers_city` (default 500) or
-`road_travellers_town` (default 100) travellers. Process them in random
-order. Each traveller picks a destination via gravity:
+For each settlement, emit `population × road_travellers_per_pop` travellers,
+capped at `road_travellers_max`. Process them busiest-origin-first — the
+pheromone makes order decide which route is worn first and which then snap
+onto it, so trunk routes are laid before the journeys that tributary into
+them; a random order had minor journeys laying track for trunk routes to
+follow. Ties keep settlement order, so it stays deterministic.
+
+Each traveller picks a destination via gravity:
 ```
 dist[d]   = max(1, hex_distance(origin, d))
-weight[d] = population[d] / dist[d] ^ road_gravity_exponent      (default 1.5)
+weight[d] = population[d] / dist[d] ^ road_gravity_exponent      (default 2.5)
 prob[d]   = weight[d] / sum(weight)        # excluding origin
 ```
 Then A*-paths from origin to chosen destination using the (live, pheromone-
 updated) cost functions. Traffic on every hex of the path is incremented.
 
 To save A* calls, each (origin, destination) pair is cached as a
-**canonical route** ([interurban_roads.py:73–75](../worldgen/stages/interurban_roads.py#L73)).
-The first traveller does the pathing; everyone after re-uses it. Before
-falling back to a fresh A*, the stage tries to **stitch** through an
-intermediate settlement (`origin → mid → dest` if both legs are already
-canonical) and uses whichever is cheaper
-([interurban_roads.py:152–189](../worldgen/stages/interurban_roads.py#L152)).
+**canonical route**. The first traveller does the pathing; everyone after
+re-uses it.
+
+There used to be a second cache in front of that: `_stitch_via_junction`
+welded two existing legs together at an intermediate settlement rather than
+pathing directly. It never compared the stitch against the direct route — A*
+ran only when *no* stitch candidate existed at all — so once a handful of
+legs existed almost everything after was a concatenation, and concatenations
+became legs for the next stitch. Measured at 128×128: **1,690 of 1,944 routes
+(87%) were never pathfound**, the median stitched route ran 168 hexes against
+66 for a routed one, and the worst was 1,047 hexes between endpoints 24 km
+apart. It is deleted.
+
+After tiering, two passes tidy the network. `route_through_settlements` bends
+any road skirting a settlement so it passes through instead (§ 4.19), and
+`prune_orphan_roads` drops any component reaching neither a settlement nor a
+ferry landing — `road_river_traffic_min` admits a riverbank edge on a single
+traveller, so a stretch of towpath can qualify while joining nothing. The
+connectivity guarantee then runs over **every** settlement, not just the
+cities: it used to require two or more cities, so the organic model had
+nothing watching it, and the map stayed connected only because stitching made
+most routes concatenations of the same few legs.
 
 #### Tier classification — [interurban_roads.py:93–114](../worldgen/stages/interurban_roads.py#L93)
 
 After all travellers are processed, hexes are filtered:
 ```
-eligible = hexes where traffic >= road_min_traffic                   (default 3)
-        OR hex.river_flow > 0 and traffic >= road_river_traffic_min  (default 1)
+eligible = edges where traffic >= road_min_traffic                   (default 3)
+        OR "river" in hex.tags and traffic >= road_river_traffic_min (default 1)
 ```
 Sort by traffic descending, then:
 - top `road_primary_pct` (10 %) → PRIMARY
@@ -1866,10 +1887,9 @@ Node cost (cost to *enter* a hex) by `terrain_class`. See
 
 | Param | Type | Default | Range | Effect |
 |---|---|---|---|---|
-| `road_travellers_city` | `int` | `500` | ≥ 0 | Travellers emitted per city |
-| `road_travellers_town` | `int` | `100` | ≥ 0 | Per town |
-| `road_travellers_village` | `int` | `20` | ≥ 0 | Reserved; not currently consumed by InterurbanRoadStage, which only routes between cities and towns |
-| `road_gravity_exponent` | `float` | `1.5` | `≥ 0` | Distance exponent in the gravity model. Higher = travellers strongly prefer nearby destinations |
+| `road_travellers_per_pop` | `float` | `0.04` | `> 0` | Travellers emitted per head of population. Replaces the three per-tier counts, which made a market of 6,200 and one of 900 each send the same hundred people — population entered only on the *destination* side of the gravity term, so every origin wore the same road out of its gates. `0.04` keeps the total near what the tier counts gave (about 8,000 over 74 markets at 128×128), so it redistributes rather than changes the dose |
+| `road_travellers_max` | `int` | `500` | `≥ 1` | Cap per settlement, so one large city cannot drown the map. Reached only above 12,500 people |
+| `road_gravity_exponent` | `float` | `2.5` | `≥ 0` | Distance exponent in the gravity model: a destination's appeal is `pop / distance ** this`. `2.5` rather than the `1.5` a modern gravity model would use, because a laden cart is not a lorry — at `1.5` a traveller was nearly as likely to make for a town 40 km off as one 10 km away, so 72% of every possible pair of settlements ended up with a road of its own and the network came out a mat rather than a hierarchy |
 | `road_bank_discount` | `float` | `0.5` | `[0, 1]` typ. | Maximum node-cost reduction on a hex *beside* a river, as a fraction of the hex's base cost, scaled by the largest adjacent river's flow. Proportional rather than absolute so it is not diluted when the cost scale changes. River hexes themselves get nothing |
 | `road_bank_discount_min_flow` | `float` | `0.2` | `[0, 1]` (validated) | Floor on `river_flow` used in the discount. Prevents tiny headwaters from losing their corridor pull |
 | `road_pheromone_factor` | `float` | `0.1` | `≥ 0` | Cost reduction per unit traffic. Higher = stronger highway-reinforcement effect |

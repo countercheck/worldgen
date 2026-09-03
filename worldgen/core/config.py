@@ -355,6 +355,12 @@ class WorldConfig:
                 "road_slope_cap_pct must be greater than road_slope_free_pct, "
                 f"got cap={self.road_slope_cap_pct}, free={self.road_slope_free_pct}"
             )
+        if self.road_travellers_per_pop <= 0:
+            raise ValueError(
+                f"road_travellers_per_pop must be > 0, got {self.road_travellers_per_pop}"
+            )
+        if self.road_travellers_max < 1:
+            raise ValueError(f"road_travellers_max must be >= 1, got {self.road_travellers_max}")
         if self.road_slope_cap_mult <= 0:
             raise ValueError(f"road_slope_cap_mult must be > 0, got {self.road_slope_cap_mult}")
         # Below 2.0 the rule can never fire: a detour is two legs where there was one.
@@ -662,10 +668,27 @@ class WorldConfig:
     road_flat_cost: float = 1.0
 
     # Roads — traveller simulation
-    road_travellers_city: int = 500
-    road_travellers_town: int = 100
-    road_travellers_village: int = 20
-    road_gravity_exponent: float = 1.5
+    #
+    # Travellers come from population, not from tier. A flat count per tier meant a town of
+    # 6,200 and one of 900 each sent the same hundred people, so population entered the
+    # model only on the destination side of the gravity term and a large market wore no
+    # deeper a road out of its own gates than a small one did.
+    #
+    # 0.04 keeps the total near what the tier counts produced on a 128x128 map (about 8,000
+    # travellers over 74 markets), so it is a redistribution rather than a change of dose.
+    road_travellers_per_pop: float = 0.04
+    # A cap, so one large city cannot drown the map. Reached only by a settlement above
+    # 12,500 people, which on these maps means a real city rather than a market town.
+    road_travellers_max: int = 500
+    # How sharply a destination's appeal falls with distance: weight is pop / d**this.
+    #
+    # 2.5 rather than the 1.5 a modern gravity model would use, because a laden cart is not
+    # a lorry. At 1.5 a traveller was nearly as likely to make for a town forty kilometres
+    # off as the one ten kilometres away, so 72% of every possible pair of settlements
+    # ended up with a road of its own and the network came out a mat rather than a
+    # hierarchy. Pre-industrial traffic is overwhelmingly local; the exponent is what says
+    # so.
+    road_gravity_exponent: float = 2.5
     # Roads follow river valleys along the *bank*, never down the channel itself, so the
     # side of the river a road runs on stays readable. Discount applies to land hexes
     # adjacent to a river, scaled by the largest adjacent river's flow.

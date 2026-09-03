@@ -8,8 +8,10 @@ from .road_cost import (
     add_traffic,
     bank_discount,
     ferry_link,
+    is_river,
     make_road_edge_cost,
     pheromone_discount,
+    prune_orphan_roads,
     river_edges,
     river_hex_cost,
     route_through_settlements,
@@ -51,22 +53,28 @@ class InterurbanRoadStage(GeneratorStage):
 
         edge_cost = make_road_edge_cost(cfg, blocked, settled)
 
-        tier_counts = {
-            SettlementTier.CITY: cfg.road_travellers_city,
-            SettlementTier.TOWN: cfg.road_travellers_town,
-        }
+        # Travellers come from population rather than from tier, so a market of 6,200 wears
+        # a deeper road out of its gates than one of 900. Population used to enter only on
+        # the destination side of the gravity term, which made every origin equally busy.
         travellers = []
         for s in settlements:
-            travellers.extend([s] * tier_counts[s.tier])
-        order = self.rng.permutation(len(travellers))
+            n = min(
+                cfg.road_travellers_max, max(1, round(s.population * cfg.road_travellers_per_pop))
+            )
+            travellers.extend([s] * n)
+        # Busiest first, rather than shuffled. The pheromone means order decides which route
+        # gets worn first and which ones then snap onto it, so a random order had minor
+        # journeys laying down track for trunk routes to follow. Sorting by the traffic a
+        # settlement emits builds the trunks first and lets the rest tributary into them.
+        # Ties keep list order, which is settlement order, so this stays deterministic.
+        travellers.sort(key=lambda s: -s.population)
 
         pop_arr = [float(s.population) for s in settlements]
         coords_arr = [s.coord for s in settlements]
         n_s = len(settlements)
         s_index = {s.coord: i for i, s in enumerate(settlements)}
 
-        for idx in order:
-            origin_s = travellers[idx]
+        for origin_s in travellers:
             oi = s_index[origin_s.coord]
             dists = [max(1, distance(origin_s.coord, c)) for c in coords_arr]
             weights = [
@@ -84,15 +92,7 @@ class InterurbanRoadStage(GeneratorStage):
             if key in canonical_routes:
                 path = canonical_routes[key]
             else:
-                path = self._stitch_via_junction(
-                    origin_s.coord,
-                    dest_coord,
-                    coords_arr,
-                    canonical_routes,
-                    hexes,
-                    node_cost,
-                    edge_cost,
-                )
+                path = astar(hexes, origin_s.coord, dest_coord, node_cost, edge_cost)
                 if path is None or len(path) < 2:
                     continue
                 canonical_routes[key] = path
@@ -121,8 +121,13 @@ class InterurbanRoadStage(GeneratorStage):
             t = edge_traffic[key]
             if t >= cfg.road_min_traffic:
                 return True
-            a, b = key
-            on_river = any(c in hexes and hexes[c].river_flow > 0 for c in (a, b))
+            # By the tag, not by `river_flow > 0`. Under `river_flow_continuous` hydrology
+            # writes a flow value onto every draining land hex, so a flow test calls the
+            # whole map a river and admits every quiet edge on it. The costs have always
+            # read the tag for this reason; eligibility was still reading the flow, and
+            # only got away with it while stitching kept traffic high enough everywhere
+            # that almost nothing sat in the one-to-two band where the two disagree.
+            on_river = any(c in hexes and is_river(hexes[c]) for c in key)
             return on_river and t >= cfg.road_river_traffic_min
 
         eligible = sorted(
@@ -149,16 +154,22 @@ class InterurbanRoadStage(GeneratorStage):
                 else:
                     road_edges[key] = RoadTier.TRACK
 
-        cities = [s for s in settlements if s.tier == SettlementTier.CITY]
-        if len(cities) > 1:
-            road_edges, ferries = self._guarantee_city_connectivity(
-                hexes, cities, road_edges, canonical_routes, cfg, blocked, settled
+        # Every settlement, not just the cities. It used to run only when a map had two
+        # or more of them, so the organic model — whose markets are all TOWN — had nothing
+        # guaranteeing its network was in one piece. It came out connected anyway only
+        # because stitching made almost every route a concatenation of the same few legs;
+        # with routes pathfound independently the map broke into two components.
+        if len(settlements) > 1:
+            road_edges, ferries = self._guarantee_connectivity(
+                hexes, settlements, road_edges, cfg, blocked, settled
             )
             state.ferries.extend(ferries)
 
         # Again over the finished network, on tiers this time: the connectivity guarantee
         # lays trunk roads of its own, which can skirt a town like any other.
         route_through_settlements(road_edges, hexes, settled, cfg, blocked)
+
+        prune_orphan_roads(road_edges, settled | {c for f in state.ferries for c in (f.a, f.b)})
 
         for a, b in road_edges:
             if a in hexes and b in hexes:
@@ -182,49 +193,8 @@ class InterurbanRoadStage(GeneratorStage):
         state.road_edges = road_edges
         return state
 
-    def _stitch_via_junction(
-        self, origin, dest, settlement_coords, canonical_routes, hexes, node_cost, edge_cost
-    ):
-        def _path_cost(path):
-            if not path:
-                return float("inf")
-            total = node_cost(hexes[path[0]])
-            for i in range(1, len(path)):
-                total += node_cost(hexes[path[i]])
-                total += edge_cost(hexes[path[i - 1]], hexes[path[i]])
-            return total
-
-        best_path = None
-        best_cost = float("inf")
-        for mid in settlement_coords:
-            if mid in (origin, dest):
-                continue
-            k1 = (min(origin, mid), max(origin, mid))
-            k2 = (min(mid, dest), max(mid, dest))
-            if k1 not in canonical_routes or k2 not in canonical_routes:
-                continue
-            seg1 = canonical_routes[k1]
-            seg2 = canonical_routes[k2]
-            s1 = seg1 if seg1[-1] == mid else (list(reversed(seg1)) if seg1[0] == mid else None)
-            s2 = seg2 if seg2[0] == mid else (list(reversed(seg2)) if seg2[-1] == mid else None)
-            if s1 is None or s2 is None:
-                continue
-            if s1[0] != origin or s2[-1] != dest:
-                continue
-            stitched = s1 + s2[1:]
-            cost = _path_cost(stitched)
-            if cost < best_cost:
-                best_path = stitched
-                best_cost = cost
-
-        return (
-            best_path if best_path is not None else astar(hexes, origin, dest, node_cost, edge_cost)
-        )
-
-    def _guarantee_city_connectivity(
-        self, hexes, cities, road_edges, canonical_routes, cfg, blocked, settled
-    ):
-        """Join any city the traffic model left off the network, by land or by boat.
+    def _guarantee_connectivity(self, hexes, places, road_edges, cfg, blocked, settled):
+        """Join any settlement the traffic model left off the network, by land or by boat.
 
         Adjacency is the drawn network itself.  It used to be rebuilt from whichever
         canonical routes contributed a tier, which was a second, subtly different answer to
@@ -235,7 +205,7 @@ class InterurbanRoadStage(GeneratorStage):
             road_adj[a].add(b)
             road_adj[b].add(a)
 
-        city_coords = {s.coord for s in cities}
+        place_coords = {s.coord for s in places}
 
         def bfs_component(start):
             visited = {start}
@@ -250,7 +220,7 @@ class InterurbanRoadStage(GeneratorStage):
 
         visited_global: set = set()
         components = []
-        for cc in city_coords:
+        for cc in place_coords:
             if cc in visited_global:
                 continue
             comp = bfs_component(cc)
@@ -282,16 +252,16 @@ class InterurbanRoadStage(GeneratorStage):
                 road_edges.setdefault(road_edge_key(a, b), RoadTier.PRIMARY)
 
         ferries: list[Ferry] = []
-        max_iter = len(cities) * 2
+        max_iter = len(places) * 2
         for _ in range(max_iter):
-            isolated = [s for s in cities if s.coord not in main]
+            isolated = [s for s in places if s.coord not in main]
             if not isolated:
                 break
             progressed = False
             for iso in isolated:
                 best_path = None
                 best_cost = float("inf")
-                for target_coord in main & city_coords:
+                for target_coord in main & place_coords:
                     p = astar(hexes, iso.coord, target_coord, plain_cost, plain_edge)
                     if p:
                         cost = path_total_cost(p)
@@ -304,13 +274,13 @@ class InterurbanRoadStage(GeneratorStage):
                     progressed = True
                     break
             if not progressed:
-                # No land route to any main-component city: the river channel cuts this
-                # city off. Join it by boat, or fail loudly if no ferry is plausible.
+                # No land route to any settlement in the main component: the river channel
+                # cuts this one off. Join it by boat, or fail loudly if none is plausible.
                 iso = isolated[0]
                 ferry, ferry_paths = ferry_link(
                     hexes,
                     iso.coord,
-                    f"City {iso.name}",
+                    iso.name,
                     main,
                     cfg,
                     blocked,
