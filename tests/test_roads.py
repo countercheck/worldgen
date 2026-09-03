@@ -269,8 +269,14 @@ def test_reproducibility():
     assert net1 == net2, "Roads differ between identical seeds"
 
 
-def test_slope_edge_cost_formula():
-    """Unit test for the hyperbolic slope cost formula used in edge_cost."""
+def test_slope_edge_cost_is_the_switchback_priced():
+    """Climb converted to level going, continuously — and refused outright above the cap.
+
+    The curve this replaced was free below `road_slope_free_pct` (3%), which is exactly
+    `terrain_rolling_gradient_m` and so the FLAT boundary: every flat edge cost nothing and
+    every flat route tied. Above 25% it saturated at ten times base rather than refusing, so
+    a road met a 65% face, paid a flat twenty, and went straight up.
+    """
     cfg = WorldConfig()
 
     def slope_cost(delta_elev):
@@ -280,35 +286,49 @@ def test_slope_edge_cost_formula():
             cfg,
         )
 
-    # grade = 0% → free
     assert slope_cost(0.0) == pytest.approx(0.0)
-    # grade = free_pct (3%) → zero cost
-    delta_free = cfg.road_slope_free_pct * cfg.hex_size_m / 100.0
-    assert slope_cost(delta_free) == pytest.approx(0.0)
-    # grade slightly above free → small positive cost
-    assert slope_cost(delta_free * 1.01) > 0.0
-    # midpoint grade → cost = road_slope_cost × 1.0
-    mid_pct = (cfg.road_slope_free_pct + cfg.road_slope_cap_pct) / 2
-    delta_mid = mid_pct * cfg.hex_size_m / 100.0
-    mid_cost = slope_cost(delta_mid)
-    expected_mid = (
-        cfg.road_slope_cost
-        * (mid_pct - cfg.road_slope_free_pct)
-        / (cfg.road_slope_cap_pct - mid_pct)
-    )
-    assert abs(mid_cost - expected_mid) < 1e-9
-    # grade = cap_pct → saturated at road_slope_cost * road_slope_cap_mult
+
+    # Metres of climb over the exchange rate, and nothing is free but level ground.
+    assert slope_cost(cfg.road_ascent_per_hex) == pytest.approx(1.0)
+    assert slope_cost(2 * cfg.road_ascent_per_hex) == pytest.approx(2.0)
+    assert slope_cost(1.0) > 0.0, "a metre of climb must cost something"
+
+    # Symmetric: a road is cut-and-fill, and a descent needs braking. Naismith's walker
+    # pays for the climb alone, which is why `travel_ascent_per_hex` is a different number.
+    for delta in (5.0, 40.0, 120.0):
+        assert slope_cost(delta) == pytest.approx(slope_cost(-delta))
+
+    # Above the cap it is refused, not priced.
     delta_cap = cfg.road_slope_cap_pct * cfg.hex_size_m / 100.0
-    assert slope_cost(delta_cap) == pytest.approx(cfg.road_slope_cost * cfg.road_slope_cap_mult)
-    # grade > cap → same saturation value
-    assert slope_cost(delta_cap * 2) == pytest.approx(cfg.road_slope_cost * cfg.road_slope_cap_mult)
-    # monotonically increasing between free and cap
-    deltas = [delta_free + i * (delta_cap - delta_free) / 20 for i in range(1, 21)]
+    assert slope_cost(delta_cap) == float("inf")
+    assert slope_cost(delta_cap * 2) == float("inf")
+    assert slope_cost(delta_cap * 0.99) < float("inf")
+
+    # Monotone all the way to the cap.
+    deltas = [delta_cap * i / 20 for i in range(20)]
     costs = [slope_cost(d) for d in deltas]
-    assert all(a <= b for a, b in zip(costs, costs[1:], strict=False))
+    assert costs == sorted(costs)
 
 
-# --- river channel constraint ------------------------------------------------
+def test_a_steep_road_hex_is_tagged_as_a_switchback():
+    """The zigzag is priced but cannot be drawn: a switchback is a hundred-metre feature
+    and a hex is a kilometre. The tag is how a reader knows the segment is slow."""
+    from worldgen.stages.road_cost import edge_grade_pct, tag_switchbacks
+
+    cfg = WorldConfig()
+    hexes = {
+        (0, 0): Hex(coord=(0, 0), elevation=0.0),
+        (1, 0): Hex(coord=(1, 0), elevation=cfg.road_switchback_grade_pct * 10.0),
+        (2, 0): Hex(coord=(2, 0), elevation=cfg.road_switchback_grade_pct * 10.0 + 1.0),
+    }
+    edges = {((0, 0), (1, 0)): RoadTier.PRIMARY, ((1, 0), (2, 0)): RoadTier.PRIMARY}
+    tag_switchbacks(edges, hexes, cfg)
+
+    assert edge_grade_pct(hexes[(0, 0)], hexes[(1, 0)], cfg) >= cfg.road_switchback_grade_pct
+    assert "switchback" in hexes[(0, 0)].tags
+    assert "switchback" in hexes[(1, 0)].tags
+    # The gentle edge tags nothing of its own; (1, 0) is marked by the steep one beside it.
+    assert "switchback" not in hexes[(2, 0)].tags
 
 
 def _river_edges(state):

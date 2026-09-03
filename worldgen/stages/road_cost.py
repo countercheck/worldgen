@@ -26,18 +26,23 @@ def max_grade_cap_delta(cfg) -> float:
 
 
 def slope_edge_cost(from_hx, to_hx, cfg) -> float:
-    """Grade-aware edge penalty for road pathfinding."""
-    grade_pct = edge_grade_pct(from_hx, to_hx, cfg)
-    if grade_pct <= cfg.road_slope_free_pct:
-        return 0.0
-    if grade_pct >= cfg.road_slope_cap_pct:
-        return cfg.road_slope_cost * cfg.road_slope_cap_mult
-    raw = (
-        cfg.road_slope_cost
-        * (grade_pct - cfg.road_slope_free_pct)
-        / (cfg.road_slope_cap_pct - grade_pct)
-    )
-    return min(raw, cfg.road_slope_cost * cfg.road_slope_cap_mult)
+    """What the climb costs, as hexes of level going — the switchback, priced.
+
+    At 1 hex = 1 km a road climbing 200 m is not a straight ramp; it is several kilometres
+    of zigzag folded inside that hex. `road_ascent_per_hex` is the exchange rate that says
+    so, and the cost is continuous in the height difference rather than banded.
+
+    Symmetric in up and down, unlike `travel_ascent_per_hex`. A walker pays for the climb
+    alone (Naismith); a road pays for both, being cut-and-fill, and a steep descent needs
+    braking and washes out.
+
+    Above `road_slope_cap_pct` the edge is refused outright — a laden cart cannot climb 25%,
+    and it should not be offered the option at a price. The curve this replaced saturated
+    there instead, so a road met a 65% face, paid a flat twenty for it, and went straight up.
+    """
+    if not grade_is_under_cap(from_hx, to_hx, cfg):
+        return float("inf")
+    return abs(to_hx.elevation - from_hx.elevation) / cfg.road_ascent_per_hex
 
 
 def terrain_base_cost(hx, cfg) -> float:
@@ -258,6 +263,26 @@ def make_road_edge_cost(cfg, blocked_edges=None, exempt_coords=frozenset(), ring
         return road_edge_cost(from_hx, to_hx, cfg, ring)
 
     return edge_cost
+
+
+def tag_switchbacks(road_edges, hexes, cfg) -> None:
+    """Mark road hexes whose grade is steep enough that the road must double back on itself.
+
+    The cost model already charges for it — `slope_edge_cost` converts the climb into the
+    level-going it really represents — but nothing in the output said so, and at this scale
+    nothing can be drawn: a switchback is a hundred-metre feature and a hex is a kilometre.
+    The tag is how a reader of the map, or a wargame counting movement, knows the segment is
+    slow.
+
+    Mutates `hex.tags` in place, like `tag_river_crossings`.
+    """
+    for a, b in road_edges:
+        ha, hb = hexes.get(a), hexes.get(b)
+        if ha is None or hb is None:
+            continue
+        if edge_grade_pct(ha, hb, cfg) >= cfg.road_switchback_grade_pct:
+            ha.tags.add("switchback")
+            hb.tags.add("switchback")
 
 
 def tag_river_crossings(road_edges, hexes) -> None:

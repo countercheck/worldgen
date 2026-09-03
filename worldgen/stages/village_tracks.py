@@ -10,6 +10,7 @@ from .road_cost import (
     river_hex_cost,
     route_through_settlements,
     tag_river_crossings,
+    tag_switchbacks,
     terrain_base_cost,
 )
 
@@ -94,4 +95,5 @@ class VillageTrackStage(GeneratorStage):
         route_through_settlements(state.road_edges, hexes, settled, cfg, blocked)
 
         tag_river_crossings(state.road_edges, hexes)
+        tag_switchbacks(state.road_edges, hexes, cfg)
         return state

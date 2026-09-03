@@ -287,7 +287,7 @@ haulage_range_land: 40.0   # Travel cost at which bulk food is worth nothing ove
 haulage_range_water_mult: 15.0 # How much further the same cargo goes by water. Diocletian's Price Edict prices land carriage at roughly 55x sea and 11x river for the same tonne-kilometre. This is why large pre-industrial cities sit on navigable water and inland ones stay small: nothing gates a city, water simply extends what can feed it. Default: 15.0
 marketable_surplus_fraction: 0.20 # Share of what a farming household grows that can leave for a market; it eats the rest. Sizing markets off the surplus rather than the production is why the tier ratios come out right without target counts anywhere. Default: 0.20
 people_per_food: 400.0     # People supported per unit of haulage-weighted food. Calibrated so market towns land in their historical 500–2500 band: across five seeds at 128x128 this gives medians of 1260–1700 and a largest of 4200–5450. Default: 400
-travel_ascent_per_hex: 125.0 # Naismith's rule: metres of ascent that cost as much as one hex of level ground. Catchments are walked, not engineered, so they use this rather than road_slope_cost — that curve prices grading a road and saturates at ten times base, which over eroded terrain shrinks a catchment to a third of its proper reach. Default: 125
+travel_ascent_per_hex: 125.0 # Naismith's rule: metres of ascent that cost as much as one hex of level ground. Catchments are walked, not engineered, so they use this rather than road_ascent_per_hex, which prices a graded road and is about five times stricter than a walker has reason to be. Default: 125
 travel_ford_cost: 8.0      # Getting across away from a crossing, per multiple of the wadeable span, charged on each land–river edge. Deliberately has no fixed term, unlike road_river_crossing_base: that base is the capital of building a bridge, and somebody walking to market pays no capital — what stops them is how much water is in the way. Default: 8.0
 
 # ---------------------------------------------------------------------------
@@ -348,14 +348,13 @@ road_disembark_cost: 20.0 # Overridden to match. Default: 8.0
 # (entering and leaving), so total ≈ 2 × (base + flow × max_river_flow).
 road_river_crossing_base: 4.0  # Base cost added on each land↔river edge. Default: 4.0
 road_river_crossing_flow: 12.0 # Additional cost × max(river_flow); biggest river adds the full amount. Default: 12.0
-road_river_hex_cost: 12.0      # Cost of standing a road *on* a river hex. Prices out threading a meander or braid, while leaving a genuine crossing affordable. Default: 12.0
+road_river_hex_cost: 16.0      # Cost of standing a road *on* a river hex. Prices out threading a meander or braid, while leaving a genuine crossing affordable. Raised from 12 with road_ascent_per_hex: pricing the climb made the valley floor more attractive, and roads began taking the channel as often as it occurs rather than declining it. Default: 16.0
 road_ferry_max_hop: 4          # Longest boat hop used to join a component a river mesh cuts off. Beyond this, routing raises RoutingError. Default: 4
 
 # Slope-based cost: grade % = (elevation_delta_m / hex_size_m) * 100
-road_slope_cost: 2.0      # Base multiplier applied to grade-based costs. Default: 2.0
-road_slope_free_pct: 3.0  # Grade % below which slope adds no extra cost. Default: 3.0
+road_ascent_per_hex: 25.0 # Metres of elevation change costing as much as one hex of level going — the switchback, priced. At 1 hex = 1 km a road climbing 200 m is not a straight ramp but several km of zigzag folded inside that hex, and this is the exchange rate that says so. Anchored on travel_ascent_per_hex (125, Naismith for a walker) divided by about five, a laden cart being far more gradient-sensitive than a man on foot. Symmetric in up and down: a road is cut-and-fill, and a steep descent needs braking. Default: 25.0
+road_switchback_grade_pct: 10.0 # A road edge at or above this grade tags both its hexes "switchback", so a reader knows the segment is slow. The zigzag is priced but cannot be drawn at this scale. Default: 10.0
 road_slope_cap_pct: 25.0  # Grade % at which slope cost saturates. Default: 25.0
-road_slope_cap_mult: 10.0 # Cost multiplier at saturation grade. Default: 10.0
 
 road_settlement_skirt_cost: 4.0 # What a road pays to pass a settlement at one hex without entering it — an edge whose two ends both neighbour the same seat. The half of the settlement pull that works at one hex: a discount on the town itself only ever makes the detour a tie, since both routes pay for the same two ring hexes. About four hexes of level going. Default: 4.0
 road_settlement_detour_max_mult: 4.0 # A road passing a settlement at one hex is bent through it instead, because a road that skirts a town at the width of a field is a motor-age idea. This caps what the detour may cost, as a multiple of the edge it replaces. 2.0 is free (a detour is two legs where there was one); this bounds the ground beyond that — the town on the far bank of a river, or up an escarpment. Default: 4.0

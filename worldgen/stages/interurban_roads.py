@@ -19,6 +19,7 @@ from .road_cost import (
     route_through_settlements,
     settlement_rings,
     tag_river_crossings,
+    tag_switchbacks,
     terrain_base_cost,
 )
 
@@ -231,6 +232,7 @@ class InterurbanRoadStage(GeneratorStage):
                 hexes[b].road_connections.add(a)
 
         tag_river_crossings(road_edges, hexes)
+        tag_switchbacks(road_edges, hexes, cfg)
 
         # Re-score habitability near roads so VillagePlacementStage benefits.  Only the
         # village score: cities and towns are already sited by this point, and a road

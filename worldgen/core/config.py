@@ -348,12 +348,13 @@ class WorldConfig:
         if self.hex_size_m <= 0:
             raise ValueError(f"hex_size_m must be > 0, got {self.hex_size_m}")
 
-        if self.road_slope_free_pct < 0:
-            raise ValueError(f"road_slope_free_pct must be >= 0, got {self.road_slope_free_pct}")
-        if self.road_slope_cap_pct <= self.road_slope_free_pct:
+        if self.road_ascent_per_hex <= 0:
+            raise ValueError(f"road_ascent_per_hex must be > 0, got {self.road_ascent_per_hex}")
+        if not 0 < self.road_switchback_grade_pct <= self.road_slope_cap_pct:
             raise ValueError(
-                "road_slope_cap_pct must be greater than road_slope_free_pct, "
-                f"got cap={self.road_slope_cap_pct}, free={self.road_slope_free_pct}"
+                "road_switchback_grade_pct must be above 0 and no more than "
+                f"road_slope_cap_pct ({self.road_slope_cap_pct}), got "
+                f"{self.road_switchback_grade_pct}"
             )
         if self.road_settlement_skirt_cost < 0:
             raise ValueError(
@@ -365,8 +366,6 @@ class WorldConfig:
             )
         if self.road_travellers_max < 1:
             raise ValueError(f"road_travellers_max must be >= 1, got {self.road_travellers_max}")
-        if self.road_slope_cap_mult <= 0:
-            raise ValueError(f"road_slope_cap_mult must be > 0, got {self.road_slope_cap_mult}")
         # Below 2.0 the rule can never fire: a detour is two legs where there was one.
         if self.road_settlement_detour_max_mult < 2.0:
             raise ValueError(
@@ -525,8 +524,8 @@ class WorldConfig:
     marketable_surplus_fraction: float = 0.20
     # Naismith's rule: this many metres of ascent cost as much as one hex of level
     # ground. Catchments are walked, not engineered, so they use this rather than
-    # road_slope_cost — that curve prices grading a road and saturates at ten times base,
-    # which over eroded terrain shrinks a catchment to a third of its proper reach.
+    # road_ascent_per_hex, which prices a graded road and is five times stricter than a
+    # walker has any reason to be.
     travel_ascent_per_hex: float = 125.0
 
     # ---- River crossings ---------------------------------------------------
@@ -713,16 +712,41 @@ class WorldConfig:
     # hexsides a river is drawn along; a meander or braid puts two river hexes side by
     # side without one, and a road threading those is still in the water. This makes
     # occupying the channel uneconomic while leaving a genuine crossing affordable.
-    road_river_hex_cost: float = 12.0
+    # Raised from 12 with `road_ascent_per_hex`. Pricing the climb continuously made the
+    # valley floor more attractive — it is the flattest line there is — and roads began
+    # taking the channel as often as it occurs rather than declining it, 3.6% of road hexes
+    # against 3.2% of the land. 16 restores the avoidance (3.1%) and slightly improves
+    # bank-following with it (2.72x to 2.78x). It saturates there; 20 behaves identically.
+    road_river_hex_cost: float = 16.0
 
     # Roads — ferries. A component cut off by a river mesh (a delta island, a braided
     # confluence) is joined by boat rather than by a road running down the channel.
     # Longer than this and no plausible ferry exists, so routing raises instead.
     road_ferry_max_hop: int = 4
-    road_slope_cost: float = 2.0
-    road_slope_free_pct: float = 3.0  # grade % below which slope costs nothing
+    # Metres of elevation change that cost as much as one hex of level going.
+    #
+    # This is the switchback, priced. At 1 hex = 1 km a road climbing 200 m is not a
+    # straight ramp — it is several kilometres of zigzag folded inside that one hex — and
+    # this is the exchange rate that says so: at 25, a 200 m climb costs eight hexes of
+    # level going, which is about what the real road would measure.
+    #
+    # Anchored on `travel_ascent_per_hex` (125, Naismith's rule for a walker), divided by
+    # about five because a laden cart is far more sensitive to gradient than a man on foot.
+    # Symmetric in up and down, unlike the walker's: a road pays for both, being cut-and-
+    # fill, and a steep descent needs braking and washes out.
+    #
+    # It replaces `road_slope_cost`, `road_slope_free_pct` and `road_slope_cap_mult`. That
+    # curve was free below 3% and saturated at ten times base above 25%. The free band was
+    # indefensible on its own terms — 3% is exactly `terrain_rolling_gradient_m`, the FLAT
+    # boundary, so every flat edge was free and tied — and the saturation was worse: a road
+    # met a 65% face, paid a flat 20 for it, and went straight up. On a 4000 m map the
+    # steepest road grade was 64.8%; with this it is 24.4%, at the cap where it belongs.
+    road_ascent_per_hex: float = 25.0
     road_slope_cap_pct: float = 25.0  # grade % at which cost saturates
-    road_slope_cap_mult: float = 10.0  # saturation multiplier at cap grade
+    # A road edge at or above this grade is tagged "switchback" on both its hexes, so a
+    # reader of the map knows the crossing is slow — the zigzag is priced but not otherwise
+    # visible at this scale.
+    road_switchback_grade_pct: float = 10.0
     # What a road pays to pass a settlement at one hex without entering it — an edge whose
     # two ends both neighbour the same seat. The cost-model half of the rule that
     # `route_through_settlements` applies afterwards, and the half that can actually shift

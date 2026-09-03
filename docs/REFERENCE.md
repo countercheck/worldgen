@@ -1952,7 +1952,7 @@ river hits this twice, entering and leaving the river hex.
 |---|---|---|---|
 | `road_river_crossing_base` | `float` | `4.0` | Constant component (validated `≥ 0`) — the capital of building a bridge |
 | `road_river_crossing_flow` | `float` | `12.0` | Multiplied by `max(from.river_flow, to.river_flow)`. Big rivers are dramatically more expensive to bridge |
-| `road_river_hex_cost` | `float` | `12.0` | Node cost for standing a road *on* a river hex (validated `≥ 0`). Prices out threading a meander or braid while leaving a genuine crossing affordable |
+| `road_river_hex_cost` | `float` | `16.0` | Raised from `12.0` alongside `road_ascent_per_hex` — pricing the climb continuously made the valley floor more attractive, it being the flattest line there is, and roads began taking the channel as often as it occurs (3.6% of road hexes against 3.2% of the land) rather than declining it. `16.0` restores the avoidance at 3.1% and improves bank-following with it, 2.72x to 2.78x; it saturates there, and `20.0` behaves identically. Node cost for standing a road *on* a river hex (validated `≥ 0`). Prices out threading a meander or braid while leaving a genuine crossing affordable |
 | `road_ferry_max_hop` | `int` | `4` | Longest boat hop used to join a component a river mesh cuts off (validated `≥ 1`). Beyond it, routing raises `RoutingError` |
 
 ### 4.18 Roads — Slope Penalty
@@ -1962,14 +1962,20 @@ Slope cost is a rational function of grade percent — zero below `free_pct`, sa
 
 | Param | Type | Default | Effect |
 |---|---|---|---|
-| `road_slope_cost` | `float` | `2.0` | Base slope penalty multiplier |
-| `road_slope_free_pct` | `float` | `3.0` | Grade % below which slope is free (validated `≥ 0`) |
+| `road_ascent_per_hex` | `float` | `25.0` | Metres of elevation change costing as much as one hex of level going — **the switchback, priced**. At 1 hex = 1 km a road climbing 200 m is not a straight ramp but several kilometres of zigzag folded inside that hex, and this is the exchange rate that says so. Anchored on `travel_ascent_per_hex` (125, Naismith's rule for a walker) divided by about five, a laden cart being far more sensitive to gradient than a man on foot. Symmetric in up and down, unlike the walker's: a road is cut-and-fill, and a steep descent needs braking and washes out. Validated `> 0` |
+| `road_switchback_grade_pct` | `float` | `10.0` | A road edge at or above this grade tags both its hexes `"switchback"`. The zigzag is priced but cannot be drawn at this scale — a switchback is a hundred-metre feature and a hex is a kilometre — so the tag is how a reader, or a wargame counting movement, knows the segment is slow. Validated in `(0, road_slope_cap_pct]` |
 | `road_slope_cap_pct` | `float` | `25.0` | Grade % at which the penalty saturates. Validated `> road_slope_free_pct` |
-| `road_slope_cap_mult` | `float` | `10.0` | Multiplier applied at saturation. Validated `> 0`, so maximum slope cost is `2.0 × 10 = 20` per edge |
 
-The same `road_slope_cap_pct` is also the threshold for the **`grade_is_under_cap`** check
-used by `settlement_min_reachable`: if no road would willingly cross a 25%+ grade, no
-settlement should be placed where its only escape requires one.
+`road_slope_cap_pct` is now a **refusal**, not a saturation. The curve it replaced was free
+below 3% and levelled off at ten times base above 25%, so a road met a 65% face, paid a flat
+twenty for it, and went straight up: on a 4000 m map the steepest road grade was **64.8%**,
+and with the refusal it is **24.4%**. The free band was no better — 3% is exactly
+`terrain_rolling_gradient_m`, the FLAT boundary, so every flat edge cost nothing and every
+flat route was a tie.
+
+The same threshold is also the **`grade_is_under_cap`** check used by
+`settlement_min_reachable`: if no road would cross a 25%+ grade, no settlement should be
+placed where its only escape requires one.
 
 ### 4.19 Roads — Network Classification
 
