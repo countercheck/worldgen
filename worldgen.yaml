@@ -324,10 +324,10 @@ road_flat_cost: 1.0       # Cost multiplier for flat hexes. Default: 1.0
 # ---------------------------------------------------------------------------
 # Roads: traveller simulation
 # ---------------------------------------------------------------------------
-road_travellers_city: 500    # Simulated daily travellers originating from each city. Default: 500
-road_travellers_town: 100    # Simulated daily travellers originating from each town. Default: 100
-road_travellers_village: 20  # Simulated daily travellers originating from each village. Default: 20
-road_gravity_exponent: 1.5   # Distance-decay exponent for gravity model; higher = traffic stays local. Default: 1.5
+# Travellers come from population, not tier: a market of 6,200 wears a deeper road out of its gates than one of 900.
+road_travellers_per_pop: 0.04 # Simulated travellers emitted per head of population. 0.04 keeps the total near what the old per-tier counts gave (about 8,000 over 74 markets on a 128x128 map). Default: 0.04
+road_travellers_max: 500      # Cap per settlement, so one large city cannot drown the map. Reached above 12,500 people. Default: 500
+road_gravity_exponent: 2.5   # Distance-decay exponent for the gravity model: a destination's appeal is pop / distance**this. 2.5 rather than the 1.5 a modern model would use, because a laden cart is not a lorry — at 1.5 a traveller was nearly as likely to make for a town 40 km off as one 10 km away, and 72% of every possible pair of settlements ended up with a road of its own. Default: 2.5
 road_bank_discount: 0.5      # Maximum cost reduction on a hex *beside* a river; multiplied by the largest adjacent river_flow. Roads follow the bank, not the channel, so which side they run on stays readable. Default: 0.5
 road_bank_discount_min_flow: 0.2   # Floor on river_flow used in the discount calc; prevents tiny streams losing all their corridor pull. Default: 0.2
 road_pheromone_factor: 0.1   # How strongly existing traffic attracts new routes. Default: 0.1
@@ -357,6 +357,8 @@ road_slope_free_pct: 3.0  # Grade % below which slope adds no extra cost. Defaul
 road_slope_cap_pct: 25.0  # Grade % at which slope cost saturates. Default: 25.0
 road_slope_cap_mult: 10.0 # Cost multiplier at saturation grade. Default: 10.0
 
+road_settlement_skirt_cost: 4.0 # What a road pays to pass a settlement at one hex without entering it — an edge whose two ends both neighbour the same seat. The half of the settlement pull that works at one hex: a discount on the town itself only ever makes the detour a tie, since both routes pay for the same two ring hexes. About four hexes of level going. Default: 4.0
+road_settlement_detour_max_mult: 4.0 # A road passing a settlement at one hex is bent through it instead, because a road that skirts a town at the width of a field is a motor-age idea. This caps what the detour may cost, as a multiple of the edge it replaces. 2.0 is free (a detour is two legs where there was one); this bounds the ground beyond that — the town on the far bank of a river, or up an escarpment. Default: 4.0
 road_min_traffic: 3       # Minimum traffic volume required to draw a road. Default: 3
 road_river_traffic_min: 1 # Minimum traffic for a river hex to qualify as a drawn road; lower than road_min_traffic so towpaths/riverside trails appear from light traffic. Default: 1
 road_primary_pct: 0.10    # Top fraction of traffic share classified as primary roads. Default: 0.10

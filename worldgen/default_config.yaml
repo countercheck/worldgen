@@ -351,6 +351,7 @@ road_slope_free_pct: 3.0  # Grade % below which slope adds no extra cost. Defaul
 road_slope_cap_pct: 25.0  # Grade % at which slope cost saturates. Default: 25.0
 road_slope_cap_mult: 10.0 # Cost multiplier at saturation grade. Default: 10.0
 
+road_settlement_skirt_cost: 4.0 # What a road pays to pass a settlement at one hex without entering it — an edge whose two ends both neighbour the same seat. The half of the settlement pull that works at one hex: a discount on the town itself only ever makes the detour a tie, since both routes pay for the same two ring hexes. About four hexes of level going. Default: 4.0
 road_settlement_detour_max_mult: 4.0 # A road passing a settlement at one hex is bent through it instead, because a road that skirts a town at the width of a field is a motor-age idea. This caps what the detour may cost, as a multiple of the edge it replaces. 2.0 is free (a detour is two legs where there was one); this bounds the ground beyond that — the town on the far bank of a river, or up an escarpment. Default: 4.0
 road_min_traffic: 3       # Minimum traffic volume required to draw a road. Default: 3
 road_river_traffic_min: 1 # Minimum traffic for a river hex to qualify as a drawn road; lower than road_min_traffic so towpaths/riverside trails appear from light traffic. Default: 1

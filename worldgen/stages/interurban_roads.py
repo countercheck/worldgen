@@ -15,6 +15,7 @@ from .road_cost import (
     river_edges,
     river_hex_cost,
     route_through_settlements,
+    settlement_rings,
     tag_river_crossings,
     terrain_base_cost,
 )
@@ -47,13 +48,15 @@ class InterurbanRoadStage(GeneratorStage):
         # it, so the bank a road takes stays readable. Settlement hexes are exempt.
         blocked = river_edges(state.rivers)
         settled = {s.coord for s in state.settlements}
+        # Which seats each hex neighbours, so an edge can be charged for skirting one.
+        ring = settlement_rings(settled)
 
         def node_cost(hx):
             base = terrain_base_cost(hx, cfg) + river_hex_cost(hx, cfg)
             base *= 1.0 - bank_discount(hx, hexes, cfg)
             return pheromone_discount(base, hex_traffic[hx.coord], cfg)
 
-        edge_cost = make_road_edge_cost(cfg, blocked, settled)
+        edge_cost = make_road_edge_cost(cfg, blocked, settled, ring)
 
         # Travellers come from population rather than from tier, so a market of 6,200 wears
         # a deeper road out of its gates than one of 900. Population used to enter only on

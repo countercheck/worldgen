@@ -355,6 +355,10 @@ class WorldConfig:
                 "road_slope_cap_pct must be greater than road_slope_free_pct, "
                 f"got cap={self.road_slope_cap_pct}, free={self.road_slope_free_pct}"
             )
+        if self.road_settlement_skirt_cost < 0:
+            raise ValueError(
+                f"road_settlement_skirt_cost must be >= 0, got {self.road_settlement_skirt_cost}"
+            )
         if self.road_travellers_per_pop <= 0:
             raise ValueError(
                 f"road_travellers_per_pop must be > 0, got {self.road_travellers_per_pop}"
@@ -719,6 +723,17 @@ class WorldConfig:
     road_slope_free_pct: float = 3.0  # grade % below which slope costs nothing
     road_slope_cap_pct: float = 25.0  # grade % at which cost saturates
     road_slope_cap_mult: float = 10.0  # saturation multiplier at cap grade
+    # What a road pays to pass a settlement at one hex without entering it — an edge whose
+    # two ends both neighbour the same seat. The cost-model half of the rule that
+    # `route_through_settlements` applies afterwards, and the half that can actually shift
+    # a route at one hex: a *discount* on the town cannot, because the direct route and the
+    # detour both pay for the same two ring hexes, so the detour's extra cost is exactly
+    # what the town costs. Drive that to zero and the detour ties; it never wins. Making
+    # the skirt dear is what breaks the tie.
+    #
+    # Modest at 4.0, roughly four hexes of level going. The point is to shift a road that
+    # was indifferent, not to drag one over a mountain to call at a village.
+    road_settlement_skirt_cost: float = 4.0
     # A road passing a settlement at one hex is bent through it instead, because a road
     # that skirts a town at the width of a field is a motor-age idea. This is what the
     # detour may cost, as a multiple of the edge it replaces.

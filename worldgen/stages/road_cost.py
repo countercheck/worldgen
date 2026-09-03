@@ -46,7 +46,14 @@ def terrain_base_cost(hx, cfg) -> float:
     Water (OCEAN/LAKE) returns the small `road_water_cost` rather than infinity;
     this lets pathfinding traverse water bodies as a single piece of terrain
     where embark/disembark costs (charged on edges) dominate the journey.
+
+    A settlement hex costs nothing — it is a road segment carrying the most travellers
+    there can be. Cleared ground, a bridge already built, an inn: passing through a town
+    is easier than passing beside it, and a route should be drawn to one from a couple of
+    hexes out rather than have to be bent into it afterwards.
     """
+    if hx.settlement is not None:
+        return 0.0
     tc = hx.terrain_class
     if tc in WATER:
         return cfg.road_water_cost
@@ -143,13 +150,43 @@ def river_crossing_edge_cost(from_hx, to_hx, cfg) -> float:
     return cfg.road_river_crossing_base + cfg.road_river_crossing_flow * flow
 
 
-def road_edge_cost(from_hx, to_hx, cfg) -> float:
-    """Combined edge-cost: slope + water embark/disembark + river crossing."""
+def settlement_skirt_cost(from_hx, to_hx, cfg, ring) -> float:
+    """What it costs to pass a town at one hex without going in.
+
+    *ring* maps a hex to the seats it neighbours, so a shared entry means both ends of this
+    edge touch the same settlement: the road enters the ring and leaves without arriving.
+
+    This is the half of the settlement pull that works at one hex. A discount on the town
+    itself cannot: the direct route and the detour both pay for the same two ring hexes, so
+    the detour costs exactly what the town costs on top, and driving that to zero makes the
+    detour a *tie* rather than a win. Ties are settled by heap order. Charging the skirt is
+    what actually shifts the route.
+    """
+    if not ring:
+        return 0.0
+    shared = ring.get(from_hx.coord)
+    if not shared or not (shared & ring.get(to_hx.coord, frozenset())):
+        return 0.0
+    return cfg.road_settlement_skirt_cost
+
+
+def road_edge_cost(from_hx, to_hx, cfg, ring=None) -> float:
+    """Combined edge-cost: slope + water embark/disembark + river crossing + town skirt."""
     return (
         slope_edge_cost(from_hx, to_hx, cfg)
         + water_edge_cost(from_hx, to_hx, cfg)
         + river_crossing_edge_cost(from_hx, to_hx, cfg)
+        + settlement_skirt_cost(from_hx, to_hx, cfg, ring)
     )
+
+
+def settlement_rings(seats) -> dict:
+    """Hex -> the settlement seats it neighbours, for `settlement_skirt_cost`."""
+    out: dict = {}
+    for seat in seats:
+        for n in neighbors(seat):
+            out.setdefault(n, set()).add(seat)
+    return {k: frozenset(v) for k, v in out.items()}
 
 
 def river_edges(rivers) -> set[frozenset]:
@@ -180,7 +217,7 @@ def _settlement_exempt(hexes, settled, a, b) -> bool:
     return b in settled and a_hx is not None and not is_river(a_hx)
 
 
-def make_road_edge_cost(cfg, blocked_edges=None, exempt_coords=frozenset()):
+def make_road_edge_cost(cfg, blocked_edges=None, exempt_coords=frozenset(), ring=None):
     """Edge-cost closure, optionally forbidding the hexsides a river runs along.
 
     Crossing a river stays legal and stays priced by `river_crossing_edge_cost` — what
@@ -218,7 +255,7 @@ def make_road_edge_cost(cfg, blocked_edges=None, exempt_coords=frozenset()):
             )
             if not exempt:
                 return float("inf")
-        return road_edge_cost(from_hx, to_hx, cfg)
+        return road_edge_cost(from_hx, to_hx, cfg, ring)
 
     return edge_cost
 
