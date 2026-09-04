@@ -284,3 +284,28 @@ def test_heightmap_path_accepts_a_path_object():
 def test_world_config_validates_heightmap_fields(kwargs, message):
     with pytest.raises(ValueError, match=message):
         WorldConfig(**kwargs)
+
+
+def test_the_road_knobs_the_haulage_branch_deleted_are_retired_not_unknown(tmp_path):
+    """A config that generated a world yesterday must not crash today.
+
+    These eight were deleted when slope pricing went continuous, the bank discount was
+    retired, and travellers went per head of population. Each must die as a deprecation
+    that says where its job went — not as an unknown-key error with a fuzzy guess.
+    """
+    old = {
+        "road_slope_cost": 4.0,
+        "road_slope_free_pct": 2.0,
+        "road_slope_cap_mult": 10.0,
+        "road_bank_discount": 0.5,
+        "road_bank_discount_min_flow": 0.1,
+        "road_travellers_city": 60,
+        "road_travellers_town": 25,
+        "road_travellers_village": 6,
+    }
+    path = tmp_path / "old.yaml"
+    path.write_text("width: 32\n" + "".join(f"{k}: {v}\n" for k, v in old.items()))
+
+    with pytest.warns(DeprecationWarning):
+        cfg = WorldConfig.from_yaml(str(path))
+    assert cfg.width == 32

@@ -1136,6 +1136,36 @@ _RETIRED_FIELDS: dict[str, str] = {
         "elevation is metres throughout, so nothing needs converting from a 0-1 range any "
         "more; max_elevation_m sets the map's vertical scale"
     ),
+    "road_slope_cost": (
+        "slope is priced continuously now, as metres of climb exchanged for hexes of "
+        "level going; use road_delta_elevation_per_hex, and road_slope_cap_pct for the "
+        "grade at which an edge is refused outright"
+    ),
+    "road_slope_free_pct": (
+        "slope is priced continuously from the first metre of climb now, with no free "
+        "band; road_delta_elevation_per_hex sets the exchange rate"
+    ),
+    "road_slope_cap_mult": (
+        "the slope curve no longer saturates — above road_slope_cap_pct the edge is "
+        "refused outright rather than charged a capped price"
+    ),
+    "road_bank_discount": (
+        "retired outright: rivers carve real valleys now, so the valley floor is already "
+        "the cheap way through and a discount for hugging the bank double-counted it"
+    ),
+    "road_bank_discount_min_flow": (
+        "retired with road_bank_discount: the valley was doing the work all along"
+    ),
+    "road_travellers_city": (
+        "travellers are emitted per head of population now, so a big town sends more "
+        "than a small one; use road_travellers_per_pop (and road_travellers_max caps it)"
+    ),
+    "road_travellers_town": (
+        "travellers are emitted per head of population now; use road_travellers_per_pop"
+    ),
+    "road_travellers_village": (
+        "travellers are emitted per head of population now; use road_travellers_per_pop"
+    ),
     "erosion_iterations": (
         "erosion is now dosed per land hex so it means the same thing at any map size; "
         "use erosion_droplets_per_hex (try 8.0, which is 15000 droplets on a 48x48 map)"
