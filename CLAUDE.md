@@ -21,6 +21,9 @@ python3 -m ruff format .   # format
 
 ## Architecture (never violate)
 
+See `docs/ARCHITECTURE.md` for Mermaid diagrams of the layer structure and the
+generation pipeline in run order.
+
 - `core/` — data types and pipeline only; no rendering, no file I/O
 - `stages/` — pure transformers: `stage.run(WorldState) -> WorldState`
 - `export/` — all file I/O lives here; stages never write files
