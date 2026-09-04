@@ -271,3 +271,9 @@ def test_every_climate_declares_an_evaporation_rate():
         < CLIMATE_CONTEXTS["mediterranean"].evaporation
         < CLIMATE_CONTEXTS["arid"].evaporation
     )
+
+
+@pytest.mark.parametrize("value", [-0.1, 1.1])
+def test_world_config_validates_rain_shadow_strength(value):
+    with pytest.raises(ValueError, match="rain_shadow_strength"):
+        WorldConfig(rain_shadow_strength=value)

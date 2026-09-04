@@ -237,7 +237,13 @@ def test_lake_drainage_merges_without_rewiring_existing_river():
 
     assert flow_dir[spillway] == merge
     assert flow_dir[merge] == downstream
-    assert acc[merge] == 5.0
+    # The channel is joined, not seized: its own course is untouched.  Its *flow* is not,
+    # and must not be — a stream below a junction carries what both sides bring it.  The
+    # basin takes in 21 (a 20-unit river plus the rain on its one hex) and evaporates 1,
+    # so 20 arrive here where the channel carried 5.  This used to assert 5.0, holding the
+    # junction to the smaller of the two and pouring the lake's throughput away at the
+    # confluence.
+    assert acc[merge] == 20.0
 
 
 def test_no_shared_hexes_between_rivers(hydro_state):
@@ -570,66 +576,52 @@ def test_a_coastal_map_drains_to_the_sea():
     )
 
 
-def test_a_lake_outflow_carries_what_flows_into_it():
-    # Regression: the outflow was seeded with the spillway hex's own drainage — usually
-    # one hex of rain — instead of the basin's throughput, so a lake fed by eighteen
-    # rivers drained through a channel carrying 0.004 of the map's flow.  Nothing was
-    # tagged endorheic and the model called it drained, but the exporters scale river
-    # width by flow_volume, so the outlet drew as a hairline beside the torrents feeding
-    # it and the lake looked stoppered on the map.
-    state = build_world(
-        seed=100,
-        until="HydrologyStage",
-        width=160,
-        height=160,
-        erosion_iterations=2000,
-        grid_layout="offset",
-        domain_warp_strength=0.8,
-        continent_falloff_edges=["south"],
-        continent_shelf_variance=0.8,
-        elevation_gradient=[0.0, -0.5],
+def test_a_lake_outflow_is_seeded_with_the_whole_basin_inflow():
+    """The outflow carries the basin's throughput, not the spillway hex's own drainage.
+
+    Asserted on the accumulation the routing seeds, because that is where the property
+    lives.  Measuring it off the finished River objects does not work: confluence
+    splitting cuts an outflow into segments at every junction, so the polyline starting
+    at the spillway is not necessarily the one carrying the basin's water, and a rewrite
+    of this test that tried came out reading a correct outlet as a fifteenth of its feed.
+    """
+    lake, spillway, merge, downstream = (2, 2), (2, 1), (2, 0), (3, 0)
+    feeders = {(2, 3): 400.0, (1, 2): 60.0, (3, 2): 15.0}
+
+    cfg = WorldConfig(width=5, height=5, endorheic_evaporation_scale=0.0)
+    stage = HydrologyStage(cfg, np.random.default_rng(0))
+    ws = WorldState.empty(seed=3, width=5, height=5)
+    for hex_item in ws.hexes.values():
+        hex_item.terrain_class = TerrainClass.FLAT
+        hex_item.elevation = 10.0
+    ws.hexes[lake].terrain_class = TerrainClass.LAKE
+    ws.hexes[lake].elevation = 0.0
+    ws.hexes[spillway].elevation = 1.0
+
+    filled = {coord: h.elevation for coord, h in ws.hexes.items()}
+    filled[spillway] = 1.0
+    acc = {spillway: 1.0, merge: 5.0, downstream: 8.0, **feeders}
+    flow_dir = {merge: downstream, downstream: None, spillway: None}
+    flow_dir.update(dict.fromkeys(feeders, lake))
+
+    stage._guided_path_to_ocean = lambda *a, **k: [merge]
+    stage._forced_exit_to_border = lambda *a, **k: [merge]
+    stage._ensure_lake_drainage(
+        river_set={merge, downstream},
+        flow_dir=flow_dir,
+        hexes=ws.hexes,
+        land=set(ws.hexes) - {lake},
+        ocean=set(),
+        lakes={lake},
+        acc=acc,
+        filled=filled,
+        on_border=ws.on_border,
     )
 
-    lakes = {c for c, h in state.hexes.items() if h.terrain_class == TerrainClass.LAKE}
-    seen: set = set()
-    checked = 0
-    for start in sorted(lakes):
-        if start in seen:
-            continue
-        stack, comp = [start], []
-        seen.add(start)
-        while stack:
-            c = stack.pop()
-            comp.append(c)
-            for n in neighbors(c):
-                if n in lakes and n not in seen:
-                    seen.add(n)
-                    stack.append(n)
-        if len(comp) < 50:
-            continue
-        comp_set = set(comp)
-        shore = {n for c in comp_set for n in neighbors(c)} - comp_set
-        inflow = sum(
-            r.flow_volume for r in state.rivers if r.hexes[-1] in comp_set or r.hexes[-1] in shore
-        )
-        outflow = max(
-            (
-                r.flow_volume
-                for r in state.rivers
-                if r.hexes[0] in shore and r.hexes[-1] not in comp_set and len(r.hexes) > 1
-            ),
-            default=0.0,
-        )
-        if inflow <= 0.0:
-            continue
-        checked += 1
-        # Not equality: confluence splitting reports a segment's own discharge, and the
-        # basin also loses the rain that fell on open water.  An order of magnitude is
-        # the thing being ruled out — an outlet that is a rounding error beside its feed.
-        assert outflow > inflow / 10, (
-            f"basin of {len(comp)} hexes takes {inflow:.3f} in and passes {outflow:.3f} out"
-        )
-    assert checked, "expected at least one sizable lake with rivers running into it"
+    # 475 units of river, plus the one hex of rain falling on the lake itself.
+    assert acc[spillway] == pytest.approx(sum(feeders.values()) + 1.0)
+    # And the old bug, stated as what it was: the spillway's own single hex of rain.
+    assert acc[spillway] > 100.0
 
 
 def _balance_world(**cfg_kw):
@@ -690,3 +682,76 @@ def test_climate_alone_can_close_a_basin():
     inflow_scale = dict(endorheic_evaporation_scale=8.0)
     assert _balance_world(regional_climate="boreal", **inflow_scale) is not None
     assert _balance_world(regional_climate="arid", **inflow_scale) is None
+
+
+def test_rain_shadow_does_not_change_how_much_rain_falls():
+    # Only where it falls. The field averages one unit per land hex at any strength, so
+    # river_flow_threshold and river_inflow_volume — both fractions — keep their meaning.
+    from worldgen.stages.precipitation import rain_per_hex
+
+    state = build_world(seed=11, until="WaterBodiesStage", width=48, height=48)
+    land = {
+        c
+        for c, h in state.hexes.items()
+        if h.terrain_class not in (TerrainClass.OCEAN, TerrainClass.LAKE)
+    }
+    for strength in (0.0, 0.25, 0.5, 1.0):
+        cfg = WorldConfig(width=48, height=48, rain_shadow_strength=strength)
+        rain = rain_per_hex(state, cfg, land)
+        mean = sum(rain[c] for c in land) / len(land)
+        assert mean == pytest.approx(1.0, abs=1e-9), f"strength {strength} moved the mean"
+
+
+def test_rain_shadow_off_gives_every_hex_the_same_rain():
+    from worldgen.stages.precipitation import rain_per_hex
+
+    state = build_world(seed=11, until="WaterBodiesStage", width=48, height=48)
+    land = {
+        c
+        for c, h in state.hexes.items()
+        if h.terrain_class not in (TerrainClass.OCEAN, TerrainClass.LAKE)
+    }
+    rain = rain_per_hex(state, WorldConfig(rain_shadow_strength=0.0), land)
+    assert set(rain.values()) == {1.0}
+
+
+def test_rain_shadow_makes_rain_uneven():
+    # The point of it: a windward slope collects more than a hex in the lee.
+    from worldgen.stages.precipitation import rain_per_hex
+
+    state = build_world(seed=11, until="WaterBodiesStage", width=48, height=48)
+    land = {
+        c
+        for c, h in state.hexes.items()
+        if h.terrain_class not in (TerrainClass.OCEAN, TerrainClass.LAKE)
+    }
+    flat = rain_per_hex(state, WorldConfig(rain_shadow_strength=0.0), land)
+    shaped = rain_per_hex(state, WorldConfig(rain_shadow_strength=1.0), land)
+    assert statistics.pstdev(shaped[c] for c in land) > statistics.pstdev(flat[c] for c in land)
+    assert min(shaped[c] for c in land) < 1.0 < max(shaped[c] for c in land)
+
+
+def test_a_drier_catchment_raises_a_smaller_river():
+    """The point of the whole thing: less rain upstream means less water downstream.
+
+    Tested on the accumulation directly rather than on a generated map's statistics.  The
+    river *set* is the top fraction of hexes by flow, so redistributing rain changes which
+    hexes are rivers as well as how much they carry, and a summary statistic over that set
+    moves for reasons that have nothing to do with the property being claimed here.
+    """
+    chain = [(0, 0), (1, 0), (2, 0), (3, 0), (4, 0)]
+    flow_dir = {c: n for c, n in zip(chain, chain[1:], strict=False)}
+    flow_dir[chain[-1]] = None
+    land = set(chain)
+    stage = HydrologyStage(WorldConfig(), np.random.default_rng(0))
+
+    wet = stage._flow_accumulation(flow_dir, land, None, dict.fromkeys(chain, 1.0))
+    # Same map, same catchment, but the headwaters sit in a rain shadow.
+    shadowed = stage._flow_accumulation(
+        flow_dir, land, None, {**dict.fromkeys(chain, 1.0), chain[0]: 0.1, chain[1]: 0.2}
+    )
+
+    mouth = chain[-1]
+    assert wet[mouth] == pytest.approx(5.0)
+    assert shadowed[mouth] == pytest.approx(3.3)
+    assert shadowed[mouth] < wet[mouth]

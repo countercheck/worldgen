@@ -7,6 +7,7 @@ from ..core.hex import Hex, HexCoord, TerrainClass
 from ..core.hex_grid import distance, neighbors
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import River, WorldState
+from .precipitation import rain_per_hex
 
 # True for hexes on the grid edge, which drain off the map.  Which coordinates those are
 # depends on the grid layout, so the test travels as `WorldState.on_border` rather than
@@ -73,8 +74,12 @@ class HydrologyStage(GeneratorStage):
         inflow_volume = max(1.0, self.config.river_inflow_volume * len(land))
         inflow = {c: inflow_volume for c in inlets}
 
-        # C — Flow accumulation (topological sort)
-        acc = self._flow_accumulation(flow_dir, land, inflow)
+        # C — Flow accumulation.  Rain is not uniform: the wind drops it climbing a range
+        # and arrives dry beyond, so a catchment in a rain shadow raises a smaller river.
+        # The field averages 1.0 per land hex whatever `rain_shadow_strength` is set to,
+        # so this redistributes the map's water without changing how much there is.
+        rain = rain_per_hex(state, self.config, land)
+        acc = self._flow_accumulation(flow_dir, land, inflow, rain)
 
         # D — Extract river hexes: top threshold fraction by flow accumulation count.
         # Sorting by accumulation and slicing avoids tie-boundary over-selection that
@@ -118,7 +123,7 @@ class HydrologyStage(GeneratorStage):
 
         # G — Ensure every lake has an outflow river (fill-to-spillway enforcement)
         drainage_rivers, outlet_of = self._ensure_lake_drainage(
-            river_set, flow_dir, hexes, land, ocean, lakes, acc, filled, on_border
+            river_set, flow_dir, hexes, land, ocean, lakes, acc, filled, on_border, rain
         )
         if drainage_rivers:
             state.rivers.extend(drainage_rivers)
@@ -482,12 +487,14 @@ class HydrologyStage(GeneratorStage):
         flow_dir: dict[HexCoord, HexCoord | None],
         land: set[HexCoord],
         inflow: dict[HexCoord, float] | None = None,
+        rain: dict[HexCoord, float] | None = None,
     ) -> dict[HexCoord, float]:
         """Topological sort (Kahn's) then accumulate upstream counts.
 
-        Every land hex starts with one unit of rain.  A hex in *inflow* starts with the
-        off-map catchment it drains instead, which is what carries a river in over the
-        border already large.
+        Each land hex starts with the rain that fell on it — one unit on average, more on
+        a windward slope and less in a shadow, or a flat unit each where *rain* is not
+        given.  A hex in *inflow* starts with the off-map catchment it drains instead,
+        which is what carries a river in over the border already large.
         """
         # Build in-degree and downstream map over land only
         in_degree: dict[HexCoord, int] = {c: 0 for c in land}
@@ -501,7 +508,8 @@ class HydrologyStage(GeneratorStage):
 
         queue: deque[HexCoord] = deque(c for c in land if in_degree[c] == 0)
         inflow = inflow or {}
-        acc: dict[HexCoord, float] = {c: inflow.get(c, 1.0) for c in land}
+        rain = rain or {}
+        acc: dict[HexCoord, float] = {c: inflow.get(c, rain.get(c, 1.0)) for c in land}
 
         while queue:
             coord = queue.popleft()
@@ -736,6 +744,7 @@ class HydrologyStage(GeneratorStage):
         acc: dict[HexCoord, float],
         filled: dict[HexCoord, float],
         on_border: OnBorder,
+        rain: dict[HexCoord, float] | None = None,
     ) -> tuple[list[River], dict[HexCoord, HexCoord | None]]:
         """Raise each lake to its natural spillway, expand into submerged land, then
         route an outflow river.
@@ -768,6 +777,7 @@ class HydrologyStage(GeneratorStage):
         downhill, so no chain of them can return to its source.
         """
         outlet_of: dict[HexCoord, HexCoord | None] = {}
+        rain = rain or {}
         if not lakes:
             return [], outlet_of
 
@@ -946,7 +956,7 @@ class HydrologyStage(GeneratorStage):
             # drained while a wet one ringed by hills did not — backwards on both counts.
             basin_inflow = sum(
                 acc.get(c, 0.0) for c in border_land if flow_dir.get(c) in component
-            ) + float(len(component))
+            ) + sum(rain.get(c, 1.0) for c in component)
             evaporation = (
                 self.config.endorheic_evaporation_scale
                 * CLIMATE_CONTEXTS[self.config.regional_climate].evaporation
@@ -1137,6 +1147,11 @@ class HydrologyStage(GeneratorStage):
             # flow_volume, so the outlet drew as a hairline beside the torrents feeding it
             # and the basin looked stoppered even though it was, on paper, draining.
             running_acc = max(acc.get(spillway, 0.0), basin_inflow - evaporation, 1.0)
+            # The spillway is the outlet itself, so it carries the discharge too.  Only
+            # the hexes *after* it were being given the flow, which left the one hex where
+            # the river leaves the lake reading a single hex of rain — drawn hairline-thin
+            # at exactly the point a reader looks to see whether the lake drains.
+            acc[spillway] = running_acc
             added_land = [spillway]
             merged_into_existing = False
             for coord in extension:
@@ -1157,11 +1172,16 @@ class HydrologyStage(GeneratorStage):
                     path.append(coord)
                     merge_acc = acc.get(coord, running_acc)
                     if running_acc > merge_acc:
-                        # If the channel we joined already carries less flow than this
-                        # path, clamp the newly added upstream cells down to the merge
-                        # value so downstream accumulation never decreases.
-                        for added in added_land:
-                            acc[added] = min(acc.get(added, merge_acc), merge_acc)
+                        # The basin brings more water than the channel it joins already
+                        # carries.  Flow must not decrease downstream, and there are two
+                        # ways to hold that: clamp the basin down to the channel, or raise
+                        # the channel to take what arrives.  It used to clamp — which
+                        # silently poured the basin's throughput away at the junction and
+                        # left the lake draining through a channel the size of whatever it
+                        # happened to meet.  A tributary joining a smaller stream does not
+                        # shrink to fit it; the stream below the junction grows.  So raise
+                        # it, and let the tail walk below carry that downstream.
+                        acc[coord] = running_acc
                     prev = coord
                     break
                 flow_dir[prev] = coord

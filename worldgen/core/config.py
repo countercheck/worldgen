@@ -136,6 +136,15 @@ class WorldConfig:
     erosion_delta_min_load: float = 0.15
 
     # Hydrology
+    # How much the rain shadow shapes the rivers.  The wind drops its moisture climbing a
+    # range and arrives dry on the far side, and this decides whether the water reflects
+    # that: 0 rains evenly on every hex, 1 takes the orographic pattern at its word, so a
+    # catchment behind mountains raises smaller rivers and a lake there is likelier to
+    # evaporate away than to overflow.  The map's total rainfall does not change with this
+    # — only where it falls — so a river being a fraction of the whole still means what it
+    # did.  Below 1 because the pattern only models rain wrung out by lift, and taken
+    # literally it leaves every plain a desert.
+    rain_shadow_strength: float = 0.5
     river_flow_threshold: float = 0.05
     river_flow_continuous: bool = False  # True: river_flow on all draining land hexes
 
@@ -188,6 +197,10 @@ class WorldConfig:
             )
         self.wind_direction = _coerce_pair("wind_direction", self.wind_direction)
         self.elevation_gradient = _coerce_pair("elevation_gradient", self.elevation_gradient)
+        if not (0.0 <= self.rain_shadow_strength <= 1.0):
+            raise ValueError(
+                f"rain_shadow_strength must be in [0, 1], got {self.rain_shadow_strength}"
+            )
         if not (0.0 <= self.river_flow_threshold <= 1.0):
             raise ValueError(
                 f"river_flow_threshold must be in [0, 1], got {self.river_flow_threshold}"

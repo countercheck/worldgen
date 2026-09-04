@@ -112,6 +112,16 @@ erosion_delta_min_load: 0.15 # Sediment a droplet must still carry when it reach
 # ---------------------------------------------------------------------------
 # Hydrology
 # ---------------------------------------------------------------------------
+# How much the rain shadow shapes the rivers. Wind drops its moisture climbing a range
+# and arrives dry on the far side; this decides whether the water reflects that. 0 rains
+# evenly on every hex, 1 takes the orographic pattern at its word — so a catchment behind
+# mountains raises a smaller river, and a lake there is likelier to evaporate away than to
+# overflow. The map's total rainfall does not change with this, only where it falls, so a
+# river being a fraction of the whole still means what it did. Below 1 by default because
+# the pattern only models rain wrung out by lift, and taken literally it leaves every
+# plain a desert.
+rain_shadow_strength: 0.5   # Default: 0.5
+
 river_flow_threshold: 0.05  # Minimum flow volume (0–1) for a hex to be a river. Default: 0.05
 
 # Rivers that enter from off the map. The grid is a region, not a world, so some of its

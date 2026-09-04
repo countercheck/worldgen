@@ -7,6 +7,7 @@ from ..core.hex import TerrainClass
 from ..core.hex_grid import neighbors
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
+from .precipitation import orographic_pattern
 
 
 class ClimateStage(GeneratorStage):
@@ -42,60 +43,12 @@ class ClimateStage(GeneratorStage):
                 state.hexes[coords[col][row]].temperature = float(temp_arr[col, row])
 
     def _compute_moisture(self, state: WorldState) -> None:
-        wind = self.config.wind_direction
-        wlen = math.hypot(wind[0], wind[1])
-        if wlen == 0.0:
-            wlen = 1.0
-        wd = (wind[0] / wlen, wind[1] / wlen)
-
-        # A linear function of the axial coord, as is the pixel transform, so the
-        # direction this sweeps is the same one whatever layout the grid uses.
-        def pos(coord):
-            q, r = coord
-            return (q + r * 0.5, float(r))
-
-        def dot_wind(coord):
-            x, y = pos(coord)
-            return wd[0] * x + wd[1] * y
-
-        sorted_coords = sorted(state.hexes.keys(), key=dot_wind)
-
-        # Atmospheric moisture carried by wind (depleted by orographic precipitation)
-        atm: dict = {}
-        for coord, h in state.hexes.items():
-            if h.terrain_class == TerrainClass.OCEAN:
-                atm[coord] = 1.0
-            elif h.terrain_class == TerrainClass.LAKE:
-                h.moisture = 1.0
-
-        orographic = self.config.orographic_strength
-        sea_level = self.config.sea_level
-
-        for coord in sorted_coords:
-            h = state.hexes[coord]
-            if h.terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE):
-                h.moisture = 1.0
-                if h.terrain_class == TerrainClass.OCEAN:
-                    atm[coord] = 1.0
-                continue
-
-            hx, hy = pos(coord)
-            upwind_vals = []
-            for n in neighbors(coord):
-                if n not in state.hexes:
-                    continue
-                nx, ny = pos(n)
-                # Neighbor is upwind if it lies opposite the wind direction
-                if wd[0] * (nx - hx) + wd[1] * (ny - hy) < 0 and n in atm:
-                    upwind_vals.append(atm[n])
-
-            incoming = sum(upwind_vals) / len(upwind_vals) if upwind_vals else 1.0
-
-            lift = max(0.0, h.elevation - sea_level)
-            fraction = min(1.0, lift * orographic)
-            precip = incoming * fraction
-            h.moisture = precip
-            atm[coord] = max(0.0, incoming - precip)
+        # The wind-and-lift pass lives in `precipitation` because HydrologyStage needs it
+        # too, to know where the rain that feeds its rivers actually falls.  It runs
+        # before this stage, so the shared function may not depend on anything this stage
+        # produces — and it does not: elevation, terrain class and the wind, nothing else.
+        for coord, precip in orographic_pattern(state, self.config).items():
+            state.hexes[coord].moisture = precip
 
         # River-adjacency and coastal moisture bonuses
         water = (TerrainClass.OCEAN, TerrainClass.LAKE)
