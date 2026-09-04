@@ -12,10 +12,12 @@ stage tree; keeping the imports in the function body preserves that.
 
 from typing import TYPE_CHECKING
 
+from ..core.config import MODELS
+
 if TYPE_CHECKING:
     from ..core.pipeline import GeneratorStage
 
-MODELS = ("classic", "organic")
+__all__ = ["MODELS", "default_stages", "stages_for"]
 
 
 def default_stages(model: str = "classic") -> tuple[type["GeneratorStage"], ...]:

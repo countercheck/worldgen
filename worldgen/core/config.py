@@ -9,6 +9,11 @@ from .hex_grid import GRID_LAYOUTS
 # How an imported image is read.  See `WorldConfig.heightmap_mode`.
 HEIGHTMAP_MODES = ("elevation", "coastline")
 
+# The settlement and road models the pipeline can run.  See `WorldConfig.model`.
+# Defined here rather than in `worldgen.stages` because the config is the record of
+# what a world is, and core must not import from stages to validate itself.
+MODELS = ("classic", "organic")
+
 
 @dataclass(frozen=True)
 class ClimateContext:
@@ -68,6 +73,14 @@ class WorldConfig:
     #             ragged.  A square needs height about 0.87 * width, since hex columns
     #             are spaced 1.5 hex-sizes apart and rows sqrt(3).
     grid_layout: str = "axial"
+    # Which settlement and road model the pipeline runs.  "classic" ranks hexes on
+    # habitability and places configured counts; "organic" derives the hierarchy from
+    # haulage economics and the count falls out.  A config field rather than only a CLI
+    # flag, for two reasons that are really one: a saved world must say which model made
+    # it — the reproduction record is seed plus config, and the model changes everything
+    # after the terrain — and the organic-only knobs must not be silently ignored because
+    # the flag defaulted to classic on the replay.  The CLI flag overrides this.
+    model: str = "classic"
     # Sea level is the datum: elevation is metres above it, so it is zero by
     # definition and is no longer a setting. What the map looks like is set by how
     # high the land stands and how deep the sea lies, below.
@@ -203,6 +216,8 @@ class WorldConfig:
             raise ValueError(
                 f"unknown grid_layout {self.grid_layout!r}; choose from {', '.join(GRID_LAYOUTS)}"
             )
+        if self.model not in MODELS:
+            raise ValueError(f"unknown model {self.model!r}; choose from {', '.join(MODELS)}")
         self.wind_direction = _coerce_pair("wind_direction", self.wind_direction)
         self.elevation_gradient_m = _coerce_pair("elevation_gradient_m", self.elevation_gradient_m)
         if self.channel_min_discharge < 0:

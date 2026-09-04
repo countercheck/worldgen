@@ -309,3 +309,11 @@ def test_the_road_knobs_the_haulage_branch_deleted_are_retired_not_unknown(tmp_p
     with pytest.warns(DeprecationWarning):
         cfg = WorldConfig.from_yaml(str(path))
     assert cfg.width == 32
+
+
+def test_the_model_is_a_config_field_and_validated():
+    """The model rides in the config so world.json records which model made the map."""
+    assert WorldConfig().model == "classic"
+    assert WorldConfig(model="organic").model == "organic"
+    with pytest.raises(ValueError, match="model"):
+        WorldConfig(model="baroque")

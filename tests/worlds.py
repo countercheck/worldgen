@@ -37,9 +37,11 @@ def build_pipeline(
     heightmap to an existing `until="ElevationStage"` call would fail on a name that is
     an implementation detail of the swap.
     """
-    cfg = WorldConfig(width=width, height=height, **cfg_overrides)
+    # The model rides in the config (and thence into world.json metadata), exactly as the
+    # CLI threads it; the keyword stays for the fixtures' convenience.
+    cfg = WorldConfig(width=width, height=height, model=model, **cfg_overrides)
 
-    stages = stages_for(cfg, model)
+    stages = stages_for(cfg, cfg.model)
     if until is not None:
         names = [s.__name__ for s in stages]
         if until not in names:

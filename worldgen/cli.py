@@ -32,9 +32,11 @@ def cli():
 @click.option(
     "--model",
     type=click.Choice(MODELS, case_sensitive=False),
-    default="classic",
-    show_default=True,
-    help="Settlement and road model to run.",
+    default=None,
+    help=(
+        "Settlement and road model to run. Overrides the config's `model` field; "
+        "defaults to what the config says (classic if it says nothing)."
+    ),
 )
 @click.option(
     "--heightmap",
@@ -87,15 +89,20 @@ def generate(
         cfg.heightmap_path = heightmap
     if heightmap_mode:
         cfg.heightmap_mode = heightmap_mode.lower()
+    # The model rides in the config so that world.json records which model made the map —
+    # seed plus config is the reproduction record, and the model changes everything after
+    # the terrain. The flag, when given, overrides what the config file said.
+    if model:
+        cfg.model = model.lower()
 
     click.echo(f"Generating world with seed {seed}...")
     click.echo(f"  Size: {cfg.width}×{cfg.height} ({cfg.grid_layout})")
-    click.echo(f"  Model: {model}")
+    click.echo(f"  Model: {cfg.model}")
     if cfg.heightmap_path:
         click.echo(f"  Heightmap: {cfg.heightmap_path} ({cfg.heightmap_mode})")
 
     pipeline = GeneratorPipeline(seed, cfg)
-    for stage in stages_for(cfg, model):
+    for stage in stages_for(cfg, cfg.model):
         pipeline.add_stage(stage)
     try:
         state = pipeline.run()
@@ -124,7 +131,6 @@ def generate(
     render_debug(state, "land_cover", str(output_path / "land_cover.svg"))
     render_debug(state, "cultivation", str(output_path / "cultivation.svg"))
     render_debug(state, "territory", str(output_path / "territory.svg"))
-
     click.echo("✓ Done")
 
 

@@ -1946,6 +1946,7 @@ from the dataclass again without the suite failing.
 | `width` | `int` | `128` | ≥ 1 | Map width in hexes (`1 hex = 1 km` by convention) |
 | `height` | `int` | `128` | ≥ 1 | Map height in hexes |
 | `grid_layout` | `str` | `"axial"` | `axial` \| `offset` | Grid shape — see below |
+| `model` | `str` | `"classic"` | `classic` \| `organic` | Which settlement and road model the pipeline runs. In the config rather than only on the CLI so `world.json` records which model made the map — seed plus config is the reproduction record. The `--model` flag overrides it |
 
 `grid_layout` decides which hexes a world is built from:
 

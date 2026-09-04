@@ -25,6 +25,7 @@ height: 128   # Map height in hexes. Default: 128
 # Columns are spaced 1.5 hex-sizes apart and rows sqrt(3), so an offset map is square
 # when height is about 0.87 * width — 128 x 111, say.
 grid_layout: axial
+model: classic          # Settlement and road model: classic | organic. The --model flag overrides.
 
 # Elevation is metres above sea level, so sea level is zero by definition and is not a
 # setting. How the map looks is set by how high the land stands and how deep the sea lies.
