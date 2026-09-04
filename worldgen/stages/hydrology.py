@@ -1048,29 +1048,44 @@ class HydrologyStage(GeneratorStage):
                     if basin_index.get(c) != basin_id and hexes[c].elevation < water_level - 1e-12
                 )
 
+            def route_escapes(route: list[HexCoord]) -> bool:
+                """True if *route* is an outflow rather than a way back into the lake.
+
+                The builder below stops at the first hex that already carries water and
+                joins it rather than stealing it, so the route a basin actually gets is
+                this path only as far as that hex — and from there it is the other
+                channel's course, not ours.  If that channel runs back into this basin
+                the result is a lake draining into itself, which the endorheic pass then
+                reports as closed.  Such a route was never an outflow, so it is rejected
+                while the other candidates are still in hand, rather than three passes
+                later once they have all been passed over.
+                """
+                merge_at = next((c for c in route if c in land and c in river_set), None)
+                return merge_at is None or drains_out_of(merge_at)
+
+            # The catchment is excluded first because an outflow that climbs its own
+            # inflow valley, while not wrong, reads badly.  But excluding it means
+            # excluding the basin's whole watershed — 6674 hexes on the map this was
+            # found on, a tenth of the grid — and where the only way out lies through it
+            # the search comes back empty and the basin falls through to the unguided
+            # fallback below, which ignores elevation and will happily carry the river
+            # over a mountain.  So try again without the exclusion before resorting to
+            # that.  It is a preference, not a correctness rule: what actually keeps the
+            # water from running back where it came from is `route_escapes`, which tests
+            # the route rather than guessing at it from the terrain.
             extension: list[HexCoord] = []
             spillway: HexCoord | None = None
-            for candidate in outflow_candidates:
-                extension = self._guided_path_to_ocean(
-                    candidate, filled, land, ocean, lower_lakes, catchment - {candidate}, on_border
-                )
-                if not extension:
-                    continue
-                # The builder below stops at the first hex that already carries water and
-                # joins it rather than stealing it, so the route the basin actually gets
-                # is this path only as far as that hex — and from there it is the other
-                # channel's course, not ours.  If that channel runs back into this basin
-                # the result is a lake draining into itself, which the endorheic pass then
-                # reports as a closed basin.  The route was never an outflow, so reject it
-                # here and try the next spillway instead of discovering it three passes
-                # later, by which point a genuine escape further down the candidate list
-                # has already been passed over.
-                merge_at = next((c for c in extension if c in land and c in river_set), None)
-                if merge_at is not None and not drains_out_of(merge_at):
-                    extension = []
-                    continue
-                spillway = candidate
-                break
+            for avoid_catchment in (True, False):
+                for candidate in outflow_candidates:
+                    avoid = (catchment - {candidate}) if avoid_catchment else set()
+                    route = self._guided_path_to_ocean(
+                        candidate, filled, land, ocean, lower_lakes, avoid, on_border
+                    )
+                    if route and route_escapes(route):
+                        extension, spillway = route, candidate
+                        break
+                if extension:
+                    break
 
             # Guaranteed fallback: plain BFS (only border/ocean as terminals)
             if not extension:
@@ -1086,7 +1101,18 @@ class HydrologyStage(GeneratorStage):
 
             path = [spillway]
             prev = spillway
-            running_acc = max(acc.get(spillway, 0.0), 1.0)
+            # What leaves the basin is what arrived in it: every river mouth on its shore,
+            # plus the rain that fell on the water itself (one unit per hex, the same
+            # measure `_flow_accumulation` seeds the land with).  Seeding the outflow with
+            # the spillway's own drainage instead — which is usually 1.0, a single hex of
+            # rain — is why a lake fed by eighteen rivers used to drain through a channel
+            # carrying 0.004 of the map's flow: the exporters scale river width by
+            # flow_volume, so the outlet drew as a hairline beside the torrents feeding it
+            # and the basin looked stoppered even though it was, on paper, draining.
+            basin_inflow = sum(
+                acc.get(c, 0.0) for c in border_land if flow_dir.get(c) in component
+            ) + float(len(component))
+            running_acc = max(acc.get(spillway, 0.0), basin_inflow, 1.0)
             added_land = [spillway]
             merged_into_existing = False
             for coord in extension:

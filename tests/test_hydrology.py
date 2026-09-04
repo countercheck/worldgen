@@ -562,3 +562,65 @@ def test_a_coastal_map_drains_to_the_sea():
         f"{len(endorheic)} of {len(lake)} lake hexes are endorheic on a map with a coast; "
         "basins are draining into themselves rather than to the sea"
     )
+
+
+def test_a_lake_outflow_carries_what_flows_into_it():
+    # Regression: the outflow was seeded with the spillway hex's own drainage — usually
+    # one hex of rain — instead of the basin's throughput, so a lake fed by eighteen
+    # rivers drained through a channel carrying 0.004 of the map's flow.  Nothing was
+    # tagged endorheic and the model called it drained, but the exporters scale river
+    # width by flow_volume, so the outlet drew as a hairline beside the torrents feeding
+    # it and the lake looked stoppered on the map.
+    state = build_world(
+        seed=100,
+        until="HydrologyStage",
+        width=160,
+        height=160,
+        erosion_iterations=2000,
+        grid_layout="offset",
+        domain_warp_strength=0.8,
+        continent_falloff_edges=["south"],
+        continent_shelf_variance=0.8,
+        elevation_gradient=[0.0, -0.5],
+    )
+
+    lakes = {c for c, h in state.hexes.items() if h.terrain_class == TerrainClass.LAKE}
+    seen: set = set()
+    checked = 0
+    for start in sorted(lakes):
+        if start in seen:
+            continue
+        stack, comp = [start], []
+        seen.add(start)
+        while stack:
+            c = stack.pop()
+            comp.append(c)
+            for n in neighbors(c):
+                if n in lakes and n not in seen:
+                    seen.add(n)
+                    stack.append(n)
+        if len(comp) < 50:
+            continue
+        comp_set = set(comp)
+        shore = {n for c in comp_set for n in neighbors(c)} - comp_set
+        inflow = sum(
+            r.flow_volume for r in state.rivers if r.hexes[-1] in comp_set or r.hexes[-1] in shore
+        )
+        outflow = max(
+            (
+                r.flow_volume
+                for r in state.rivers
+                if r.hexes[0] in shore and r.hexes[-1] not in comp_set and len(r.hexes) > 1
+            ),
+            default=0.0,
+        )
+        if inflow <= 0.0:
+            continue
+        checked += 1
+        # Not equality: confluence splitting reports a segment's own discharge, and the
+        # basin also loses the rain that fell on open water.  An order of magnitude is
+        # the thing being ruled out — an outlet that is a rounding error beside its feed.
+        assert outflow > inflow / 10, (
+            f"basin of {len(comp)} hexes takes {inflow:.3f} in and passes {outflow:.3f} out"
+        )
+    assert checked, "expected at least one sizable lake with rivers running into it"
