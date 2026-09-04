@@ -317,3 +317,11 @@ def test_the_model_is_a_config_field_and_validated():
     assert WorldConfig(model="organic").model == "organic"
     with pytest.raises(ValueError, match="model"):
         WorldConfig(model="baroque")
+
+
+def test_zero_divisor_knobs_fail_loudly():
+    """Both are divisors; at zero they used to crash mid-pipeline, not at load."""
+    with pytest.raises(ValueError, match="market_kernel_decay"):
+        WorldConfig(market_kernel_decay=0.0)
+    with pytest.raises(ValueError, match="crossing_relief_m"):
+        WorldConfig(crossing_relief_m=0.0)

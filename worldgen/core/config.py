@@ -455,6 +455,10 @@ class WorldConfig:
             "rural_field_radius",
             "market_day_radius",
             "travel_ascent_per_hex",
+            # Divisors, both of them. At zero these did not degrade — they crashed the
+            # run mid-pipeline with a bare ZeroDivisionError from deep inside a stage.
+            "market_kernel_decay",
+            "crossing_relief_m",
         ):
             if getattr(self, name) <= 0:
                 raise ValueError(f"{name} must be > 0, got {getattr(self, name)}")
