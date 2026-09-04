@@ -533,3 +533,32 @@ def test_inflow_prefers_the_longer_course():
     assert biased > unbiased, (
         f"length-biased inlets are no longer than unbiased ones ({biased} vs {unbiased})"
     )
+
+
+def test_a_coastal_map_drains_to_the_sea():
+    # Regression: a basin whose outflow route joined a channel that flowed back into the
+    # same basin was left draining into itself, and the endorheic pass then reported it
+    # closed.  On this config that swallowed almost every lake on the map — 95% of lake
+    # hexes came out endorheic, including one inland sea of 5121 hexes on a 256x256 run.
+    #
+    # The map has an ocean along its south edge and slopes down to it, so the water has
+    # somewhere to go and most of it should get there.  Some genuinely closed basins are
+    # expected and wanted; a map that is nearly all closed basin is the bug.
+    state = build_world(
+        seed=1,
+        until="HydrologyStage",
+        width=80,
+        height=80,
+        erosion_iterations=600,
+        grid_layout="offset",
+        continent_falloff_edges=["south"],
+        continent_shelf_variance=0.8,
+        elevation_gradient=[0.0, -0.5],
+    )
+    lake = [h for h in state.hexes.values() if h.terrain_class == TerrainClass.LAKE]
+    endorheic = [h for h in lake if "endorheic" in h.tags]
+    assert lake, "expected this config to produce lakes"
+    assert len(endorheic) / len(lake) < 0.5, (
+        f"{len(endorheic)} of {len(lake)} lake hexes are endorheic on a map with a coast; "
+        "basins are draining into themselves rather than to the sea"
+    )

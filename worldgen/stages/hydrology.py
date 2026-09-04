@@ -1054,9 +1054,23 @@ class HydrologyStage(GeneratorStage):
                 extension = self._guided_path_to_ocean(
                     candidate, filled, land, ocean, lower_lakes, catchment - {candidate}, on_border
                 )
-                if extension:
-                    spillway = candidate
-                    break
+                if not extension:
+                    continue
+                # The builder below stops at the first hex that already carries water and
+                # joins it rather than stealing it, so the route the basin actually gets
+                # is this path only as far as that hex — and from there it is the other
+                # channel's course, not ours.  If that channel runs back into this basin
+                # the result is a lake draining into itself, which the endorheic pass then
+                # reports as a closed basin.  The route was never an outflow, so reject it
+                # here and try the next spillway instead of discovering it three passes
+                # later, by which point a genuine escape further down the candidate list
+                # has already been passed over.
+                merge_at = next((c for c in extension if c in land and c in river_set), None)
+                if merge_at is not None and not drains_out_of(merge_at):
+                    extension = []
+                    continue
+                spillway = candidate
+                break
 
             # Guaranteed fallback: plain BFS (only border/ocean as terminals)
             if not extension:
