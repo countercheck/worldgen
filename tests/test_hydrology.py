@@ -3,7 +3,7 @@ import pytest
 
 from worldgen.core.config import WorldConfig
 from worldgen.core.hex import TerrainClass
-from worldgen.core.hex_grid import neighbors
+from worldgen.core.hex_grid import distance, neighbors
 from worldgen.core.pipeline import GeneratorPipeline
 from worldgen.core.world_state import River, WorldState
 from worldgen.stages.elevation import ElevationStage
@@ -11,6 +11,8 @@ from worldgen.stages.erosion import ErosionStage
 from worldgen.stages.hydrology import HydrologyStage, _split_at_confluences
 from worldgen.stages.terrain_class import TerrainClassificationStage
 from worldgen.stages.water_bodies import WaterBodiesStage
+
+from .worlds import build_world
 
 
 def _build_pipeline(seed: int = 42, width: int = 32, height: int = 32):
@@ -305,3 +307,145 @@ def test_split_at_confluences_tributary_keeps_pre_merge_flow_volume():
     # The confluence's own accumulation already includes the trunk — using it here would
     # render the whole tributary at post-merge width.
     assert tributary.flow_volume != pytest.approx(acc[(2, 0)] / max_acc)
+
+
+# ---------------------------------------------------------------------------
+# Rivers entering from off the map
+# ---------------------------------------------------------------------------
+#
+# An inlet must be a *land* hex on the border, so these worlds drop an edge from
+# `continent_falloff_edges`.  With the default sea ring the whole border is ocean, there
+# is no land for a river to enter through, and the feature correctly does nothing — which
+# `test_inflow_needs_land_at_the_border` pins down.
+
+_INFLOW_KW = dict(
+    width=48,
+    height=48,
+    erosion_iterations=800,
+    continent_falloff_edges=("south", "east", "west"),
+)
+
+
+def _inflow_world(**overrides):
+    return build_world(seed=11, until="HydrologyStage", **{**_INFLOW_KW, **overrides})
+
+
+def _sources(state):
+    return [c for c, h in state.hexes.items() if "river_source_offmap" in h.tags]
+
+
+@pytest.fixture(scope="module")
+def inflow_state():
+    return _inflow_world()
+
+
+def test_inflow_river_enters_from_the_border(inflow_state):
+    # The direct regression test for the trace loop: _build_rivers breaks on the border
+    # at the top of its loop, so without the inlet exemption an inflow river would be a
+    # single hex.
+    sources = _sources(inflow_state)
+    assert sources, "expected at least one off-map river source"
+
+    entering = [r for r in inflow_state.rivers if r.hexes[0] in sources]
+    assert entering, "no river starts at an off-map source"
+    for river in entering:
+        assert len(river.hexes) > 1, f"off-map river at {river.hexes[0]} is a one-hex stub"
+        assert inflow_state.on_border(river.hexes[0])
+        assert not inflow_state.on_border(river.hexes[1]), (
+            "an inflow river's second hex is on the border: it is creeping along the edge "
+            "rather than heading inland"
+        )
+
+
+def test_inflow_sources_are_never_water(inflow_state):
+    # A river may not rise out of the sea or a lake.  Guarded in three places: candidates
+    # are drawn from land, an inlet's downstream hex must be land too, and the source tag
+    # is dropped if lake drainage later submerges the hex.
+    water = (TerrainClass.OCEAN, TerrainClass.LAKE)
+    for coord in _sources(inflow_state):
+        assert inflow_state.hexes[coord].terrain_class not in water
+
+    for river in inflow_state.rivers:
+        source = river.hexes[0]
+        assert inflow_state.hexes[source].terrain_class not in water, (
+            f"river starts in water at {source}"
+        )
+
+
+def test_inflow_respects_min_separation(inflow_state):
+    sources = _sources(inflow_state)
+    separation = _INFLOW_KW.get(
+        "river_inflow_min_separation", WorldConfig().river_inflow_min_separation
+    )
+    for i, a in enumerate(sources):
+        for b in sources[i + 1 :]:
+            assert distance(a, b) >= separation, f"inlets {a} and {b} share a valley"
+
+
+def test_inflow_count_is_respected(inflow_state):
+    assert len(_sources(inflow_state)) <= WorldConfig().river_inflow_count
+
+
+def test_inflow_arrives_already_large(inflow_state):
+    # The point of the feature: an off-map river is wide where it crosses the border,
+    # not a trickle that grows. A spring inside the map starts with one hex of rain, so
+    # any inlet must carry far more than the largest ordinary headwater does.
+    sources = set(_sources(inflow_state))
+    assert sources
+
+    local_headwaters = [
+        r.hexes[0]
+        for r in inflow_state.rivers
+        if r.hexes[0] not in sources and "headwater" in inflow_state.hexes[r.hexes[0]].tags
+    ]
+    assert local_headwaters
+
+    weakest_inlet = min(inflow_state.hexes[c].river_flow for c in sources)
+    strongest_local_source = max(inflow_state.hexes[c].river_flow for c in local_headwaters)
+    assert weakest_inlet > strongest_local_source, (
+        "an off-map river should cross the border already carrying its catchment"
+    )
+
+
+def test_inflow_disabled_produces_no_off_map_sources():
+    state = _inflow_world(river_inflow_count=0)
+    assert _sources(state) == []
+
+
+def test_inflow_zero_matches_the_pre_feature_world():
+    # river_inflow_count = 0 must leave hydrology exactly as it was before the feature.
+    a = _inflow_world(river_inflow_count=0)
+    b = _inflow_world(river_inflow_count=0, river_inflow_volume=0.9)
+    assert [r.hexes for r in a.rivers] == [r.hexes for r in b.rivers]
+
+
+def test_inflow_is_reproducible():
+    a = _inflow_world()
+    b = build_world(seed=11, until="HydrologyStage", **_INFLOW_KW)
+    assert sorted(_sources(a)) == sorted(_sources(b))
+
+
+def test_inflow_edges_select_the_side_water_arrives_from():
+    # The north edge is the only one without the sea ring, so it is the only one that can
+    # carry an inlet; asking for the south instead must yield none.
+    north = _inflow_world(river_inflow_edges=("north",))
+    assert _sources(north), "expected inlets on the north edge"
+    for coord in _sources(north):
+        _col, row = north.grid_index(coord)
+        assert row == 0, f"inlet at {coord} is not on the north edge"
+
+    south = _inflow_world(river_inflow_edges=("south",))
+    assert _sources(south) == [], "the south edge is all sea and cannot carry an inlet"
+
+
+def test_inflow_empty_edge_list_is_not_an_error():
+    assert _sources(_inflow_world(river_inflow_edges=())) == []
+
+
+def test_inflow_needs_land_at_the_border():
+    # The default map rings itself with sea, so no river can enter it by land.  Enabled
+    # but inert, not an error.
+    state = build_world(
+        seed=11, until="HydrologyStage", width=48, height=48, erosion_iterations=800
+    )
+    assert _sources(state) == []

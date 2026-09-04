@@ -3,7 +3,7 @@ from collections import defaultdict, deque
 from collections.abc import Callable
 
 from ..core.hex import Hex, HexCoord, TerrainClass
-from ..core.hex_grid import neighbors
+from ..core.hex_grid import distance, neighbors
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import River, WorldState
 
@@ -13,8 +13,16 @@ from ..core.world_state import River, WorldState
 #
 # A border hex is a valid terminal even when its own steepest descent points back inland
 # (see `_flow_direction`), so path tracing must stop *on* it rather than follow it
-# inward — including when a path starts there.
+# inward — including when a path starts there.  The one exception is an inflow inlet,
+# which is a border hex water deliberately enters *through*; `_build_rivers` lets a trace
+# leave the border only when it starts on one of those.
 OnBorder = Callable[[HexCoord], bool]
+
+# The edges a hex lies on — a set, because a corner hex lies on two.  Travels as a
+# callable for the same reason `OnBorder` does: the mapping from coordinate to edge is
+# the grid layout's business, not this stage's.  Names match
+# `WorldConfig.continent_falloff_edges`: west is column 0, north is row 0.
+EdgesOf = Callable[[HexCoord], frozenset[str]]
 
 
 class HydrologyStage(GeneratorStage):
@@ -57,8 +65,15 @@ class HydrologyStage(GeneratorStage):
         # B — Flow direction (steepest descent on filled surface)
         flow_dir = self._flow_direction(filled, land, ocean, lakes, elev, on_border)
 
+        # B2 — Rivers that arrive from beyond the border.  The map is a region, not a
+        # world, so some of its water was gathered off it.  Each inlet is seeded with a
+        # catchment it did not earn here, which is what makes it enter already wide.
+        inlets = self._inflow_inlets(flow_dir, filled, land, on_border, self._edges_of(state))
+        inflow_volume = max(1.0, self.config.river_inflow_volume * len(land))
+        inflow = {c: inflow_volume for c in inlets}
+
         # C — Flow accumulation (topological sort)
-        acc = self._flow_accumulation(flow_dir, land)
+        acc = self._flow_accumulation(flow_dir, land, inflow)
 
         # D — Extract river hexes: top threshold fraction by flow accumulation count.
         # Sorting by accumulation and slicing avoids tie-boundary over-selection that
@@ -78,7 +93,17 @@ class HydrologyStage(GeneratorStage):
 
         # E — Build River objects (may extend river_set via fallback for stalled rivers)
         state.rivers = self._build_rivers(
-            river_set, flow_dir, hexes, land, ocean, lakes, acc, max_acc, filled, on_border
+            river_set,
+            flow_dir,
+            hexes,
+            land,
+            ocean,
+            lakes,
+            acc,
+            max_acc,
+            filled,
+            on_border,
+            set(inlets),
         )
 
         # F — Normalize river_flow; headwater/confluence/mouth tags set from river_set
@@ -113,6 +138,14 @@ class HydrologyStage(GeneratorStage):
             if coord not in river_set:
                 hx.tags -= _river_tags
         self._tag_hexes(river_set, flow_dir, hexes, ocean, lakes, on_border)
+        # An inlet is already tagged a headwater — it has no upstream hex on this map —
+        # so this is what separates a river arriving from beyond the border from one
+        # rising at a spring inside it.  Gated on river_set rather than on `inlets`
+        # alone: _ensure_lake_drainage may have submerged an inlet into a lake, and a
+        # lake hex must not be left labelled a river source.
+        for coord in inlets:
+            if coord in river_set:
+                hexes[coord].tags.add("river_source_offmap")
         # Recompute flow_volume for all rivers now that max_acc is final;
         # _ensure_lake_drainage may remove land hexes from acc (submerged into lake)
         # which can change max_acc, making pre-drainage flow_volume values stale.
@@ -291,12 +324,111 @@ class HydrologyStage(GeneratorStage):
             flow_dir[coord] = best_coord
         return flow_dir
 
+    @staticmethod
+    def _edges_of(state: WorldState) -> EdgesOf:
+        """Build the coordinate-to-edge-names lookup for *state*'s grid layout."""
+        w, h = state.width, state.height
+
+        def edges_of(coord: HexCoord) -> frozenset[str]:
+            col, row = state.grid_index(coord)
+            found = set()
+            if col == 0:
+                found.add("west")
+            if col == w - 1:
+                found.add("east")
+            if row == 0:
+                found.add("north")
+            if row == h - 1:
+                found.add("south")
+            return frozenset(found)
+
+        return edges_of
+
+    def _inflow_inlets(
+        self,
+        flow_dir: dict[HexCoord, HexCoord | None],
+        filled: dict[HexCoord, float],
+        land: set[HexCoord],
+        on_border: OnBorder,
+        edges_of: EdgesOf,
+    ) -> list[HexCoord]:
+        """Border hexes where a river enters the map from a catchment beyond it.
+
+        Eligibility is read off `flow_dir` rather than re-derived from elevations, so an
+        inlet's water is guaranteed to travel inland by the very field that will route
+        it.  Three conditions do the work:
+
+        *   The hex is in `land`, which the caller builds as everything that is neither
+            ocean nor lake — so a river can never rise out of open water.
+        *   Its downstream hex is in `land` too.  A border hex whose steepest descent runs
+            straight into a lake or the sea is a river *mouth*, not a source; admitting one
+            would draw a one-hex stub from the edge into the water beside it.
+        *   That downstream hex is off the border, so an inflow heads inland instead of
+            creeping along the map edge.
+
+        Candidates are sampled with probability proportional to how far the terrain drops
+        inland of them, so a deep valley mouth is likelier than a shallow dip in the edge
+        but the choice still varies between seeds.  A minimum separation keeps two inlets
+        off the same valley, which would otherwise draw one river twice.
+        """
+        count = self.config.river_inflow_count
+        wanted_edges = set(self.config.river_inflow_edges)
+        if count <= 0 or not wanted_edges:
+            return []
+
+        candidates: list[HexCoord] = []
+        weights: list[float] = []
+        for coord in land:
+            if not on_border(coord) or not (edges_of(coord) & wanted_edges):
+                continue
+            downstream = flow_dir.get(coord)
+            if downstream is None or downstream not in land or on_border(downstream):
+                continue
+            drop = filled[coord] - filled[downstream]
+            if drop <= 0.0:
+                continue
+            candidates.append(coord)
+            weights.append(drop)
+
+        if not candidates:
+            return []
+
+        # Sorted so the sampling order depends only on the seed, never on set iteration
+        # order — `land` is a set, and its order is not stable across runs.
+        order = sorted(range(len(candidates)), key=lambda i: candidates[i])
+        candidates = [candidates[i] for i in order]
+        weights = [weights[i] for i in order]
+
+        separation = self.config.river_inflow_min_separation
+        chosen: list[HexCoord] = []
+        remaining = list(range(len(candidates)))
+        while remaining and len(chosen) < count:
+            total = sum(weights[i] for i in remaining)
+            if total <= 0.0:
+                break
+            probs = [weights[i] / total for i in remaining]
+            pick = remaining[int(self.rng.choice(len(remaining), p=probs))]
+            chosen.append(candidates[pick])
+            remaining = [
+                i
+                for i in remaining
+                if distance(candidates[i], candidates[pick]) >= separation and i != pick
+            ]
+
+        return chosen
+
     def _flow_accumulation(
         self,
         flow_dir: dict[HexCoord, HexCoord | None],
         land: set[HexCoord],
+        inflow: dict[HexCoord, float] | None = None,
     ) -> dict[HexCoord, float]:
-        """Topological sort (Kahn's) then accumulate upstream counts."""
+        """Topological sort (Kahn's) then accumulate upstream counts.
+
+        Every land hex starts with one unit of rain.  A hex in *inflow* starts with the
+        off-map catchment it drains instead, which is what carries a river in over the
+        border already large.
+        """
         # Build in-degree and downstream map over land only
         in_degree: dict[HexCoord, int] = {c: 0 for c in land}
         downstream: dict[HexCoord, HexCoord | None] = {}
@@ -308,7 +440,8 @@ class HydrologyStage(GeneratorStage):
                 in_degree[ds] += 1
 
         queue: deque[HexCoord] = deque(c for c in land if in_degree[c] == 0)
-        acc: dict[HexCoord, float] = {c: 1.0 for c in land}
+        inflow = inflow or {}
+        acc: dict[HexCoord, float] = {c: inflow.get(c, 1.0) for c in land}
 
         while queue:
             coord = queue.popleft()
@@ -359,6 +492,7 @@ class HydrologyStage(GeneratorStage):
         max_acc: float,
         filled: dict[HexCoord, float],
         on_border: OnBorder,
+        inflow_sources: set[HexCoord] | None = None,
     ) -> list[River]:
         """Trace each headwater downstream to ocean/border.
 
@@ -372,6 +506,7 @@ class HydrologyStage(GeneratorStage):
         segments by the caller after all drainage rivers are also available.
         """
         rivers: list[River] = []
+        inflow_sources = inflow_sources or set()
 
         # Compute headwaters without relying on tags: any river hex with no upstream river hex
         has_upstream: set[HexCoord] = set()
@@ -388,8 +523,11 @@ class HydrologyStage(GeneratorStage):
 
             while True:
                 # Tested at the top of the loop so a headwater that already sits on the
-                # border terminates too, instead of being traced back inland.
-                if on_border(current):
+                # border terminates too, instead of being traced back inland.  An inflow
+                # inlet is the one border hex a trace may leave, and only as its own first
+                # step: water enters the map there, so stopping would emit a one-hex
+                # river.  Any border hex reached later still ends the river.
+                if on_border(current) and not (current == start and start in inflow_sources):
                     break
                 ds = flow_dir.get(current)
                 if ds is None:

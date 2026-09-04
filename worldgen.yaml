@@ -8,6 +8,7 @@
 # ---------------------------------------------------------------------------
 width: 128    # Map width in hexes. Default: 128
 height: 128   # Map height in hexes. Default: 128
+sea_level: 0.25  # Water level threshold (0–1) on normalised elevation. Lower = more land. Default: 0.25
 
 # How width x height are laid onto the hex grid.
 #   axial   Hex coordinates run q in [0, width), r in [0, height). The flat-top pixel
@@ -19,7 +20,6 @@ height: 128   # Map height in hexes. Default: 128
 # Columns are spaced 1.5 hex-sizes apart and rows sqrt(3), so an offset map is square
 # when height is about 0.87 * width — 128 x 111, say.
 grid_layout: axial
-sea_level: 0.25  # Water level threshold (0–1) on normalised elevation. Lower = more land. Default: 0.25
 
 # ---------------------------------------------------------------------------
 # Elevation noise (Fractal Brownian Motion)
@@ -38,7 +38,7 @@ continent_falloff: true   # Apply edge falloff so the sea rings the map and ever
 #   [west]                      →  a west coast, land running inland to the east
 #   [north, west]               →  a north-west corner of a larger continent
 continent_falloff_edges: [south]
-continent_shelf_variance: 0.35 # How much the shelf's inner edge wanders, 0–1. 0 gives a coast of even width; higher makes bays and headlands. The terrain noise already moves the shoreline a good deal on its own, so this is a nudge, not the main shaping. Default: 0.35
+continent_shelf_variance: 0.8 # How much the shelf's inner edge wanders, 0–1. 0 gives a coast of even width; higher makes bays and headlands. The terrain noise already moves the shoreline a good deal on its own, so this is a nudge, not the main shaping. Default: 0.35
 continent_shelf_hexes: 10 # Width in hexes (km) of the coastal shelf over which land drops away to the sea. In hexes rather than a fraction of the map, so the coastal gradient is the same per km at any size. Narrower = steeper, cliffier coasts. Capped at a quarter of the shorter side. Only used when continent_falloff is true. Default: 10
 continent_seabed: 0.15    # Elevation the shelf descends to at the map edge. Must be below sea_level so the border is always under water. Nearer sea_level = a shallower, gentler shelf; nearer 0 = a steep drop into deep water, which makes cliff coasts common. Default: 0.15
 
@@ -50,7 +50,46 @@ continent_seabed: 0.15    # Elevation the shelf descends to at the map edge. Mus
 #   [0.0, -0.5]  →  north is highest, map runs downhill to the south
 #   [-0.5, 0.0]  →  west is highest, map runs downhill to the east
 #   [0.0, 0.0]   →  no tilt (default)
-elevation_gradient: [0.0, 0.0]
+elevation_gradient: [0.0, -0.50]
+
+# ---------------------------------------------------------------------------
+# Elevation from an image
+# ---------------------------------------------------------------------------
+# Set heightmap_path to take the terrain from a picture instead of generating it. The
+# image replaces the noise elevation stage; erosion, rivers, climate, biomes, settlements
+# and roads all run on top of it unchanged. A relative path resolves against the working
+# directory, the same as --config. The image is stretched to fill the grid on each axis,
+# and each hex averages the pixels its footprint covers.
+#
+# Two notes. The path is copied into world.json as part of the config dump, so it travels
+# with any world you export. And erosion still runs afterwards: it renormalises elevation
+# to span the full 0-1 range, so in "elevation" mode a low-contrast heightmap comes out
+# with its contrast stretched and its coast moved. Use `worldgen import-heightmap` when
+# you need the image reproduced exactly — it skips erosion. ("coastline" mode is built to
+# span the full range already, so that renormalisation leaves its coast alone.)
+#
+# Sizing: use grid_layout "offset" with height about 0.87 * width, or the imported map is
+# sheared into a parallelogram. Give an image at least as large as the grid; a smaller one
+# is upsampled into blocks of equal elevation, which flattens terrain classification.
+heightmap_path: null      # Path to the image, or null to generate terrain as usual. Default: null
+
+# How the image is read.
+#   elevation  A greyscale heightmap. Luminance maps linearly onto the 0-1 elevation
+#              range, black lowest and white highest.
+#   coastline  A land/sea stencil only. Heights still come from the noise, shaped so
+#              everything drawn as land sits above sea_level and everything drawn as sea
+#              below it — so the coastline you drew is the coastline you get.
+heightmap_mode: elevation # Default: elevation
+
+# Coastline mode only. Where the image has a meaningful alpha channel, alpha decides what
+# is land; otherwise luminance is compared against this threshold.
+heightmap_land_threshold: 0.5 # Brightness at or above which a pixel is land. Default: 0.5
+heightmap_invert: false   # True: the darker side of the threshold is the land instead. Default: false
+# Coastline mode only. The stencil is authoritative by default, so land drawn running off
+# the edge of the map stays land. Set true to also apply the rectangular edge falloff,
+# which rings the map with sea and so guarantees every river a coast to reach — at the
+# cost of eating a landmass you deliberately ran off the border.
+heightmap_coast_falloff: false # Default: false
 
 # ---------------------------------------------------------------------------
 # Terrain classification
@@ -74,6 +113,19 @@ erosion_delta_min_load: 0.15 # Sediment a droplet must still carry when it reach
 # Hydrology
 # ---------------------------------------------------------------------------
 river_flow_threshold: 0.05  # Minimum flow volume (0–1) for a hex to be a river. Default: 0.05
+
+# Rivers that enter from off the map. The grid is a region, not a world, so some of its
+# water was gathered beyond the border. An inlet is a border land hex whose terrain
+# already descends inland; it is seeded with a catchment it did not earn on this map, so
+# it arrives already wide instead of starting as a trickle at the edge. Set the count to
+# 0 for a map that only drains outward.
+river_inflow_count: 2      # Number of rivers entering from beyond the border. 0 disables. Default: 2
+river_inflow_volume: 0.15  # Size of the off-map catchment, as a fraction of this map's land area. Relative rather than absolute so the same value means the same thing on any grid size. Default: 0.15
+river_inflow_min_separation: 6 # Minimum spacing between inlets, in hexes. Without it the best candidates are usually the same valley mouth, and one river gets drawn twice. Default: 6
+# Which edges water may arrive from. Drop an edge and no river enters on that side.
+# Narrowing this places the off-map highlands: ["west"] means every river from beyond the
+# border enters in the west, as though the range that feeds them lay off that corner.
+river_inflow_edges: ["north"] # Default: all four
 
 # Lake drainage. Every lake is filled to its spillway and given an outflow, so water
 # that enters a basin has somewhere to go instead of accumulating forever.
@@ -183,8 +235,8 @@ road_pheromone_factor: 0.1   # How strongly existing traffic attracts new routes
 # Per-hex cost across water is tiny so distance across a body barely matters;
 # the journey is paid for by the embark + disembark costs at the shores.
 road_water_cost: 0.05    # Per-hex pathfinding cost on OCEAN/LAKE hexes. Default: 0.05
-road_embark_cost: 20.0    # Cost charged on a land→water edge transition. Default: 8.0
-road_disembark_cost: 20.0 # Cost charged on a water→land edge transition. Default: 8.0
+road_embark_cost: 8.0    # Cost charged on a land→water edge transition. Default: 8.0
+road_disembark_cost: 8.0 # Cost charged on a water→land edge transition. Default: 8.0
 
 # ---------------------------------------------------------------------------
 # Roads: river crossings (charged on each land↔river edge, scales with flow)

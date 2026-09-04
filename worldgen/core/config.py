@@ -119,6 +119,23 @@ class WorldConfig:
     # Hydrology
     river_flow_threshold: float = 0.05
     river_flow_continuous: bool = False  # True: river_flow on all draining land hexes
+
+    # Rivers that enter from off the map.  The grid is a region, not a world, so a river
+    # may well have gathered its water beyond the border.  An inlet is a border land hex
+    # whose own terrain already descends inland; it is seeded with a catchment it did not
+    # earn on this map, which makes it arrive already wide instead of starting as a
+    # trickle at the edge.  0 disables, and the map drains outward only.
+    river_inflow_count: int = 2
+    # Size of that off-map catchment, as a fraction of the map's own land area.  Relative
+    # rather than absolute so the same value means the same thing on any grid size: 0.15
+    # is a river carrying half again what the largest wholly-on-map river would.
+    river_inflow_volume: float = 0.15
+    # Minimum spacing between inlets, in hexes.  Without it the best few candidates are
+    # usually the same valley mouth, and the map gets one river drawn three times.
+    river_inflow_min_separation: int = 6
+    # Which edges water may arrive from.  Narrowing it puts the off-map highlands on a
+    # chosen side: ("west",) means every river from beyond the border enters in the west.
+    river_inflow_edges: tuple[str, ...] = ("north", "south", "east", "west")
     moisture_bleed_passes: int = 0  # 0 = flat river bonus (default); >0 = elevation-gated bleed
     moisture_bleed_strength: float = 0.3
 
@@ -138,6 +155,15 @@ class WorldConfig:
             raise ValueError(
                 f"river_flow_threshold must be in [0, 1], got {self.river_flow_threshold}"
             )
+        if self.river_inflow_count < 0:
+            raise ValueError(f"river_inflow_count must be >= 0, got {self.river_inflow_count}")
+        if self.river_inflow_volume < 0:
+            raise ValueError(f"river_inflow_volume must be >= 0, got {self.river_inflow_volume}")
+        if self.river_inflow_min_separation < 0:
+            raise ValueError(
+                f"river_inflow_min_separation must be >= 0, got {self.river_inflow_min_separation}"
+            )
+        self.river_inflow_edges = _coerce_edges(self.river_inflow_edges, "river_inflow_edges")
         if self.moisture_bleed_passes < 0:
             raise ValueError(
                 f"moisture_bleed_passes must be >= 0, got {self.moisture_bleed_passes}"
@@ -487,25 +513,25 @@ def _closest(name: str, known: set[str]) -> str | None:
     return matches[0] if matches else None
 
 
-def _coerce_edges(value: Any) -> tuple[str, ...]:
-    """Normalise the falloff-edge list, keeping a stable order and rejecting typos."""
+def _coerce_edges(value: Any, field: str = "continent_falloff_edges") -> tuple[str, ...]:
+    """Normalise an edge list, keeping a stable order and rejecting typos.
+
+    *field* names the setting being parsed, so an error points at the one the user
+    actually got wrong — more than one config value is a list of edges.
+    """
     if isinstance(value, str):
         value = [part.strip() for part in value.split(",") if part.strip()]
     try:
         given = list(value)
     except TypeError as exc:
-        raise ValueError(
-            f"continent_falloff_edges must be a list of edge names, got {value!r}"
-        ) from exc
+        raise ValueError(f"{field} must be a list of edge names, got {value!r}") from exc
     lowered = []
     for edge in given:
         if not isinstance(edge, str):
-            raise ValueError(f"continent_falloff_edges entries must be strings, got {edge!r}")
+            raise ValueError(f"{field} entries must be strings, got {edge!r}")
         name = edge.strip().lower()
         if name not in _EDGES:
-            raise ValueError(
-                f"unknown edge {edge!r} in continent_falloff_edges; choose from {', '.join(_EDGES)}"
-            )
+            raise ValueError(f"unknown edge {edge!r} in {field}; choose from {', '.join(_EDGES)}")
         lowered.append(name)
     # Deduplicate but keep _EDGES order so the value is canonical and comparable.
     return tuple(e for e in _EDGES if e in set(lowered))

@@ -220,3 +220,31 @@ def test_heightmap_path_accepts_a_path_object():
 def test_world_config_validates_heightmap_fields(kwargs, message):
     with pytest.raises(ValueError, match=message):
         WorldConfig(**kwargs)
+
+
+@pytest.mark.parametrize(
+    "kwargs,message",
+    [
+        ({"river_inflow_count": -1}, "river_inflow_count"),
+        ({"river_inflow_volume": -0.1}, "river_inflow_volume"),
+        ({"river_inflow_min_separation": -1}, "river_inflow_min_separation"),
+        ({"river_inflow_edges": ["nrth"]}, "river_inflow_edges"),
+        ({"river_inflow_edges": [3]}, "river_inflow_edges"),
+        # The shared edge parser names the setting that was actually wrong, so a typo in
+        # one edge list is never reported against the other.
+        ({"continent_falloff_edges": ["nrth"]}, "continent_falloff_edges"),
+    ],
+)
+def test_world_config_validates_river_inflow_fields(kwargs, message):
+    with pytest.raises(ValueError, match=message):
+        WorldConfig(**kwargs)
+
+
+def test_river_inflow_edges_are_canonicalised():
+    # Same normalisation the falloff edges get: a comma-separated string, any case, any
+    # order, deduplicated, and stable so two equivalent configs compare equal.
+    assert WorldConfig(river_inflow_edges="West, north ,west").river_inflow_edges == (
+        "north",
+        "west",
+    )
+    assert WorldConfig(river_inflow_edges=[]).river_inflow_edges == ()
