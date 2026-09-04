@@ -1,4 +1,5 @@
 import json
+import math
 import os
 from dataclasses import asdict, dataclass, fields
 from typing import Any
@@ -1002,11 +1003,23 @@ class WorldConfig:
         share off the top, and how big that share is depends on how warm it is. A cold
         region sheds nearly everything that falls on it, which is why the taiga is full of
         rivers on rainfall a Mediterranean hillside would call meagre.
+
+        Pike's curve rather than a plain subtraction, and the difference matters at the
+        dry end. Subtracting the evaporative *demand* zeroes every climate whose demand
+        exceeds its rain — mediterranean and arid both fell to `min_runoff_mm` and drew
+        identical rivers, though one gets nearly three times the rain of the other. Real
+        ground cannot evaporate water it never received: actual evaporation approaches the
+        demand only where rain is plentiful, and approaches the rain itself where it is
+        not, which is exactly what `P / sqrt(1 + (P/PET)^2)` says. The wet end barely
+        moves (temperate 450 -> 479), the dry end becomes a spectrum again.
         """
         if temp_c is None:
             temp_c = self.mean_temperature_c
-        et = self.evapotranspiration_base_mm + self.evapotranspiration_per_c_mm * max(0.0, temp_c)
-        return max(self.min_runoff_mm, precip_mm - et)
+        pet = self.evapotranspiration_base_mm + self.evapotranspiration_per_c_mm * max(0.0, temp_c)
+        if pet <= 0.0 or precip_mm <= 0.0:
+            return max(self.min_runoff_mm, precip_mm)
+        actual_et = precip_mm / math.sqrt(1.0 + (precip_mm / pet) ** 2)
+        return max(self.min_runoff_mm, precip_mm - actual_et)
 
     @classmethod
     def from_json(cls, path: str) -> "WorldConfig":

@@ -359,3 +359,36 @@ def test_cold_country_drains_well_on_modest_rain():
     assert boreal.runoff_mm(boreal.mean_precip_mm) > med.runoff_mm(med.mean_precip_mm), (
         "the colder region should still shed more of it"
     )
+
+
+def test_dry_climates_are_a_spectrum_not_a_floor():
+    """Mediterranean gets nearly three times arid's rain, and must drain accordingly.
+
+    Subtracting the full evaporative demand zeroed both: each fell to `min_runoff_mm`,
+    `min_catchment` came out identical, and the two climates drew byte-identical rivers
+    on the same terrain. Pike's curve keeps actual evaporation below the rain that
+    actually fell, so the dry end is a spectrum again.
+    """
+    from tests.worlds import build_pipeline
+
+    med = WorldConfig(regional_climate="mediterranean")
+    arid = WorldConfig(regional_climate="arid")
+    assert med.runoff_mm(med.mean_precip_mm) > arid.runoff_mm(arid.mean_precip_mm), (
+        "the wetter dry climate should shed more water"
+    )
+
+    rivers = {}
+    for climate in ("mediterranean", "arid"):
+        state = build_pipeline(
+            seed=42,
+            width=64,
+            height=64,
+            regional_climate=climate,
+            continent_falloff_edges=("south",),
+            until="HydrologyStage",
+        ).run()
+        rivers[climate] = {c for c, h in state.hexes.items() if "river" in h.tags}
+    assert rivers["mediterranean"] != rivers["arid"], (
+        "two climates a third of a rainfall apart drew identical rivers"
+    )
+    assert len(rivers["mediterranean"]) > len(rivers["arid"])

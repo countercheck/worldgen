@@ -703,18 +703,22 @@ Nine steps, top to bottom in
 
 5. **River extraction** — a channel forms where enough water passes to keep one open:
    ```
+   PET          = evapotranspiration_base_mm
+                  + evapotranspiration_per_c_mm * max(0, temp_c)
    runoff_mm    = max(min_runoff_mm,
-                      precip_mm - (evapotranspiration_base_mm
-                                   + evapotranspiration_per_c_mm * max(0, temp_c)))
+                      precip_mm - precip_mm / sqrt(1 + (precip_mm / PET)^2))
    min_catchment = channel_min_discharge / runoff_mm
    river_set     = {c for c, area in acc.items() if area >= min_catchment}
    ```
    **Discharge, not rank.** The old `river_flow_threshold` was documented as a flow
    minimum and implemented as "take the top 5% of land by accumulation", so every
-   climate — desert and rainforest alike — got 5.6% of its land under channel. Because
-   runoff is rainfall less evapotranspiration, and evapotranspiration rises with
-   temperature, cold country now sheds nearly everything it receives: arid land drains
-   1.2% with **no navigable river at all**, tropical 12.6%.
+   climate — desert and rainforest alike — got 5.6% of its land under channel. Runoff
+   uses Pike's curve rather than subtracting the evaporative demand outright: ground
+   cannot evaporate rain it never received, so actual evaporation approaches the demand
+   where rain is plentiful and approaches the rain where it is not. A plain subtraction
+   zeroed every climate whose demand exceeds its rain — mediterranean (550 mm) and arid
+   (200 mm) both fell to the floor and drew identical rivers. Because the demand rises
+   with temperature, cold country still sheds nearly everything it receives.
 
    `hex.river_flow` remains a normalised `[0, 1]` rank, retained for river *rendering*
    width. Anything making a decision about a river reads `catchment_km2` instead.
