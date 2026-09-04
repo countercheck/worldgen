@@ -304,7 +304,6 @@ def export_svg(
             "color_mode",
             "hex_size",
             "padding",
-            "contour_elevation_scale_m",
             "contour_interval_m",
             "contour_max_crossings",
             "contour_max_stroke",

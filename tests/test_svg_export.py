@@ -147,7 +147,7 @@ def test_contours_layer_produces_lines():
     # Set up a steep elevation gradient between two known-adjacent hexes.
     # (1, 0) is a neighbor of (0, 0) per the axial hex grid.
     ws.hexes[(0, 0)].elevation = 0.0
-    ws.hexes[(1, 0)].elevation = 0.5  # 1500 m diff at scale 3000
+    ws.hexes[(1, 0)].elevation = 1500.0  # metres: a wall of contours
     config = SVGConfig(layers={"contours"})
     svg = render(ws, config)
     assert 'id="layer-contours"' in svg
@@ -158,7 +158,7 @@ def test_contours_below_threshold_omitted():
     ws = WorldState.empty(seed=1, width=4, height=4)
     # All hexes at same elevation → no contour lines drawn.
     for h in ws.hexes.values():
-        h.elevation = 0.5
+        h.elevation = 1500.0
     config = SVGConfig(layers={"contours"})
     svg = render(ws, config)
     assert 'id="layer-contours"' in svg
@@ -179,10 +179,10 @@ def test_contour_stroke_scales_with_elevation_diff():
     # (0,0)↔(1,0) and (2,0)↔(3,0) are adjacent pairs in the axial grid.
     # Pair A: 1 threshold crossing (100 m)
     ws.hexes[(0, 0)].elevation = 0.0  # 0 m
-    ws.hexes[(1, 0)].elevation = 0.05  # 150 m → crosses 100 m
+    ws.hexes[(1, 0)].elevation = 150.0  # crosses 100 m
     # Pair B: 4 threshold crossings (100, 200, 300, 400 m)
     ws.hexes[(2, 0)].elevation = 0.0  # 0 m
-    ws.hexes[(3, 0)].elevation = 0.15  # 450 m → crosses 100–400 m
+    ws.hexes[(3, 0)].elevation = 450.0  # crosses 100-400 m
     config = SVGConfig(layers={"contours"})
     svg = render(ws, config)
     widths = [float(m) for m in re.findall(r'stroke-width="([\d.]+)"', svg)]
@@ -196,10 +196,10 @@ def test_contour_darkness_scales_with_crossings():
     ws = WorldState.empty(seed=1, width=4, height=4)
     # Pair A: 1 crossing → light gray
     ws.hexes[(0, 0)].elevation = 0.0
-    ws.hexes[(1, 0)].elevation = 0.05  # 150 m
+    ws.hexes[(1, 0)].elevation = 150.0
     # Pair B: saturated crossings → near-black
     ws.hexes[(2, 0)].elevation = 0.0
-    ws.hexes[(3, 0)].elevation = 0.5  # 1500 m → 15 crossings
+    ws.hexes[(3, 0)].elevation = 1500.0  # 15 crossings
     config = SVGConfig(layers={"contours"})
     svg = render(ws, config)
     colors = re.findall(r'stroke="(#[0-9a-f]{6})"', svg)
@@ -212,7 +212,7 @@ def test_contour_single_crossing_uses_lightest_min_styling():
 
     ws = WorldState.empty(seed=1, width=4, height=4)
     ws.hexes[(0, 0)].elevation = 0.0
-    ws.hexes[(1, 0)].elevation = 0.05  # exactly one threshold crossing at 100 m
+    ws.hexes[(1, 0)].elevation = 150.0  # exactly one threshold crossing at 100 m
     svg = render(ws, SVGConfig(layers={"contours"}, contour_max_crossings=5))
     m = re.search(r'stroke="(#[0-9a-f]{6})" stroke-width="([\d.]+)"', svg)
     assert m is not None
@@ -227,7 +227,7 @@ def test_contour_max_crossings_one_saturates_first_crossing():
 
     ws = WorldState.empty(seed=1, width=4, height=4)
     ws.hexes[(0, 0)].elevation = 0.0
-    ws.hexes[(1, 0)].elevation = 0.05  # one threshold crossing
+    ws.hexes[(1, 0)].elevation = 150.0  # one threshold crossing
     svg = render(ws, SVGConfig(layers={"contours"}, contour_max_crossings=1))
     m = re.search(r'stroke="(#[0-9a-f]{6})" stroke-width="([\d.]+)"', svg)
     assert m is not None
@@ -808,3 +808,23 @@ def test_legend_line_glyphs_scale_with_legend_scale():
         return [float(w) for w in re.findall(r'stroke-width="([\d.]+)"', body)]
 
     assert max(widths(2.0)) > max(widths(1.0))
+
+
+def test_elevation_fills_are_legal_colours():
+    """Metre elevations must be normalised before they reach a colour channel.
+
+    Fed raw, a 585 m hex formatted as `#2469a2469a2469a` and a below-sea hex went
+    negative — every fill in elevation mode must be a well-formed six-digit colour,
+    whatever the map's vertical span.
+    """
+    import re
+
+    ws = WorldState.empty(seed=1, width=4, height=4)
+    for i, h in enumerate(ws.hexes.values()):
+        h.elevation = -120.0 + i * 90.0  # metres, spanning below and above sea level
+
+    svg = render(ws, SVGConfig(color_mode="elevation", layers={"terrain"}))
+    fills = re.findall(r'fill="([^"]+)"', svg)
+    assert fills
+    for fill in fills:
+        assert re.fullmatch(r"#[0-9a-f]{6}|none", fill), f"illegal fill {fill!r}"

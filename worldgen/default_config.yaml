@@ -451,7 +451,6 @@ export:
   road_casing_color: "#20140a"  # Colour of the casing under roads. Default: "#20140a"
 
   # Contour settings — only used when "contours" is in the layers list above
-  contour_elevation_scale_m: 3000.0  # Elevation span in metres for contour scaling. Default: 3000.0
   contour_interval_m: 100.0          # Vertical spacing between contour lines in metres. Default: 100.0
   contour_max_crossings: 5           # Maximum contour lines drawn per hex edge. Default: 5
   contour_max_stroke: 4.0            # Maximum contour stroke width in pixels. Default: 4.0

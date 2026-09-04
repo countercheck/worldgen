@@ -120,7 +120,7 @@ def test_contours_layer_renders():
     ws = WorldState.empty(seed=1, width=4, height=4)
     # Use known-adjacent hexes: (1, 0) is a neighbor of (0, 0).
     ws.hexes[(0, 0)].elevation = 0.0
-    ws.hexes[(1, 0)].elevation = 0.5  # 1500 m diff → contour line drawn
+    ws.hexes[(1, 0)].elevation = 1500.0  # metres: contour lines drawn
     # Render only the contours layer so the background stays plain white.
     config = PNGConfig(layers={"contours"})
     img = render(ws, config)

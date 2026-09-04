@@ -185,7 +185,6 @@ def test_export_reads_export_block_from_yaml_config(world_json, tmp_path):
                     "hex_size": 9.0,
                     "padding": 7,
                     "layers": ["terrain", "contours"],
-                    "contour_elevation_scale_m": 2500.0,
                     "contour_interval_m": 50.0,
                     "contour_max_crossings": 3,
                     "contour_max_stroke": 2.0,

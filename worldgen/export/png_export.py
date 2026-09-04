@@ -35,7 +35,6 @@ class PNGConfig:
             "legend",
         }
     )
-    contour_elevation_scale_m: float = 3000.0
     contour_interval_m: float = 100.0
     contour_max_crossings: int = 5
     contour_max_stroke: float = 4.0
@@ -403,7 +402,6 @@ def render(ws: WorldState, config: PNGConfig | None = None) -> Image.Image:
             draw.polygon(verts, outline=(80, 80, 80), width=grid_lw)
 
     if "contours" in layers:
-        scale = config.contour_elevation_scale_m
         interval = config.contour_interval_m
         max_n = config.contour_max_crossings
         max_stroke = config.contour_max_stroke
@@ -419,8 +417,11 @@ def render(ws: WorldState, config: PNGConfig | None = None) -> Image.Image:
                 nbr = ws.hexes.get(nbr_coord)
                 if nbr is None:
                     continue
-                lo_m = min(hex_item.elevation, nbr.elevation) * scale
-                hi_m = max(hex_item.elevation, nbr.elevation) * scale
+                # Elevation is already metres; no scale factor. The old
+                # `contour_elevation_scale_m` converted a [0, 1] field that no longer
+                # exists, and applied to metres it saturated every hexside at max weight.
+                lo_m = min(hex_item.elevation, nbr.elevation)
+                hi_m = max(hex_item.elevation, nbr.elevation)
                 n = int(hi_m / interval) - int(lo_m / interval)
                 if n <= 0:
                     continue
