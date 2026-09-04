@@ -136,6 +136,18 @@ class WorldConfig:
     # Which edges water may arrive from.  Narrowing it puts the off-map highlands on a
     # chosen side: ("west",) means every river from beyond the border enters in the west.
     river_inflow_edges: tuple[str, ...] = ("north", "south", "east", "west")
+    # How strongly to prefer an inlet whose water then crosses the map, over one that
+    # ducks back off it a few hexes later.  Exponent on the length of the course an inlet
+    # would take, so 0 ignores length entirely and higher values concentrate the choice
+    # on the longest course available.
+    river_inflow_length_bias: float = 2.0
+    # Shortest course worth importing a river for, as a fraction of the longer map
+    # dimension.  Weighting alone still leaves stubs, because the separation rule can
+    # leave nothing but stubs to choose from once the first inlet is placed — and a river
+    # that enters the map and leaves it four hexes later reads as a mistake rather than as
+    # geography.  A map that offers nothing longer gets fewer rivers than
+    # `river_inflow_count` asks for, which is the honest outcome; 0 disables the floor.
+    river_inflow_min_length: float = 0.1
     moisture_bleed_passes: int = 0  # 0 = flat river bonus (default); >0 = elevation-gated bleed
     moisture_bleed_strength: float = 0.3
 
@@ -164,6 +176,14 @@ class WorldConfig:
                 f"river_inflow_min_separation must be >= 0, got {self.river_inflow_min_separation}"
             )
         self.river_inflow_edges = _coerce_edges(self.river_inflow_edges, "river_inflow_edges")
+        if self.river_inflow_length_bias < 0:
+            raise ValueError(
+                f"river_inflow_length_bias must be >= 0, got {self.river_inflow_length_bias}"
+            )
+        if self.river_inflow_min_length < 0:
+            raise ValueError(
+                f"river_inflow_min_length must be >= 0, got {self.river_inflow_min_length}"
+            )
         if self.moisture_bleed_passes < 0:
             raise ValueError(
                 f"moisture_bleed_passes must be >= 0, got {self.moisture_bleed_passes}"

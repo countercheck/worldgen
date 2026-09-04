@@ -1,3 +1,5 @@
+import statistics
+
 import numpy as np
 import pytest
 
@@ -449,3 +451,85 @@ def test_inflow_needs_land_at_the_border():
         seed=11, until="HydrologyStage", width=48, height=48, erosion_iterations=800
     )
     assert _sources(state) == []
+
+
+def test_downstream_lengths_counts_land_hexes_to_the_outlet():
+    # A straight chain of four land hexes draining into a fifth that is not land (the
+    # sea, or off the map): each hex counts itself plus everything below it, and the
+    # water hex is not counted.
+    chain = [(0, 0), (1, 0), (2, 0), (3, 0)]
+    outlet = (4, 0)
+    flow_dir = {c: n for c, n in zip(chain, chain[1:] + [outlet], strict=True)}
+    lengths = HydrologyStage._downstream_lengths(flow_dir, set(chain))
+    assert [lengths[c] for c in chain] == [4, 3, 2, 1]
+
+
+def test_downstream_lengths_shares_a_common_trunk():
+    # Two headwaters joining a trunk. The memo has to give the trunk one value, not
+    # recompute it per branch, and each branch counts itself on top of it.
+    trunk = [(2, 0), (3, 0)]
+    flow_dir = {
+        (0, 0): (2, 0),
+        (1, 0): (2, 0),
+        (2, 0): (3, 0),
+        (3, 0): (4, 0),
+    }
+    land = {(0, 0), (1, 0), *trunk}
+    lengths = HydrologyStage._downstream_lengths(flow_dir, land)
+    assert lengths[(3, 0)] == 1
+    assert lengths[(2, 0)] == 2
+    assert lengths[(0, 0)] == lengths[(1, 0)] == 3
+
+
+def test_downstream_lengths_terminates_on_a_cycle():
+    # flow_dir is cycle-free by construction, but the walk must not hang if that ever
+    # stops being true.
+    flow_dir = {(0, 0): (1, 0), (1, 0): (2, 0), (2, 0): (0, 0)}
+    lengths = HydrologyStage._downstream_lengths(flow_dir, {(0, 0), (1, 0), (2, 0)})
+    assert set(lengths) == {(0, 0), (1, 0), (2, 0)}
+    assert all(v > 0 for v in lengths.values())
+
+
+def test_inflow_min_length_rejects_short_courses():
+    # A floor longer than the map can possibly offer leaves nothing eligible. Fewer
+    # rivers than river_inflow_count asks for is the intended outcome — better than
+    # importing one that leaves again a few hexes later.
+    assert _sources(_inflow_world(river_inflow_min_length=0.95)) == []
+
+
+def test_inflow_without_a_floor_still_places_rivers():
+    # The floor is what costs inlets, so with it off the count should be met — this is
+    # what pins the previous test on the floor rather than on the world having no
+    # candidates at all.
+    state = _inflow_world(river_inflow_min_length=0.0, river_inflow_length_bias=0.0)
+    assert _sources(state)
+
+
+def test_inflow_prefers_the_longer_course():
+    # The whole point of the length weighting. Measured on the course the water actually
+    # takes, walking the drawn rivers — a single River may be trimmed at a confluence
+    # where a larger trunk claims the trunk hexes, so its polyline is not the full course.
+    def course_length(state, source):
+        downstream = {}
+        for river in state.rivers:
+            for a, b in zip(river.hexes, river.hexes[1:], strict=False):
+                downstream.setdefault(a, b)
+        seen, current, hops = set(), source, 0
+        while current is not None and current not in seen:
+            seen.add(current)
+            hops += 1
+            current = downstream.get(current)
+        return hops
+
+    def median_course(**overrides):
+        lengths = []
+        for seed in (3, 4, 5, 6):
+            state = build_world(seed=seed, until="HydrologyStage", **{**_INFLOW_KW, **overrides})
+            lengths += [course_length(state, c) for c in _sources(state)]
+        return statistics.median(lengths) if lengths else 0
+
+    biased = median_course()
+    unbiased = median_course(river_inflow_length_bias=0.0, river_inflow_min_length=0.0)
+    assert biased > unbiased, (
+        f"length-biased inlets are no longer than unbiased ones ({biased} vs {unbiased})"
+    )

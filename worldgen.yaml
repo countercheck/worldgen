@@ -37,8 +37,8 @@ continent_falloff: true   # Apply edge falloff so the sea rings the map and ever
 #   [north, south, east, west]  →  an island, sea on all sides
 #   [west]                      →  a west coast, land running inland to the east
 #   [north, west]               →  a north-west corner of a larger continent
-continent_falloff_edges: [south]
-continent_shelf_variance: 0.8 # How much the shelf's inner edge wanders, 0–1. 0 gives a coast of even width; higher makes bays and headlands. The terrain noise already moves the shoreline a good deal on its own, so this is a nudge, not the main shaping. Default: 0.35
+continent_falloff_edges: [north, south, east, west]
+continent_shelf_variance: 0.35 # How much the shelf's inner edge wanders, 0–1. 0 gives a coast of even width; higher makes bays and headlands. The terrain noise already moves the shoreline a good deal on its own, so this is a nudge, not the main shaping. Default: 0.35
 continent_shelf_hexes: 10 # Width in hexes (km) of the coastal shelf over which land drops away to the sea. In hexes rather than a fraction of the map, so the coastal gradient is the same per km at any size. Narrower = steeper, cliffier coasts. Capped at a quarter of the shorter side. Only used when continent_falloff is true. Default: 10
 continent_seabed: 0.15    # Elevation the shelf descends to at the map edge. Must be below sea_level so the border is always under water. Nearer sea_level = a shallower, gentler shelf; nearer 0 = a steep drop into deep water, which makes cliff coasts common. Default: 0.15
 
@@ -50,7 +50,7 @@ continent_seabed: 0.15    # Elevation the shelf descends to at the map edge. Mus
 #   [0.0, -0.5]  →  north is highest, map runs downhill to the south
 #   [-0.5, 0.0]  →  west is highest, map runs downhill to the east
 #   [0.0, 0.0]   →  no tilt (default)
-elevation_gradient: [0.0, -0.50]
+elevation_gradient: [0.0, 0.0]
 
 # ---------------------------------------------------------------------------
 # Elevation from an image
@@ -125,7 +125,15 @@ river_inflow_min_separation: 6 # Minimum spacing between inlets, in hexes. Witho
 # Which edges water may arrive from. Drop an edge and no river enters on that side.
 # Narrowing this places the off-map highlands: ["west"] means every river from beyond the
 # border enters in the west, as though the range that feeds them lay off that corner.
-river_inflow_edges: ["north"] # Default: all four
+river_inflow_edges: ["north", "south", "east", "west"] # Default: all four
+# Left to itself the choice of inlet lands on a hex that descends steeply inland and then
+# meets the sea a few hexes later, which is most of what a border offers. These two keep
+# an imported river worth importing: the bias ranks candidates by how far the water then
+# travels, and the floor makes a course shorter than that ineligible outright. A map with
+# nothing longer gets fewer rivers than the count asks for, which beats one that enters
+# and leaves again four hexes later.
+river_inflow_length_bias: 2.0 # Exponent on the length of the course an inlet would take. 0 ignores length. Default: 2.0
+river_inflow_min_length: 0.1  # Shortest course worth a river, as a fraction of the longer map dimension. 0 disables the floor. Default: 0.1
 
 # Lake drainage. Every lake is filled to its spillway and given an outflow, so water
 # that enters a basin has somewhere to go instead of accumulating forever.

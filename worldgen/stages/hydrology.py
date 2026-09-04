@@ -344,6 +344,43 @@ class HydrologyStage(GeneratorStage):
 
         return edges_of
 
+    @staticmethod
+    def _downstream_lengths(
+        flow_dir: dict[HexCoord, HexCoord | None],
+        land: set[HexCoord],
+    ) -> dict[HexCoord, int]:
+        """Land hexes from each hex to wherever its water leaves the map.
+
+        Memoised along each chain, so the whole field costs one pass over `land` rather
+        than one trace per hex.  Water hexes and the map edge terminate a chain and are
+        not counted, so the number is the length of the river a hex would head.
+
+        `flow_dir` is cycle-free by construction — the caller's epsilon tilt makes every
+        filled elevation unique — but a chain that revisits a hex is still terminated
+        rather than followed, so a future change to the tilt cannot hang this.
+        """
+        length: dict[HexCoord, int] = {}
+        for start in land:
+            if start in length:
+                continue
+            chain: list[HexCoord] = []
+            seen: set[HexCoord] = set()
+            current: HexCoord | None = start
+            while (
+                current is not None
+                and current in land
+                and current not in length
+                and current not in seen
+            ):
+                seen.add(current)
+                chain.append(current)
+                current = flow_dir.get(current)
+            tail = length.get(current, 0) if current is not None else 0
+            for coord in reversed(chain):
+                tail += 1
+                length[coord] = tail
+        return length
+
     def _inflow_inlets(
         self,
         flow_dir: dict[HexCoord, HexCoord | None],
@@ -365,16 +402,36 @@ class HydrologyStage(GeneratorStage):
             would draw a one-hex stub from the edge into the water beside it.
         *   That downstream hex is off the border, so an inflow heads inland instead of
             creeping along the map edge.
+        *   The terrain descends inland of it at all, so the hex sits in something that
+            drains rather than in a rise against the edge.
 
-        Candidates are sampled with probability proportional to how far the terrain drops
-        inland of them, so a deep valley mouth is likelier than a shallow dip in the edge
-        but the choice still varies between seeds.  A minimum separation keeps two inlets
-        off the same valley, which would otherwise draw one river twice.
+        What is left is ranked by how far the water then travels.  Length has to do that
+        work rather than the inland drop, which was the obvious choice and the wrong one:
+        the drop is a single step's view, it ranges over orders of magnitude, and on its
+        own it happily picks a hex that descends steeply inland and meets the sea three
+        hexes later — which is most of what a border offers.  So the drop stays a filter,
+        and the weight is the course length raised to `river_inflow_length_bias`.
+
+        Weighting alone still leaves stubs, because `river_inflow_min_separation` can
+        leave nothing but stubs to draw from once the first inlet is placed, so a course
+        shorter than `river_inflow_min_length` is not eligible at all.  A map with no long
+        course yields fewer inlets than asked for; importing a river that leaves again
+        four hexes later would read as a mistake rather than as geography.
+
+        The course is traced on `flow_dir`, which depends only on elevation — seeding the
+        inflow does not change it — so the length weighed here is the length the river
+        actually gets.
         """
         count = self.config.river_inflow_count
         wanted_edges = set(self.config.river_inflow_edges)
         if count <= 0 or not wanted_edges:
             return []
+
+        lengths = self._downstream_lengths(flow_dir, land)
+        bias = self.config.river_inflow_length_bias
+        min_length = self.config.river_inflow_min_length * max(
+            self.config.width, self.config.height
+        )
 
         candidates: list[HexCoord] = []
         weights: list[float] = []
@@ -384,11 +441,13 @@ class HydrologyStage(GeneratorStage):
             downstream = flow_dir.get(coord)
             if downstream is None or downstream not in land or on_border(downstream):
                 continue
-            drop = filled[coord] - filled[downstream]
-            if drop <= 0.0:
+            if filled[coord] - filled[downstream] <= 0.0:
+                continue
+            course = lengths[coord]
+            if course < min_length:
                 continue
             candidates.append(coord)
-            weights.append(drop)
+            weights.append(float(course) ** bias)
 
         if not candidates:
             return []

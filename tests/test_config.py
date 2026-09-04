@@ -230,6 +230,8 @@ def test_world_config_validates_heightmap_fields(kwargs, message):
         ({"river_inflow_min_separation": -1}, "river_inflow_min_separation"),
         ({"river_inflow_edges": ["nrth"]}, "river_inflow_edges"),
         ({"river_inflow_edges": [3]}, "river_inflow_edges"),
+        ({"river_inflow_length_bias": -0.1}, "river_inflow_length_bias"),
+        ({"river_inflow_min_length": -0.1}, "river_inflow_min_length"),
         # The shared edge parser names the setting that was actually wrong, so a typo in
         # one edge list is never reported against the other.
         ({"continent_falloff_edges": ["nrth"]}, "continent_falloff_edges"),
