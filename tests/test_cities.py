@@ -187,17 +187,38 @@ def test_promotion_founds_nothing():
 def test_a_city_takes_its_surplus_from_the_markets_it_reaches():
     """Conserved, not conjured. A city is the same countryside feeding a different place.
 
-    Total population may move a little — a market's own draw is jittered — but a city that
-    added tens of thousands of people without taking them from anywhere would mean the
-    surplus was being counted twice.
+    Exactly conserved, to the rounding: promotion is a transfer applied as a delta on the
+    populations the markets already have, so the books balance to within half a person
+    per settlement touched. This used to allow 5% slack, which was wide enough to hide
+    both a promoted seat keeping surplus another city had taken and the founding jitter
+    being silently stripped from the whole tier.
     """
     before, after = _before_and_after()
     if not _split(after)[0]:
         return
     was = sum(s.population for s in before.settlements)
     now = sum(s.population for s in after.settlements)
-    assert now == pytest.approx(was, rel=0.05), (
+    assert abs(now - was) <= len(after.settlements), (
         f"population went from {was:,} to {now:,} — promotion is creating surplus, not moving it"
+    )
+
+
+def test_promotion_leaves_an_untouched_market_byte_identical():
+    """A market no city drew on keeps the exact population it was founded with.
+
+    Founding sizes carry a deliberate jitter; recomputing every market from the
+    un-jittered draw erased it map-wide, which made town sizes an invertible function of
+    catchment again — the exact mechanical look the jitter exists to break.
+    """
+    before, after = _before_and_after()
+    cities, _ = _split(after)
+    if not cities:
+        return
+    pop_before = {s.coord: s.population for s in before.settlements}
+    unchanged = [s for s in after.settlements if s.population == pop_before[s.coord]]
+    assert unchanged, (
+        "every single settlement's population changed across promotion — the stage is "
+        "rewriting the whole tier rather than moving surplus between the places it touched"
     )
 
 
@@ -207,3 +228,73 @@ def test_same_seed_same_cities():
     assert sorted((s.coord, s.tier.value, s.population) for s in a.settlements) == sorted(
         (s.coord, s.tier.value, s.population) for s in b.settlements
     )
+
+
+# --- the arithmetic, in isolation ---------------------------------------------
+
+
+def test_bulk_reach_prices_the_haul_toward_the_seat():
+    """The Dijkstra expands outward; the cargo travels inward, and only climb is charged.
+
+    A seat in the valley is provisioned downhill — the wagons descend, so its reach runs
+    far up the slope. A seat on the hill is provisioned uphill, and the same budget buys
+    less. Getting the edge direction wrong is silent: nothing crashes, the two cases
+    simply swap, and every market the country rises toward has its draw inflated.
+    """
+    from worldgen.core.hex import Hex
+    from worldgen.stages.cities import CityPromotionStage
+
+    cfg = WorldConfig()
+    hexes = {(q, 0): Hex(coord=(q, 0), elevation=q * 60.0) for q in range(10)}
+
+    to_valley = CityPromotionStage._bulk_reach(hexes, (0, 0), cfg)
+    to_hilltop = CityPromotionStage._bulk_reach(hexes, (9, 0), cfg)
+
+    assert to_hilltop[(0, 0)] > to_valley[(9, 0)], (
+        "hauling 540 m uphill must cost more than hauling the same road down"
+    )
+
+
+def test_resize_moves_exactly_what_was_taken():
+    """Conserved to the round, and untouched markets come out byte-identical.
+
+    Two regressions live here. Recomputing every market from the un-jittered draw
+    silently stripped the founding jitter off the whole tier; and a promoted seat that
+    had itself been drawn on by an earlier city kept surplus already counted elsewhere,
+    so promotion conjured people. The delta form fixes both at once.
+    """
+    import numpy as np
+
+    from worldgen.core.hex import Settlement, SettlementRole
+    from worldgen.core.world_state import WorldState
+    from worldgen.stages.cities import CityPromotionStage
+
+    cfg = WorldConfig()
+
+    def market(coord, pop):
+        return Settlement(
+            coord=coord,
+            tier=SettlementTier.TOWN,
+            role=SettlementRole.MARKET,
+            population=pop,
+            name=f"market_{coord}",
+        )
+
+    a, b, c = market((1, 1), 1013), market((5, 5), 977), market((9, 9), 1200)
+    state = WorldState.empty(1, 12, 12, cfg.grid_layout)
+
+    # A is promoted on B's surplus; B is then promoted on C's — so B both sends and
+    # receives, which is exactly the case the old recomputation double-counted.
+    absorbed = {(1, 1): {(5, 5): 2.0}, (5, 5): {(9, 9): 1.0}}
+    stage = CityPromotionStage(cfg, np.random.default_rng(0))
+    stage._resize(state, [a, b, c], absorbed, [(1, 1), (5, 5)], cfg)
+
+    ppf = cfg.people_per_food
+    assert a.population == 1013 + round(2.0 * ppf)
+    assert b.population == 977 + round((1.0 - 2.0) * ppf), "B must be charged what A took"
+    assert c.population == 1200 - round(1.0 * ppf)
+    assert a.population + b.population + c.population == 1013 + 977 + 1200, (
+        "promotion moved people it did not have"
+    )
+    assert a.tier is SettlementTier.CITY and b.tier is SettlementTier.CITY
+    assert c.tier is SettlementTier.TOWN

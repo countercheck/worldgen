@@ -46,7 +46,7 @@ class CityPromotionStage(GeneratorStage):
         if not promoted:
             return state
 
-        self._resize(state, markets, draw, absorbed, promoted, cfg)
+        self._resize(state, markets, absorbed, promoted, cfg)
         return state
 
     # -- what each market already gathers -------------------------------------
@@ -95,7 +95,12 @@ class CityPromotionStage(GeneratorStage):
                 n_hx = hexes.get(n)
                 if n_hx is None:
                     continue
-                step = node_cost(n_hx) + edge_cost(hx, n_hx)
+                # The search expands outward from the seat, but the cargo travels the
+                # other way — so each relaxation prices the step *n -> here*, toward the
+                # seat. Getting the edge direction wrong does not fail loudly: slope is
+                # the only asymmetric term, so it silently inflates the draw of every
+                # market the country rises toward.
+                step = node_cost(n_hx) + edge_cost(n_hx, hx)
                 if step == float("inf"):
                     continue
                 nd = d + step
@@ -147,13 +152,22 @@ class CityPromotionStage(GeneratorStage):
 
     # -- sizing ---------------------------------------------------------------
 
-    def _resize(self, state, markets, draw, absorbed, promoted, cfg):
+    def _resize(self, state, markets, absorbed, promoted, cfg):
         """Move the absorbed surplus onto the cities and off the markets that sent it.
 
         Conserved, deliberately. A city is not new food; it is the same countryside
         feeding a different place, so the map's total population barely moves while its
         distribution changes completely. A market in a city's shadow shrinks by what it
         sends, which is why a great port has quiet towns around it rather than peers.
+
+        Applied as a *delta* on the population each settlement already has, not a
+        recomputation from the draw, for two reasons that are really one. A settlement
+        promotion never touched must come out of this stage byte-identical — recomputing
+        rewrote every market from the un-jittered draw, silently stripping the founding
+        jitter off the whole tier. And a promoted seat may itself have been drawn on by a
+        city promoted before it, so its own draw is not all still its own: charging every
+        seat exactly what was taken from it is what makes the books balance instead of
+        counting the overlap twice.
         """
         by_coord = {s.coord: s for s in markets}
         lost: dict = {}
@@ -162,14 +176,15 @@ class CityPromotionStage(GeneratorStage):
                 lost[other] = lost.get(other, 0.0) + taken
 
         for coord, settlement in by_coord.items():
-            own = draw.get(coord, 0.0)
+            delta = -lost.get(coord, 0.0)
             if coord in absorbed:
-                total = own + sum(absorbed[coord].values())
+                delta += sum(absorbed[coord].values())
                 settlement.tier = SettlementTier.CITY
                 settlement.name = settlement.name.replace("_market_", "_city_")
-            else:
-                total = max(0.0, own - lost.get(coord, 0.0))
-            settlement.population = max(1, round(total * cfg.people_per_food))
+            if delta:
+                settlement.population = max(
+                    1, round(settlement.population + delta * cfg.people_per_food)
+                )
 
         state.metadata["cities"] = sorted(promoted)
 
