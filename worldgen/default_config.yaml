@@ -141,6 +141,14 @@ lake_chaining: true             # Allow a lake to spill into a strictly lower la
 endorheic_marsh_radius: 1       # Where a basin genuinely has no outlet it is endorheic: water leaves by evaporation. This many hexes of its shore become wetland. 0 disables. Default: 1
 endorheic_marsh_min_moisture: 0.4 # A closed basin drier than this is a salt pan, not a marsh, and gets no wetland shore. Default: 0.4
 
+# Whether a basin is closed at all is a water balance, not a shape: it overflows when the
+# rivers reaching it plus the rain on its surface exceed what evaporates off that surface.
+# The per-hex evaporation comes from regional_climate below (a boreal lake loses half what
+# a temperate one does; an arid lake three and a half times as much), and this scales it.
+# Above 1 closes more basins; 0 makes any basin with inflow overflow. Raise it if your map
+# has large lakes you would rather see as inland seas with no outlet.
+endorheic_evaporation_scale: 1.0 # Multiplier on the climate's evaporation rate. Default: 1.0
+
 # ---------------------------------------------------------------------------
 # Climate
 # ---------------------------------------------------------------------------

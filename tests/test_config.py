@@ -250,3 +250,24 @@ def test_river_inflow_edges_are_canonicalised():
         "west",
     )
     assert WorldConfig(river_inflow_edges=[]).river_inflow_edges == ()
+
+
+def test_world_config_validates_evaporation_scale():
+    with pytest.raises(ValueError, match="endorheic_evaporation_scale"):
+        WorldConfig(endorheic_evaporation_scale=-0.1)
+
+
+def test_every_climate_declares_an_evaporation_rate():
+    # The water balance reads this for whichever climate the region is set to, so a new
+    # climate added without one would silently fall back to the default and make its
+    # basins behave like a temperate region's.
+    from worldgen.core.config import CLIMATE_CONTEXTS
+
+    assert all(ctx.evaporation > 0 for ctx in CLIMATE_CONTEXTS.values())
+    # Drier regions must evaporate more, or the balance has the world backwards.
+    assert (
+        CLIMATE_CONTEXTS["boreal"].evaporation
+        < CLIMATE_CONTEXTS["temperate"].evaporation
+        < CLIMATE_CONTEXTS["mediterranean"].evaporation
+        < CLIMATE_CONTEXTS["arid"].evaporation
+    )

@@ -2,6 +2,7 @@ import heapq
 from collections import defaultdict, deque
 from collections.abc import Callable
 
+from ..core.config import CLIMATE_CONTEXTS
 from ..core.hex import Hex, HexCoord, TerrainClass
 from ..core.hex_grid import distance, neighbors
 from ..core.pipeline import GeneratorStage
@@ -930,6 +931,31 @@ class HydrologyStage(GeneratorStage):
                 outlet_of.update(dict.fromkeys(component))
                 continue
 
+            # Whether this basin is closed is a water balance, not a shape.  What arrives
+            # is every river mouth on its shore plus the rain falling on the open water,
+            # counted in the unit `_flow_accumulation` gives one hex of land.  What leaves
+            # without a river is evaporation off that same surface.  A basin taking in
+            # more than it evaporates must overflow, and is given an outlet below — by
+            # force, if the terrain makes it awkward.  One that evaporates everything
+            # reaching it is genuinely closed, and cutting a channel out of it would
+            # invent a river that should not exist.
+            #
+            # This is why the Caspian is closed and Baikal is not, and it replaces a test
+            # the routing was making by accident: a basin used to come out closed when
+            # path-finding happened to fail on it, so a dry basin with an easy saddle
+            # drained while a wet one ringed by hills did not — backwards on both counts.
+            basin_inflow = sum(
+                acc.get(c, 0.0) for c in border_land if flow_dir.get(c) in component
+            ) + float(len(component))
+            evaporation = (
+                self.config.endorheic_evaporation_scale
+                * CLIMATE_CONTEXTS[self.config.regional_climate].evaporation
+                * len(component)
+            )
+            if basin_inflow <= evaporation:
+                outlet_of.update(dict.fromkeys(component))
+                continue
+
             # Check if a natural outflow already exists (river leaving the lake).
             # Following flow_dir a single step is not enough: a perimeter hex belonging
             # to an *inflow* river also points at a land hex outside the component (the
@@ -1087,7 +1113,9 @@ class HydrologyStage(GeneratorStage):
                 if extension:
                     break
 
-            # Guaranteed fallback: plain BFS (only border/ocean as terminals)
+            # Fallback: plain BFS, which ignores elevation and will carry a river over a
+            # mountain to reach the border.  The balance above already established that
+            # this water has to get out somehow, so the violence is warranted.
             if not extension:
                 spillway = outflow_candidates[0]
                 extension = self._forced_exit_to_border(
@@ -1101,18 +1129,14 @@ class HydrologyStage(GeneratorStage):
 
             path = [spillway]
             prev = spillway
-            # What leaves the basin is what arrived in it: every river mouth on its shore,
-            # plus the rain that fell on the water itself (one unit per hex, the same
-            # measure `_flow_accumulation` seeds the land with).  Seeding the outflow with
-            # the spillway's own drainage instead — which is usually 1.0, a single hex of
-            # rain — is why a lake fed by eighteen rivers used to drain through a channel
-            # carrying 0.004 of the map's flow: the exporters scale river width by
+            # What leaves the basin is what arrived in it, less what evaporated on the
+            # way — the same two quantities the balance above is decided on.  Seeding the
+            # outflow with the spillway's own drainage instead, usually 1.0 for a single
+            # hex of rain, is why a lake fed by eighteen rivers used to drain through a
+            # channel carrying 0.004 of the map's flow: the exporters scale river width by
             # flow_volume, so the outlet drew as a hairline beside the torrents feeding it
             # and the basin looked stoppered even though it was, on paper, draining.
-            basin_inflow = sum(
-                acc.get(c, 0.0) for c in border_land if flow_dir.get(c) in component
-            ) + float(len(component))
-            running_acc = max(acc.get(spillway, 0.0), basin_inflow, 1.0)
+            running_acc = max(acc.get(spillway, 0.0), basin_inflow - evaporation, 1.0)
             added_land = [spillway]
             merged_into_existing = False
             for coord in extension:

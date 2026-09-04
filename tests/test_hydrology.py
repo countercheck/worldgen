@@ -196,6 +196,12 @@ def test_lake_drainage_merges_without_rewiring_existing_river():
     spillway = (2, 1)
     merge = (2, 0)
     downstream = (3, 0)
+    # A river running into the lake, so the basin takes in more than it evaporates and
+    # has to overflow.  Without it this one-hex lake collects only the rain that falls on
+    # it, which in a temperate climate is exactly what evaporates off it again, and the
+    # water balance correctly declines to give a closed basin an outflow — leaving
+    # nothing for this test to look at.
+    feeder = (2, 3)
 
     for hex_item in ws.hexes.values():
         hex_item.terrain_class = TerrainClass.FLAT
@@ -206,11 +212,11 @@ def test_lake_drainage_merges_without_rewiring_existing_river():
     ws.hexes[spillway].elevation = 1.0
 
     river_set = {merge, downstream}
-    flow_dir = {merge: downstream, downstream: None, spillway: None}
+    flow_dir = {merge: downstream, downstream: None, spillway: None, feeder: lake}
     land = set(ws.hexes) - {lake}
     ocean: set[tuple[int, int]] = set()
     lakes = {lake}
-    acc = {spillway: 1.0, merge: 5.0, downstream: 8.0}
+    acc = {spillway: 1.0, merge: 5.0, downstream: 8.0, feeder: 20.0}
     filled = {coord: hex_item.elevation for coord, hex_item in ws.hexes.items()}
     filled[spillway] = 1.0
 
@@ -624,3 +630,63 @@ def test_a_lake_outflow_carries_what_flows_into_it():
             f"basin of {len(comp)} hexes takes {inflow:.3f} in and passes {outflow:.3f} out"
         )
     assert checked, "expected at least one sizable lake with rivers running into it"
+
+
+def _balance_world(**cfg_kw):
+    """A one-hex lake with one river running into it, for water-balance tests.
+
+    Deliberately synthetic: the balance is a ratio between what arrives and what
+    evaporates, and a hand-built basin is the only way to put both sides of it where the
+    test can see them.
+    """
+    cfg = WorldConfig(width=5, height=5, **cfg_kw)
+    stage = HydrologyStage(cfg, np.random.default_rng(0))
+    ws = WorldState.empty(seed=3, width=5, height=5)
+
+    lake, spillway, merge, downstream, feeder = (2, 2), (2, 1), (2, 0), (3, 0), (2, 3)
+    for hex_item in ws.hexes.values():
+        hex_item.terrain_class = TerrainClass.FLAT
+        hex_item.elevation = 10.0
+    ws.hexes[lake].terrain_class = TerrainClass.LAKE
+    ws.hexes[lake].elevation = 0.0
+    ws.hexes[spillway].elevation = 1.0
+
+    filled = {coord: h.elevation for coord, h in ws.hexes.items()}
+    filled[spillway] = 1.0
+    stage._guided_path_to_ocean = lambda *a, **k: [merge]
+    stage._forced_exit_to_border = lambda *a, **k: [merge]
+
+    _rivers, outlet_of = stage._ensure_lake_drainage(
+        river_set={merge, downstream},
+        flow_dir={merge: downstream, downstream: None, spillway: None, feeder: lake},
+        hexes=ws.hexes,
+        land=set(ws.hexes) - {lake},
+        ocean=set(),
+        lakes={lake},
+        acc={spillway: 1.0, merge: 5.0, downstream: 8.0, feeder: 20.0},
+        filled=filled,
+        on_border=ws.on_border,
+    )
+    return outlet_of[lake]
+
+
+def test_a_basin_taking_in_more_than_it_evaporates_is_given_an_outlet():
+    # 21 units arrive (a 20-unit river plus the rain on one hex of water); a temperate
+    # hex of lake evaporates 1.  It has to overflow.
+    assert _balance_world(regional_climate="temperate") is not None
+
+
+def test_a_basin_that_evaporates_what_reaches_it_is_closed():
+    # Same basin, same inflow, evaporation cranked past it: the water now leaves as
+    # vapour and no channel is cut.  This is the Caspian, and it is the case the old
+    # topological test could not express — it closed a basin when path-finding failed,
+    # which is a fact about the terrain's shape, not about its water.
+    assert _balance_world(endorheic_evaporation_scale=100.0) is None
+
+
+def test_climate_alone_can_close_a_basin():
+    # The evaporation rate is the region's climate, so the same terrain and the same
+    # rivers give a draining lake in the cold and a closed one in the desert.
+    inflow_scale = dict(endorheic_evaporation_scale=8.0)
+    assert _balance_world(regional_climate="boreal", **inflow_scale) is not None
+    assert _balance_world(regional_climate="arid", **inflow_scale) is None

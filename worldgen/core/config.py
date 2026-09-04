@@ -17,11 +17,20 @@ class ClimateContext:
     and moisture axes; `palette` is the set of biomes that can occur there.  The palette
     is what keeps a region coherent: an arid region varies from desert to steppe to
     alpine with altitude, but never produces jungle three valleys over.
+
+    `evaporation` is how much water a hex of open lake loses, measured in the same unit
+    the hydrology gives one hex of land as rain.  So 1.0 means a lake evaporates exactly
+    what falls on it and any river reaching it makes it overflow; 3.5 means an arid
+    region's lake swallows three and a half hexes' worth of rain per hex of surface, and
+    needs a large catchment behind it before it spills.  This is what decides whether a
+    basin drains or is closed — the Caspian and the Great Salt Lake are closed because
+    they evaporate what reaches them, not because the ground pens them in.
     """
 
     base_temperature: float
     moisture_target: float
     palette: frozenset
+    evaporation: float = 1.0
 
 
 def _palette(*names: str) -> frozenset:
@@ -35,16 +44,26 @@ def _palette(*names: str) -> frozenset:
 _ALWAYS = ("ALPINE", "WETLAND", "OCEAN")
 
 CLIMATE_CONTEXTS: dict[str, ClimateContext] = {
-    "boreal": ClimateContext(0.22, 0.55, _palette("TUNDRA", "BOREAL", "GRASSLAND", *_ALWAYS)),
+    "boreal": ClimateContext(
+        0.22, 0.55, _palette("TUNDRA", "BOREAL", "GRASSLAND", *_ALWAYS), evaporation=0.5
+    ),
     "temperate": ClimateContext(
-        0.50, 0.55, _palette("TEMPERATE_FOREST", "GRASSLAND", "BOREAL", "SHRUBLAND", *_ALWAYS)
+        0.50,
+        0.55,
+        _palette("TEMPERATE_FOREST", "GRASSLAND", "BOREAL", "SHRUBLAND", *_ALWAYS),
+        evaporation=1.0,
     ),
     "mediterranean": ClimateContext(
-        0.62, 0.35, _palette("SHRUBLAND", "GRASSLAND", "TEMPERATE_FOREST", *_ALWAYS)
+        0.62,
+        0.35,
+        _palette("SHRUBLAND", "GRASSLAND", "TEMPERATE_FOREST", *_ALWAYS),
+        evaporation=1.8,
     ),
-    "arid": ClimateContext(0.68, 0.15, _palette("DESERT", "SHRUBLAND", "GRASSLAND", *_ALWAYS)),
+    "arid": ClimateContext(
+        0.68, 0.15, _palette("DESERT", "SHRUBLAND", "GRASSLAND", *_ALWAYS), evaporation=3.5
+    ),
     "tropical": ClimateContext(
-        0.85, 0.75, _palette("TROPICAL", "GRASSLAND", "SHRUBLAND", *_ALWAYS)
+        0.85, 0.75, _palette("TROPICAL", "GRASSLAND", "SHRUBLAND", *_ALWAYS), evaporation=1.5
     ),
 }
 
@@ -155,6 +174,12 @@ class WorldConfig:
     lake_chaining: bool = True  # Let a lake spill into a strictly lower lake, not only the sea
     endorheic_marsh_radius: int = 1  # Shore band (hexes) turned to wetland around a closed basin
     endorheic_marsh_min_moisture: float = 0.40  # Below this a closed basin is arid, not marshy
+    # Whether a basin is closed is a water balance, not a shape: it overflows when the
+    # rivers reaching it plus the rain on its surface exceed what evaporates off that
+    # surface.  The per-hex evaporation comes from the region's climate (see
+    # `ClimateContext.evaporation`); this scales it.  Above 1 closes more basins, and 0
+    # makes every basin with any inflow at all overflow.
+    endorheic_evaporation_scale: float = 1.0
 
     def __post_init__(self) -> None:
         if self.grid_layout not in GRID_LAYOUTS:
@@ -230,6 +255,10 @@ class WorldConfig:
             raise ValueError(
                 "endorheic_marsh_min_moisture must be in [0, 1], "
                 f"got {self.endorheic_marsh_min_moisture}"
+            )
+        if self.endorheic_evaporation_scale < 0:
+            raise ValueError(
+                f"endorheic_evaporation_scale must be >= 0, got {self.endorheic_evaporation_scale}"
             )
         if not (0.0 <= self.moisture_bleed_strength <= 1.0):
             raise ValueError(
