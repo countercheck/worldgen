@@ -44,6 +44,8 @@ from .city_town import _assign_role
 from .habitability import actual_food, potential_food
 from .haulage import gather, usable_fraction
 
+_WATER = (TerrainClass.OCEAN, TerrainClass.LAKE)
+
 WATER = (TerrainClass.OCEAN, TerrainClass.LAKE)
 # Soil you can get a plough into at all. GRAZING fails it for the two reasons that make
 # ground grazing in the first place: too steep for the share, or too dry for the seed.
@@ -104,7 +106,13 @@ def rural_population(hx, cfg) -> float:
     way round. A market draws `marketable_surplus_fraction` of what its catchment yields, so
     the other four fifths is what feeds the people who grew it. Defining it this way means
     the two figures reconcile by construction rather than by calibration.
+
+    Zero on water, whatever the food model says a fishery yields: the fishermen live on
+    the shore that works the water, not on the water itself. Without this a fifth of the
+    map's people stood on the open sea, and every density figure quietly counted them.
     """
+    if hx.terrain_class in _WATER:
+        return 0.0
     return actual_food(hx, cfg) * (1.0 - cfg.marketable_surplus_fraction) * cfg.people_per_food
 
 

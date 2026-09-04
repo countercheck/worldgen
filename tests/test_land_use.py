@@ -192,3 +192,18 @@ def test_same_seed_same_land_use():
     assert {c: h.land_use for c, h in a.hexes.items()} == {
         c: h.land_use for c, h in b.hexes.items()
     }
+
+
+def test_nobody_lives_on_the_water(used):
+    """The fishermen live on the shore that works the water, not on the sea itself.
+
+    The food model gives open water a non-zero yield so the fishery can feed a market;
+    read naively as residents, it put a fifth of the map's people on the open sea, and
+    every density figure quietly counted them.
+    """
+    water = (TerrainClass.OCEAN, TerrainClass.LAKE)
+    afloat = [
+        c for c, h in used.hexes.items() if h.terrain_class in water and h.rural_population > 0
+    ]
+    assert not afloat, f"{len(afloat)} water hexes house people, first at {afloat[:3]}"
+    assert any(h.rural_population > 0 for h in used.hexes.values())
