@@ -846,3 +846,20 @@ def test_unreachable_settlements_are_recorded_on_the_world():
     for entry in state.metadata.get("unreachable_settlements", []):
         assert set(entry) == {"coord", "reason"}
         assert len(entry["coord"]) == 2
+
+
+def test_the_adjacency_index_matches_the_edges(road_state):
+    """`hex.road_connections` is the serialised index of the network; the edges are the
+    network. The village stage reroutes edges after the index was first written, so it
+    must rebuild what it invalidated — a reader following the index must never walk an
+    edge the map does not have, or miss one it does.
+    """
+    want: dict = {}
+    for a, b in list(road_state.road_edges) + list(road_state.sea_edges):
+        want.setdefault(a, set()).add(b)
+        want.setdefault(b, set()).add(a)
+    for coord, hx in road_state.hexes.items():
+        assert hx.road_connections == want.get(coord, set()), (
+            f"adjacency at {coord} disagrees with the edge set: "
+            f"index {sorted(hx.road_connections)} vs edges {sorted(want.get(coord, set()))}"
+        )

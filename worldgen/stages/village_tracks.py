@@ -100,4 +100,15 @@ class VillageTrackStage(GeneratorStage):
         tag_river_crossings(tiers, hexes)
         tag_switchbacks(tiers, hexes, cfg)
         state.road_edges = as_road_edges(tiers, hexes)
+
+        # `route_through_settlements` reroutes edges, and the per-hex adjacency written
+        # while the tracks were laid does not know that. Rebuilt wholesale from the edges
+        # that actually survived — this is the last stage to touch the network, so what
+        # goes out here is what serialises, and the two must not disagree.
+        for hx in hexes.values():
+            hx.road_connections.clear()
+        for a, b in list(state.road_edges) + list(state.sea_edges):
+            if a in hexes and b in hexes:
+                hexes[a].road_connections.add(b)
+                hexes[b].road_connections.add(a)
         return state
