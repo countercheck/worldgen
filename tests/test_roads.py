@@ -70,6 +70,26 @@ def test_the_drawn_network_never_starts_or_ends_on_water(road_state):
             )
 
 
+def test_road_edges_and_sea_edges_split_the_water_between_them(road_state):
+    """`road_edges` is land and `sea_edges` is the water — each must actually be so.
+
+    The old water check lived on a network the stage now filters by construction, so it
+    could never fail; the place a violation would land today is `sea_edges`. A road edge
+    with a wet endpoint is a cart in the sea; a sea edge with two dry endpoints is a road
+    filed under boats, invisible to every "is there a land route" question.
+    """
+    water = (TerrainClass.OCEAN, TerrainClass.LAKE)
+    for a, b in road_state.road_edges:
+        for end in (a, b):
+            assert road_state.hexes[end].terrain_class not in water, (
+                f"road edge endpoint {end} is on water"
+            )
+    for a, b in road_state.sea_edges:
+        assert any(road_state.hexes[c].terrain_class in water for c in (a, b)), (
+            f"sea edge {a}-{b} touches no water at all"
+        )
+
+
 def test_road_connections_symmetric(road_state):
     hexes = road_state.hexes
     for coord, hx in hexes.items():

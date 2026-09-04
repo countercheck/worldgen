@@ -124,6 +124,26 @@ def test_pre_split_habitability_still_loads(tmp_path):
     assert h.habitability_village == 0.6
 
 
+def test_sea_edges_and_catchment_round_trip(tmp_path):
+    """The two fields the losslessness invariant had no witness for.
+
+    Deleting either from `to_dict` kept the whole suite green: `sea_edges` never crossed
+    a save/load in any test, and `catchment_km2` was never set on a fixture hex. Both
+    carry decisions — navigability reads catchment, and the land/sea split of the network
+    is the point of storing two edge sets — so both get an explicit witness here.
+    """
+    ws = _small_world()
+    ws.hexes[(0, 0)].catchment_km2 = 137.5
+    ws.sea_edges = {
+        road_edge_key((0, 0), (1, 0)): RoadEdge(RoadTier.PRIMARY, 0.0),
+    }
+    path = tmp_path / "world.json"
+    json_export.save(ws, path)
+    ws2 = json_export.load(path)
+    assert ws2.sea_edges == ws.sea_edges
+    assert abs(ws2.hexes[(0, 0)].catchment_km2 - 137.5) < 1e-9
+
+
 def test_territory_round_trips(tmp_path):
     ws = _small_world()
     ws.hexes[(0, 0)].territory = (1, 1)

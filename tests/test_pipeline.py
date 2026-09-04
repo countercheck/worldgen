@@ -77,6 +77,7 @@ def test_stage_order_is_load_bearing():
         "HydrologyStage",  # climate's orographic pass needs rivers
         "ClimateStage",  # biomes need temperature and moisture
         "BiomeStage",  # land cover is derived from biome
+        "SoilStage",  # cover depends on soil: good ground carries wildwood until cleared
         "LandCoverStage",  # habitability scores land cover
         "HabitabilityStage",  # placement ranks on habitability
         "CityTownStage",  # roads join cities and towns
@@ -158,3 +159,29 @@ def test_seed_is_recorded_in_metadata():
     state = build_pipeline(seed=123, width=32, height=32).run()
     assert state.seed == 123
     assert state.metadata["seed"] == 123
+
+
+def test_organic_stage_order_is_load_bearing():
+    """The organic half of the ordering test, which never existed.
+
+    Every one of these orderings is annotated as deliberate in `default_stages`:
+    crossings before markets so a bridging point is a reason a market grows there;
+    land use straight after siting because a market is worth what its countryside
+    sends; cities before roads because population decides travellers; chokepoints
+    after roads because only the built network says which crossings carry traffic.
+    The classic list had a test and the organic list — where the ordering comments
+    actually live — had none, so any of them could be silently reshuffled.
+    """
+    names = [s.__name__ for s in default_stages("organic")]
+    order = [
+        "SoilStage",  # land use reads what the ground is
+        "LandCoverStage",  # soil decides what grows until somebody clears it
+        "CrossingStage",  # a bridging point should be a reason a market grows there
+        "MarketStage",  # land use founds what this stage sites
+        "LandUseStage",  # a market is worth what its countryside actually sends
+        "CityPromotionStage",  # promotion changes populations, populations drive travellers
+        "InterurbanRoadStage",  # chokepoints need the built network
+        "ChokepointStage",  # a bad site that has traffic anyway
+    ]
+    positions = [names.index(n) for n in order]
+    assert positions == sorted(positions), f"Stage order violated: {names}"
