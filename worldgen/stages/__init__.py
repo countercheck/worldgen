@@ -83,7 +83,7 @@ def stages_for(config, model: str = "classic") -> tuple[type["GeneratorStage"], 
     `build_pipeline`'s `until=` look stages up in it by name.
     """
     stages = default_stages(model)
-    if not getattr(config, "heightmap_path", None):
+    if not config.heightmap_path:
         return stages
 
     from .elevation import ElevationStage

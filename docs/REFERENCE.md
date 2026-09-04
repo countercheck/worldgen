@@ -1295,8 +1295,8 @@ map comes out square at `height ≈ 0.87 * width` — `128 x 111`, for instance.
 | `heightmap_path` | `str \| None` | `None` | — | Path to an image to read the terrain from, resolved against the working directory. Setting it swaps `ImageElevationStage` in for `ElevationStage` |
 | `heightmap_mode` | `str` | `"elevation"` | `elevation`, `coastline` | `elevation` reads the image as a greyscale heightmap; `coastline` reads it as a land/sea stencil and fills it with generated terrain |
 | `heightmap_land_threshold` | `float` | `0.5` | `[0, 1]` | Coastline mode. Brightness at or above which a pixel is land. Ignored where the image has a meaningful alpha channel |
-| `heightmap_invert` | `bool` | `False` | — | Coastline mode. Treat the darker side of the threshold as the land instead |
-| `heightmap_coast_falloff` | `bool` | `False` | — | Coastline mode. Also apply the rectangular edge falloff, ringing the map with sea. Off by default, so the stencil is authoritative |
+| `heightmap_invert` | `bool` | `False` | — | Coastline mode. Treat the darker side of the threshold as the land instead; with an alpha stencil, treat the transparent side as the land |
+| `heightmap_coast_falloff` | `bool` | `False` | — | Coastline mode. Also apply the rectangular edge falloff on every edge (regardless of `continent_falloff_edges`), ringing the map with sea. Off by default, so the stencil is authoritative |
 
 ### 4.3 Terrain Classification — § [3.3](#33-terrain-classification)
 
