@@ -77,13 +77,18 @@ def noise_field(cfg, rng, w: int, h: int) -> tuple[np.ndarray, OpenSimplex]:
     return arr, coast_gen
 
 
-def falloff_ramp(cfg, coast_gen: OpenSimplex, w: int, h: int) -> np.ndarray:
+def falloff_ramp(
+    cfg, coast_gen: OpenSimplex, w: int, h: int, edges: set[str] | None = None
+) -> np.ndarray:
     """The continent falloff's blend factor: 0 at the participating edges, 1 inland.
 
-    Separate from `apply_continent_falloff` because an imported coastline blends towards
-    its own seabed rather than the configured one, but wants the same edge ramp.
+    Separate from `apply_continent_falloff` because an imported coastline applies the
+    ramp unconditionally and to every edge — it promises to ring the map with sea — where
+    the generated path gates it on `continent_falloff` and its configured edge list.
+    *edges* overrides `cfg.continent_falloff_edges` for that caller.
     """
-    edges = set(cfg.continent_falloff_edges)
+    if edges is None:
+        edges = set(cfg.continent_falloff_edges)
 
     # Distance to the nearest *participating* border, in hexes.  Edges left out
     # contribute nothing, so the land runs off the map on that side instead of ending in
@@ -143,13 +148,18 @@ def apply_continent_falloff(
     if not cfg.continent_falloff or not set(cfg.continent_falloff_edges):
         return arr
 
-    t = falloff_ramp(cfg, coast_gen, w, h)
+    return blend_to_seabed(arr, falloff_ramp(cfg, coast_gen, w, h), cfg)
 
-    # Blend towards a shallow seabed, not towards zero.  Dropping the border to elevation
-    # 0 puts an abyss against the shore, and the whole descent has to happen across the
-    # shelf, which is what made the coast a cliff whatever width it was given.  A seabed
-    # just below sea level is both a shorter drop and a truer one — the sea floor near a
-    # coast is shallow.
+
+def blend_to_seabed(arr: np.ndarray, t: np.ndarray, cfg) -> np.ndarray:
+    """Blend towards a shallow seabed, not towards zero.
+
+    Dropping the border to elevation 0 puts an abyss against the shore, and the whole
+    descent has to happen across the shelf, which is what made the coast a cliff whatever
+    width it was given.  A seabed just below sea level is both a shorter drop and a truer
+    one — the sea floor near a coast is shallow.  Shared with the imported-coastline
+    falloff so the two paths cannot drift apart.
+    """
     return arr * t + cfg.continent_seabed * (1.0 - t)
 
 

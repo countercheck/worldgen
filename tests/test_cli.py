@@ -387,6 +387,32 @@ def test_import_heightmap_reports_a_bad_path_cleanly(tmp_path):
     assert "nope.png" in result.output
 
 
+@pytest.mark.parametrize("command", ["generate", "import-heightmap"])
+@pytest.mark.parametrize("kind", ["missing", "malformed"])
+def test_bad_config_is_a_message_not_a_traceback(tmp_path, command, kind):
+    """`from_yaml` raises FileNotFoundError and yaml.YAMLError, neither a ValueError.
+
+    Both used to escape the per-command `except ValueError` as raw tracebacks — and
+    `generate` had no handling at all — so the shared loader owns the whole family now.
+    """
+    cfg = tmp_path / "bad.yaml"
+    if kind == "malformed":
+        cfg.write_text("width: [unclosed")
+
+    args = ["--config", str(cfg), "--output-dir", str(tmp_path / "o")]
+    if command == "import-heightmap":
+        args = ["import-heightmap", "--input", _heightmap(tmp_path, "cfg-err.png"), *args]
+    else:
+        args = ["generate", *args]
+
+    result = CliRunner().invoke(cli, args)
+    assert result.exit_code != 0
+    assert "bad.yaml" in result.output, (
+        f"expected a clean message naming the config, got: {result.output!r} "
+        f"(exception: {result.exception!r})"
+    )
+
+
 def test_generate_accepts_a_heightmap(tmp_path):
     cfg = tmp_path / "cfg.yaml"
     cfg.write_text(yaml.safe_dump({"erosion_iterations": 0, "target_city_count": 1}))

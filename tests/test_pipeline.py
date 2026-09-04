@@ -29,8 +29,9 @@ def test_cli_and_tests_share_one_stage_list():
     in each of four test modules. Both now read the shared registry, so this asserts the
     CLI has not quietly grown a private list again.
 
-    Either entry point counts: `stages_for` is `default_stages` resolved against a config,
-    and both bottom out in the same tuple.
+    Specifically `stages_for`, not `default_stages`: the config-resolved entry point is
+    what honours `heightmap_path`, so a revert to `default_stages` would silently ignore
+    a user's heightmap while still echoing it — exactly the regression this guard is for.
     """
     import inspect
 
@@ -38,8 +39,8 @@ def test_cli_and_tests_share_one_stage_list():
 
     # `generate` is a click Command; the function it wraps is its callback.
     source = inspect.getsource(cli.generate.callback)
-    assert "stages_for(" in source or "default_stages(" in source, (
-        "cli.generate no longer builds from the shared stage registry"
+    assert "stages_for(" in source, (
+        "cli.generate no longer builds from the config-resolved stage registry"
     )
     assert ".add_stage(ElevationStage)" not in source, "cli.generate has an inline stage list"
 
