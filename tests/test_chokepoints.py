@@ -102,6 +102,17 @@ def test_ground_that_is_not_a_saddle_reports_nothing(name, centre, ring):
     assert saddle_relief_m((0, 0), _ring_world(centre, ring)) == 0.0, name
 
 
+def test_a_wall_with_a_gap_in_it_is_not_a_wall():
+    """A flank is only as walled as its lowest hex.
+
+    High ground both sides, but one wall carries a low gap: you cross at the gap, so the
+    relief on offer is the gap's, not the outcrop's beside it. Scoring a flank by its
+    highest hex called this a 300 m pass; it is a 50 m rise anyone walks over.
+    """
+    hexes = _ring_world(100.0, [400.0, 150.0, 20.0, 400.0, 400.0, 20.0])
+    assert saddle_relief_m((0, 0), hexes) == pytest.approx(50.0)
+
+
 def test_a_pass_is_walled_by_ground_the_terrain_bands_call_impassable():
     """The threshold is `terrain_steep_gradient_m`, not a setting of its own.
 

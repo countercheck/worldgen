@@ -44,7 +44,10 @@ def saddle_relief_m(coord, hexes) -> float:
 
     The figure returned is the *lesser* of the two flanks, because a pass is only as walled
     as its weaker side: if one flank is a cliff and the other a gentle rise, you walk over
-    the rise and the saddle is not a chokepoint at all.
+    the rise and the saddle is not a chokepoint at all. And a flank, in turn, is only as
+    walled as its *lowest* hex — a run of [500, 40] is crossed at the 40, whatever stands
+    beside it. Scoring a flank by its highest hex called a wall with a gap in it a wall,
+    which is how a hillside with one proud outcrop could read as impassable ground.
     """
     hx = hexes[coord]
     ring = [hexes.get(n) for n in neighbors(coord)]
@@ -67,7 +70,7 @@ def saddle_relief_m(coord, hexes) -> float:
         runs.append(current)
     if len(runs) < 2:
         return 0.0
-    return min(max(run) for run in runs) - hx.elevation
+    return min(min(run) for run in runs) - hx.elevation
 
 
 def is_pass(coord, hexes, cfg) -> bool:
