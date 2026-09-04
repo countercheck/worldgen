@@ -25,6 +25,9 @@
 | 13 | `hydrology.py` is 781 lines — prime split candidate | Code | **9** | M |
 | 14 | Bare `dict`/`list` type annotations throughout stages | Code | **8** | S |
 | 15 | Rivers stay a list of paths while roads became a graph | Architecture | **8** | S |
+| 16 | Moisture smear blends the ocean's carrier value into coastal rainfall | Model | **12** | M |
+| 17 | `_assign_role` compares metre elevation against 0.70 — FORTRESS unreachable | Code | **12** | S |
+| 18 | Market siting scores a plain hex disc, not the day-reach the catchment walks | Model | **20** | L |
 
 ---
 
@@ -331,3 +334,81 @@ without being on a path. The two agree exactly on land.
 **Do this if** rivers gain per-segment attributes the way roads did (navigability by
 tonnage, a ford's difficulty, a named reach), at which point an edge map earns its place.
 Until then the path form carries information the graph would lose.
+
+
+### 16 — Moisture smear blends the ocean's carrier value into coastal rainfall
+**Category:** Model | **Priority: 12** | **Effort: M**
+
+Ocean and lake hexes hold `moisture = 1.0` when the Gaussian smear runs — the
+*carrier* value the orographic sweep transports, not rainfall — and the smear blends
+it into every coastal land hex, windward and leeward alike. A lee shore draws rain
+from the sea behind it, which is the effect the orographic pass exists to prevent.
+
+**Fixed once, and reverted deliberately.** A land-only normalised convolution
+(smear `arr * land_mask` against a smeared mask) removes the artifact cleanly — and
+`test_each_climate_comes_out_as_the_country_it_is_named_after` immediately fails,
+because the artifact is quietly load-bearing: blending 1.0 into the coasts and then
+rescaling the land mean *widens* each climate's rainfall distribution, and the soil
+rainfall bands were calibrated against those widened distributions. Remove it and a
+mediterranean map's rainfall clusters inside the [`biome_dry_precip_mm`,
+`biome_wet_precip_mm`] arable band: 46% arable against temperate's 34%, and the
+"mediterranean comes out pastoral" acceptance claim inverts.
+
+**The real fix is a decision, not a patch:** what should make a 550 mm climate
+pastoral once the artifact is gone? Historically it is summer drought — seasonality
+the model does not represent — so either the rainfall bands get per-climate
+recalibration, or soil gains a seasonality term, and both change the acceptance
+table. The one-line convolution fix is in the review record, ready once that call
+is made.
+
+### 17 — `_assign_role` compares metre elevation against 0.70
+**Category:** Code | **Priority: 12** | **Effort: S**
+
+`city_town.py` still reads the retired [0, 1] elevation axis: any steep neighbour
+above 0.70 *metres* makes a settlement MINING, so FORTRESS is unreachable and — with
+the water tests generous — 73 of 74 organic settlements come out `port`. Deferred in
+the PR that introduced the metres axis ("needs a decision about what a fortress and
+a mine are"); recorded here so the deferral has an address.
+
+
+### 18 — Market siting scores a plain hex disc, not the day-reach the catchment walks
+**Category:** Model | **Priority: 20** | **Effort: L**
+
+`MarketStage._plant` ranks candidates by integrating surplus over plain hex rings out to
+`market_day_radius`: no travel cost, no water barrier, off-map as zero. The catchment the
+winner then receives is a cost-bounded Dijkstra with watershed edges. So the day radius
+means a *ring count* in the siting and a *cost budget* in the gather, a ridge beside a
+candidate does not lower its score, and markets are ranked on countryside the built
+catchment then fails to deliver. Six independent verifier runs in the PR #34 review
+confirmed the mechanism (planting score ≈ 4× the real gather, its land term as
+disconnected from the draw as its water term).
+
+**Fixed once, calibrated twice, and reverted deliberately.** The rewrite exists and
+works: score over a cached single-source day-reach Dijkstra plus the fishery rim on the
+same terms `fishery_rim` grants it, deplete exactly what was scored, seed the lazy-greedy
+heap with the ring disc as a provable upper bound (one ring slack for the rim) so
+exactness survives and the Dijkstra only runs on candidates that pop. What it cannot do
+is inherit the disc's calibration:
+
+- The floor's units change (score ≈ real gather, not 4× it), and no single value threads
+  the acceptance table. 12.0 reproduces disc-era density (15 markets on the 64×64
+  temperate reference against 13) and keeps count monotone in measured food across all
+  five climates — and then the tiers above and below break: a city stands away from
+  navigable water, a landlocked arid map grows a city of 8,754, both 96×96 chokepoint
+  fixtures grow zero villages, and every market's population moves across promotion
+  because every market sits in some city's shadow.
+- The deeper reason: cost-bounded scoring reads *local* concentration where the disc
+  read regional total. Spread-thin fertility (taiga, leached tropics) scores lower and
+  concentrated fertility (desert rivers, coasts with a fishery rim) scores higher, so
+  the whole settlement economy — floor, `city_min_draw`, chokepoint gates, the rural
+  share — needs recalibrating together, against the acceptance table the author wants,
+  not one test at a time.
+
+Sweep data from the review record (64×64, seed 42, island geometry, markets/medians):
+floor 8 → arid 15/845, boreal 17/812, tropical 18/857, med 24/1020, temperate 30/930 (no
+ordering violations, ~2× disc density); floor 12 → 6/6/7/14/15 (no violations, disc
+density); floors 10, 14, 16 each break count-follows-food between boreal and tropical.
+
+**Do this as its own branch**, with the acceptance table on the desk: pick the density,
+re-tune `city_min_draw` and the chokepoint gates against it, and update the PR-table
+numbers in the same change. The diff is small; the decision is not.
