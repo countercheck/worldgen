@@ -131,6 +131,13 @@ def generate(
     render_debug(state, "land_cover", str(output_path / "land_cover.svg"))
     render_debug(state, "cultivation", str(output_path / "cultivation.svg"))
     render_debug(state, "territory", str(output_path / "territory.svg"))
+    if cfg.model == "organic":
+        # The plates only the haulage model can fill. Under classic every hex would come
+        # out the fallback grey, which reads as a bug rather than as an empty layer.
+        render_debug(state, "soil", str(output_path / "soil.svg"))
+        render_debug(state, "land_use", str(output_path / "land_use.svg"))
+        render_debug(state, "rural_population", str(output_path / "rural_population.svg"))
+
     click.echo("✓ Done")
 
 
@@ -150,6 +157,9 @@ _ATTRIBUTES = [
     "land_cover",
     "cultivation",
     "territory",
+    "soil",
+    "land_use",
+    "rural_population",
 ]
 
 
