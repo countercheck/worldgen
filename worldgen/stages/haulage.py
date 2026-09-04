@@ -265,20 +265,32 @@ def fishery_rim(hexes, owner: dict, cost: dict) -> tuple[dict, dict]:
     a whole sea, so the rim is granted rather than traversed: a claimed land hex donates
     its adjacent unclaimed water at its own cost, and the water goes no further.
 
+    Each water hex goes to the *cheapest* adjacent claimant — the boats put out from the
+    nearest shore that works the water, not from whichever claimant happens to sort
+    first. It used to go to the lowest-coordinate neighbour, which handed fisheries to
+    the wrong market wherever two catchments met at a shore. Ties break on the donor's
+    coordinate, so the grant is deterministic whatever order the claims were laid.
+
     Returns fresh dicts; the inputs are not mutated.
     """
     out_owner = dict(owner)
     out_cost = dict(cost)
 
+    best: dict = {}
     for coord in sorted(owner):
+        claim = (cost[coord], coord)
         for n in neighbors(coord):
             if n in out_owner:
                 continue
             n_hx = hexes.get(n)
             if n_hx is None or n_hx.terrain_class not in WATER:
                 continue
-            out_owner[n] = owner[coord]
-            out_cost[n] = cost[coord]
+            if n not in best or claim < best[n][0]:
+                best[n] = (claim, owner[coord])
+
+    for n, ((donor_cost, _), seat) in best.items():
+        out_owner[n] = seat
+        out_cost[n] = donor_cost
 
     return out_owner, out_cost
 
