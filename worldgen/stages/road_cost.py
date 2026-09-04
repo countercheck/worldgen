@@ -48,7 +48,15 @@ def slope_edge_cost(from_hx, to_hx, cfg) -> float:
     Above `road_slope_cap_pct` the edge is refused outright — a laden cart cannot climb 25%,
     and it should not be offered the option at a price. The curve this replaced saturated
     there instead, so a road met a 65% face, paid a flat twenty for it, and went straight up.
+
+    Water pays nothing here. A boat notices the sea floor's gradient not at all, and
+    charging it did two wrong things at once: every sea leg paid for the bathymetry under
+    it, and a shelf dropping faster than the cap made a strait *impassable* — a cliff
+    a keel never touches. `water_edge_cost` prices getting on and off the water; the
+    water itself is level by definition.
     """
+    if from_hx.terrain_class in WATER or to_hx.terrain_class in WATER:
+        return 0.0
     if not grade_is_under_cap(from_hx, to_hx, cfg):
         return float("inf")
     return abs(delta_elevation(from_hx, to_hx)) / cfg.road_delta_elevation_per_hex
