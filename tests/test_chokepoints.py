@@ -36,9 +36,12 @@ from worldgen.stages.chokepoints import (
 )
 
 # 96x96 with the gate opened to `track`, rather than the 128x128 and `secondary` that ship.
-# At production's settings this map grows a single village, and one instance cannot show
-# that a rule binds. Opening the gate one tier gives ten — two of them on passes — for
-# 2.4 s instead of 40, and every rule under test is the same rule.
+# At production's settings this map grows no village at all — once a bridge has to be
+# genuinely crossed to hold anything, secondary-tier crossings are rare — and a rule
+# cannot be shown to bind on an empty tier. Opening the gate one tier gives one genuine
+# village (a bridgehead on prime ground) for 2.4 s instead of 40, and every rule under
+# test is the same rule. This comment once promised ten villages, two on passes: six of
+# those stood at bridges no road touched, which is the bug the crossing test fixed.
 _CHOKE_DEFAULTS = {
     "regional_climate": "temperate",
     "continent_falloff_edges": ("south",),
@@ -120,16 +123,25 @@ def test_a_pass_is_walled_by_ground_the_terrain_bands_call_impassable():
 
 
 def test_every_village_holds_a_chokepoint(choke_world):
-    """The first half of the gate. No village is founded on ordinary ground."""
+    """The first half of the gate. No village is founded on ordinary ground.
+
+    A bridge only counts if the drawn network actually goes over it — at least two road
+    edges, one onto each bank. `CrossingStage` tags candidate sites before any road
+    exists, and a tag nothing crosses holds nothing.
+    """
+    degree: dict = {}
+    for a, b in choke_world.road_edges:
+        degree[a] = degree.get(a, 0) + 1
+        degree[b] = degree.get(b, 0) + 1
+
+    def crossed(coord):
+        return BRIDGE in choke_world.hexes[coord].tags and degree.get(coord, 0) >= 2
+
     for s in _villages(choke_world):
         hx = choke_world.hexes[s.coord]
-        beside_bridge = any(
-            BRIDGE in choke_world.hexes[n].tags
-            for n in neighbors(s.coord)
-            if n in choke_world.hexes
-        )
-        assert PASS in hx.tags or BRIDGE in hx.tags or beside_bridge, (
-            f"village at {s.coord} holds no bridge and no pass"
+        beside_bridge = any(crossed(n) for n in neighbors(s.coord) if n in choke_world.hexes)
+        assert PASS in hx.tags or crossed(s.coord) or beside_bridge, (
+            f"village at {s.coord} holds no crossed bridge and no pass"
         )
 
 
@@ -210,13 +222,28 @@ def test_thin_country_grows_few_villages_and_only_on_its_good_ground():
     arid map its exceptions — alluvium along the rivers it has, and the odd well-watered
     corner the orography leaves — so the better claim is not that nobody lives there but
     that nobody lives on the sand.
+
+    Compared at the `track` gate, where villages exist to compare. It once ran a tier
+    higher, which read as the stronger claim and was the weaker one: the arid world grew
+    zero villages there, so the soil loop below asserted over an empty list for as long
+    as it existed — and once bridges had to be genuinely crossed, *both* worlds came out
+    empty at `secondary` and the count comparison was 0 < 0. The bound is `<=` because
+    the village tier is thin everywhere on this map: one genuine crossing each. What the
+    desert must never do is out-village the well-watered country, and what its villages
+    must never do is stand on sand — and the arid world does grow one here, on a pass on
+    arable ground, so the soil assertion finally has a subject.
     """
-    arid = _world(regional_climate="arid", chokepoint_min_road_tier="secondary")
-    temperate = _world(chokepoint_min_road_tier="secondary")
-    assert len(_villages(arid)) < len(_villages(temperate)), (
-        "a desert should carry fewer bridge villages than well-watered country"
+    arid = _world(regional_climate="arid")
+    temperate = _world()
+    arid_villages = _villages(arid)
+    assert len(arid_villages) <= len(_villages(temperate)), (
+        "a desert should carry no more bridge villages than well-watered country"
     )
-    for v in _villages(arid):
+    assert arid_villages, (
+        "the arid track-gate world is expected to grow a village; if terrain changes "
+        "emptied it, move this test somewhere the soil claim has a subject again"
+    )
+    for v in arid_villages:
         soil = arid.hexes[v.coord].soil
         assert SOIL_RANK[soil] >= SOIL_RANK[SoilQuality.ARABLE], (
             f"village at {v.coord} stands on {soil.value} ground in a desert"
@@ -306,4 +333,42 @@ def test_same_seed_same_villages():
     b = build_pipeline(seed=42, width=96, height=96, model="organic", **_CHOKE_DEFAULTS).run()
     assert sorted((s.coord, s.population) for s in _villages(a)) == sorted(
         (s.coord, s.population) for s in _villages(b)
+    )
+
+
+def test_a_bridge_no_road_crosses_founds_nothing():
+    """`CrossingStage` tags candidate sites before any road exists, and most are never
+    built at. A road hex beside such a tag is not a bridgehead: the bridge only holds
+    anything if the drawn network actually goes over it. Before this was checked, six of
+    seven villages on the 96x96 fixture stood at bridges with no road edge at all.
+    """
+    cfg = WorldConfig(width=12, height=12, chokepoint_min_road_tier="secondary")
+    state = WorldState.empty(1, cfg.width, cfg.height, cfg.grid_layout)
+
+    road = [(1, 1), (2, 1), (3, 1), (4, 1), (5, 1)]
+    for a, b in zip(road, road[1:], strict=False):
+        state.road_edges[road_edge_key(a, b)] = RoadEdge(RoadTier.SECONDARY, 0.0)
+
+    # One bridge the road runs over, and one tagged beside the road that nothing crosses.
+    state.hexes[(2, 1)].tags.add(BRIDGE)  # two road edges: crossed
+    state.hexes[(4, 2)].tags.add(BRIDGE)  # neighbours (4, 1); no road edge at all
+
+    for coord in (road[0], road[-1]):
+        s = Settlement(
+            coord=coord,
+            tier=SettlementTier.TOWN,
+            role=SettlementRole.MARKET,
+            population=500,
+            name="market",
+        )
+        state.settlements.append(s)
+        state.hexes[coord].settlement = s
+
+    stage = ChokepointStage(cfg, np.random.default_rng(0))
+    candidates = stage._candidates(state, cfg)
+
+    assert (2, 1) in candidates, "the bridge the road crosses is the chokepoint"
+    assert (3, 1) in candidates, "the bank beside a crossed bridge is a bridgehead"
+    assert (4, 1) not in candidates, (
+        "a road hex beside a bridge nothing crosses was accepted as a bridgehead"
     )

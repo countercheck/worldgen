@@ -171,15 +171,32 @@ class ChokepointStage(GeneratorStage):
                 carries.add(b)
         carries &= self._through_network(state)
 
+        # A bridge only holds anything if a road actually goes over it. `CrossingStage`
+        # tags its bridges before any road exists — they are candidate sites, and most of
+        # them are never built at. Judged by the drawn network: a crossed bridge carries
+        # at least two road edges, one onto each bank; a tagged hex with one edge is a
+        # road that ends at the water, and one with none is a proposal nobody took up.
+        # Without this test the tier founded villages beside phantom crossings — on one
+        # 96x96 fixture, six of seven stood at bridges no road touched.
+        degree: dict = {}
+        for a, b in state.road_edges:
+            degree[a] = degree.get(a, 0) + 1
+            degree[b] = degree.get(b, 0) + 1
+
+        def crossed(coord) -> bool:
+            return degree.get(coord, 0) >= 2
+
         occupied = {s.coord for s in state.settlements}
         held = set()
         for coord in carries:
             hx = hexes.get(coord)
             if hx is None:
                 continue
-            if PASS in hx.tags or BRIDGE in hx.tags:
+            if PASS in hx.tags or (BRIDGE in hx.tags and crossed(coord)):
                 held.add(coord)
-            elif any(BRIDGE in hexes[n].tags for n in neighbors(coord) if n in hexes):
+            elif any(
+                BRIDGE in hexes[n].tags and crossed(n) for n in neighbors(coord) if n in hexes
+            ):
                 held.add(coord)  # the bridgehead, which is where the town stands
 
         return sorted(held & settleable(hexes, cfg) - occupied)
