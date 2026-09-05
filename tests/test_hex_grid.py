@@ -147,7 +147,7 @@ def _water_grid(water: set, length: int = 6) -> dict:
     return {
         (q, 0): Hex(
             coord=(q, 0),
-            terrain_class=TerrainClass.OCEAN if q in water else TerrainClass.FLAT,
+            terrain_class=TerrainClass.OCEAN if q in water else TerrainClass.LAND,
         )
         for q in range(length)
     }
@@ -272,7 +272,7 @@ def test_water_transitions_single_hex_path():
 def _grid(*paths, water: frozenset = frozenset()) -> dict:
     """A grid covering every coord in *paths*, with the given coords made ocean."""
     return {
-        c: Hex(coord=c, terrain_class=TerrainClass.OCEAN if c in water else TerrainClass.FLAT)
+        c: Hex(coord=c, terrain_class=TerrainClass.OCEAN if c in water else TerrainClass.LAND)
         for p in paths
         for c in p
     }

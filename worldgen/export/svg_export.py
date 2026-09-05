@@ -2,7 +2,7 @@ import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ..core.hex import SettlementTier
+from ..core.hex import SettlementTier, terrain_labels
 from ..core.hex_grid import axial_to_pixel, dedupe_road_paths, neighbors
 from ..core.world_state import ROAD_TIER_RANK, RoadTier, WorldState
 from ..render.debug_viewer import BIOME_COLORS, LAND_COVER_COLORS, TERRAIN_COLORS
@@ -80,9 +80,9 @@ def _xml_escape(s: str) -> str:
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def _get_hex_fill(h, color_mode: str) -> str:
+def _get_hex_fill(h, color_mode: str, labels: dict) -> str:
     if color_mode == "terrain":
-        rgb = TERRAIN_COLORS.get(h.terrain_class, (0.5, 0.5, 0.5))
+        rgb = TERRAIN_COLORS.get(labels[h.coord], (0.5, 0.5, 0.5))
     elif color_mode == "land_cover":
         rgb = (
             LAND_COVER_COLORS.get(h.land_cover, (0.5, 0.5, 0.5))
@@ -96,7 +96,7 @@ def _get_hex_fill(h, color_mode: str) -> str:
         if h.biome is not None:
             rgb = BIOME_COLORS.get(h.biome, (0.5, 0.5, 0.5))
         else:
-            rgb = TERRAIN_COLORS.get(h.terrain_class, (0.5, 0.5, 0.5))
+            rgb = TERRAIN_COLORS.get(labels[h.coord], (0.5, 0.5, 0.5))
     return _rgb_to_hex(*rgb[:3])
 
 
@@ -190,6 +190,7 @@ def _legend_glyph(
     cy: float,
     g: float,
     color_mode: str,
+    labels: dict,
     river_color: str = "#2f6fbf",
 ) -> str:
     """SVG markup for one legend row's symbol, in a square box of side *g* centred on (cx, cy)."""
@@ -210,7 +211,7 @@ def _legend_glyph(
     if row.kind == "fill":
         verts = _hex_vertices(cx, cy, g / 2)
         return (
-            f'<polygon points="{_points_str(verts)}" fill="{_get_hex_fill(row.sample, color_mode)}"'
+            f'<polygon points="{_points_str(verts)}" fill="{_get_hex_fill(row.sample, color_mode, labels)}"'
             f' stroke="#555555" stroke-width="0.5"/>'
         )
 
@@ -274,6 +275,7 @@ def _legend_svg(
 
     Row selection, panel geometry and placement live in `legend`; this only draws them.
     """
+    labels = terrain_labels(ws)
     x, y = legend.placement(
         ws,
         config.hex_size,
@@ -302,7 +304,7 @@ def _legend_svg(
         out.append(
             "    "
             + _legend_glyph(
-                row, x + m.inner + m.glyph / 2, cy, m.glyph, color_mode, config.river_color
+                row, x + m.inner + m.glyph / 2, cy, m.glyph, color_mode, labels, config.river_color
             )
         )
         out.append(
@@ -384,12 +386,14 @@ def render(ws: WorldState, config: SVGConfig | None = None) -> str:
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}">'
     ]
 
+    labels = terrain_labels(ws)
+
     if "terrain" in layers:
         out.append('  <g id="layer-terrain">')
         for hex_item in ws.hexes.values():
             px, py = axial_to_pixel(hex_item.coord, size)
             verts = _hex_vertices(px + ox, py + oy, size)
-            fill = _get_hex_fill(hex_item, color_mode)
+            fill = _get_hex_fill(hex_item, color_mode, labels)
             out.append(f'    <polygon points="{_points_str(verts)}" fill="{fill}" stroke="none"/>')
         out.append("  </g>")
 

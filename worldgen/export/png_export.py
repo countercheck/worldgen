@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 
 from PIL import Image, ImageDraw, ImageFont
 
-from ..core.hex import SettlementTier
+from ..core.hex import SettlementTier, terrain_labels
 from ..core.hex_grid import axial_to_pixel, dedupe_road_paths, neighbors
 from ..core.world_state import ROAD_TIER_RANK, RoadTier, WorldState
 from ..render.debug_viewer import BIOME_COLORS, LAND_COVER_COLORS, TERRAIN_COLORS
@@ -76,9 +76,9 @@ def _hex_verts(cx: float, cy: float, size: float) -> list[tuple[int, int]]:
     ]
 
 
-def _get_hex_fill(h, color_mode: str) -> tuple[int, int, int]:
+def _get_hex_fill(h, color_mode: str, labels: dict) -> tuple[int, int, int]:
     if color_mode == "terrain":
-        rgb = TERRAIN_COLORS.get(h.terrain_class, (0.5, 0.5, 0.5))
+        rgb = TERRAIN_COLORS.get(labels[h.coord], (0.5, 0.5, 0.5))
     elif color_mode == "land_cover":
         rgb = (
             LAND_COVER_COLORS.get(h.land_cover, (0.5, 0.5, 0.5))
@@ -92,7 +92,7 @@ def _get_hex_fill(h, color_mode: str) -> tuple[int, int, int]:
         if h.biome is not None:
             rgb = BIOME_COLORS.get(h.biome, (0.5, 0.5, 0.5))
         else:
-            rgb = TERRAIN_COLORS.get(h.terrain_class, (0.5, 0.5, 0.5))
+            rgb = TERRAIN_COLORS.get(labels[h.coord], (0.5, 0.5, 0.5))
     return _rgb_int(*rgb[:3])
 
 
@@ -196,7 +196,9 @@ def _dashed_line(draw: ImageDraw.ImageDraw, x1, y, x2, color, width, dash=4, gap
         x += dash + gap
 
 
-def _draw_legend_glyph(draw: ImageDraw.ImageDraw, row, cx, cy, g: float, color_mode: str) -> None:
+def _draw_legend_glyph(
+    draw: ImageDraw.ImageDraw, row, cx, cy, g: float, color_mode: str, labels: dict
+) -> None:
     """One legend row's symbol, in a square box of side *g* centred on (cx, cy)."""
     if row.kind == "ramp":
         sw = g / len(legend.ELEVATION_RAMP)
@@ -209,7 +211,7 @@ def _draw_legend_glyph(draw: ImageDraw.ImageDraw, row, cx, cy, g: float, color_m
     elif row.kind == "fill":
         draw.polygon(
             _hex_verts(cx, cy, g / 2),
-            fill=_get_hex_fill(row.sample, color_mode),
+            fill=_get_hex_fill(row.sample, color_mode, labels),
             outline=(85, 85, 85),
         )
     elif row.kind == "settlement":
@@ -276,6 +278,7 @@ def _draw_legend(
 
     Row selection, panel geometry and placement live in `legend`; this only draws them.
     """
+    labels = terrain_labels(ws)
     x, y = legend.placement(
         ws,
         config.hex_size,
@@ -297,7 +300,7 @@ def _draw_legend(
     draw.text((x + m.inner, y + m.inner), "Legend", fill=(0, 0, 0), font=font)
     for i, row in enumerate(rows):
         cy = y + m.inner + m.title_h + i * m.row_h + m.row_h / 2
-        _draw_legend_glyph(draw, row, x + m.inner + m.glyph / 2, cy, m.glyph, color_mode)
+        _draw_legend_glyph(draw, row, x + m.inner + m.glyph / 2, cy, m.glyph, color_mode, labels)
         bbox = draw.textbbox((0, 0), row.label, font=font)
         draw.text(
             (x + m.inner + m.glyph + m.gap, cy - (bbox[3] - bbox[1]) / 2 - bbox[1]),
@@ -378,11 +381,13 @@ def render(ws: WorldState, config: PNGConfig | None = None) -> Image.Image:
     img = Image.new("RGB", (width, height), (255, 255, 255))
     draw = ImageDraw.Draw(img)
 
+    labels = terrain_labels(ws)
+
     if "terrain" in layers:
         for hex_item in ws.hexes.values():
             px, py = axial_to_pixel(hex_item.coord, size)
             verts = _hex_verts(px + ox, py + oy, size)
-            fill = _get_hex_fill(hex_item, color_mode)
+            fill = _get_hex_fill(hex_item, color_mode, labels)
             draw.polygon(verts, fill=fill)
 
     if "grid" in layers:

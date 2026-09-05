@@ -21,9 +21,26 @@ ROAD_TIER_RANK = {RoadTier.TRACK: 0, RoadTier.SECONDARY: 1, RoadTier.PRIMARY: 2}
 # added "layout", which says how width/height map onto hex coordinates; an earlier file
 # predates offset grids, so it loads as "axial".  The bump exists so the schema cannot
 # change shape under a fixed version string — an old reader handed a 1.2 file fails with
-# a clear message instead of silently missing fields.
-SCHEMA_VERSION = "1.2"
-SUPPORTED_SCHEMA_VERSIONS = frozenset({"1.0", "1.1", "1.2"})
+# a clear message instead of silently missing fields.  1.3 records "slope" and "relief"
+# and stops recording a steepness class: "flat", "hill" and "mountain" were thresholds on
+# the slope now stored, and an earlier file's band reads back as plain land, with the
+# slope recomputed by whoever needs it.
+SCHEMA_VERSION = "1.3"
+SUPPORTED_SCHEMA_VERSIONS = frozenset({"1.0", "1.1", "1.2", "1.3"})
+
+# Steepness bands a pre-1.3 file may carry in "terrain_class".  Land is land; how steep it
+# was is a number that file never wrote down, so it comes back as 0.0 rather than being
+# guessed from the band it fell in.
+_LEGACY_TERRAIN_BANDS = frozenset({"flat", "hill", "mountain"})
+
+
+def _terrain_class_from(value: str):
+    """Read a hex's class, translating the steepness bands a pre-1.3 file may carry."""
+    from .hex import TerrainClass
+
+    if value in _LEGACY_TERRAIN_BANDS:
+        return TerrainClass.LAND
+    return TerrainClass(value)
 
 
 @dataclass
@@ -150,6 +167,8 @@ class WorldState:
                     "temperature": h.temperature,
                     "biome": h.biome.value if h.biome is not None else None,
                     "terrain_class": h.terrain_class.value,
+                    "slope": h.slope,
+                    "relief": h.relief,
                     "land_cover": h.land_cover.value if h.land_cover is not None else None,
                     "river_flow": h.river_flow,
                     "habitability_city": h.habitability_city,
@@ -191,7 +210,6 @@ class WorldState:
             Settlement,
             SettlementRole,
             SettlementTier,
-            TerrainClass,
         )
 
         version = data.get("version")
@@ -233,7 +251,9 @@ class WorldState:
                 moisture=hd["moisture"],
                 temperature=hd["temperature"],
                 biome=Biome(hd["biome"]) if hd.get("biome") is not None else None,
-                terrain_class=TerrainClass(hd["terrain_class"]),
+                terrain_class=_terrain_class_from(hd["terrain_class"]),
+                slope=hd.get("slope", 0.0),
+                relief=hd.get("relief", 0.0),
                 land_cover=LandCover(hd["land_cover"])
                 if hd.get("land_cover") is not None
                 else None,

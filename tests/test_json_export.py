@@ -19,7 +19,7 @@ def _small_world() -> WorldState:
     h.moisture = 0.3
     h.temperature = 0.6
     h.biome = Biome.GRASSLAND
-    h.terrain_class = TerrainClass.FLAT
+    h.terrain_class = TerrainClass.LAND
     h.land_cover = LandCover.OPEN
     # Distinct per tier, so a round trip that collapsed them would show up.
     h.habitability_city = 0.7
@@ -66,7 +66,7 @@ def test_hex_fields_preserved(tmp_path):
     assert abs(h.elevation - 0.5) < 1e-9
     assert abs(h.moisture - 0.3) < 1e-9
     assert h.biome == Biome.GRASSLAND
-    assert h.terrain_class == TerrainClass.FLAT
+    assert h.terrain_class == TerrainClass.LAND
     assert h.land_cover == LandCover.OPEN
     assert abs(h.habitability_city - 0.7) < 1e-9
     assert abs(h.habitability_town - 0.5) < 1e-9
@@ -112,7 +112,7 @@ def test_new_saves_carry_the_bumped_version(tmp_path):
 
     path = tmp_path / "world.json"
     json_export.save(_small_world(), path)
-    assert json.loads(path.read_text())["version"] == "1.2"
+    assert json.loads(path.read_text())["version"] == "1.3"
 
 
 def test_an_unknown_version_is_rejected_by_name(tmp_path):

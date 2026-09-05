@@ -96,6 +96,15 @@ heightmap_coast_falloff: false # Default: false
 # ---------------------------------------------------------------------------
 terrain_hill_gradient: 0.02      # Elevation gradient threshold for hills. Default: 0.02
 terrain_mountain_gradient: 0.04  # Elevation gradient threshold for mountains. Default: 0.04
+# Ground above this is barren whatever its gradient — a plateau high enough that altitude,
+# not steepness, is what strips it. Separate from the gradients because the two say
+# different things.
+terrain_bare_elevation: 0.8      # Default: 0.8
+#
+# Note: these three no longer classify anything. Steepness is carried per hex as a number
+# (see Hex.slope), and these are the thresholds the *map* is banded with — mountain, hill,
+# flat — plus the one land cover uses to decide bare rock. Widening them changes how the
+# world is drawn and where bare rock appears, not how the generator reasons about ground.
 
 # ---------------------------------------------------------------------------
 # Erosion (hydraulic droplet simulation)

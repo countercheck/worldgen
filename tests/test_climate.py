@@ -1,7 +1,7 @@
 import pytest
 
 from worldgen.core.config import WorldConfig
-from worldgen.core.hex import TerrainClass
+from worldgen.core.hex import TerrainClass, TerrainLabel, terrain_labels
 from worldgen.core.pipeline import GeneratorPipeline
 from worldgen.core.world_state import WorldState
 from worldgen.stages.climate import ClimateStage
@@ -48,13 +48,14 @@ def test_mountains_colder_than_flat(climate_state):
     height = climate_state.height
     mountain_temps = []
     flat_temps = []
+    labels = terrain_labels(climate_state)
     for (_, r), h in climate_state.hexes.items():
         mid = height * 0.3 < r < height * 0.7
         if not mid:
             continue
-        if h.terrain_class == TerrainClass.MOUNTAIN:
+        if labels[h.coord] is TerrainLabel.MOUNTAIN:
             mountain_temps.append(h.temperature)
-        elif h.terrain_class == TerrainClass.FLAT:
+        elif labels[h.coord] is TerrainLabel.FLAT:
             flat_temps.append(h.temperature)
 
     if mountain_temps and flat_temps:
@@ -69,8 +70,9 @@ def test_rain_shadow_present(climate_state):
     # windward neighbors (lower q) should have higher average moisture than leeward (higher q).
     windward_avg = []
     leeward_avg = []
-    for (q, r), h in climate_state.hexes.items():
-        if h.terrain_class != TerrainClass.MOUNTAIN:
+    labels = terrain_labels(climate_state)
+    for q, r in climate_state.hexes:
+        if labels[(q, r)] is not TerrainLabel.MOUNTAIN:
             continue
         windward = climate_state.hexes.get((q - 1, r))
         leeward = climate_state.hexes.get((q + 1, r))
@@ -231,7 +233,7 @@ def test_moisture_bleed_requires_river_tag():
 
     state = WorldState.empty(seed=1, width=3, height=1)
     for hx in state.hexes.values():
-        hx.terrain_class = TerrainClass.FLAT
+        hx.terrain_class = TerrainClass.LAND
         hx.elevation = 0.0
     state.hexes[(0, 0)].elevation = 1.0
     state.hexes[(0, 0)].river_flow = 1.0
@@ -241,7 +243,7 @@ def test_moisture_bleed_requires_river_tag():
 
     tagged_state = WorldState.empty(seed=1, width=3, height=1)
     for hx in tagged_state.hexes.values():
-        hx.terrain_class = TerrainClass.FLAT
+        hx.terrain_class = TerrainClass.LAND
         hx.elevation = 0.0
     tagged_state.hexes[(0, 0)].elevation = 1.0
     tagged_state.hexes[(0, 0)].river_flow = 1.0

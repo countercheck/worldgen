@@ -204,7 +204,7 @@ def test_lake_drainage_merges_without_rewiring_existing_river():
     feeder = (2, 3)
 
     for hex_item in ws.hexes.values():
-        hex_item.terrain_class = TerrainClass.FLAT
+        hex_item.terrain_class = TerrainClass.LAND
         hex_item.elevation = 10.0
         hex_item.river_flow = 0.0
     ws.hexes[lake].terrain_class = TerrainClass.LAKE
@@ -602,7 +602,7 @@ def test_a_lake_outflow_is_seeded_with_the_whole_basin_inflow():
     stage = HydrologyStage(cfg, np.random.default_rng(0))
     ws = WorldState.empty(seed=3, width=5, height=5)
     for hex_item in ws.hexes.values():
-        hex_item.terrain_class = TerrainClass.FLAT
+        hex_item.terrain_class = TerrainClass.LAND
         hex_item.elevation = 10.0
     ws.hexes[lake].terrain_class = TerrainClass.LAKE
     ws.hexes[lake].elevation = 0.0
@@ -647,7 +647,7 @@ def _balance_world(**cfg_kw):
 
     lake, spillway, merge, downstream, feeder = (2, 2), (2, 1), (2, 0), (3, 0), (2, 3)
     for hex_item in ws.hexes.values():
-        hex_item.terrain_class = TerrainClass.FLAT
+        hex_item.terrain_class = TerrainClass.LAND
         hex_item.elevation = 10.0
     ws.hexes[lake].terrain_class = TerrainClass.LAKE
     ws.hexes[lake].elevation = 0.0

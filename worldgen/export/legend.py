@@ -9,7 +9,7 @@ the two can gain a legend row or change placement without drifting apart.
 import math
 from dataclasses import dataclass
 
-from ..core.hex import SettlementTier
+from ..core.hex import SettlementTier, terrain_labels
 from ..core.hex_grid import split_path_on_water, water_transitions
 from ..core.world_state import RoadTier, WorldState
 
@@ -101,14 +101,19 @@ def _enum_sort_key(member) -> tuple[str, int]:
     return (cls.__name__, list(cls).index(member))
 
 
-def _fill_category(h, color_mode: str):
-    """The enum member that decides a hex's fill — mirrors each exporter's `_get_hex_fill`."""
+def _fill_category(h, color_mode: str, labels: dict):
+    """The enum member that decides a hex's fill — mirrors each exporter's `_get_hex_fill`.
+
+    Terrain reads the map label, not `terrain_class`: the generator no longer bands
+    steepness, so ocean, lake, coast and land is all the class can say, and a legend
+    listing those four would tell a reader nothing about the ground.
+    """
     if color_mode == "terrain":
-        return h.terrain_class
+        return labels[h.coord]
     if color_mode == "land_cover":
         return h.land_cover
     if color_mode == "biome":
-        return h.biome if h.biome is not None else h.terrain_class
+        return h.biome if h.biome is not None else labels[h.coord]
     return None  # "elevation" is continuous, not categorical
 
 
@@ -170,6 +175,8 @@ def rows(ws: WorldState, color_mode: str, layers: set[str]) -> list[LegendRow]:
     """Legend rows for *ws*, covering only what the given layers actually draw."""
     out: list[LegendRow] = []
 
+    labels = terrain_labels(ws)
+
     if "terrain" in layers:
         if color_mode == "elevation":
             out.append(LegendRow("ramp", "Low → high elevation"))
@@ -177,7 +184,7 @@ def rows(ws: WorldState, color_mode: str, layers: set[str]) -> list[LegendRow]:
             # One representative hex per category, so exporters can reuse their fill lookup.
             samples: dict = {}
             for hex_item in ws.hexes.values():
-                category = _fill_category(hex_item, color_mode)
+                category = _fill_category(hex_item, color_mode, labels)
                 if category is not None:
                     samples.setdefault(category, hex_item)
             for category in sorted(samples, key=_enum_sort_key):

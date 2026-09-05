@@ -3,17 +3,17 @@ from pathlib import Path
 
 import matplotlib as mpl
 
-from ..core.hex import Biome, LandCover, SettlementTier, TerrainClass
+from ..core.hex import Biome, LandCover, SettlementTier, TerrainClass, TerrainLabel, terrain_labels
 from ..core.hex_grid import axial_to_pixel, dedupe_road_paths
 from ..core.world_state import ROAD_TIER_RANK, RoadTier, WorldState
 
 TERRAIN_COLORS = {
-    TerrainClass.OCEAN: (0.2, 0.4, 0.8),
-    TerrainClass.LAKE: (0.35, 0.6, 0.85),
-    TerrainClass.COAST: (0.9, 0.8, 0.4),
-    TerrainClass.FLAT: (0.4, 0.8, 0.4),
-    TerrainClass.HILL: (0.7, 0.6, 0.3),
-    TerrainClass.MOUNTAIN: (0.5, 0.5, 0.5),
+    TerrainLabel.OCEAN: (0.2, 0.4, 0.8),
+    TerrainLabel.LAKE: (0.35, 0.6, 0.85),
+    TerrainLabel.COAST: (0.9, 0.8, 0.4),
+    TerrainLabel.FLAT: (0.4, 0.8, 0.4),
+    TerrainLabel.HILL: (0.7, 0.6, 0.3),
+    TerrainLabel.MOUNTAIN: (0.5, 0.5, 0.5),
 }
 
 BIOME_COLORS = {
@@ -54,8 +54,8 @@ def _get_color_biome(h) -> tuple[float, float, float]:
     return BIOME_COLORS.get(h.biome, (0.5, 0.5, 0.5))
 
 
-def _get_color_terrain(h) -> tuple[float, float, float]:
-    return TERRAIN_COLORS[h.terrain_class]
+def _get_color_terrain(h, labels) -> tuple[float, float, float]:
+    return TERRAIN_COLORS[labels[h.coord]]
 
 
 def _hex_vertices(cx: float, cy: float, size: float) -> list[tuple[float, float]]:
@@ -83,12 +83,15 @@ def _star_points(cx: float, cy: float, outer: float, inner: float, n: int = 5) -
     return _points_str(pts)
 
 
-def _color_getter(attribute: str):
+def _color_getter(attribute: str, labels: dict):
+    # `labels` bands each hex's slope into the word a reader expects — mountain, hill,
+    # flat.  Derived for the drawing rather than carried on the hex, so the vocabulary a
+    # map is read in cannot quietly become a vocabulary the generator reasons in.
     """Returns (get_color, settlement_overlay, road_overlay) for an attribute name."""
     if attribute == "biome":
         return _get_color_biome, False, False
     if attribute == "terrain_class":
-        return _get_color_terrain, False, False
+        return (lambda h: _get_color_terrain(h, labels)), False, False
     if attribute == "elevation":
         cmap = mpl.colormaps["terrain"]
         return (lambda h: cmap(h.elevation)), False, False
@@ -103,7 +106,7 @@ def _color_getter(attribute: str):
 
         def get_color(h):
             if h.terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE):
-                return TERRAIN_COLORS[h.terrain_class]
+                return TERRAIN_COLORS[labels[h.coord]]
             return cmap(min(h.river_flow * 3, 1.0))
 
         return get_color, False, False
@@ -140,7 +143,7 @@ def _color_getter(attribute: str):
 
 def render_svg(state: WorldState, attribute: str, hex_size: float = 20) -> str:
     """Render hex map colored by attribute as an SVG string."""
-    get_color, settlement_overlay, road_overlay = _color_getter(attribute)
+    get_color, settlement_overlay, road_overlay = _color_getter(attribute, terrain_labels(state))
 
     hex_items = list(state.hexes.values())
     if not hex_items:

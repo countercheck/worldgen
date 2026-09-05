@@ -1,7 +1,7 @@
 import pytest
 
 from worldgen.core.config import WorldConfig
-from worldgen.core.hex import TerrainClass
+from worldgen.core.hex import TerrainClass, TerrainLabel, terrain_labels
 from worldgen.core.hex_grid import neighbors
 from worldgen.core.pipeline import GeneratorPipeline
 from worldgen.stages.elevation import ElevationStage
@@ -39,9 +39,9 @@ def test_coast_borders_ocean(phase1_state):
 
 
 def test_mountain_not_isolated(phase1_state):
-    mountains = [
-        coord for coord, h in phase1_state.hexes.items() if h.terrain_class == TerrainClass.MOUNTAIN
-    ]
+    # "Mountain" is a band on slope now, so ask for it the way a map does.
+    labels = terrain_labels(phase1_state)
+    mountains = [c for c in phase1_state.hexes if labels[c] is TerrainLabel.MOUNTAIN]
     if not mountains:
         pytest.skip("No mountain hexes generated")
 
@@ -49,8 +49,7 @@ def test_mountain_not_isolated(phase1_state):
         1
         for coord in mountains
         if not any(
-            phase1_state.hexes.get(n, None)
-            and phase1_state.hexes[n].terrain_class == TerrainClass.MOUNTAIN
+            phase1_state.hexes.get(n, None) and labels[n] is TerrainLabel.MOUNTAIN
             for n in neighbors(coord)
             if n in phase1_state.hexes
         )

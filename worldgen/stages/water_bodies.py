@@ -63,9 +63,6 @@ def _fix_coast_hexes(state: WorldState) -> None:
     cfg_dict = state.metadata.get("config", {})
     sea = cfg_dict.get("sea_level", 0.45)
     coast_threshold = sea + 0.05
-    mountain_gradient = cfg_dict.get("terrain_mountain_gradient", 0.04)
-    hill_gradient = cfg_dict.get("terrain_hill_gradient", 0.02)
-    bare_elevation = cfg_dict.get("terrain_bare_elevation", 0.8)
 
     for coord, hx in hexes.items():
         if hx.terrain_class != TerrainClass.COAST:
@@ -82,15 +79,8 @@ def _fix_coast_hexes(state: WorldState) -> None:
             # so downstream stages can treat it like coastal terrain if desired.
             continue
 
-        neighbor_elevs = [n.elevation for n in nbrs]
-        gradient = (
-            sum(abs(elev - ne) for ne in neighbor_elevs) / len(neighbor_elevs)
-            if neighbor_elevs
-            else 0.0
-        )
-        if gradient > mountain_gradient or elev > bare_elevation:
-            hx.terrain_class = TerrainClass.MOUNTAIN
-        elif gradient >= hill_gradient:
-            hx.terrain_class = TerrainClass.HILL
-        else:
-            hx.terrain_class = TerrainClass.FLAT
+        # Not a shore after all, so it is simply land.  This used to re-derive a
+        # steepness band here, duplicating the classification stage's arithmetic to pick
+        # between three labels; with steepness carried on the hex as a number there is
+        # one answer and no sum to repeat.
+        hx.terrain_class = TerrainClass.LAND

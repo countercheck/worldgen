@@ -17,7 +17,7 @@ def _small_world() -> WorldState:
     ws = WorldState.empty(seed=99, width=4, height=4)
     h = ws.hexes[(0, 0)]
     h.biome = Biome.GRASSLAND
-    h.terrain_class = TerrainClass.FLAT
+    h.terrain_class = TerrainClass.LAND
     h.land_cover = LandCover.OPEN
     h.elevation = 0.5
     ws.settlements = [

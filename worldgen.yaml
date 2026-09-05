@@ -96,6 +96,15 @@ heightmap_coast_falloff: false # Default: false
 # ---------------------------------------------------------------------------
 terrain_hill_gradient: 0.02      # Elevation gradient threshold for hills. Default: 0.02
 terrain_mountain_gradient: 0.04  # Elevation gradient threshold for mountains. Default: 0.04
+# Ground above this is barren whatever its gradient — a plateau high enough that altitude,
+# not steepness, is what strips it. Separate from the gradients because the two say
+# different things.
+terrain_bare_elevation: 0.8      # Default: 0.8
+#
+# Note: these three no longer classify anything. Steepness is carried per hex as a number
+# (see Hex.slope), and these are the thresholds the *map* is banded with — mountain, hill,
+# flat — plus the one land cover uses to decide bare rock. Widening them changes how the
+# world is drawn and where bare rock appears, not how the generator reasons about ground.
 
 # ---------------------------------------------------------------------------
 # Erosion (hydraulic droplet simulation)
@@ -112,6 +121,16 @@ erosion_delta_min_load: 0.15 # Sediment a droplet must still carry when it reach
 # ---------------------------------------------------------------------------
 # Hydrology
 # ---------------------------------------------------------------------------
+# How much the rain shadow shapes the rivers. Wind drops its moisture climbing a range
+# and arrives dry on the far side; this decides whether the water reflects that. 0 rains
+# evenly on every hex, 1 takes the orographic pattern at its word — so a catchment behind
+# mountains raises a smaller river, and a lake there is likelier to evaporate away than to
+# overflow. The map's total rainfall does not change with this, only where it falls, so a
+# river being a fraction of the whole still means what it did. Below 1 by default because
+# the pattern only models rain wrung out by lift, and taken literally it leaves every
+# plain a desert.
+rain_shadow_strength: 0.5   # Default: 0.5
+
 river_flow_threshold: 0.05  # Minimum flow volume (0–1) for a hex to be a river. Default: 0.05
 
 # Rivers that enter from off the map. The grid is a region, not a world, so some of its
@@ -140,6 +159,14 @@ river_inflow_min_length: 0.1  # Shortest course worth a river, as a fraction of 
 lake_chaining: true             # Allow a lake to spill into a strictly lower lake, not just the sea. Chains of lakes stepping down to the coast are the only outlet on a landlocked map. Default: true
 endorheic_marsh_radius: 1       # Where a basin genuinely has no outlet it is endorheic: water leaves by evaporation. This many hexes of its shore become wetland. 0 disables. Default: 1
 endorheic_marsh_min_moisture: 0.4 # A closed basin drier than this is a salt pan, not a marsh, and gets no wetland shore. Default: 0.4
+
+# Whether a basin is closed at all is a water balance, not a shape: it overflows when the
+# rivers reaching it plus the rain on its surface exceed what evaporates off that surface.
+# The per-hex evaporation comes from regional_climate below (a boreal lake loses half what
+# a temperate one does; an arid lake three and a half times as much), and this scales it.
+# Above 1 closes more basins; 0 makes any basin with inflow overflow. Raise it if your map
+# has large lakes you would rather see as inland seas with no outlet.
+endorheic_evaporation_scale: 1.0 # Multiplier on the climate's evaporation rate. Default: 1.0
 
 # ---------------------------------------------------------------------------
 # Climate
@@ -222,8 +249,6 @@ road_elev_range_m: 3000.0 # Elevation span in metres representing the full 0→1
 # ---------------------------------------------------------------------------
 # Roads: base terrain costs (pathfinding multipliers by terrain type)
 # ---------------------------------------------------------------------------
-road_mountain_cost: 10.0  # Cost multiplier for mountain hexes. Default: 10.0
-road_hill_cost: 3.0       # Cost multiplier for hill hexes. Default: 3.0
 road_flat_cost: 1.0       # Cost multiplier for flat hexes. Default: 1.0
 
 # ---------------------------------------------------------------------------

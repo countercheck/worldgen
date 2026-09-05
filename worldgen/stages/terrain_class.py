@@ -40,14 +40,6 @@ class TerrainClassificationStage(GeneratorStage):
                 h.terrain_class = TerrainClass.COAST
                 continue
 
-            if (
-                gradient > self.config.terrain_mountain_gradient
-                or elev > self.config.terrain_bare_elevation
-            ):
-                h.terrain_class = TerrainClass.MOUNTAIN
-            elif gradient >= self.config.terrain_hill_gradient:
-                h.terrain_class = TerrainClass.HILL
-            else:
-                h.terrain_class = TerrainClass.FLAT
+            h.terrain_class = TerrainClass.LAND
 
         return state

@@ -28,7 +28,7 @@ from worldgen.stages.road_cost import (
 
 
 def _flat(coord):
-    return Hex(coord=coord, elevation=0.5, terrain_class=TerrainClass.FLAT)
+    return Hex(coord=coord, elevation=0.5, terrain_class=TerrainClass.LAND)
 
 
 def _ocean(coord):
