@@ -3,17 +3,40 @@ from pathlib import Path
 
 import matplotlib as mpl
 
-from ..core.hex import Biome, LandCover, SettlementTier, TerrainClass, TerrainLabel, terrain_labels
-from ..core.hex_grid import axial_to_pixel, dedupe_road_paths
-from ..core.world_state import ROAD_TIER_RANK, RoadTier, WorldState
+from ..core.hex import (
+    DEFAULT_TERRAIN_BANDS,
+    Biome,
+    LandCover,
+    LandUse,
+    SettlementTier,
+    SoilQuality,
+    TerrainClass,
+    TerrainLabel,
+    terrain_label,
+)
+from ..core.hex_grid import axial_to_pixel, road_polylines
+from ..core.world_state import RoadTier, WorldState
 
+# Degrees Celsius spanned by the temperature ramp. Fixed rather than per-map so two
+# worlds can be compared by eye.
+TEMPERATURE_RAMP_C = (-20.0, 35.0)
+
+# Millimetres of annual rainfall spanned by the moisture ramp — desert to rainforest.
+# Fixed for the same reason as the temperature ramp: so two maps can be compared.
+PRECIP_RAMP_MM = (0.0, 2500.0)
+
+# Keyed on the map *label* rather than on the terrain class, because the class no longer
+# carries steepness — the bands are derived from measured slope at draw time.
 TERRAIN_COLORS = {
     TerrainLabel.OCEAN: (0.2, 0.4, 0.8),
     TerrainLabel.LAKE: (0.35, 0.6, 0.85),
     TerrainLabel.COAST: (0.9, 0.8, 0.4),
+    # Four bands of gradient, darkening as the ground steepens, so the relief reads as a
+    # ramp rather than as four unrelated categories.
     TerrainLabel.FLAT: (0.4, 0.8, 0.4),
-    TerrainLabel.HILL: (0.7, 0.6, 0.3),
-    TerrainLabel.MOUNTAIN: (0.5, 0.5, 0.5),
+    TerrainLabel.ROLLING: (0.7, 0.6, 0.3),
+    TerrainLabel.STEEP: (0.5, 0.5, 0.5),
+    TerrainLabel.ESCARPMENT: (0.32, 0.29, 0.28),
 }
 
 BIOME_COLORS = {
@@ -43,6 +66,28 @@ LAND_COVER_COLORS = {
     LandCover.BARE_ROCK: (0.376, 0.376, 0.376),
 }
 
+# Soil reads as a ladder, so it gets a ramp rather than a categorical palette: bare buff
+# through pasture green to the dark alluvial brown of a floodplain. The eye should be able
+# to rank two hexes without consulting the key.
+SOIL_COLORS = {
+    SoilQuality.UNUSABLE: (0.878, 0.855, 0.792),
+    SoilQuality.GRAZING: (0.757, 0.804, 0.616),
+    SoilQuality.MARGINAL: (0.588, 0.694, 0.463),
+    SoilQuality.ARABLE: (0.506, 0.478, 0.318),
+    SoilQuality.PRIME: (0.361, 0.278, 0.176),
+}
+
+# Land use is categorical — these are different things people do, not degrees of one thing
+# — so the palette is unranked and each is named by its own colour: ploughland tawny, wood
+# green, pasture pale, waste grey.
+LAND_USE_COLORS = {
+    LandUse.WATER: (0.255, 0.412, 0.882),
+    LandUse.WASTE: (0.741, 0.729, 0.702),
+    LandUse.WOOD: (0.180, 0.400, 0.220),
+    LandUse.PASTURE: (0.678, 0.804, 0.549),
+    LandUse.ARABLE: (0.831, 0.643, 0.298),
+}
+
 _ROAD_STYLE = {
     RoadTier.PRIMARY: {"stroke": "#5c3d1e", "stroke-width": "2.0"},
     RoadTier.SECONDARY: {"stroke": "#8b6914", "stroke-width": "1.2"},
@@ -54,8 +99,8 @@ def _get_color_biome(h) -> tuple[float, float, float]:
     return BIOME_COLORS.get(h.biome, (0.5, 0.5, 0.5))
 
 
-def _get_color_terrain(h, labels) -> tuple[float, float, float]:
-    return TERRAIN_COLORS[labels[h.coord]]
+def _get_color_terrain(h, bands=DEFAULT_TERRAIN_BANDS) -> tuple[float, float, float]:
+    return TERRAIN_COLORS[terrain_label(h, *bands)]
 
 
 def _hex_vertices(cx: float, cy: float, size: float) -> list[tuple[float, float]]:
@@ -83,24 +128,27 @@ def _star_points(cx: float, cy: float, outer: float, inner: float, n: int = 5) -
     return _points_str(pts)
 
 
-def _color_getter(attribute: str, labels: dict):
-    # `labels` bands each hex's slope into the word a reader expects — mountain, hill,
-    # flat.  Derived for the drawing rather than carried on the hex, so the vocabulary a
-    # map is read in cannot quietly become a vocabulary the generator reasons in.
+def _color_getter(attribute: str):
     """Returns (get_color, settlement_overlay, road_overlay) for an attribute name."""
     if attribute == "biome":
         return _get_color_biome, False, False
     if attribute == "terrain_class":
-        return (lambda h: _get_color_terrain(h, labels)), False, False
+        return _get_color_terrain, False, False
     if attribute == "elevation":
         cmap = mpl.colormaps["terrain"]
         return (lambda h: cmap(h.elevation)), False, False
     if attribute == "moisture":
         cmap = mpl.colormaps["Blues"]
-        return (lambda h: cmap(h.moisture)), False, False
+        lo, hi = PRECIP_RAMP_MM
+        return (lambda h: cmap(min(1.0, (h.moisture - lo) / (hi - lo)))), False, False
     if attribute == "temperature":
+        # Temperature is degrees Celsius, so it has to be put on a 0-1 ramp for drawing.
+        # The span is fixed rather than taken from the map's own range: a fixed scale lets
+        # two maps be compared by eye, where a per-map stretch would paint a mild region
+        # and a frozen one in exactly the same colours.
         cmap = mpl.colormaps["RdYlBu_r"]
-        return (lambda h: cmap(h.temperature)), False, False
+        lo, hi = TEMPERATURE_RAMP_C
+        return (lambda h: cmap((h.temperature - lo) / (hi - lo))), False, False
     if attribute == "alluvium":
         # Browns rather than a diverging map: this is soil depth, one-ended, and the
         # question a reader asks of it is where the good ground is.
@@ -108,7 +156,7 @@ def _color_getter(attribute: str, labels: dict):
 
         def get_color(h):
             if h.terrain_class in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER):
-                return TERRAIN_COLORS[labels[h.coord]]
+                return _get_color_terrain(h)
             return cmap(h.alluvium)
 
         return get_color, False, False
@@ -117,7 +165,7 @@ def _color_getter(attribute: str, labels: dict):
 
         def get_color(h):
             if h.terrain_class in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER):
-                return TERRAIN_COLORS[labels[h.coord]]
+                return _get_color_terrain(h)
             return cmap(min(h.river_flow * 3, 1.0))
 
         return get_color, False, False
@@ -139,6 +187,47 @@ def _color_getter(attribute: str, labels: dict):
             return LAND_COVER_COLORS.get(h.land_cover, (0.5, 0.5, 0.5))
 
         return get_color, False, False
+    if attribute == "soil":
+
+        def get_color(h):
+            return SOIL_COLORS.get(h.soil, (0.5, 0.5, 0.5))
+
+        return get_color, False, False
+    if attribute == "land_use":
+
+        def get_color(h):
+            return LAND_USE_COLORS.get(h.land_use, (0.5, 0.5, 0.5))
+
+        return get_color, True, False
+    if attribute == "rural_population":
+        # Against the densest hex on this map rather than an absolute scale: the question
+        # the plate answers is where the people are, and a fixed ceiling would render a
+        # thin map as uniformly empty.
+        cmap = mpl.colormaps["YlOrBr"]
+
+        def get_color(h):
+            return cmap(min(h.rural_population / 120.0, 1.0))
+
+        return get_color, False, False
+    if attribute == "territory":
+        # Which settlement works each hex.  Hashed to a colour rather than ramped: the
+        # question is where one catchment ends and the next begins, so neighbouring
+        # catchments need to be *unalike*, and any ordered palette makes adjacent owners
+        # look related when they are not.
+        import colorsys
+
+        def get_color(h):
+            water = h.terrain_class in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
+            if water and h.territory is None:
+                return _get_color_terrain(h)
+            if h.territory is None:
+                return (0.85, 0.85, 0.85)
+            hue = ((hash(h.territory) % 997) / 997.0) % 1.0
+            # Value falls off with haulage distance, so the gradient inside one catchment
+            # reads as "far from its market" while the hue still says whose it is.
+            return colorsys.hsv_to_rgb(hue, 0.55, 1.0 - min(h.territory_cost / 20.0, 0.45))
+
+        return get_color, True, False
     if attribute == "cultivation":
         _cultivated = (0.831, 0.643, 0.298)
 
@@ -154,7 +243,7 @@ def _color_getter(attribute: str, labels: dict):
 
 def render_svg(state: WorldState, attribute: str, hex_size: float = 20) -> str:
     """Render hex map colored by attribute as an SVG string."""
-    get_color, settlement_overlay, road_overlay = _color_getter(attribute, terrain_labels(state))
+    get_color, settlement_overlay, road_overlay = _color_getter(attribute)
 
     hex_items = list(state.hexes.values())
     if not hex_items:
@@ -211,12 +300,10 @@ def render_svg(state: WorldState, attribute: str, hex_size: float = 20) -> str:
     if road_overlay:
         out.append('  <g id="layer-roads">')
         # Iterating RoadTier drew PRIMARY first and TRACK last, so a track painted over
-        # the primary road it branches from. dedupe_road_paths awards each shared edge to
-        # its highest tier and returns them in ascending order, so primaries land on top.
-        for road, leg in dedupe_road_paths(
-            state.roads, state.hexes, lambda r: ROAD_TIER_RANK[r.tier]
-        ):
-            style = _ROAD_STYLE[road.tier]
+        # the primary road it branches from. road_polylines returns runs in ascending tier
+        # order, so primaries land on top.
+        for tier, leg in road_polylines(state.road_edges, state.hexes):
+            style = _ROAD_STYLE[tier]
             da = f' stroke-dasharray="{style["dasharray"]}"' if "dasharray" in style else ""
             pts = [(px + ox, py + oy) for px, py in (axial_to_pixel(c, hex_size) for c in leg)]
             out.append(

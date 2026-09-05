@@ -3,15 +3,23 @@ from collections import deque
 from ..core.errors import RoutingError
 from ..core.hex import TerrainClass
 from ..core.hex_grid import astar, distance, neighbors
-from ..core.world_state import Ferry
+from ..core.world_state import ROAD_TIER_RANK, Ferry, RoadTier, road_edge_key
 
 WATER = (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
 
 
+def delta_elevation(from_hx, to_hx) -> float:
+    """Height gained from *from_hx* to *to_hx*, signed: negative where the road falls.
+
+    One definition, so the number a `RoadEdge` carries and the number the cost is charged on
+    cannot drift apart. The cost takes the absolute value; the sign is kept for the reader.
+    """
+    return to_hx.elevation - from_hx.elevation
+
+
 def edge_grade_pct(from_hx, to_hx, cfg) -> float:
     """Percent grade between two adjacent hexes."""
-    delta = abs(to_hx.elevation - from_hx.elevation)
-    return delta * cfg.road_elev_range_m * 100.0 / cfg.hex_size_m
+    return abs(delta_elevation(from_hx, to_hx)) * 100.0 / cfg.hex_size_m
 
 
 def grade_is_under_cap(from_hx, to_hx, cfg) -> bool:
@@ -22,22 +30,36 @@ def grade_is_under_cap(from_hx, to_hx, cfg) -> bool:
 def max_grade_cap_delta(cfg) -> float:
     """Elevation delta equivalent to the slope cap, for fast per-edge comparisons
     (avoids repeating the grade_is_under_cap division/multiplication per edge)."""
-    return cfg.road_slope_cap_pct * cfg.hex_size_m / (cfg.road_elev_range_m * 100.0)
+    return cfg.road_slope_cap_pct * cfg.hex_size_m / 100.0
 
 
 def slope_edge_cost(from_hx, to_hx, cfg) -> float:
-    """Grade-aware edge penalty for road pathfinding."""
-    grade_pct = edge_grade_pct(from_hx, to_hx, cfg)
-    if grade_pct <= cfg.road_slope_free_pct:
+    """What the climb costs, as hexes of level going — the switchback, priced.
+
+    At 1 hex = 1 km a road climbing 200 m is not a straight ramp; it is several kilometres
+    of zigzag folded inside that hex. `road_delta_elevation_per_hex` is the exchange rate that says
+    so, and the cost is continuous in the height difference rather than banded.
+
+    Charged on the *absolute* height difference, so a descent costs exactly what the same
+    climb would. That is the difference from `travel_ascent_per_hex`: a walker pays for the
+    climb alone (Naismith), while a road is cut-and-fill and a steep descent needs braking
+    and washes out.
+
+    Above `road_slope_cap_pct` the edge is refused outright — a laden cart cannot climb 25%,
+    and it should not be offered the option at a price. The curve this replaced saturated
+    there instead, so a road met a 65% face, paid a flat twenty for it, and went straight up.
+
+    Water pays nothing here. A boat notices the sea floor's gradient not at all, and
+    charging it did two wrong things at once: every sea leg paid for the bathymetry under
+    it, and a shelf dropping faster than the cap made a strait *impassable* — a cliff
+    a keel never touches. `water_edge_cost` prices getting on and off the water; the
+    water itself is level by definition.
+    """
+    if from_hx.terrain_class in WATER or to_hx.terrain_class in WATER:
         return 0.0
-    if grade_pct >= cfg.road_slope_cap_pct:
-        return cfg.road_slope_cost * cfg.road_slope_cap_mult
-    raw = (
-        cfg.road_slope_cost
-        * (grade_pct - cfg.road_slope_free_pct)
-        / (cfg.road_slope_cap_pct - grade_pct)
-    )
-    return min(raw, cfg.road_slope_cost * cfg.road_slope_cap_mult)
+    if not grade_is_under_cap(from_hx, to_hx, cfg):
+        return float("inf")
+    return abs(delta_elevation(from_hx, to_hx)) / cfg.road_delta_elevation_per_hex
 
 
 def terrain_base_cost(hx, cfg) -> float:
@@ -46,15 +68,22 @@ def terrain_base_cost(hx, cfg) -> float:
     Water (OCEAN/LAKE) returns the small `road_water_cost` rather than infinity;
     this lets pathfinding traverse water bodies as a single piece of terrain
     where embark/disembark costs (charged on edges) dominate the journey.
+
+    A settlement hex costs nothing — it is a road segment carrying the most travellers
+    there can be. Cleared ground, a bridge already built, an inn: passing through a town
+    is easier than passing beside it, and a route should be drawn to one from a couple of
+    hexes out rather than have to be bent into it afterwards.
     """
+    if hx.settlement is not None:
+        return 0.0
     tc = hx.terrain_class
     if tc in WATER:
         return cfg.road_water_cost
-    # No surcharge for steep ground here.  Every edge is already charged its real grade by
-    # `slope_edge_cost`, computed from the elevation difference the road actually climbs,
-    # so a flat hill and mountain rate on top of that charged the same terrain twice — and
-    # charged it off a threshold, which is why a level floodplain under a bluff was priced
-    # as mountain.  The continuous term is the correct one and it was always there.
+    # No steepness surcharge here.  The climb between two hexes is already priced on the
+    # edge, from the actual metres of rise, so banding the hex and charging again billed
+    # the same ascent twice — and billed it wrongly where the band and the grade
+    # disagreed, taxing a level valley floor at escarpment rates because the bluff above
+    # it was in the averaging window.
     return cfg.road_flat_cost
 
 
@@ -69,30 +98,6 @@ def is_river(hx) -> bool:
     scale by *how much* water flows should read `river_flow` itself.
     """
     return "river" in hx.tags
-
-
-def bank_discount(hx, hexes, cfg) -> float:
-    """Scaled along-river discount, applied to the *bank* rather than the channel.
-
-    Roads follow river valleys, but a road drawn down the channel itself hides which
-    side of the river it — and anything standing on it — is on.  So the pull lives on
-    the land hexes beside the river instead: a road runs along the bank, and the side it
-    takes is a fact about the world rather than an accident of rendering.
-
-    Scaled by the largest adjacent river's flow (bigger river → bigger pull), with the
-    same `min_flow` floor as before so small headwater rivers keep a usable discount.
-    River hexes themselves get nothing; visiting one is a crossing, not a route.
-    """
-    if is_river(hx):
-        return 0.0
-    flow = 0.0
-    for n in neighbors(hx.coord):
-        n_hx = hexes.get(n)
-        if n_hx is not None and is_river(n_hx) and n_hx.river_flow > flow:
-            flow = n_hx.river_flow
-    if flow <= 0:
-        return 0.0
-    return cfg.road_bank_discount * max(flow, cfg.road_bank_discount_min_flow)
 
 
 def river_hex_cost(hx, cfg) -> float:
@@ -132,13 +137,43 @@ def river_crossing_edge_cost(from_hx, to_hx, cfg) -> float:
     return cfg.road_river_crossing_base + cfg.road_river_crossing_flow * flow
 
 
-def road_edge_cost(from_hx, to_hx, cfg) -> float:
-    """Combined edge-cost: slope + water embark/disembark + river crossing."""
+def settlement_skirt_cost(from_hx, to_hx, cfg, ring) -> float:
+    """What it costs to pass a town at one hex without going in.
+
+    *ring* maps a hex to the seats it neighbours, so a shared entry means both ends of this
+    edge touch the same settlement: the road enters the ring and leaves without arriving.
+
+    This is the half of the settlement pull that works at one hex. A discount on the town
+    itself cannot: the direct route and the detour both pay for the same two ring hexes, so
+    the detour costs exactly what the town costs on top, and driving that to zero makes the
+    detour a *tie* rather than a win. Ties are settled by heap order. Charging the skirt is
+    what actually shifts the route.
+    """
+    if not ring:
+        return 0.0
+    shared = ring.get(from_hx.coord)
+    if not shared or not (shared & ring.get(to_hx.coord, frozenset())):
+        return 0.0
+    return cfg.road_settlement_skirt_cost
+
+
+def road_edge_cost(from_hx, to_hx, cfg, ring=None) -> float:
+    """Combined edge-cost: slope + water embark/disembark + river crossing + town skirt."""
     return (
         slope_edge_cost(from_hx, to_hx, cfg)
         + water_edge_cost(from_hx, to_hx, cfg)
         + river_crossing_edge_cost(from_hx, to_hx, cfg)
+        + settlement_skirt_cost(from_hx, to_hx, cfg, ring)
     )
+
+
+def settlement_rings(seats) -> dict:
+    """Hex -> the settlement seats it neighbours, for `settlement_skirt_cost`."""
+    out: dict = {}
+    for seat in seats:
+        for n in neighbors(seat):
+            out.setdefault(n, set()).add(seat)
+    return {k: frozenset(v) for k, v in out.items()}
 
 
 def river_edges(rivers) -> set[frozenset]:
@@ -169,7 +204,7 @@ def _settlement_exempt(hexes, settled, a, b) -> bool:
     return b in settled and a_hx is not None and not is_river(a_hx)
 
 
-def make_road_edge_cost(cfg, blocked_edges=None, exempt_coords=frozenset()):
+def make_road_edge_cost(cfg, blocked_edges=None, exempt_coords=frozenset(), ring=None):
     """Edge-cost closure, optionally forbidding the hexsides a river runs along.
 
     Crossing a river stays legal and stays priced by `river_crossing_edge_cost` — what
@@ -207,33 +242,72 @@ def make_road_edge_cost(cfg, blocked_edges=None, exempt_coords=frozenset()):
             )
             if not exempt:
                 return float("inf")
-        return road_edge_cost(from_hx, to_hx, cfg)
+        return road_edge_cost(from_hx, to_hx, cfg, ring)
 
     return edge_cost
 
 
-def tag_river_crossings(roads, hexes) -> None:
-    """Tag river-entry hexes on each road as ford → bridge on second visit.
+def tag_switchbacks(road_edges, hexes, cfg) -> None:
+    """Mark road hexes whose grade is steep enough that the road must double back on itself.
+
+    The cost model already charges for it — `slope_edge_cost` converts the climb into the
+    level-going it really represents — but nothing in the output said so, and at this scale
+    nothing can be drawn: a switchback is a hundred-metre feature and a hex is a kilometre.
+    The tag is how a reader of the map, or a wargame counting movement, knows the segment is
+    slow.
+
+    Mutates `hex.tags` in place, like `tag_river_crossings`.
+    """
+    for a, b in road_edges:
+        ha, hb = hexes.get(a), hexes.get(b)
+        if ha is None or hb is None:
+            continue
+        if edge_grade_pct(ha, hb, cfg) >= cfg.road_switchback_grade_pct:
+            ha.tags.add("switchback")
+            hb.tags.add("switchback")
+
+
+def tag_river_crossings(road_edges, hexes) -> None:
+    """Tag river hexes the road network crosses: ford, or bridge where the road is primary.
 
     Mutates `hex.tags` in place. Purely cosmetic (used by renderers); does
     not feed back into pathfinding cost.
+
+    It used to walk each route in turn and promote a ford to a bridge the second time a
+    route entered the same river hex — "more than one road uses this, so build a bridge".
+    With the network stored as edges there are no routes to count, and no need to: edge
+    tier already *is* how busy a crossing is, taken from the same traffic the old
+    second-visit rule was standing in for. A primary crossing gets a bridge, a quieter one
+    a ford, and the result no longer depends on the order routes happened to be built in.
+
+    `CrossingStage` (the organic model) tags its own fords and bridges before roads exist;
+    those are left alone, since a bridge is not demoted by carrying a quiet road.
     """
-    for road in roads:
-        path = road.path
-        for i, c in enumerate(path):
-            if c not in hexes:
+    incident: dict = {}
+    for (a, b), tier in road_edges.items():
+        for coord in (a, b):
+            hx = hexes.get(coord)
+            if hx is None or "river" not in hx.tags:
                 continue
-            hx = hexes[c]
-            if "river" not in hx.tags:
+            # Only a road arriving from off the channel is a crossing; one running along
+            # the bank is not, and roads may not run down a channel in any case.
+            other = b if coord == a else a
+            other_hx = hexes.get(other)
+            if other_hx is not None and "river" in other_hx.tags:
                 continue
-            prev_c = path[i - 1] if i > 0 else None
-            prev_hx = hexes.get(prev_c) if prev_c is not None else None
-            if (prev_hx is None or "river" not in prev_hx.tags) and "bridge" not in hx.tags:
-                if "ford" not in hx.tags:
-                    hx.tags.add("ford")
-                else:
-                    hx.tags.discard("ford")
-                    hx.tags.add("bridge")
+            best = incident.get(coord)
+            if best is None or ROAD_TIER_RANK[tier] > ROAD_TIER_RANK[best]:
+                incident[coord] = tier
+
+    for coord, tier in incident.items():
+        tags = hexes[coord].tags
+        if "bridge" in tags:
+            continue
+        if tier is RoadTier.PRIMARY:
+            tags.discard("ford")
+            tags.add("bridge")
+        else:
+            tags.add("ford")
 
 
 def reachable_under_constraint(hexes, start, blocked, settled) -> set:
@@ -321,3 +395,164 @@ def ferry_link(hexes, origin, label, main, cfg, blocked, settled, plain_cost, pl
             raise RoutingError(f"{label} at {origin} cannot reach its own ferry landing at {a}.")
         paths.append(p)
     return Ferry(a=a, b=b), paths
+
+
+def pheromone_discount(base: float, traffic: float, cfg) -> float:
+    """What a hex costs a traveller once earlier travellers have worn a path across it.
+
+    Extracted so the shape can be measured.  It was inline in `InterurbanRoadStage`, and
+    `_guarantee_city_connectivity`'s `plain_cost` quietly used a different formula.
+    """
+    return max(0.0, base - cfg.road_pheromone_factor * traffic)
+
+
+def _keep_higher_tier(existing, incoming):
+    """Merge rule for a tier map: a road laid here is never demoted by one bent onto it."""
+    if existing is None or ROAD_TIER_RANK[incoming] > ROAD_TIER_RANK[existing]:
+        return incoming
+    return existing
+
+
+def add_traffic(existing, incoming):
+    """Merge rule for a traffic map: two roads meeting carry the sum of what each carried.
+
+    This is why consolidation happens *before* tiering rather than after. Bending a bypass
+    through a town merges two flows onto one pair of edges, and the merged edge should be
+    ranked on what it now carries — two secondary roads meeting can make a primary. Taking
+    the higher of two tiers after the fact cannot express that; adding the traffic and
+    then cutting the percentiles does it for nothing.
+    """
+    return incoming if existing is None else existing + incoming
+
+
+def detour_is_allowed(hexes, settled, cfg, blocked, a, seat, b) -> bool:
+    """Could a road skirting *seat* on the edge (a, b) be bent through it instead?
+
+    Three things forbid it, and they are why "no road skirts a town" is not an invariant on
+    its own: the legs may not cross a river channel they have no business on, may not climb
+    a grade a laden cart cannot, and may not cost more than `road_settlement_detour_max_mult`
+    times the edge they replace — a road is allowed to decline a town that is dear to reach.
+
+    Split out so the rule has one statement. It was written twice, once here and once in the
+    test that guards it, and the copies disagreed: the test knew only about the cost bound,
+    so a skirt refused for a 30% grade or a channel crossing read as a defect.
+    """
+
+    def leg_cost(start, end) -> float:
+        return (
+            terrain_base_cost(hexes[end], cfg)
+            + river_hex_cost(hexes[end], cfg)
+            + road_edge_cost(hexes[start], hexes[end], cfg)
+        )
+
+    legs = ((a, seat), (seat, b))
+    for start, end in legs:
+        if end not in hexes or start not in hexes:
+            return False
+        if frozenset((start, end)) in blocked and not _settlement_exempt(
+            hexes, settled, start, end
+        ):
+            return False
+        if not grade_is_under_cap(hexes[start], hexes[end], cfg):
+            return False
+    direct = leg_cost(a, b)
+    detour = leg_cost(a, seat) + leg_cost(seat, b)
+    return not (direct > 0 and detour > direct * cfg.road_settlement_detour_max_mult)
+
+
+def route_through_settlements(
+    road_edges, hexes, settled, cfg, blocked=frozenset(), combine=_keep_higher_tier
+) -> int:
+    """Bend any road skirting a settlement so that it passes through it instead.
+
+    A road whose two ends are both neighbours of a town enters the ring around it and
+    leaves again without arriving — at 1 hex = 1 km, a trunk road passing a market town at
+    the width of one field. Bypasses are a motor-age idea; before that the road went
+    through the town, which is half the reason the town is where it is.
+
+    So the edge (a, b) is replaced by (a, s) and (s, b): one hex longer, and the traffic
+    now calls. Where those two already exist the bypass was pure redundancy and simply
+    goes. A replacement may not cross a river channel it has no business on, climb a grade
+    a laden cart cannot, or cost more than `road_settlement_detour_max_mult` times the edge
+    it replaces — a road is allowed to decline a town that is dear to reach.
+
+    *road_edges* maps an edge to whatever *combine* knows how to merge: traffic before
+    tiering (`add_traffic`), or tiers after it (the default, which never demotes). Mutates
+    it in place; returns how many bypasses were rerouted.
+    """
+
+    rerouted = 0
+    for seat in settled:
+        seat_hx = hexes.get(seat)
+        if seat_hx is None or seat_hx.terrain_class in WATER:
+            continue
+        ring = set(neighbors(seat))
+        for a, b in [(a, b) for a, b in road_edges if a in ring and b in ring]:
+            if not detour_is_allowed(hexes, settled, cfg, blocked, a, seat, b):
+                continue
+            legs = ((a, seat), (seat, b))
+            carried = road_edges.pop(road_edge_key(a, b))
+            for start, end in legs:
+                key = road_edge_key(start, end)
+                road_edges[key] = combine(road_edges.get(key), carried)
+            rerouted += 1
+    return rerouted
+
+
+def as_road_edges(tiers, hexes) -> dict:
+    """Turn a key -> tier map into key -> `RoadEdge`, measuring each edge as it goes.
+
+    The stages build with bare tiers because that is all the routing and tidying passes
+    need. This is the one place the delta is measured, so the number a world carries is the
+    number `slope_edge_cost` charged on.
+    """
+    from ..core.world_state import RoadEdge
+
+    out = {}
+    for (a, b), tier in tiers.items():
+        ha, hb = hexes.get(a), hexes.get(b)
+        delta = delta_elevation(ha, hb) if ha is not None and hb is not None else 0.0
+        out[(a, b)] = RoadEdge(tier, delta)
+    return out
+
+
+def prune_orphan_roads(road_edges, anchors) -> int:
+    """Drop any part of the network that connects nothing.
+
+    `road_river_traffic_min` admits a riverbank edge on a single traveller, so a stretch of
+    towpath can qualify without joining anything — a five-hex road in the middle of a
+    valley, reaching no settlement and no ferry. That is not a road, it is a residue of the
+    threshold, and it is what leaves the network in more than one piece.
+
+    *anchors* is what makes a component worth keeping: settlement seats, and the landings
+    of any ferry, since a component reachable only by boat is legitimately separate on land.
+
+    Mutates *road_edges*; returns how many edges were dropped.
+    """
+    adj: dict = {}
+    for a, b in road_edges:
+        adj.setdefault(a, set()).add(b)
+        adj.setdefault(b, set()).add(a)
+
+    seen: set = set()
+    doomed: set = set()
+    for start in adj:
+        if start in seen:
+            continue
+        stack, comp = [start], set()
+        while stack:
+            c = stack.pop()
+            if c in comp:
+                continue
+            comp.add(c)
+            stack.extend(adj[c] - comp)
+        seen |= comp
+        if not (comp & anchors):
+            doomed |= comp
+
+    if not doomed:
+        return 0
+    dropped = [k for k in road_edges if k[0] in doomed or k[1] in doomed]
+    for k in dropped:
+        del road_edges[k]
+    return len(dropped)

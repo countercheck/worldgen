@@ -3,10 +3,16 @@ from dataclasses import dataclass, field
 
 from PIL import Image, ImageDraw, ImageFont
 
-from ..core.hex import SettlementTier, terrain_labels
-from ..core.hex_grid import axial_to_pixel, dedupe_road_paths, neighbors
-from ..core.world_state import ROAD_TIER_RANK, RoadTier, WorldState
-from ..render.debug_viewer import BIOME_COLORS, LAND_COVER_COLORS, TERRAIN_COLORS
+from ..core.hex import DEFAULT_TERRAIN_BANDS, SettlementTier, terrain_bands, terrain_label
+from ..core.hex_grid import axial_to_pixel, neighbors, road_polylines
+from ..core.world_state import RoadTier, WorldState
+from ..render.debug_viewer import (
+    BIOME_COLORS,
+    LAND_COVER_COLORS,
+    LAND_USE_COLORS,
+    SOIL_COLORS,
+    TERRAIN_COLORS,
+)
 from . import legend, rivers
 
 
@@ -15,7 +21,7 @@ class PNGConfig:
     hex_size: float = 12.0
     dpi: int = 150
     style: str = "atlas"  # "atlas" | "topographic" | "wargame"
-    color_mode: str = "biome"  # "biome" | "terrain" | "land_cover" | "elevation"
+    color_mode: str = "biome"  # biome | terrain | land_cover | soil | land_use | elevation
     layers: set[str] = field(
         default_factory=lambda: {
             "terrain",
@@ -29,7 +35,6 @@ class PNGConfig:
             "legend",
         }
     )
-    contour_elevation_scale_m: float = 3000.0
     contour_interval_m: float = 100.0
     contour_max_crossings: int = 5
     contour_max_stroke: float = 4.0
@@ -76,15 +81,23 @@ def _hex_verts(cx: float, cy: float, size: float) -> list[tuple[int, int]]:
     ]
 
 
-def _get_hex_fill(h, color_mode: str, labels: dict) -> tuple[int, int, int]:
+def _get_hex_fill(
+    h,
+    color_mode: str,
+    bands: tuple[float, float, float] = DEFAULT_TERRAIN_BANDS,
+) -> tuple[int, int, int]:
     if color_mode == "terrain":
-        rgb = TERRAIN_COLORS.get(labels[h.coord], (0.5, 0.5, 0.5))
+        rgb = TERRAIN_COLORS.get(terrain_label(h, *bands), (0.5, 0.5, 0.5))
     elif color_mode == "land_cover":
         rgb = (
             LAND_COVER_COLORS.get(h.land_cover, (0.5, 0.5, 0.5))
             if h.land_cover is not None
             else (0.5, 0.5, 0.5)
         )
+    elif color_mode == "soil":
+        rgb = SOIL_COLORS.get(h.soil, (0.5, 0.5, 0.5))
+    elif color_mode == "land_use":
+        rgb = LAND_USE_COLORS.get(h.land_use, (0.5, 0.5, 0.5))
     elif color_mode == "elevation":
         v = h.elevation
         rgb = (v, v, v)
@@ -92,7 +105,7 @@ def _get_hex_fill(h, color_mode: str, labels: dict) -> tuple[int, int, int]:
         if h.biome is not None:
             rgb = BIOME_COLORS.get(h.biome, (0.5, 0.5, 0.5))
         else:
-            rgb = TERRAIN_COLORS.get(labels[h.coord], (0.5, 0.5, 0.5))
+            rgb = TERRAIN_COLORS.get(terrain_label(h, *bands), (0.5, 0.5, 0.5))
     return _rgb_int(*rgb[:3])
 
 
@@ -196,9 +209,7 @@ def _dashed_line(draw: ImageDraw.ImageDraw, x1, y, x2, color, width, dash=4, gap
         x += dash + gap
 
 
-def _draw_legend_glyph(
-    draw: ImageDraw.ImageDraw, row, cx, cy, g: float, color_mode: str, labels: dict
-) -> None:
+def _draw_legend_glyph(draw: ImageDraw.ImageDraw, row, cx, cy, g: float, color_mode: str) -> None:
     """One legend row's symbol, in a square box of side *g* centred on (cx, cy)."""
     if row.kind == "ramp":
         sw = g / len(legend.ELEVATION_RAMP)
@@ -211,7 +222,7 @@ def _draw_legend_glyph(
     elif row.kind == "fill":
         draw.polygon(
             _hex_verts(cx, cy, g / 2),
-            fill=_get_hex_fill(row.sample, color_mode, labels),
+            fill=_get_hex_fill(row.sample, color_mode),
             outline=(85, 85, 85),
         )
     elif row.kind == "settlement":
@@ -278,7 +289,6 @@ def _draw_legend(
 
     Row selection, panel geometry and placement live in `legend`; this only draws them.
     """
-    labels = terrain_labels(ws)
     x, y = legend.placement(
         ws,
         config.hex_size,
@@ -300,7 +310,7 @@ def _draw_legend(
     draw.text((x + m.inner, y + m.inner), "Legend", fill=(0, 0, 0), font=font)
     for i, row in enumerate(rows):
         cy = y + m.inner + m.title_h + i * m.row_h + m.row_h / 2
-        _draw_legend_glyph(draw, row, x + m.inner + m.glyph / 2, cy, m.glyph, color_mode, labels)
+        _draw_legend_glyph(draw, row, x + m.inner + m.glyph / 2, cy, m.glyph, color_mode)
         bbox = draw.textbbox((0, 0), row.label, font=font)
         draw.text(
             (x + m.inner + m.glyph + m.gap, cy - (bbox[3] - bbox[1]) / 2 - bbox[1]),
@@ -381,13 +391,13 @@ def render(ws: WorldState, config: PNGConfig | None = None) -> Image.Image:
     img = Image.new("RGB", (width, height), (255, 255, 255))
     draw = ImageDraw.Draw(img)
 
-    labels = terrain_labels(ws)
-
     if "terrain" in layers:
+        # The bands this world was generated with, not today's defaults.
+        bands = terrain_bands(ws)
         for hex_item in ws.hexes.values():
             px, py = axial_to_pixel(hex_item.coord, size)
             verts = _hex_verts(px + ox, py + oy, size)
-            fill = _get_hex_fill(hex_item, color_mode, labels)
+            fill = _get_hex_fill(hex_item, color_mode, bands)
             draw.polygon(verts, fill=fill)
 
     if "grid" in layers:
@@ -398,7 +408,6 @@ def render(ws: WorldState, config: PNGConfig | None = None) -> Image.Image:
             draw.polygon(verts, outline=(80, 80, 80), width=grid_lw)
 
     if "contours" in layers:
-        scale = config.contour_elevation_scale_m
         interval = config.contour_interval_m
         max_n = config.contour_max_crossings
         max_stroke = config.contour_max_stroke
@@ -414,8 +423,11 @@ def render(ws: WorldState, config: PNGConfig | None = None) -> Image.Image:
                 nbr = ws.hexes.get(nbr_coord)
                 if nbr is None:
                     continue
-                lo_m = min(hex_item.elevation, nbr.elevation) * scale
-                hi_m = max(hex_item.elevation, nbr.elevation) * scale
+                # Elevation is already metres; no scale factor. The old
+                # `contour_elevation_scale_m` converted a [0, 1] field that no longer
+                # exists, and applied to metres it saturated every hexside at max weight.
+                lo_m = min(hex_item.elevation, nbr.elevation)
+                hi_m = max(hex_item.elevation, nbr.elevation)
                 n = int(hi_m / interval) - int(lo_m / interval)
                 if n <= 0:
                     continue
@@ -465,15 +477,15 @@ def render(ws: WorldState, config: PNGConfig | None = None) -> Image.Image:
             draw.line(pts, fill=_RIVER_COLOR, width=lw)
 
     if "roads" in layers:
-        # Deduped and ordered by tier, so shared trunk segments are drawn once and a
-        # track never paints over the primary road it branches from.
+        # One tier per edge and runs split at junctions, so a shared trunk is drawn
+        # once and a track never paints over the primary road it branches from.
         legs = []
-        for road, leg in dedupe_road_paths(ws.roads, ws.hexes, lambda r: ROAD_TIER_RANK[r.tier]):
+        for tier, leg in road_polylines(ws.road_edges, ws.hexes):
             pts = []
             for coord in leg:
                 px, py = axial_to_pixel(coord, size)
                 pts.append((int(px + ox), int(py + oy)))
-            legs.append((pts, max(1, round(_ROAD_WIDTH[road.tier] * line_scale)), road.tier))
+            legs.append((pts, max(1, round(_ROAD_WIDTH[tier] * line_scale)), tier))
         outline = config.feature_outline * line_scale
         if outline > 0.0:
             # Casings for every road before any road line, or a branch's casing would

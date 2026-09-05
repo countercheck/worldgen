@@ -59,9 +59,11 @@ def _load_world_config(config_path: str | None) -> WorldConfig:
 @click.option(
     "--model",
     type=click.Choice(MODELS, case_sensitive=False),
-    default="classic",
-    show_default=True,
-    help="Settlement and road model to run.",
+    default=None,
+    help=(
+        "Settlement and road model to run. Overrides the config's `model` field; "
+        "defaults to what the config says (classic if it says nothing)."
+    ),
 )
 @click.option(
     "--heightmap",
@@ -108,17 +110,22 @@ def generate(
         cfg.heightmap_path = heightmap
     if heightmap_mode:
         cfg.heightmap_mode = heightmap_mode.lower()
+    # The model rides in the config so that world.json records which model made the map —
+    # seed plus config is the reproduction record, and the model changes everything after
+    # the terrain. The flag, when given, overrides what the config file said.
+    if model:
+        cfg.model = model.lower()
 
     click.echo(f"Generating world with seed {seed}...")
     click.echo(f"  Size: {cfg.width}×{cfg.height} ({cfg.grid_layout})")
-    click.echo(f"  Model: {model}")
+    click.echo(f"  Model: {cfg.model}")
     if cfg.heightmap_path:
         click.echo(f"  Heightmap: {cfg.heightmap_path} ({cfg.heightmap_mode})")
 
     from .export.heightmap_import import HeightmapError
 
     pipeline = GeneratorPipeline(seed, cfg)
-    for stage in stages_for(cfg, model):
+    for stage in stages_for(cfg, cfg.model):
         pipeline.add_stage(stage)
     try:
         state = pipeline.run()
@@ -149,6 +156,13 @@ def generate(
     render_debug(state, "roads", str(output_path / "roads.svg"))
     render_debug(state, "land_cover", str(output_path / "land_cover.svg"))
     render_debug(state, "cultivation", str(output_path / "cultivation.svg"))
+    render_debug(state, "territory", str(output_path / "territory.svg"))
+    if cfg.model == "organic":
+        # The plates only the haulage model can fill. Under classic every hex would come
+        # out the fallback grey, which reads as a bug rather than as an empty layer.
+        render_debug(state, "soil", str(output_path / "soil.svg"))
+        render_debug(state, "land_use", str(output_path / "land_use.svg"))
+        render_debug(state, "rural_population", str(output_path / "rural_population.svg"))
 
     click.echo("✓ Done")
 
@@ -169,6 +183,10 @@ _ATTRIBUTES = [
     "roads",
     "land_cover",
     "cultivation",
+    "territory",
+    "soil",
+    "land_use",
+    "rural_population",
 ]
 
 
@@ -198,7 +216,7 @@ def render_map(input_path: str, attribute: str, output: str):
 
 
 _STYLES = ["atlas", "topographic", "wargame"]
-_COLOR_MODES = ["biome", "terrain", "land_cover", "elevation"]
+_COLOR_MODES = ["biome", "terrain", "land_cover", "soil", "land_use", "elevation"]
 _DEFAULT_LAYERS = {
     "terrain",
     "rivers",
@@ -284,7 +302,7 @@ def _load_export_section(config_path: str) -> dict:
     "--color-mode",
     type=click.Choice(_COLOR_MODES, case_sensitive=False),
     default=None,
-    help="Hex fill color source (overrides config file). Choices: biome, terrain, land_cover, elevation.",
+    help="Hex fill color source (overrides config file). Choices: biome, terrain, land_cover, soil, land_use, elevation.",
 )
 @click.option(
     "--layers",
@@ -329,7 +347,6 @@ def export_svg(
             "color_mode",
             "hex_size",
             "padding",
-            "contour_elevation_scale_m",
             "contour_interval_m",
             "contour_max_crossings",
             "contour_max_stroke",

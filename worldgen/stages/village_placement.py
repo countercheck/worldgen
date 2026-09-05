@@ -90,7 +90,7 @@ class VillagePlacementStage(GeneratorStage):
                 continue
             if all(distance(coord, c) >= 3 for c in placed_coords):
                 pop = int(self.rng.integers(100, 1_001))
-                role = _assign_role(coord, hx, hexes, self.config.terrain_mountain_gradient)
+                role = _assign_role(coord, hx, hexes, self.config)
                 name = f"{hx.biome.name.lower()}_village_{village_idx}"
                 s = Settlement(
                     coord=coord,

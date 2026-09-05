@@ -184,6 +184,90 @@ def astar(
     return None
 
 
+def astar_to_any(
+    grid: dict[HexCoord, Hex],
+    start: HexCoord,
+    goals,
+    cost_fn: Callable[[Hex], float],
+    edge_cost_fn: Callable[[Hex, Hex], float] | None = None,
+    aim: HexCoord | None = None,
+    goal_cost: dict | None = None,
+) -> list[HexCoord] | None:
+    """`astar`, but it ends at the best hex in *goals* rather than at one named hex.
+
+    What it is for: a traveller bound for a town does not need a road of his own the whole
+    way there, he needs to reach the road that already goes there.  So the search runs
+    against the set of hexes from which the destination is already reachable, and stops at
+    whichever it touches first.
+
+    *aim* steers the heuristic — the destination itself, so the search heads the right way
+    rather than sprawling.  Without it this is a Dijkstra that happens to stop early.
+
+    *goal_cost* is what remains to be travelled after reaching each goal, so that the search
+    minimises the whole journey rather than the cost of reaching the network.  Those are not
+    the same thing: without it a traveller joins the road at whatever hex is cheapest to
+    reach and follows it however far round it goes.
+
+    **Pass `goal_cost` only with `aim=None`.**  The two are in different units — `goal_cost`
+    is real cost, while the heuristic counts hexes at 1.0 apiece, and road travel costs a
+    fraction of that.  Mixing them makes the cutoff below fire on the first expansion, so
+    the search returns the network route every time without ever looking at an alternative.
+    With `aim=None` the frontier is ordered by true cost and the comparison is sound.
+    """
+    if start not in grid or not goals:
+        return None
+    if start in goals:
+        return [start]
+
+    open_set = [(0.0, start)]
+    came_from: dict = {start: None}
+    g_score = {start: 0.0}
+    visited = set()
+    best_total, best_node = float("inf"), None
+
+    while open_set:
+        f, current = heapq.heappop(open_set)
+        # Nothing left on the frontier can better the journey already found. Sound only
+        # because f and best_total are in the same units, which is what `aim` would break.
+        if f > best_total:
+            break
+        if current in visited:
+            continue
+        visited.add(current)
+
+        if current in goals:
+            total = g_score[current] + (goal_cost.get(current, 0.0) if goal_cost else 0.0)
+            if total < best_total:
+                best_total, best_node = total, current
+            # With no residual to weigh, the first goal reached is the cheapest reached.
+            if goal_cost is None:
+                break
+
+        for neighbor in neighbors(current):
+            if neighbor not in grid or neighbor in visited:
+                continue
+            cost = cost_fn(grid[neighbor])
+            if edge_cost_fn is not None:
+                cost += edge_cost_fn(grid[current], grid[neighbor])
+            if cost == float("inf"):
+                continue
+            tentative_g = g_score[current] + cost
+            if neighbor not in g_score or tentative_g < g_score[neighbor]:
+                came_from[neighbor] = current
+                g_score[neighbor] = tentative_g
+                h = distance(neighbor, aim) if aim is not None else 0.0
+                heapq.heappush(open_set, (tentative_g + h, neighbor))
+
+    if best_node is None:
+        return None
+    path = []
+    node = best_node
+    while node is not None:
+        path.append(node)
+        node = came_from[node]
+    return list(reversed(path))
+
+
 def _is_water(hexes: dict[HexCoord, Hex], coord: HexCoord) -> bool:
     """Water test used by the path helpers.
 
@@ -215,45 +299,92 @@ def water_transitions(path: list[HexCoord], hexes: dict[HexCoord, Hex]) -> list[
     return out
 
 
-def dedupe_road_paths(roads, hexes: dict[HexCoord, Hex], rank) -> list[tuple]:
-    """Split roads into land legs with every map edge drawn exactly once.
+def road_water_transitions(sea_edges, hexes: dict[HexCoord, Hex]) -> set[HexCoord]:
+    """The shores a sea leg lands on — where a route takes to a boat and comes off again.
 
-    Routes between different settlement pairs share trunk segments, so a naive render
-    stacks many polylines on the same edge — mostly invisible, but where the tiers differ
-    a thin dashed track paints over a primary road, and the redundancy bloats the output.
-
-    Each edge is awarded to the highest-ranked road using it (`rank(road) -> int`, higher
-    wins; ties go to the first road in list order).  Results come back in ascending rank
-    so a renderer drawing them in order paints important roads last, on top.  Returns
-    (road, polyline) pairs; the road carries whatever styling the caller needs.
+    The water itself is not drawn, so a crossing leaves two lines stopping dead at opposite
+    shores; renderers mark these hexes so the two read as one route.  Pass `sea_edges`: a
+    dry hex holding an edge into the water is a landing.
     """
-    best: dict[frozenset, int] = {}
-    for road in roads:
-        r = rank(road)
-        for a, b in zip(road.path, road.path[1:], strict=False):
-            edge = frozenset((a, b))
-            if best.get(edge, -1) < r:
-                best[edge] = r
+    out: set[HexCoord] = set()
+    for a, b in sea_edges:
+        a_wet, b_wet = _is_water(hexes, a), _is_water(hexes, b)
+        if a_wet != b_wet:
+            out.add(b if a_wet else a)
+    return out
+
+
+def road_polylines(road_edges, hexes: dict[HexCoord, Hex]) -> list[tuple]:
+    """The road graph as drawable runs: `(tier, polyline)` pairs, each edge appearing once.
+
+    Replaces `dedupe_road_paths`, which existed only to undo the old representation.  When
+    the model stored a whole journey per settlement pair, routes overlapped almost
+    completely and every renderer had to award each shared edge to its highest-ranked user
+    before drawing.  One tier per edge makes that step unnecessary: there is nothing left
+    to deduplicate, and this only has to decide where one drawn line stops and the next
+    begins.
+
+    A run breaks at two things — a junction and a change of tier.  Junctions, because a
+    line through a fork would draw an edge that is not there; tier, because a polyline
+    carries one style.  Water needs no handling here: a leg with a foot in the sea lives in
+    `WorldState.sea_edges` and is not a road.
+
+    Results come back in ascending tier rank, so a renderer drawing them in order paints
+    primary roads last and a track never overdraws a highway.
+    """
+    from .world_state import ROAD_TIER_RANK
+
+    # Water is skipped defensively: `road_edges` should hold none, but a world loaded from
+    # a schema-1.3 file has its sea legs mixed in and must still draw.
+    adjacency: dict[HexCoord, list[tuple[HexCoord, object]]] = {}
+    edges: dict[frozenset, object] = {}
+    for (a, b), edge in road_edges.items():
+        if _is_water(hexes, a) or _is_water(hexes, b):
+            continue
+        tier = getattr(edge, "tier", edge)
+        edges[frozenset((a, b))] = tier
+        adjacency.setdefault(a, []).append((b, tier))
+        adjacency.setdefault(b, []).append((a, tier))
+
+    def continues(coord: HexCoord, tier) -> list[HexCoord]:
+        """Neighbours reachable from *coord* along an edge of the same tier."""
+        return [n for n, t in adjacency.get(coord, ()) if t == tier]
 
     out: list[tuple] = []
-    claimed: set[frozenset] = set()
-    for road in sorted(roads, key=rank):  # stable, so ties keep list order
-        r = rank(road)
-        for leg in split_path_on_water(road.path, hexes):
-            run: list[HexCoord] = []
-            for a, b in zip(leg, leg[1:], strict=False):
-                edge = frozenset((a, b))
-                if best[edge] == r and edge not in claimed:
-                    claimed.add(edge)
-                    if not run:
-                        run.append(a)
-                    run.append(b)
-                else:
-                    if len(run) >= 2:
-                        out.append((road, run))
-                    run = []
-            if len(run) >= 2:
-                out.append((road, run))
+    walked: set[frozenset] = set()
+
+    def walk(start: HexCoord, first: HexCoord, tier) -> None:
+        run = [start, first]
+        walked.add(frozenset((start, first)))
+        while True:
+            here = run[-1]
+            # Carry on only through a plain degree-2 node of this tier: anywhere else is a
+            # junction, and the next run starts there rather than sweeping through it.
+            onward = [n for n in continues(here, tier) if n != run[-2]]
+            if len(onward) != 1 or len(continues(here, tier)) != 2:
+                break
+            edge = frozenset((here, onward[0]))
+            if edge in walked:
+                break
+            walked.add(edge)
+            run.append(onward[0])
+        out.append((tier, run))
+
+    # Open runs first, from every end and junction, so the interior of a corridor is only
+    # reached along it rather than started in the middle.
+    for coord in sorted(adjacency):
+        for nbr, tier in sorted(adjacency[coord]):
+            if len(continues(coord, tier)) == 2 or frozenset((coord, nbr)) in walked:
+                continue
+            walk(coord, nbr, tier)
+
+    # Whatever is left is a closed loop of one tier, with no end to start from.
+    for coord in sorted(adjacency):
+        for nbr, tier in sorted(adjacency[coord]):
+            if frozenset((coord, nbr)) not in walked:
+                walk(coord, nbr, tier)
+
+    out.sort(key=lambda pair: ROAD_TIER_RANK[pair[0]])
     return out
 
 

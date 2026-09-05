@@ -41,14 +41,13 @@ def test_debug_viewer_paints_the_primary_road_over_the_branching_track():
     """Iterating RoadTier drew tracks last, so a branch painted over its own trunk."""
     import re
 
-    from worldgen.core.world_state import Road, RoadTier, WorldState
+    from tests.worlds import lay_road
+    from worldgen.core.world_state import RoadTier, WorldState
     from worldgen.render.debug_viewer import render_svg
 
     ws = WorldState.empty(seed=1, width=5, height=3)
-    ws.roads = [
-        Road(path=[(0, 1), (1, 1), (2, 1), (3, 1)], tier=RoadTier.PRIMARY),
-        Road(path=[(0, 1), (1, 1), (2, 1), (2, 2)], tier=RoadTier.TRACK),
-    ]
+    lay_road(ws, [(0, 1), (1, 1), (2, 1), (3, 1)], RoadTier.PRIMARY)
+    lay_road(ws, [(0, 1), (1, 1), (2, 1), (2, 2)], RoadTier.TRACK)
     body = render_svg(ws, "roads").split('<g id="layer-roads">')[1].split("</g>")[0]
 
     assert body.index('stroke="#b8a070"') < body.index('stroke="#5c3d1e"')

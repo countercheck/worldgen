@@ -34,7 +34,7 @@ class WaterBodiesStage(GeneratorStage):
                 for c in component:
                     hexes[c].terrain_class = TerrainClass.INLAND_WATER
 
-        _fix_coast_hexes(state)
+        _fix_coast_hexes(state, self.config)
         return state
 
 
@@ -51,7 +51,7 @@ def _bfs_component(seed, water: set) -> set:
     return component
 
 
-def _fix_coast_hexes(state: WorldState) -> None:
+def _fix_coast_hexes(state: WorldState, cfg) -> None:
     """Re-classify COAST hexes that border only lakes (not open ocean).
 
     TerrainClassificationStage runs before water body labelling, so it
@@ -60,9 +60,7 @@ def _fix_coast_hexes(state: WorldState) -> None:
     original terrain classification.
     """
     hexes = state.hexes
-    cfg_dict = state.metadata.get("config", {})
-    sea = cfg_dict.get("sea_level", 0.45)
-    coast_threshold = sea + 0.05
+    coast_threshold = cfg.coast_max_elevation_m
 
     for coord, hx in hexes.items():
         if hx.terrain_class != TerrainClass.COAST:

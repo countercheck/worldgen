@@ -29,7 +29,7 @@ def build_pipeline(
 
     *until* stops after the stage of that class name, for tests that only care about an
     early attribute and should not pay for settlement and road generation.  Overrides win
-    over the defaults, so a caller can vary anything including `erosion_iterations`.
+    the production defaults, so a caller can vary anything it needs to.
 
     The two elevation stages are interchangeable as far as *until* is concerned: a caller
     that sets `heightmap_path` gets `ImageElevationStage` in the slot, and asking to stop
@@ -37,10 +37,11 @@ def build_pipeline(
     heightmap to an existing `until="ElevationStage"` call would fail on a name that is
     an implementation detail of the swap.
     """
-    defaults = {"erosion_iterations": 500}
-    cfg = WorldConfig(width=width, height=height, **{**defaults, **cfg_overrides})
+    # The model rides in the config (and thence into world.json metadata), exactly as the
+    # CLI threads it; the keyword stays for the fixtures' convenience.
+    cfg = WorldConfig(width=width, height=height, model=model, **cfg_overrides)
 
-    stages = stages_for(cfg, model)
+    stages = stages_for(cfg, cfg.model)
     if until is not None:
         names = [s.__name__ for s in stages]
         if until not in names:
@@ -95,3 +96,29 @@ def build_world(
             **cfg_overrides,
         ).run()
     return _WORLD_CACHE[key]
+
+
+def lay_road(ws, path, tier):
+    """Write a hex path into the world as a route of *tier*.
+
+    Mirrors what `InterurbanRoadStage` does on the way out, which a fixture has to or it
+    tests a shape the generator never produces: one tier per edge, the higher tier winning
+    where two routes overlap, and an edge with a foot in the water filed under `sea_edges`
+    rather than `road_edges`, because it is a sea leg and not a road.
+    """
+    from worldgen.core.hex import TerrainClass
+    from worldgen.core.world_state import ROAD_TIER_RANK, RoadEdge, road_edge_key
+
+    water = (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
+    for a, b in zip(path, path[1:], strict=False):
+        a, b = tuple(a), tuple(b)
+        key = road_edge_key(a, b)
+        wet = any(ws.hexes[c].terrain_class in water for c in (a, b))
+        book = ws.sea_edges if wet else ws.road_edges
+        have = book.get(key)
+        if have is None or ROAD_TIER_RANK[tier] > ROAD_TIER_RANK[have.tier]:
+            lo, hi = key
+            book[key] = RoadEdge(tier, ws.hexes[hi].elevation - ws.hexes[lo].elevation)
+        ws.hexes[a].road_connections.add(b)
+        ws.hexes[b].road_connections.add(a)
+    return ws

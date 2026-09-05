@@ -519,22 +519,48 @@ class ErosionStage(GeneratorStage):
         cfg = self.config
         w, h = state.width, state.height
 
+        # Erosion works on a normalised copy, and puts the result back in metres.
+        #
+        # Its constants are fractions of the map's relief rather than physical
+        # quantities: erosion_capacity multiplies a height difference, the capacity floor
+        # and erosion_delta_min_load are absolute heights, and all of them were tuned
+        # against a 0-1 range. Fed metres directly they become centimetres — a droplet's
+        # capacity collapses to nothing, so every one of them deposits, and the whole map
+        # planes off to sea level within a couple of passes.
+        #
+        # Converted against the *known* span rather than the map's own minimum and
+        # maximum, so this is a fixed change of units and not another per-map stretch of
+        # the kind the rest of this work has been removing. Erosion is a shaping heuristic,
+        # and its knobs being shares of the relief is the honest description of them.
+        span = cfg.max_elevation_m + cfg.seabed_depth_m
+        sea_shaped = cfg.seabed_depth_m / span
+
         # Indexed by grid column/row throughout; `state.coord_at` turns an index back
         # into a hex on the way in and out, so droplets run over the same rectangular
         # field whichever layout the grid uses.
         arr = np.zeros((w, h))
         for col in range(w):
             for row in range(h):
-                arr[col, row] = state.hexes[state.coord_at(col, row)].elevation
+                elevation = state.hexes[state.coord_at(col, row)].elevation
+                arr[col, row] = (elevation + cfg.seabed_depth_m) / span
 
         land_coords = [
-            (col, row) for col in range(w) for row in range(h) if arr[col, row] >= cfg.sea_level
+            (col, row) for col in range(w) for row in range(h) if arr[col, row] >= sea_shaped
         ]
 
         if land_coords:
             land_arr = np.array(land_coords)
             n_land = len(land_coords)
-            n_iter = cfg.erosion_iterations
+            # Dosed per land hex rather than as a flat count, because a flat count is a
+            # different amount of weather depending on how big the map is. At the old
+            # default of 15000 droplets a 32x32 map got 14.6 per hex and a 128x128 got
+            # 0.9 — a sixteenfold spread, and most of why small maps came out as Alpine
+            # massifs while the default map stayed a barely-touched noise field.
+            #
+            # Per *land* hex, not per map hex: droplets are seeded on land, so a map that
+            # is mostly ocean should not have its weather spread thinner over what land it
+            # has.
+            n_iter = max(1, int(round(cfg.erosion_droplets_per_hex * n_land)))
             affinity_interval = cfg.erosion_affinity_update_interval
 
             # Channel affinity: starts uniform, biases later particles toward established channels
@@ -556,7 +582,7 @@ class ErosionStage(GeneratorStage):
                     float(sr),
                     w,
                     h,
-                    cfg.sea_level,
+                    sea_shaped,
                     cfg.erosion_inertia,
                     cfg.erosion_capacity,
                     cfg.erosion_deposition,
@@ -577,10 +603,13 @@ class ErosionStage(GeneratorStage):
 
         arr = gaussian_filter(arr, sigma=0.5)
 
-        lo, hi = arr.min(), arr.max()
-        if hi > lo:
-            arr = (arr - lo) / (hi - lo)
-
+        # Back to metres below. There is deliberately no re-stretch to [0, 1] first: it
+        # would undo the datum, putting the lowest point of the eroded map at the seabed
+        # and the highest at the peak whatever erosion had actually done to either. Sea
+        # level has to stay where it is for the word to mean anything, and a landscape
+        # that has been worn down should read as worn down rather than being scaled back
+        # up to fill the range it started with.
+        #
         # Carve the valleys, then look again at where the water runs, and carve again.
         # One pass does not do it: widening a valley moves the drainage into it, so the
         # network measured before the first cut is not the network that exists after —
@@ -588,13 +617,7 @@ class ErosionStage(GeneratorStage):
         # Letting terrain and drainage settle against each other is what a landscape
         # evolution model does, and it is the only way the two agree by the time anything
         # downstream reads either.
-        #
-        # After the renormalisation above, deliberately.  Carving before it lowers the
-        # field's minimum, so rescaling to [0, 1] lifts everything else to compensate and
-        # the waterline moves — on one heightmap it went from 43.7% land to 67.9%, which
-        # is the coastline the import was asked to preserve. Cutting afterwards changes
-        # the valleys and leaves the rest of the map where it was.
-        if land_coords:
+        if land_coords and cfg.valley_width_max > 0.0:
             # Rivers that enter from off the map bring a catchment this map never had, and
             # nothing here knew about it: accumulation starts every cell at one hex of
             # rain, so an imported trunk was measured as the trickle its first few on-map
@@ -607,7 +630,7 @@ class ErosionStage(GeneratorStage):
                 mouth: inflow_volume
                 for mouth in _inflow_mouths(
                     arr,
-                    cfg.sea_level,
+                    sea_shaped,
                     state,
                     neighbours,
                     tuple(cfg.river_inflow_edges),
@@ -616,16 +639,18 @@ class ErosionStage(GeneratorStage):
                 )
             }
 
+            # The two height knobs are quoted in metres and the field is normalised, so
+            # they are divided by the same span the array was built with.
             meander = np.zeros((w, h))
             for _ in range(cfg.valley_carve_passes):
                 _widen_valleys(
                     arr,
-                    _grid_flow_accumulation(arr, cfg.sea_level, neighbours, inflow),
-                    cfg.sea_level,
+                    _grid_flow_accumulation(arr, sea_shaped, neighbours, inflow),
+                    sea_shaped,
                     cfg.valley_width_max,
                     cfg.valley_width_exponent,
-                    cfg.valley_floor_slope,
-                    cfg.valley_max_relief,
+                    cfg.valley_floor_slope_m / span,
+                    cfg.valley_max_relief_m / span,
                     cfg.valley_channel_fraction,
                     meander,
                 )
@@ -637,7 +662,7 @@ class ErosionStage(GeneratorStage):
             alluvium = _normalise_alluvium(
                 deposition,
                 meander,
-                arr >= cfg.sea_level,
+                arr >= sea_shaped,
                 cfg.alluvium_quantile,
                 cfg.alluvium_floodplain_gain,
                 cfg.alluvium_smoothing,
@@ -648,6 +673,7 @@ class ErosionStage(GeneratorStage):
 
         for col in range(w):
             for row in range(h):
-                state.hexes[state.coord_at(col, row)].elevation = float(arr[col, row])
+                metres = float(arr[col, row]) * span - cfg.seabed_depth_m
+                state.hexes[state.coord_at(col, row)].elevation = metres
 
         return state

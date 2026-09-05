@@ -5,14 +5,15 @@ left downwind of a range is a rain shadow, and the point of computing this befor
 rivers rather than after is that a shadow should show in the water: a catchment behind
 mountains ought to raise smaller rivers, and a lake in one ought to be likelier to close.
 
-Shared by `ClimateStage`, which turns the pattern into per-hex moisture for the biomes,
-and by `HydrologyStage`, which uses it to decide how much rain each hex contributes to
-flow accumulation.  Kept in one place because the two must agree: a map whose biomes say
-desert while its rivers say floodplain is worse than either being wrong alone.
+Shared by `ClimateStage`, which scales the pattern into millimetres a year for the
+biomes, and by `HydrologyStage`, which uses it to decide how much rain each hex
+contributes to flow accumulation.  Kept in one place because the two must agree: a map
+whose biomes say desert while its rivers say floodplain is worse than either being wrong
+alone.
 
 Depends only on elevation, terrain class and the wind — never on rivers.  That is what
-lets hydrology run it, and it is the whole reason this is a separate function rather than
-a method on `ClimateStage`, which cannot run first because its later moisture bonuses read
+lets hydrology run it, and it is the whole reason this is a function here rather than a
+method on `ClimateStage`, which cannot run first because its later moisture bonuses read
 the river tags hydrology produces.
 """
 
@@ -22,6 +23,8 @@ from ..core.hex import HexCoord, TerrainClass
 from ..core.hex_grid import neighbors
 from ..core.world_state import WorldState
 
+WATER = (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
+
 
 def orographic_pattern(state: WorldState, config) -> dict[HexCoord, float]:
     """Relative precipitation per hex: wind swept across the map, rained out by lift.
@@ -29,7 +32,10 @@ def orographic_pattern(state: WorldState, config) -> dict[HexCoord, float]:
     Every hex of open water reads 1.0 — the air above it is saturated.  On land the value
     is what the parcel arriving from upwind gives up climbing to that hex, so it is a
     *pattern* and not a depth: flat ground lifts nothing and so reads near zero, which is
-    why callers scale it against its own mean rather than using it raw.
+    why both callers scale it against its own mean rather than using it raw.
+
+    Lift is taken as a fraction of the map's vertical scale, so `orographic_strength`
+    means the same thing whatever `max_elevation_m` is set to.
     """
     wind = config.wind_direction
     wlen = math.hypot(wind[0], wind[1])
@@ -50,22 +56,21 @@ def orographic_pattern(state: WorldState, config) -> dict[HexCoord, float]:
     sorted_coords = sorted(state.hexes.keys(), key=dot_wind)
 
     orographic = config.orographic_strength
-    sea_level = config.sea_level
+    resupply = config.moisture_resupply_per_hex
+    span = config.max_elevation_m or 1.0
 
     # Atmospheric moisture still aloft, depleted as it rains out.
     atm: dict[HexCoord, float] = {}
     precip: dict[HexCoord, float] = {}
     for coord, h in state.hexes.items():
-        if h.terrain_class == TerrainClass.OPEN_WATER:
+        if h.terrain_class is TerrainClass.OPEN_WATER:
             atm[coord] = 1.0
-        elif h.terrain_class == TerrainClass.INLAND_WATER:
-            precip[coord] = 1.0
 
     for coord in sorted_coords:
         h = state.hexes[coord]
-        if h.terrain_class in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER):
+        if h.terrain_class in WATER:
             precip[coord] = 1.0
-            if h.terrain_class == TerrainClass.OPEN_WATER:
+            if h.terrain_class is TerrainClass.OPEN_WATER:
                 atm[coord] = 1.0
             continue
 
@@ -75,17 +80,24 @@ def orographic_pattern(state: WorldState, config) -> dict[HexCoord, float]:
             if n not in state.hexes:
                 continue
             nx, ny = pos(n)
-            # Neighbor is upwind if it lies opposite the wind direction
+            # Neighbour is upwind if it lies opposite the wind direction.
             if wd[0] * (nx - hx) + wd[1] * (ny - hy) < 0 and n in atm:
                 upwind_vals.append(atm[n])
 
         incoming = sum(upwind_vals) / len(upwind_vals) if upwind_vals else 1.0
 
-        lift = max(0.0, h.elevation - sea_level)
+        lift = max(0.0, h.elevation) / span
         fraction = min(1.0, lift * orographic)
         rained_out = incoming * fraction
         precip[coord] = rained_out
-        atm[coord] = max(0.0, incoming - rained_out)
+        # Air picks moisture back up as it goes.  Without this the sweep is a one-way
+        # drying: whatever the first barrier takes is gone for good, so the far side of a
+        # 128 km map receives nothing at all and the region's rainfall spans a factor of
+        # eight from coast to interior.  Real air is resupplied continuously by
+        # evaporation, which is why a rain shadow is a local feature tens of kilometres
+        # deep rather than everything downwind of the first hill.
+        left = max(0.0, incoming - rained_out)
+        atm[coord] = left + resupply * (1.0 - left)
 
     return precip
 
@@ -101,8 +113,8 @@ def rain_per_hex(state: WorldState, config, land: set[HexCoord]) -> dict[HexCoor
     the orographic pattern at its word.
 
     The mean is held at 1.0 whatever the strength, so the map's total water does not
-    change with this setting — only where it falls.  That keeps `river_flow_threshold`
-    and `river_inflow_volume`, both of which are fractions, meaning what they did.
+    change with this setting — only where it falls.  That keeps `channel_min_discharge`
+    and `river_inflow_volume` meaning what they did.
 
     Lake hexes are covered too, since a basin's own surface collects rain and the water
     balance counts it.  Their value is the mean of the land around them rather than their
@@ -123,7 +135,7 @@ def rain_per_hex(state: WorldState, config, land: set[HexCoord]) -> dict[HexCoor
     rain = {c: max(0.0, 1.0 + strength * (pattern.get(c, 0.0) / mean - 1.0)) for c in land}
 
     for coord, hx in state.hexes.items():
-        if hx.terrain_class != TerrainClass.INLAND_WATER:
+        if hx.terrain_class is not TerrainClass.INLAND_WATER:
             continue
         nearby = [rain[n] for n in neighbors(coord) if n in rain]
         rain[coord] = sum(nearby) / len(nearby) if nearby else 1.0

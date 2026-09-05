@@ -11,7 +11,7 @@ def _axes(cfg, w: int, h: int) -> tuple[np.ndarray, np.ndarray]:
 
 
 def noise_field(cfg, rng, w: int, h: int) -> tuple[np.ndarray, OpenSimplex]:
-    """The raw terrain field: FBM over warped coordinates, tilted, normalised to [0, 1].
+    """The raw terrain field: FBM over warped coordinates, normalised to [0, 1].
 
     Split out from `ElevationStage` so that an imported coastline can be filled with the
     same terrain the generator would have produced on its own, rather than a second
@@ -58,11 +58,10 @@ def noise_field(cfg, rng, w: int, h: int) -> tuple[np.ndarray, OpenSimplex]:
         result[i] = v / max_val
     arr = result.reshape(w, h)
 
-    gx, gy = cfg.elevation_gradient
-    if gx != 0.0 or gy != 0.0:
-        qf = np.linspace(-0.5, 0.5, w)[:, np.newaxis]
-        rf = np.linspace(-0.5, 0.5, h)[np.newaxis, :]
-        arr += gx * qf + gy * rf
+    # The regional tilt is deliberately *not* applied here.  It used to be, and it was
+    # competing with the normalisation immediately below, which promptly stretched the
+    # result back out — so asking for half a range of tilt got you rather less than that.
+    # It now goes on in metres after the conversion, where it does what it says.
 
     # Normalise to [0, 1] *before* the falloff.  The falloff multiplies towards zero, so
     # it only pulls the map edge underwater if zero is the bottom of the elevation range.
@@ -148,19 +147,52 @@ def apply_continent_falloff(
     if not cfg.continent_falloff or not set(cfg.continent_falloff_edges):
         return arr
 
-    return blend_to_seabed(arr, falloff_ramp(cfg, coast_gen, w, h), cfg)
+    return blend_to_seabed(arr, falloff_ramp(cfg, coast_gen, w, h), 0.0)
 
 
-def blend_to_seabed(arr: np.ndarray, t: np.ndarray, cfg) -> np.ndarray:
-    """Blend towards a shallow seabed, not towards zero.
+def blend_to_seabed(arr: np.ndarray, t: np.ndarray, floor: float) -> np.ndarray:
+    """Blend *arr* towards *floor* where the ramp *t* falls away to zero.
 
-    Dropping the border to elevation 0 puts an abyss against the shore, and the whole
-    descent has to happen across the shelf, which is what made the coast a cliff whatever
-    width it was given.  A seabed just below sea level is both a shorter drop and a truer
-    one — the sea floor near a coast is shallow.  Shared with the imported-coastline
-    falloff so the two paths cannot drift apart.
+    Dropping the border straight to the bottom of the field puts an abyss against the
+    shore, and the whole descent then has to happen across the shelf — which is what made
+    the coast a cliff whatever width it was given.  A sea floor just below the waterline
+    is both a shorter drop and a truer one.
+
+    *floor* is passed rather than read off the config because the two callers work on
+    different axes and must still agree on where the sea floor is.  The generated path
+    blends the shaped [0, 1] field towards its own bottom, 0.0, which `to_metres` then
+    puts at `-seabed_depth_m`; an imported coastline is already in metres and blends
+    towards `-seabed_depth_m` itself.  Shared so the two paths cannot drift apart.
     """
-    return arr * t + cfg.continent_seabed * (1.0 - t)
+    return arr * t + floor * (1.0 - t)
+
+
+def to_metres(arr: np.ndarray, cfg) -> np.ndarray:
+    """A shaped [0, 1] field into metres above sea level.
+
+    Sea level is the datum: land is positive, the sea floor negative, and zero means sea
+    level by definition rather than by a configured threshold.  Every test downstream —
+    is this ocean, how far above the water does the ground stand, is it above the
+    treeline — is then a statement about the world rather than a position on a per-map
+    axis.
+    """
+    span = cfg.max_elevation_m + cfg.seabed_depth_m
+    return arr * span - cfg.seabed_depth_m
+
+
+def apply_tilt(arr: np.ndarray, cfg, w: int, h: int) -> np.ndarray:
+    """The regional tilt, in metres: raise one edge of the map by the figure given.
+
+    Applied after the metres conversion, not before the shaping.  In the old model it
+    went on first and was immediately undone by a normalisation, so asking for half a
+    range of tilt got you rather less.
+    """
+    gx, gy = cfg.elevation_gradient_m
+    if gx == 0.0 and gy == 0.0:
+        return arr
+    qf = np.linspace(-0.5, 0.5, w)[:, np.newaxis]
+    rf = np.linspace(-0.5, 0.5, h)[np.newaxis, :]
+    return arr + gx * qf + gy * rf
 
 
 def write_elevations(state: WorldState, arr: np.ndarray) -> None:
@@ -181,6 +213,7 @@ class ElevationStage(GeneratorStage):
 
         arr, coast_gen = noise_field(cfg, self.rng, w, h)
         arr = apply_continent_falloff(arr, cfg, coast_gen, w, h)
+        arr = apply_tilt(to_metres(arr, cfg), cfg, w, h)
         write_elevations(state, arr)
 
         return state

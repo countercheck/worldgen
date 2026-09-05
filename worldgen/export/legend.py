@@ -9,8 +9,8 @@ the two can gain a legend row or change placement without drifting apart.
 import math
 from dataclasses import dataclass
 
-from ..core.hex import SettlementTier, terrain_labels
-from ..core.hex_grid import split_path_on_water, water_transitions
+from ..core.hex import DEFAULT_TERRAIN_BANDS, SettlementTier, terrain_bands, terrain_label
+from ..core.hex_grid import road_polylines, road_water_transitions
 from ..core.world_state import RoadTier, WorldState
 
 # Stand-in steps for the continuous greyscale used by color_mode="elevation".
@@ -101,19 +101,18 @@ def _enum_sort_key(member) -> tuple[str, int]:
     return (cls.__name__, list(cls).index(member))
 
 
-def _fill_category(h, color_mode: str, labels: dict):
-    """The enum member that decides a hex's fill — mirrors each exporter's `_get_hex_fill`.
-
-    Terrain reads the map label, not `terrain_class`: the generator no longer bands
-    steepness, so ocean, lake, coast and land is all the class can say, and a legend
-    listing those four would tell a reader nothing about the ground.
-    """
+def _fill_category(h, color_mode: str, bands=DEFAULT_TERRAIN_BANDS):
+    """The enum member that decides a hex's fill — mirrors each exporter's `_get_hex_fill`."""
     if color_mode == "terrain":
-        return labels[h.coord]
+        return terrain_label(h, *bands)
     if color_mode == "land_cover":
         return h.land_cover
     if color_mode == "biome":
-        return h.biome if h.biome is not None else labels[h.coord]
+        return h.biome if h.biome is not None else terrain_label(h, *bands)
+    if color_mode == "soil":
+        return h.soil
+    if color_mode == "land_use":
+        return h.land_use
     return None  # "elevation" is continuous, not categorical
 
 
@@ -129,15 +128,13 @@ def anchorage_points(ws: WorldState) -> list:
     in for a road where a river channel cuts the network in two.
 
     Shore points are filtered to hexes that a drawn road leg actually reaches.  A land
-    leg of a single hex cannot be drawn as a polyline (`split_path_on_water` discards
-    it), and marking its shore would leave an anchor sitting on the coast with no road
-    attached to it.  Ferry landings are never filtered — the ferry is the connection,
-    whether or not a road leg happens to be drawable at either end.
+    leg of a single hex cannot be drawn as a polyline (`road_polylines` discards it), and
+    marking its shore would leave an anchor sitting on the coast with no road attached to
+    it.  Ferry landings are never filtered — the ferry is the connection, whether or not a
+    road leg happens to be drawable at either end.
     """
-    drawn = {
-        c for road in ws.roads for leg in split_path_on_water(road.path, ws.hexes) for c in leg
-    }
-    points = {c for road in ws.roads for c in water_transitions(road.path, ws.hexes) if c in drawn}
+    drawn = {c for _, leg in road_polylines(ws.road_edges, ws.hexes) for c in leg}
+    points = {c for c in road_water_transitions(ws.sea_edges, ws.hexes) if c in drawn}
     points |= {c for ferry in ws.ferries for c in (ferry.a, ferry.b)}
     return sorted(points)
 
@@ -175,16 +172,15 @@ def rows(ws: WorldState, color_mode: str, layers: set[str]) -> list[LegendRow]:
     """Legend rows for *ws*, covering only what the given layers actually draw."""
     out: list[LegendRow] = []
 
-    labels = terrain_labels(ws)
-
     if "terrain" in layers:
         if color_mode == "elevation":
             out.append(LegendRow("ramp", "Low → high elevation"))
         else:
             # One representative hex per category, so exporters can reuse their fill lookup.
             samples: dict = {}
+            bands = terrain_bands(ws)
             for hex_item in ws.hexes.values():
-                category = _fill_category(hex_item, color_mode, labels)
+                category = _fill_category(hex_item, color_mode, bands)
                 if category is not None:
                     samples.setdefault(category, hex_item)
             for category in sorted(samples, key=_enum_sort_key):
@@ -193,8 +189,8 @@ def rows(ws: WorldState, color_mode: str, layers: set[str]) -> list[LegendRow]:
     if "rivers" in layers and ws.rivers:
         out.append(LegendRow("river", "River"))
 
-    if "roads" in layers and ws.roads:
-        present = {road.tier for road in ws.roads}
+    if "roads" in layers and ws.road_edges:
+        present = {edge.tier for edge in ws.road_edges.values()}
         for tier in RoadTier:
             if tier in present:
                 out.append(LegendRow("road", f"{_label(tier)} road", tier))

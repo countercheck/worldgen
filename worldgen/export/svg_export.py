@@ -2,10 +2,16 @@ import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ..core.hex import SettlementTier, terrain_labels
-from ..core.hex_grid import axial_to_pixel, dedupe_road_paths, neighbors
-from ..core.world_state import ROAD_TIER_RANK, RoadTier, WorldState
-from ..render.debug_viewer import BIOME_COLORS, LAND_COVER_COLORS, TERRAIN_COLORS
+from ..core.hex import DEFAULT_TERRAIN_BANDS, SettlementTier, terrain_bands, terrain_label
+from ..core.hex_grid import axial_to_pixel, neighbors, road_polylines
+from ..core.world_state import RoadTier, WorldState
+from ..render.debug_viewer import (
+    BIOME_COLORS,
+    LAND_COVER_COLORS,
+    LAND_USE_COLORS,
+    SOIL_COLORS,
+    TERRAIN_COLORS,
+)
 from . import legend, rivers
 
 
@@ -13,7 +19,7 @@ from . import legend, rivers
 class SVGConfig:
     hex_size: float = 12.0
     padding: int = 20
-    color_mode: str = "biome"  # "terrain" | "biome" | "land_cover" | "elevation"
+    color_mode: str = "biome"  # terrain | biome | land_cover | soil | land_use | elevation
     layers: set[str] = field(
         default_factory=lambda: {
             "terrain",
@@ -28,7 +34,6 @@ class SVGConfig:
         }
     )
     style: str = "atlas"  # "atlas" | "topographic" | "wargame"
-    contour_elevation_scale_m: float = 3000.0
     contour_interval_m: float = 100.0
     contour_max_crossings: int = 5
     contour_max_stroke: float = 4.0
@@ -80,23 +85,39 @@ def _xml_escape(s: str) -> str:
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def _get_hex_fill(h, color_mode: str, labels: dict) -> str:
+def _get_hex_fill(
+    h,
+    color_mode: str,
+    elev_span: tuple[float, float] | None = None,
+    bands: tuple[float, float, float] = DEFAULT_TERRAIN_BANDS,
+) -> str:
     if color_mode == "terrain":
-        rgb = TERRAIN_COLORS.get(labels[h.coord], (0.5, 0.5, 0.5))
+        rgb = TERRAIN_COLORS.get(terrain_label(h, *bands), (0.5, 0.5, 0.5))
     elif color_mode == "land_cover":
         rgb = (
             LAND_COVER_COLORS.get(h.land_cover, (0.5, 0.5, 0.5))
             if h.land_cover is not None
             else (0.5, 0.5, 0.5)
         )
+    elif color_mode == "soil":
+        rgb = SOIL_COLORS.get(h.soil, (0.5, 0.5, 0.5))
+    elif color_mode == "land_use":
+        rgb = LAND_USE_COLORS.get(h.land_use, (0.5, 0.5, 0.5))
     elif color_mode == "elevation":
-        v = h.elevation
+        # Elevation is metres; a grey channel is [0, 1]. Normalised against the span of
+        # the map being drawn — the caller passes it, computed once — and clamped, so a
+        # value outside the span can never leave the channel and emit an illegal colour.
+        # (Unnormalised metres used to go straight into the hex formatter, which wrote
+        # fills like `#2469a2469a2469a`.)
+        lo, hi = elev_span if elev_span is not None else (0.0, 1.0)
+        v = (h.elevation - lo) / (hi - lo) if hi > lo else 0.5
+        v = min(1.0, max(0.0, v))
         rgb = (v, v, v)
     else:  # biome
         if h.biome is not None:
             rgb = BIOME_COLORS.get(h.biome, (0.5, 0.5, 0.5))
         else:
-            rgb = TERRAIN_COLORS.get(labels[h.coord], (0.5, 0.5, 0.5))
+            rgb = TERRAIN_COLORS.get(terrain_label(h, *bands), (0.5, 0.5, 0.5))
     return _rgb_to_hex(*rgb[:3])
 
 
@@ -190,7 +211,6 @@ def _legend_glyph(
     cy: float,
     g: float,
     color_mode: str,
-    labels: dict,
     river_color: str = "#2f6fbf",
 ) -> str:
     """SVG markup for one legend row's symbol, in a square box of side *g* centred on (cx, cy)."""
@@ -211,7 +231,7 @@ def _legend_glyph(
     if row.kind == "fill":
         verts = _hex_vertices(cx, cy, g / 2)
         return (
-            f'<polygon points="{_points_str(verts)}" fill="{_get_hex_fill(row.sample, color_mode, labels)}"'
+            f'<polygon points="{_points_str(verts)}" fill="{_get_hex_fill(row.sample, color_mode)}"'
             f' stroke="#555555" stroke-width="0.5"/>'
         )
 
@@ -275,7 +295,6 @@ def _legend_svg(
 
     Row selection, panel geometry and placement live in `legend`; this only draws them.
     """
-    labels = terrain_labels(ws)
     x, y = legend.placement(
         ws,
         config.hex_size,
@@ -304,7 +323,7 @@ def _legend_svg(
         out.append(
             "    "
             + _legend_glyph(
-                row, x + m.inner + m.glyph / 2, cy, m.glyph, color_mode, labels, config.river_color
+                row, x + m.inner + m.glyph / 2, cy, m.glyph, color_mode, config.river_color
             )
         )
         out.append(
@@ -386,14 +405,18 @@ def render(ws: WorldState, config: SVGConfig | None = None) -> str:
         f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}">'
     ]
 
-    labels = terrain_labels(ws)
-
     if "terrain" in layers:
+        elev_span = None
+        if color_mode == "elevation" and ws.hexes:
+            elevs = [h.elevation for h in ws.hexes.values()]
+            elev_span = (min(elevs), max(elevs))
         out.append('  <g id="layer-terrain">')
+        # The bands this world was generated with, not today's defaults.
+        bands = terrain_bands(ws)
         for hex_item in ws.hexes.values():
             px, py = axial_to_pixel(hex_item.coord, size)
             verts = _hex_vertices(px + ox, py + oy, size)
-            fill = _get_hex_fill(hex_item, color_mode, labels)
+            fill = _get_hex_fill(hex_item, color_mode, elev_span, bands)
             out.append(f'    <polygon points="{_points_str(verts)}" fill="{fill}" stroke="none"/>')
         out.append("  </g>")
 
@@ -409,7 +432,6 @@ def render(ws: WorldState, config: SVGConfig | None = None) -> str:
         out.append("  </g>")
 
     if "contours" in layers:
-        scale = config.contour_elevation_scale_m
         interval = config.contour_interval_m
         max_n = config.contour_max_crossings
         max_stroke = config.contour_max_stroke
@@ -426,8 +448,9 @@ def render(ws: WorldState, config: SVGConfig | None = None) -> str:
                 nbr = ws.hexes.get(nbr_coord)
                 if nbr is None:
                     continue
-                lo_m = min(hex_item.elevation, nbr.elevation) * scale
-                hi_m = max(hex_item.elevation, nbr.elevation) * scale
+                # Elevation is already metres; no scale factor (see png_export).
+                lo_m = min(hex_item.elevation, nbr.elevation)
+                hi_m = max(hex_item.elevation, nbr.elevation)
                 n = int(hi_m / interval) - int(lo_m / interval)
                 if n <= 0:
                     continue
@@ -502,11 +525,11 @@ def render(ws: WorldState, config: SVGConfig | None = None) -> str:
 
     if "roads" in layers:
         out.append('  <g id="layer-roads">')
-        # Deduped and ordered by tier, so shared trunk segments are drawn once and a
-        # track never paints over the primary road it branches from.
+        # One tier per edge and runs split at junctions, so a shared trunk is drawn
+        # once and a track never paints over the primary road it branches from.
         legs = []
-        for road, leg in dedupe_road_paths(ws.roads, ws.hexes, lambda r: ROAD_TIER_RANK[r.tier]):
-            style = _ROAD_SVG[road.tier]
+        for tier, leg in road_polylines(ws.road_edges, ws.hexes):
+            style = _ROAD_SVG[tier]
             da = ""
             if style["dasharray"]:
                 # The dash pattern scales too, or a track's dashes crowd into a solid

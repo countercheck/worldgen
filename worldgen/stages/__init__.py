@@ -12,19 +12,29 @@ stage tree; keeping the imports in the function body preserves that.
 
 from typing import TYPE_CHECKING
 
+from ..core.config import MODELS
+
 if TYPE_CHECKING:
     from ..core.pipeline import GeneratorStage
 
-MODELS = ("classic",)
+__all__ = ["MODELS", "default_stages", "stages_for"]
 
 
 def default_stages(model: str = "classic") -> tuple[type["GeneratorStage"], ...]:
     """The production pipeline, in run order.
 
-    *model* selects which settlement and road model to use.  Only ``classic`` — the
-    habitability-ranked placement with a single gravity road pass — exists today; the
-    haulage-based model is added alongside it so the two can be compared in the debug
-    viewer before either is retired.
+    *model* selects which settlement and road model to use.
+
+    ``classic`` ranks hexes on habitability and places a configured number of cities and
+    towns at a fixed minimum separation, then sprinkles villages.
+
+    ``organic`` derives the hierarchy from pre-industrial haulage economics: markets go
+    where the most surplus can reach them inside a day's return, and their number follows
+    the land rather than a target.  It models the countryside as a productive surface
+    rather than a list of hamlets, so it runs no village stages; it is still being built
+    stage by stage, so the classic road stages run over the new settlements for now.  The
+    two live side by side so they can be compared in the debug viewer before either is
+    retired.
     """
     if model not in MODELS:
         raise ValueError(f"Unknown pipeline model {model!r}. Supported: {', '.join(MODELS)}")
@@ -39,12 +49,15 @@ def default_stages(model: str = "classic") -> tuple[type["GeneratorStage"], ...]
     from .hydrology import HydrologyStage
     from .interurban_roads import InterurbanRoadStage
     from .land_cover import LandCoverStage
+    from .soil import SoilStage
     from .terrain_class import TerrainClassificationStage
     from .village_placement import VillagePlacementStage
     from .village_tracks import VillageTrackStage
     from .water_bodies import WaterBodiesStage
 
-    stages = (
+    # Terrain first, and in strict dependency order: each of these reads what the one
+    # before it wrote.
+    physical = (
         ElevationStage,
         ErosionStage,
         TerrainClassificationStage,
@@ -52,8 +65,59 @@ def default_stages(model: str = "classic") -> tuple[type["GeneratorStage"], ...]
         HydrologyStage,
         ClimateStage,
         BiomeStage,
+        # Soil before cover, because cover depends on it: good ground carries wildwood
+        # until somebody clears it, so what grows on a hex follows from what the hex is.
+        # Soil itself needs the gradient, the drainage, the rainfall and the cold biomes,
+        # which is every stage above.
+        SoilStage,
         LandCoverStage,
         HabitabilityStage,
+    )
+
+    if model == "organic":
+        from .chokepoints import ChokepointStage
+        from .cities import CityPromotionStage
+        from .crossings import CrossingStage
+        from .land_use import LandUseStage
+        from .markets import MarketStage
+
+        return physical + (
+            # Crossings before markets, deliberately: a bridging point is the cheapest
+            # ground in a district to reach from both banks, so it should be a reason a
+            # market grows there rather than something noticed afterwards.
+            CrossingStage,
+            MarketStage,
+            # Land use immediately after siting, and it founds the markets. A market is
+            # worth what its countryside actually sends, and until the countryside has
+            # been put to use that is not known — so `MarketStage` plants and allocates,
+            # and this clears, sizes and counts who lives on the land.
+            LandUseStage,
+            # Cities before roads: promotion changes populations, and population is what
+            # decides how many travellers a place sends.
+            CityPromotionStage,
+            # Interim: the classic road stages still run over the new settlements, so
+            # there is something to look at in the viewer. Markets are all TOWN tier for
+            # now, which is what InterurbanRoadStage expects. Trade roads replace this
+            # in turn.
+            #
+            # The three classic village stages are deliberately absent. They exist to serve
+            # a village tier built the other way round: every hex clearing a habitability
+            # bar becomes a hamlet, which buried 74 markets under 835 settlements on a
+            # 128x128 temperate map, so what the viewer showed was mostly not the haulage
+            # model. `ChokepointStage` below is the organic village tier — gated on holding
+            # something rather than sprinkled.
+            #
+            # The win is legibility, not speed: the three stages cost 0.8 s of a 15.2 s
+            # pipeline. InterurbanRoadStage is 12.3 s of what remains.
+            InterurbanRoadStage,
+            # Chokepoints after roads, and that ordering is the whole idea. A chokepoint
+            # is not a good site that happens to have traffic; it is a bad site that has
+            # traffic anyway, and only the built network can say which crossings carry
+            # any. They sit on the road by construction, so nothing has to be recut.
+            ChokepointStage,
+        )
+
+    return physical + (
         # Villages need roads and cultivation to exist before VillagePlacementStage will
         # site them, so this ordering is load-bearing, not incidental.
         CityTownStage,
@@ -63,7 +127,6 @@ def default_stages(model: str = "classic") -> tuple[type["GeneratorStage"], ...]
         VillageTrackStage,
         VillageCultivationStage,
     )
-    return stages
 
 
 def stages_for(config, model: str = "classic") -> tuple[type["GeneratorStage"], ...]:

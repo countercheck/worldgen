@@ -17,7 +17,7 @@ from worldgen.core.world_state import WorldState
 from worldgen.stages import default_stages
 from worldgen.stages.elevation import ElevationStage
 from worldgen.stages.erosion import ErosionStage
-from worldgen.stages.habitability import food_value
+from worldgen.stages.habitability import potential_food
 from worldgen.stages.terrain_class import TerrainClassificationStage
 
 WATER = (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
@@ -69,7 +69,7 @@ def test_alluvium_within_unit_interval(eroded):
 def test_alluvium_only_on_land(eroded):
     """Sediment under the sea is seabed, not soil, and nothing downstream can farm it."""
     for h in eroded.hexes.values():
-        if h.elevation < eroded.metadata["config"]["sea_level"]:
+        if h.elevation < 0.0:
             assert h.alluvium == 0.0, f"submerged hex {h.coord} carries alluvium {h.alluvium}"
 
 
@@ -182,36 +182,42 @@ def test_reproducible():
 
 
 def test_alluvium_raises_food_value():
-    """Silt makes good ground better."""
+    """Silt makes good ground better.
+
+    Read off `potential_food`, which keys on soil: rainfall enters once, in `SoilStage`,
+    where it chooses the class. The alluvium the erosion model measured is a separate
+    fact from the soil class — a multiplier on it, not a term inside it.
+    """
+    from worldgen.core.hex import LandCover, SoilQuality
+
     cfg = WorldConfig()
     state = WorldState.empty(seed=1, width=2, height=1)
-    from worldgen.core.hex import LandCover
 
     bare, silted = state.hexes[(0, 0)], state.hexes[(1, 0)]
     for hx in (bare, silted):
         hx.land_cover = LandCover.OPEN
-        hx.moisture = (cfg.biome_dry_moist + cfg.biome_wet_moist) / 2
+        hx.soil = SoilQuality.ARABLE
     silted.alluvium = 1.0
 
-    dry, wet = cfg.biome_dry_moist, cfg.biome_wet_moist
-    assert food_value(silted, cfg, dry, wet) > food_value(bare, cfg, dry, wet)
+    assert potential_food(silted, cfg) > potential_food(bare, cfg)
 
 
 def test_alluvium_does_not_make_barren_ground_fertile():
     """The bonus is multiplicative on purpose: deltas carry the deepest silt on the map,
-    and a flat bonus would have turned a bare-rock river mouth into farmland."""
-    from worldgen.core.hex import LandCover
+    and a flat bonus would have turned a bare-rock river mouth into farmland.
+
+    UNUSABLE is the ground that carries the claim — desert, bare rock, above the treeline,
+    drowned. `soil_value` scores it zero, and no multiplier lifts a zero.
+    """
+    from worldgen.core.hex import LandCover, SoilQuality
 
     cfg = WorldConfig()
     state = WorldState.empty(seed=1, width=1, height=1)
     hx = state.hexes[(0, 0)]
-    hx.moisture = (cfg.biome_dry_moist + cfg.biome_wet_moist) / 2
-    for cover in (LandCover.BARE_ROCK, LandCover.DESERT, LandCover.ALPINE, LandCover.TUNDRA):
-        hx.land_cover = cover
-        hx.alluvium = 1.0
-        assert food_value(hx, cfg, cfg.biome_dry_moist, cfg.biome_wet_moist) == 0.0, (
-            f"{cover} scored as farmland once silted"
-        )
+    hx.land_cover = LandCover.BARE_ROCK
+    hx.soil = SoilQuality.UNUSABLE
+    hx.alluvium = 1.0
+    assert potential_food(hx, cfg) == 0.0, "barren ground scored as farmland once silted"
 
 
 def test_alluvium_survives_a_round_trip(tmp_path):
