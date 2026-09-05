@@ -28,6 +28,7 @@
 | 16 | Moisture smear blends the ocean's carrier value into coastal rainfall | Model | **12** | M |
 | 17 | `_assign_role` compares metre elevation against 0.70 — FORTRESS unreachable | Code | **12** | S |
 | 18 | Market siting scores a plain hex disc, not the day-reach the catchment walks | Model | **20** | L |
+| 19 | Measured alluvium thins with map size, and disagrees with the `PRIME` rule | Model | **21** | M |
 
 ---
 
@@ -412,3 +413,83 @@ density); floors 10, 14, 16 each break count-follows-food between boreal and tro
 **Do this as its own branch**, with the acceptance table on the desk: pick the density,
 re-tune `city_min_draw` and the chokepoint gates against it, and update the PR-table
 numbers in the same change. The diff is small; the decision is not.
+
+
+### 19 — Measured alluvium thins with map size, and disagrees with the `PRIME` rule
+**Category:** Model | **Priority: 21** | **Effort: M**
+
+Two problems in the same field, found while merging the ported water model into
+`feat/alluvium`. Both are invisible to the test suite, which exercises alluvium only at
+48×48 — the size at which the first one does not yet bite.
+
+**The field's magnitude falls away as the map grows.** Mean alluvium on a hex beside a
+river, by world (`_distance_to_river` profile, seed 42):
+
+| world | at the river | 1 | 2 | 3 | 4 | hexes above 0.5 |
+|---|---|---|---|---|---|---|
+| pre-merge 48×48 | 0.339 | 0.250 | 0.131 | 0.052 | 0.025 | 45 |
+| pre-merge 96×96 | 0.331 | 0.259 | 0.156 | 0.082 | 0.044 | 363 |
+| **post-merge 48×48** | 0.366 | 0.365 | 0.257 | 0.183 | 0.127 | 83 |
+| **post-merge 96×96** | 0.123 | 0.078 | 0.037 | 0.015 | 0.009 | 71 |
+| **post-merge 96×96, organic, south falloff** | 0.069 | 0.051 | 0.026 | 0.016 | 0.017 | 121 |
+
+Before the merge the profile was flat in map size — 0.339 against 0.331, and the count of
+deep hexes scaled with the area, which is what it should do. After it, 48×48 is if anything
+stronger while 96×96 has fallen by a factor of three and the deep-hex count has stopped
+scaling. The shape of the profile survives; the depth does not, and `food_alluvium_bonus`
+multiplies the depth.
+
+On the 96×96 organic world the claim `test_alluvium_sits_on_gentle_ground` makes has gone
+hollow with it: ground carrying deep alluvium averages **82 m/km** against **96** for the
+rest of the land. That still satisfies the assertion, which only asks that one be less than
+the other, but 82 m/km is an 8% grade and silt does not sit on it. At 48×48 the same figures
+are 39 against 123, which is the real claim.
+
+**Two candidates, not yet separated.** `alluvium_quantile` normalises the droplet term
+against the 98th percentile, and the ported model raises much bigger rivers — off-map
+inflows seed catchments of up to 3,926 km² where the old model's largest was 386 — so a few
+enormous deltas could be lifting the percentile and flattening every ordinary floodplain
+against it, which is the failure mode the quantile exists to prevent, recurring one scale
+up. Alternatively the meander term has shifted: it is scaled per-channel against
+`_widen_valleys`' belts, and both the belts and the channel set moved with the new
+hydrology. **Measure which before changing either** — the fix for one is not the fix for
+the other, and the two terms are added after separate normalisation precisely so they can
+be tuned apart.
+
+**Test at more than one size.** The suite's alluvium fixtures are all 48×48; the entire
+effect above is invisible there. Whatever the fix, the regression test for it has to run at
+two sizes at least.
+
+### The second problem: two mechanisms, one floodplain
+
+`SoilQuality.PRIME` is documented as "alluvium: the floodplain of a river too big to wade"
+and derived by `SoilStage.is_alluvium` from slope and catchment — a **rule** about where
+silt ought to be. `Hex.alluvium` is a **measurement** of where the erosion model actually
+put it. Both now feed `potential_food`, the first by choosing the soil class and the second
+by multiplying it.
+
+They identify almost disjoint ground (96×96 organic, seed 42, 7,757 land hexes):
+
+- `PRIME`: 143 hexes, median **1** hop from a river, mean slope 17 m/km, 22% on the coast.
+- measured alluvium > 0.5: 121 hexes, median **3** hops from a river, mean slope 82 m/km,
+  8% on the coast.
+- In both: **11 hexes** — 8% of `PRIME`, 9% of the measured set.
+
+So the double pricing is real but small: `PRIME` scores 1.05× its configured base rather
+than 1.00×, and the `PRIME`/`ARABLE` ratio comes out 1.45 against the 1.40 the settings ask
+for. Not worth fixing on its own.
+
+The disagreement is the interesting part. The rule finds riverside flats; the measurement
+finds deltas and meander belts three hops out. `test_alluvium_falls_away_from_the_rivers`
+checks that the two networks agree *statistically* — the profile is monotone — which is a
+much weaker claim than agreeing per hex, and the numbers above are what that gap looks
+like.
+
+**The coherent end state is probably that the measurement replaces the rule inside
+`is_alluvium`**: the erosion model knows where sediment went, and a rule inferring it from
+slope and catchment is a second, worse answer to a question already answered. That would
+retire the double count, remove a threshold, and make `PRIME` mean something measured. It
+also moves the soil map and therefore the whole settlement economy, so it wants the
+acceptance table on the desk — see item 18, which is the same kind of change and says the
+same thing. **Fix the size dependence first**, or the measurement is not yet fit to be
+promoted over the rule.
