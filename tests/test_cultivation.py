@@ -19,8 +19,6 @@ _RESISTANT = {
 _CULT_DEFAULTS = {
     "target_city_count": 3,
     "target_town_count": 8,
-    "road_travellers_city": 100,
-    "road_travellers_town": 20,
     "cultivation_city_radius": 6,
     "cultivation_town_radius": 3,
     "cultivation_village_radius": 2,
@@ -106,14 +104,14 @@ def test_village_separation(cult_state):
 
 
 def test_villages_have_track_connection(cult_state):
-    """Every village must be an endpoint of a TRACK road connecting it to the road network."""
-    from worldgen.core.world_state import RoadTier
+    """Every village must be joined to the road network by `VillageTrackStage`.
 
-    track_endpoints: set = set()
-    for road in cult_state.roads:
-        if road.tier == RoadTier.TRACK and len(road.path) >= 2:
-            track_endpoints.add(road.path[0])
-            track_endpoints.add(road.path[-1])
+    It used to assert the village was an endpoint of a *TRACK* road specifically. With one
+    tier per edge that is no longer the right question: a lane laid onto ground the trunk
+    network already covers keeps the higher tier, so a village on the highway is correctly
+    not on a track. What has to hold is that it is connected at all.
+    """
+    track_endpoints: set = {c for edge in cult_state.road_edges for c in edge}
 
     villages = [s for s in cult_state.settlements if s.tier == SettlementTier.VILLAGE]
     for v in villages:

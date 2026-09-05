@@ -17,9 +17,11 @@ class ClimateStage(GeneratorStage):
 
     def _compute_temperature(self, state: WorldState) -> None:
         w, h = state.width, state.height
-        base = self.config.base_temperature
-        lat_range = self.config.latitude_temp_range
-        lapse = self.config.altitude_lapse_rate
+        cfg = self.config
+        base = cfg.mean_temperature_c
+        lat_range = cfg.latitude_temp_range_c
+        # The lapse rate is quoted per kilometre of ascent and elevation is metres above
+        # sea level, so this is a division by a thousand and nothing more.
 
         # Latitude is the grid *row*, which on an offset grid is the true north-south
         # axis; on an axial grid it is r, as before.
@@ -28,10 +30,12 @@ class ClimateStage(GeneratorStage):
             row_frac = row / max(h - 1, 1)
             lat_temp = math.sin(row_frac * math.pi)
             # Subtract the mean of sin over [0, π] (= 2/π ≈ 0.637) so that
-            # base_temperature is the true map mean temperature.
+            # mean_temperature_c is the true map mean.
             temp = base + (lat_temp - 2.0 / math.pi) * lat_range
-            temp -= hx.elevation * lapse
-            hx.temperature = max(0.0, min(1.0, temp))
+            # A hex at the waterline gets no lapse, which is what makes the figure a real
+            # temperature rather than one relative to the map's own lowest point.
+            temp -= max(0.0, hx.elevation) / 1000.0 * cfg.lapse_rate_c_per_km
+            hx.temperature = temp
 
         # Smooth temperature with gaussian_filter (replaces 5 manual neighbor-average passes)
         coords = [[state.coord_at(col, row) for row in range(h)] for col in range(w)]
@@ -69,7 +73,7 @@ class ClimateStage(GeneratorStage):
                 h.moisture = 1.0
 
         orographic = self.config.orographic_strength
-        sea_level = self.config.sea_level
+        resupply = self.config.moisture_resupply_per_hex
 
         for coord in sorted_coords:
             h = state.hexes[coord]
@@ -91,11 +95,18 @@ class ClimateStage(GeneratorStage):
 
             incoming = sum(upwind_vals) / len(upwind_vals) if upwind_vals else 1.0
 
-            lift = max(0.0, h.elevation - sea_level)
+            lift = max(0.0, h.elevation) / self.config.max_elevation_m
             fraction = min(1.0, lift * orographic)
             precip = incoming * fraction
             h.moisture = precip
-            atm[coord] = max(0.0, incoming - precip)
+            # Air picks moisture back up as it goes. Without this the sweep is a one-way
+            # drying: whatever the first barrier takes is gone for good, so the far side
+            # of a 128 km map receives nothing at all and the region's rainfall spans a
+            # factor of eight from coast to interior. Real air is resupplied continuously
+            # by evaporation, which is why a rain shadow is a local feature tens of
+            # kilometres deep rather than everything downwind of the first hill.
+            left = max(0.0, incoming - precip)
+            atm[coord] = left + resupply * (1.0 - left)
 
         # River-adjacency and coastal moisture bonuses
         water = (TerrainClass.OCEAN, TerrainClass.LAKE)
@@ -112,41 +123,39 @@ class ClimateStage(GeneratorStage):
                     h.moisture += 0.1
                     break
 
-        # Normalize land moisture to [0, 1]
+        # Smear the pattern, the way the temperature field is smeared. Weather systems
+        # are wide, and rain falls either side of the ridge that lifted it rather than
+        # only on the hex that did the lifting.
+        # Indexed by grid column/row, like the temperature smear above: `state.coord_at`
+        # is what makes the field the same rectangle whichever layout the grid uses.
+        width, height = state.width, state.height
+        coords = [[state.coord_at(col, row) for row in range(height)] for col in range(width)]
+        arr = np.array([[state.hexes[c].moisture for c in column] for column in coords])
+        arr = gaussian_filter(arr, sigma=2.0)
+        for col in range(width):
+            for row in range(height):
+                state.hexes[coords[col][row]].moisture = float(arr[col, row])
+
+        # Then put the pattern into millimetres a year.
+        #
+        # What the orographic pass produces is *relative* — which slopes catch the rain
+        # and which sit in a shadow — and says nothing about whether the region is wet or
+        # dry. Scaling so its mean lands on the climate's rainfall supplies that, and a
+        # linear scale is the honest way: if a leeward valley receives a third of what the
+        # windward slope does, that ratio is a fact about the terrain and should survive
+        # being told how wet the region is overall.
+        #
+        # It used to stretch to [0, 1] and then fit a gamma to move the mean onto a
+        # target. The gamma held the bounds while shifting the centre, but it warped the
+        # distribution to do it, so the leeward-to-windward ratio came out different for a
+        # wet region than a dry one. In millimetres there are no bounds to hold.
         land_vals = [h.moisture for h in state.hexes.values() if h.terrain_class not in water]
         if land_vals:
-            lo = min(land_vals)
-            hi = max(land_vals)
-            span = hi - lo if hi > lo else 1.0
+            mean = sum(land_vals) / len(land_vals)
+            scale = (self.config.mean_precip_mm / mean) if mean > 0 else 0.0
             for h in state.hexes.values():
                 if h.terrain_class not in water:
-                    h.moisture = (h.moisture - lo) / span
-
-            # Anchor the pattern to the region's climate.  What the orographic pass
-            # produces is a *relative* map — which slopes catch the rain and which sit in
-            # a shadow — and stretching it to [0, 1] says nothing about whether the
-            # region is wet or dry.  Its mean lands near 0.15 because precipitation falls
-            # off sharply inland, so against a dry threshold of 0.2 almost every hex read
-            # as arid whatever climate was asked for, and every region came out
-            # shrubland.  A gamma keeps the ordering and the [0, 1] bounds intact while
-            # moving the mean onto the value the region's climate calls for, so rain
-            # shadow still decides which parts are wetter — just around the right centre.
-            target = self.config.regional_moisture
-            vals = np.array(
-                [h.moisture for h in state.hexes.values() if h.terrain_class not in water]
-            )
-            if len(vals) and 0.0 < target < 1.0 and vals.max() > 0.0:
-                lo_g, hi_g = 0.01, 25.0
-                for _ in range(40):
-                    mid = (lo_g + hi_g) / 2.0
-                    if float((vals**mid).mean()) > target:
-                        lo_g = mid
-                    else:
-                        hi_g = mid
-                gamma = (lo_g + hi_g) / 2.0
-                for h in state.hexes.values():
-                    if h.terrain_class not in water:
-                        h.moisture = float(h.moisture**gamma)
+                    h.moisture = max(0.0, h.moisture * scale + self.config.base_precip_mm)
 
         # Elevation-gated bleed: river moisture spreads to adjacent lower-or-equal hexes
         if self.config.moisture_bleed_passes > 0:
@@ -171,21 +180,21 @@ class ClimateStage(GeneratorStage):
                     additions[coord] = best
                 for coord, h in state.hexes.items():
                     if h.terrain_class not in water:
-                        h.moisture = min(
-                            1.0, h.moisture + self.config.moisture_bleed_strength * additions[coord]
+                        # No ceiling: moisture is millimetres a year now, and a river
+                        # valley in a wet region genuinely does receive more than the
+                        # old normalised 1.0 would have allowed.
+                        h.moisture = (
+                            h.moisture
+                            + self.config.moisture_bleed_strength
+                            * self.config.mean_precip_mm
+                            * additions[coord]
                         )
-            # Re-normalize after bleed
-            land_vals = [h.moisture for h in state.hexes.values() if h.terrain_class not in water]
-            if land_vals:
-                lo = min(land_vals)
-                hi = max(land_vals)
-                span = hi - lo if hi > lo else 1.0
-                for h in state.hexes.values():
-                    if h.terrain_class not in water:
-                        h.moisture = (h.moisture - lo) / span
+            # No renormalising after the bleed. It used to stretch back to [0, 1], which
+            # would now throw away the rainfall the scaling above established — the bleed
+            # adds water to river valleys, and that extra water is the point.
 
-        base = self.config.base_moisture
-        if base != 0.0:
-            for h in state.hexes.values():
-                if h.terrain_class not in water:
-                    h.moisture = max(0.0, min(1.0, h.moisture + base))
+        # Standing water is not short of it. Left at the raw carrier value of 1.0 these
+        # would read as the driest hexes on the map wherever moisture is drawn or scored.
+        for h in state.hexes.values():
+            if h.terrain_class in water:
+                h.moisture = self.config.mean_precip_mm

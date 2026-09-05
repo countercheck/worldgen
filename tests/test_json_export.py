@@ -3,12 +3,21 @@ import pytest
 from worldgen.core.hex import (
     Biome,
     LandCover,
+    LandUse,
     Settlement,
     SettlementRole,
     SettlementTier,
+    SoilQuality,
     TerrainClass,
 )
-from worldgen.core.world_state import Ferry, River, Road, RoadTier, WorldState
+from worldgen.core.world_state import (
+    Ferry,
+    River,
+    RoadEdge,
+    RoadTier,
+    WorldState,
+    road_edge_key,
+)
 from worldgen.export import json_export
 
 
@@ -25,6 +34,9 @@ def _small_world() -> WorldState:
     h.habitability_city = 0.7
     h.habitability_town = 0.5
     h.habitability_village = 0.3
+    h.soil = SoilQuality.PRIME
+    h.land_use = LandUse.ARABLE
+    h.rural_population = 42.5
     h.cultivated = True
     h.tags = {"test"}
     ws.settlements = [
@@ -39,7 +51,10 @@ def _small_world() -> WorldState:
     ws.hexes[(1, 1)].settlement = ws.settlements[0]
     ws.hexes[(1, 1)].road_connections = {(2, 1)}
     ws.rivers = [River(hexes=[(0, 0), (1, 0), (2, 0)], flow_volume=1.5)]
-    ws.roads = [Road(path=[(1, 1), (2, 1), (3, 1)], tier=RoadTier.PRIMARY)]
+    ws.road_edges = {
+        road_edge_key((1, 1), (2, 1)): RoadEdge(RoadTier.PRIMARY, 12.5),
+        road_edge_key((2, 1), (3, 1)): RoadEdge(RoadTier.PRIMARY, -4.0),
+    }
     return ws
 
 
@@ -54,7 +69,7 @@ def test_round_trip(tmp_path):
     assert len(ws2.hexes) == len(ws.hexes)
     assert len(ws2.settlements) == len(ws.settlements)
     assert len(ws2.rivers) == len(ws.rivers)
-    assert len(ws2.roads) == len(ws.roads)
+    assert ws2.road_edges == ws.road_edges
 
 
 def test_hex_fields_preserved(tmp_path):
@@ -72,6 +87,9 @@ def test_hex_fields_preserved(tmp_path):
     assert abs(h.habitability_town - 0.5) < 1e-9
     assert abs(h.habitability_village - 0.3) < 1e-9
     assert h.cultivated is True
+    assert h.soil is SoilQuality.PRIME
+    assert h.land_use is LandUse.ARABLE
+    assert abs(h.rural_population - 42.5) < 1e-9
     assert "test" in h.tags
     s2 = ws2.settlements[0]
     assert s2.name == "Ironhaven"
@@ -106,13 +124,72 @@ def test_pre_split_habitability_still_loads(tmp_path):
     assert h.habitability_village == 0.6
 
 
+def test_sea_edges_and_catchment_round_trip(tmp_path):
+    """The two fields the losslessness invariant had no witness for.
+
+    Deleting either from `to_dict` kept the whole suite green: `sea_edges` never crossed
+    a save/load in any test, and `catchment_km2` was never set on a fixture hex. Both
+    carry decisions — navigability reads catchment, and the land/sea split of the network
+    is the point of storing two edge sets — so both get an explicit witness here.
+    """
+    ws = _small_world()
+    ws.hexes[(0, 0)].catchment_km2 = 137.5
+    ws.sea_edges = {
+        road_edge_key((0, 0), (1, 0)): RoadEdge(RoadTier.PRIMARY, 0.0),
+    }
+    path = tmp_path / "world.json"
+    json_export.save(ws, path)
+    ws2 = json_export.load(path)
+    assert ws2.sea_edges == ws.sea_edges
+    assert abs(ws2.hexes[(0, 0)].catchment_km2 - 137.5) < 1e-9
+
+
+def test_territory_round_trips(tmp_path):
+    ws = _small_world()
+    ws.hexes[(0, 0)].territory = (1, 1)
+    ws.hexes[(0, 0)].territory_cost = 2.5
+    path = tmp_path / "world.json"
+    json_export.save(ws, path)
+
+    h = json_export.load(path).hexes[(0, 0)]
+    assert h.territory == (1, 1), "territory must come back as a tuple, not a list"
+    assert h.territory_cost == 2.5
+
+
+def test_unclaimed_territory_round_trips_as_none(tmp_path):
+    ws = _small_world()
+    path = tmp_path / "world.json"
+    json_export.save(ws, path)
+    assert json_export.load(path).hexes[(0, 0)].territory is None
+
+
+def test_pre_territory_worlds_still_load(tmp_path):
+    """A 1.1 file has no catchments recorded; it must open, not fail."""
+    import json
+
+    ws = _small_world()
+    path = tmp_path / "world.json"
+    json_export.save(ws, path)
+
+    data = json.loads(path.read_text())
+    data["version"] = "1.1"
+    for hd in data["hexes"]:
+        hd.pop("territory", None)
+        hd.pop("territory_cost", None)
+    path.write_text(json.dumps(data))
+
+    h = json_export.load(path).hexes[(0, 0)]
+    assert h.territory is None
+    assert h.territory_cost == 0.0
+
+
 def test_new_saves_carry_the_bumped_version(tmp_path):
     """The schema changed shape, so it must not keep claiming to be 1.0."""
     import json
 
     path = tmp_path / "world.json"
     json_export.save(_small_world(), path)
-    assert json.loads(path.read_text())["version"] == "1.2"
+    assert json.loads(path.read_text())["version"] == "1.6"
 
 
 def test_an_unknown_version_is_rejected_by_name(tmp_path):
@@ -126,7 +203,7 @@ def test_an_unknown_version_is_rejected_by_name(tmp_path):
     data["version"] = "2.0"
     path.write_text(json.dumps(data))
 
-    with pytest.raises(ValueError, match="Supported: 1.0, 1.1"):
+    with pytest.raises(ValueError, match="Supported: 1.0, 1.1, 1.2"):
         json_export.load(path)
 
 
@@ -157,12 +234,59 @@ def test_river_preserved(tmp_path):
     assert ws2.rivers[0].hexes[0] == (0, 0)
 
 
+def test_delta_elevation_round_trips(tmp_path):
+    """The height a segment climbs is what decides how slow it is, so it has to survive."""
+    ws = _small_world()
+    path = tmp_path / "world.json"
+    json_export.save(ws, path)
+    ws2 = json_export.load(path)
+    assert ws2.road_edges == ws.road_edges
+    deltas = {k: e.delta_elevation_m for k, e in ws2.road_edges.items()}
+    assert deltas[road_edge_key((1, 1), (2, 1))] == pytest.approx(12.5)
+    # Signed, so a reader can tell which way is uphill.
+    assert deltas[road_edge_key((2, 1), (3, 1))] == pytest.approx(-4.0)
+
+
+def test_an_edge_saved_before_deltas_loads_as_level(tmp_path):
+    """A 1.4 file has no delta recorded; it must open rather than fail."""
+    import json
+
+    ws = _small_world()
+    path = tmp_path / "world.json"
+    json_export.save(ws, path)
+    data = json.loads(path.read_text())
+    data["version"] = "1.4"
+    for ed in data["road_edges"]:
+        ed.pop("delta_elevation_m", None)
+    path.write_text(json.dumps(data))
+
+    for edge in json_export.load(path).road_edges.values():
+        assert edge.delta_elevation_m == 0.0
+
+
 def test_road_tier_preserved(tmp_path):
     ws = _small_world()
     path = tmp_path / "world.json"
     json_export.save(ws, path)
     ws2 = json_export.load(path)
-    assert ws2.roads[0].tier == RoadTier.PRIMARY
+    assert {e.tier for e in ws2.road_edges.values()} == {RoadTier.PRIMARY}
+
+
+def test_a_schema_1_2_file_loads_its_journeys_as_a_network():
+    """1.2 stored a path per journey; overlapping journeys collapse onto shared edges,
+    the higher tier winning — which is what the renderer did at draw time anyway."""
+    data = _small_world().to_dict()
+    del data["road_edges"]
+    data["version"] = "1.2"
+    data["roads"] = [
+        {"path": [[1, 1], [2, 1], [3, 1]], "tier": "track"},
+        {"path": [[2, 1], [3, 1]], "tier": "primary"},
+    ]
+    ws = WorldState.from_dict(data)
+    assert {k: e.tier for k, e in ws.road_edges.items()} == {
+        road_edge_key((1, 1), (2, 1)): RoadTier.TRACK,
+        road_edge_key((2, 1), (3, 1)): RoadTier.PRIMARY,
+    }
 
 
 def test_empty_world(tmp_path):

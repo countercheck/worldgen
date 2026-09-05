@@ -7,14 +7,16 @@ from worldgen.core.config import WorldConfig
 
 
 def test_yaml_roundtrip(tmp_path):
-    cfg = WorldConfig(width=64, height=48, base_moisture=0.1, elevation_gradient=(0.3, -0.2))
+    cfg = WorldConfig(
+        width=64, height=48, base_precip_mm=50.0, elevation_gradient_m=(300.0, -200.0)
+    )
     out = str(tmp_path / "cfg.yaml")
     cfg.to_yaml(out)
     loaded = WorldConfig.from_yaml(out)
     assert loaded.width == 64
     assert loaded.height == 48
-    assert loaded.base_moisture == pytest.approx(0.1)
-    assert loaded.elevation_gradient == pytest.approx((0.3, -0.2))
+    assert loaded.base_precip_mm == pytest.approx(50.0)
+    assert loaded.elevation_gradient_m == pytest.approx((300.0, -200.0))
 
 
 def test_from_yaml_ignores_export_block(tmp_path):
@@ -49,12 +51,12 @@ def test_from_yaml_wind_direction_is_tuple(tmp_path):
 
 
 def test_from_yaml_elevation_gradient_is_tuple(tmp_path):
-    data = {"elevation_gradient": [0.5, -0.3]}
+    data = {"elevation_gradient_m": [0.5, -0.3]}
     p = tmp_path / "cfg.yaml"
     p.write_text(yaml.dump(data))
     cfg = WorldConfig.from_yaml(str(p))
-    assert isinstance(cfg.elevation_gradient, tuple)
-    assert cfg.elevation_gradient == pytest.approx((0.5, -0.3))
+    assert isinstance(cfg.elevation_gradient_m, tuple)
+    assert cfg.elevation_gradient_m == pytest.approx((0.5, -0.3))
 
 
 def test_from_json_wind_direction_is_tuple(tmp_path):
@@ -65,7 +67,7 @@ def test_from_json_wind_direction_is_tuple(tmp_path):
     assert isinstance(cfg.wind_direction, tuple)
 
 
-@pytest.mark.parametrize("key", ["wind_direction", "elevation_gradient"])
+@pytest.mark.parametrize("key", ["wind_direction", "elevation_gradient_m"])
 def test_yaml_tuple_fields_require_two_numeric_values(tmp_path, key):
     p = tmp_path / "cfg.yaml"
     p.write_text(yaml.dump({key: None}))
@@ -78,8 +80,8 @@ def test_yaml_tuple_fields_require_two_numeric_values(tmp_path, key):
     [
         ({"wind_direction": (1.0,)}, "wind_direction"),
         ({"wind_direction": ("east", 0.0)}, "wind_direction"),
-        ({"elevation_gradient": (0.5,)}, "elevation_gradient"),
-        ({"elevation_gradient": (0.1, "north")}, "elevation_gradient"),
+        ({"elevation_gradient_m": (0.5,)}, "elevation_gradient_m"),
+        ({"elevation_gradient_m": (0.1, "north")}, "elevation_gradient_m"),
     ],
 )
 def test_world_config_validates_vector_fields(kwargs, message):
@@ -91,15 +93,20 @@ def test_world_config_validates_vector_fields(kwargs, message):
     ("kwargs", "message"),
     [
         ({"hex_size_m": 0.0}, "hex_size_m"),
-        ({"road_elev_range_m": 0.0}, "road_elev_range_m"),
+        ({"max_elevation_m": 0.0}, "max_elevation_m"),
+        ({"seabed_depth_m": 0.0}, "seabed_depth_m"),
+        ({"road_delta_elevation_per_hex": 0.0}, "road_delta_elevation_per_hex"),
         (
-            {"road_slope_free_pct": 10.0, "road_slope_cap_pct": 10.0},
-            "road_slope_cap_pct",
+            {"road_switchback_grade_pct": 30.0, "road_slope_cap_pct": 25.0},
+            "road_switchback_grade_pct",
         ),
         ({"settlement_min_reachable": 0}, "settlement_min_reachable"),
         ({"moisture_bleed_passes": -1}, "moisture_bleed_passes"),
         ({"moisture_bleed_strength": -0.1}, "moisture_bleed_strength"),
         ({"moisture_bleed_strength": 1.1}, "moisture_bleed_strength"),
+        # The ground goes bare above the treeline, not below it.
+        ({"biome_snowline_temp_c": 0.0}, "biome_snowline_temp_c"),
+        ({"biome_snowline_temp_c": -2.0}, "biome_snowline_temp_c"),
     ],
 )
 def test_world_config_validates_new_road_and_settlement_fields(kwargs, message):
@@ -116,15 +123,15 @@ def test_unknown_key_raises_value_error_not_type_error(tmp_path):
     The CLI catches ValueError, so that surfaced as a raw traceback rather than a message.
     """
     path = tmp_path / "typo.yaml"
-    path.write_text("width: 32\nsea_levl: 0.3\n")
+    path.write_text("width: 32\nhex_size_mm: 1000\n")
     with pytest.raises(ValueError, match="Unknown config setting"):
         WorldConfig.from_yaml(str(path))
 
 
 def test_unknown_key_suggests_the_nearest_real_setting(tmp_path):
     path = tmp_path / "typo.yaml"
-    path.write_text("sea_levl: 0.3\n")
-    with pytest.raises(ValueError, match="did you mean 'sea_level'"):
+    path.write_text("hex_size_mm: 1000\n")
+    with pytest.raises(ValueError, match="did you mean 'hex_size_m'"):
         WorldConfig.from_yaml(str(path))
 
 
@@ -155,18 +162,75 @@ def test_retired_key_warns_and_still_loads(tmp_path, monkeypatch):
     assert cfg.width == 32
 
 
-def test_shipped_default_config_loads():
-    """`init-config` copies this file verbatim, so it must parse against the dataclass.
+def _config_yaml_keys(path):
+    """Top-level setting names in a config file, excluding the `export` section."""
+    import yaml
 
-    It is hand-synced with the dataclass, so nothing else would catch a key that was
-    renamed in one place and not the other.
+    with open(path) as f:
+        raw = yaml.safe_load(f)
+    return {k for k in raw if k != "export"}
+
+
+def _documented_config_files():
+    """The two hand-written config files, both of which must track the dataclass.
+
+    `default_config.yaml` is what `init-config` copies for a new user; the root
+    `worldgen.yaml` is the working config the README and the verification commands
+    point at. Neither is generated, so only a test keeps them honest.
     """
     from pathlib import Path
 
     import worldgen
 
-    shipped = Path(worldgen.__file__).parent / "default_config.yaml"
-    assert WorldConfig.from_yaml(str(shipped)).width > 0
+    package = Path(worldgen.__file__).parent
+    return [package / "default_config.yaml", package.parent / "worldgen.yaml"]
+
+
+@pytest.mark.parametrize("path", _documented_config_files(), ids=lambda p: p.name)
+def test_shipped_config_loads(path):
+    """`init-config` copies this file verbatim, so it must parse against the dataclass."""
+    assert WorldConfig.from_yaml(str(path)).width > 0
+
+
+@pytest.mark.parametrize("path", _documented_config_files(), ids=lambda p: p.name)
+def test_shipped_config_documents_every_setting(path):
+    """Every `WorldConfig` field must appear in the shipped configs.
+
+    Parsing alone is not enough, and the difference is not academic: the root
+    `worldgen.yaml` went twenty-one retired keys and forty-nine missing ones out of date
+    across the units work while still loading cleanly every time, because a retired key
+    only warns and a missing one silently takes the dataclass default. A config file that
+    loads but documents none of the settings that matter is worse than one that fails, so
+    the coverage is asserted rather than the parse.
+    """
+    from dataclasses import fields
+
+    documented = _config_yaml_keys(path)
+    declared = {f.name for f in fields(WorldConfig)}
+
+    missing = sorted(declared - documented)
+    assert not missing, f"{path.name} does not document: {', '.join(missing)}"
+
+
+@pytest.mark.parametrize("path", _documented_config_files(), ids=lambda p: p.name)
+def test_shipped_config_has_no_retired_or_unknown_settings(path):
+    """...and nothing in them may be a setting the dataclass no longer has.
+
+    A retired key loads with a warning, so a stale file is quiet at runtime; this is what
+    makes it audible.
+    """
+    from dataclasses import fields
+
+    from worldgen.core.config import _RENAMED_FIELDS, _RETIRED_FIELDS
+
+    documented = _config_yaml_keys(path)
+    declared = {f.name for f in fields(WorldConfig)}
+
+    retired = sorted(documented & (set(_RETIRED_FIELDS) | set(_RENAMED_FIELDS)))
+    assert not retired, f"{path.name} still sets retired settings: {', '.join(retired)}"
+
+    unknown = sorted(documented - declared)
+    assert not unknown, f"{path.name} sets settings that do not exist: {', '.join(unknown)}"
 
 
 # --- heightmap import --------------------------------------------------------
@@ -220,3 +284,44 @@ def test_heightmap_path_accepts_a_path_object():
 def test_world_config_validates_heightmap_fields(kwargs, message):
     with pytest.raises(ValueError, match=message):
         WorldConfig(**kwargs)
+
+
+def test_the_road_knobs_the_haulage_branch_deleted_are_retired_not_unknown(tmp_path):
+    """A config that generated a world yesterday must not crash today.
+
+    These eight were deleted when slope pricing went continuous, the bank discount was
+    retired, and travellers went per head of population. Each must die as a deprecation
+    that says where its job went — not as an unknown-key error with a fuzzy guess.
+    """
+    old = {
+        "road_slope_cost": 4.0,
+        "road_slope_free_pct": 2.0,
+        "road_slope_cap_mult": 10.0,
+        "road_bank_discount": 0.5,
+        "road_bank_discount_min_flow": 0.1,
+        "road_travellers_city": 60,
+        "road_travellers_town": 25,
+        "road_travellers_village": 6,
+    }
+    path = tmp_path / "old.yaml"
+    path.write_text("width: 32\n" + "".join(f"{k}: {v}\n" for k, v in old.items()))
+
+    with pytest.warns(DeprecationWarning):
+        cfg = WorldConfig.from_yaml(str(path))
+    assert cfg.width == 32
+
+
+def test_the_model_is_a_config_field_and_validated():
+    """The model rides in the config so world.json records which model made the map."""
+    assert WorldConfig().model == "classic"
+    assert WorldConfig(model="organic").model == "organic"
+    with pytest.raises(ValueError, match="model"):
+        WorldConfig(model="baroque")
+
+
+def test_zero_divisor_knobs_fail_loudly():
+    """Both are divisors; at zero they used to crash mid-pipeline, not at load."""
+    with pytest.raises(ValueError, match="market_kernel_decay"):
+        WorldConfig(market_kernel_decay=0.0)
+    with pytest.raises(ValueError, match="crossing_relief_m"):
+        WorldConfig(crossing_relief_m=0.0)

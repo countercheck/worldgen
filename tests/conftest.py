@@ -25,9 +25,6 @@ def road_state():
     return build_world(
         target_city_count=4,
         target_town_count=10,
-        road_travellers_city=100,
-        road_travellers_town=20,
-        road_travellers_village=5,
     )
 
 
@@ -37,8 +34,6 @@ def cult_state():
     return build_world(
         target_city_count=3,
         target_town_count=8,
-        road_travellers_city=100,
-        road_travellers_town=20,
         cultivation_city_radius=6,
         cultivation_town_radius=3,
         cultivation_village_radius=2,
@@ -57,10 +52,6 @@ def small_state():
     return build_world(
         width=32,
         height=32,
-        erosion_iterations=200,
         target_city_count=2,
         target_town_count=4,
-        road_travellers_city=50,
-        road_travellers_town=10,
-        road_travellers_village=2,
     )

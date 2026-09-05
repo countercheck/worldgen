@@ -1,14 +1,16 @@
 from ..core.hex import SettlementTier
 from ..core.hex_grid import astar
 from ..core.pipeline import GeneratorStage
-from ..core.world_state import Road, RoadTier, WorldState
+from ..core.world_state import RoadTier, WorldState, road_edge_key
 from .road_cost import (
     WATER,
-    bank_discount,
+    as_road_edges,
     make_road_edge_cost,
     river_edges,
     river_hex_cost,
+    route_through_settlements,
     tag_river_crossings,
+    tag_switchbacks,
     terrain_base_cost,
 )
 
@@ -46,12 +48,17 @@ class VillageTrackStage(GeneratorStage):
         settled = {s.coord for s in state.settlements}
 
         def node_cost(hx):
-            base = terrain_base_cost(hx, cfg) + river_hex_cost(hx, cfg)
-            return max(0.0, base - bank_discount(hx, hexes, cfg))
+            # Land only. A lane from a village to the nearest road is a walk, not a
+            # crossing, and a track drawn over a lake would land in `road_edges` as road —
+            # which is the confusion `sea_edges` exists to prevent. A village the water
+            # cuts off simply gets no track; `astar` returns nothing and it is skipped.
+            if hx.terrain_class in WATER:
+                return float("inf")
+            return terrain_base_cost(hx, cfg) + river_hex_cost(hx, cfg)
 
         edge_cost = make_road_edge_cost(cfg, blocked, settled)
 
-        new_roads: list[Road] = []
+        new_edges: dict = {}
 
         for village in villages:
             if not targets:
@@ -68,15 +75,40 @@ class VillageTrackStage(GeneratorStage):
                 if path and len(path) >= 2:
                     break
             if path and len(path) >= 2:
-                new_roads.append(Road(path=path, tier=RoadTier.TRACK))
                 for a, b in zip(path, path[1:], strict=False):
                     if a in hexes and b in hexes:
+                        # A track never demotes a road already laid: where a village lane
+                        # joins the highway it is the highway that gets drawn.
+                        new_edges.setdefault(road_edge_key(a, b), RoadTier.TRACK)
                         hexes[a].road_connections.add(b)
                         hexes[b].road_connections.add(a)
                 # Village's hex is now a road endpoint — add to targets for later villages
                 targets.add(village.coord)
 
-        tag_river_crossings(new_roads, hexes)
+        # Work in bare tiers, as the interurban stage does, and wrap once at the end. The
+        # tidying passes below are about which edges exist and how they rank; measuring
+        # each one belongs in a single place.
+        tiers = {key: edge.tier for key, edge in state.road_edges.items()}
+        for key, tier in new_edges.items():
+            tiers.setdefault(key, tier)
 
-        state.roads.extend(new_roads)
+        # Tracks are laid after the trunk network, so they can skirt a village the way
+        # trunk roads could skirt a town. Run the same rule again over the finished
+        # network — this is the last stage that touches it.
+        route_through_settlements(tiers, hexes, settled, cfg, blocked)
+
+        tag_river_crossings(tiers, hexes)
+        tag_switchbacks(tiers, hexes, cfg)
+        state.road_edges = as_road_edges(tiers, hexes)
+
+        # `route_through_settlements` reroutes edges, and the per-hex adjacency written
+        # while the tracks were laid does not know that. Rebuilt wholesale from the edges
+        # that actually survived — this is the last stage to touch the network, so what
+        # goes out here is what serialises, and the two must not disagree.
+        for hx in hexes.values():
+            hx.road_connections.clear()
+        for a, b in list(state.road_edges) + list(state.sea_edges):
+            if a in hexes and b in hexes:
+                hexes[a].road_connections.add(b)
+                hexes[b].road_connections.add(a)
         return state

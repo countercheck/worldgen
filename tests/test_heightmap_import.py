@@ -296,18 +296,19 @@ def test_stencil_is_honoured_exactly():
     mask = ((xx - 20) ** 2 + (yy - 20) ** 2) < 12**2
 
     out = shape_to_mask(noise, mask, cfg)
-    assert (out[mask] >= cfg.sea_level).all(), "drawn land dipped below sea level"
-    assert (out[~mask] < cfg.sea_level).all(), "drawn sea rose above sea level"
-    assert out.min() >= 0.0 and out.max() <= 1.0
+    assert (out[mask] >= 0.0).all(), "drawn land dipped below sea level"
+    assert (out[~mask] < 0.0).all(), "drawn sea rose above sea level"
+    assert out.min() >= -cfg.seabed_depth_m and out.max() <= cfg.max_elevation_m
 
 
-def test_shaped_field_fills_the_unit_range():
-    """The property that keeps the coast alive through erosion.
+def test_shaped_field_spans_the_maps_vertical_scale():
+    """Land reaches for `max_elevation_m` and sea for `-seabed_depth_m`.
 
-    `ErosionStage` finishes by rescaling whatever range it is handed onto [0, 1]. A field
-    that already spans it is left alone; one that does not has sea level dragged through
-    its terrain. Before this was enforced, a 32%-land stencil came out of the full
-    pipeline at 2% — the continent broke up into specks.
+    This used to assert a [0, 1] span, which was a defence against `ErosionStage`
+    rescaling whatever it was handed back onto that range — it moved sea level relative
+    to the terrain, and a 32%-land stencil came out of the full pipeline at 2%. Erosion
+    no longer rescales and sea level is now the datum, so what is asserted is the honest
+    thing: the field uses the vertical scale it was given.
     """
     cfg = WorldConfig(width=48, height=48)
     noise = np.random.default_rng(4).random((48, 48))
@@ -315,8 +316,8 @@ def test_shaped_field_fills_the_unit_range():
     mask = ((xx - 24) ** 2 + (yy - 24) ** 2) < 14**2
 
     out = shape_to_mask(noise, mask, cfg)
-    assert out.min() == pytest.approx(0.0), f"deepest sea is {out.min():.3f}, not 0"
-    assert out.max() == pytest.approx(1.0), f"highest land is {out.max():.3f}, not 1"
+    assert out.min() == pytest.approx(-cfg.seabed_depth_m, rel=0.05)
+    assert 0.5 * cfg.max_elevation_m < out.max() <= cfg.max_elevation_m
 
 
 def test_coastline_survives_erosion():
@@ -333,31 +334,31 @@ def test_coastline_survives_erosion():
     from worldgen.stages.erosion import ErosionStage
 
     n = 64
-    cfg = WorldConfig(width=n, height=n, erosion_iterations=0)
+    cfg = WorldConfig(width=n, height=n, erosion_droplets_per_hex=0.0)
     noise = np.random.default_rng(5).random((n, n))
     yy, xx = np.mgrid[0:n, 0:n]
     mask = ((xx - n // 2) ** 2 + (yy - n // 2) ** 2) < 24**2
 
     ws = WorldState.empty(1, n, n)
     write_elevations(ws, shape_to_mask(noise, mask, cfg))
-    before = np.mean([h.elevation >= cfg.sea_level for h in ws.hexes.values()])
+    before = np.mean([h.elevation >= 0.0 for h in ws.hexes.values()])
 
     ErosionStage(cfg, np.random.default_rng(0)).run(ws)
-    after = np.mean([h.elevation >= cfg.sea_level for h in ws.hexes.values()])
+    after = np.mean([h.elevation >= 0.0 for h in ws.hexes.values()])
 
     assert after == pytest.approx(before, abs=0.05), (
         f"erosion moved the waterline from {before:.1%} land to {after:.1%}"
     )
 
 
-def test_coast_falloff_keeps_the_range_filled(tmp_path):
+def test_coast_falloff_keeps_the_waterline_through_erosion(tmp_path):
     """The opt-in path has to hold the same invariant as the default one.
 
-    `heightmap_coast_falloff` blends towards `continent_seabed` *after* the field has been
-    anchored, which takes it back off [0, 1] and moves the waterline — walking straight
-    back into the erosion renormalisation the anchoring exists to defuse. Measured before
-    the re-anchor: a west-three-quarters stencil went 59.6% land -> 56.5% through erosion,
-    against 59.6% -> 59.7% after.
+    `heightmap_coast_falloff` blends the field towards the sea floor, which moves the
+    waterline inward. In the old [0, 1] model that walked back into an erosion
+    renormalisation and cost land: a west-three-quarters stencil went 59.6% -> 56.5%
+    through erosion. Sea level is the datum now and erosion no longer rescales, so the
+    waterline the falloff draws is the waterline that survives.
     """
     from worldgen.stages.erosion import ErosionStage
 
@@ -371,7 +372,7 @@ def test_coast_falloff_keeps_the_range_filled(tmp_path):
         heightmap_path=path,
         heightmap_mode="coastline",
         heightmap_coast_falloff=True,
-        erosion_iterations=0,
+        erosion_droplets_per_hex=0.0,
     )
     pipeline = GeneratorPipeline(11, cfg)
     pipeline.add_stage(ImageElevationStage)
@@ -380,12 +381,16 @@ def test_coast_falloff_keeps_the_range_filled(tmp_path):
     arr = np.array(
         [[state.hexes[state.coord_at(c, r)].elevation for r in range(h)] for c in range(w)]
     )
-    assert arr.min() == pytest.approx(0.0), f"deepest sea is {arr.min():.3f} after the falloff"
-    assert arr.max() == pytest.approx(1.0), f"highest land is {arr.max():.3f} after the falloff"
+    assert arr.min() == pytest.approx(-cfg.seabed_depth_m, rel=0.05), (
+        f"deepest sea is {arr.min():.1f} m after the falloff"
+    )
+    assert 0.0 < arr.max() <= cfg.max_elevation_m, (
+        f"highest land is {arr.max():.1f} m after the falloff"
+    )
 
-    before = np.mean([hx.elevation >= cfg.sea_level for hx in state.hexes.values()])
+    before = np.mean([hx.elevation >= 0.0 for hx in state.hexes.values()])
     ErosionStage(cfg, np.random.default_rng(0)).run(state)
-    after = np.mean([hx.elevation >= cfg.sea_level for hx in state.hexes.values()])
+    after = np.mean([hx.elevation >= 0.0 for hx in state.hexes.values()])
     assert after == pytest.approx(before, abs=0.02), (
         f"the falloff path lost land to erosion: {before:.1%} -> {after:.1%}"
     )
@@ -429,7 +434,6 @@ def test_coast_falloff_rings_every_edge_regardless_of_config(tmp_path):
     )
 
     w, h = 16, 16
-    cfg_sea = WorldConfig().sea_level
     arr = np.array(
         [[state.hexes[state.coord_at(c, r)].elevation for r in range(h)] for c in range(w)]
     )
@@ -439,7 +443,8 @@ def test_coast_falloff_rings_every_edge_regardless_of_config(tmp_path):
         (arr[:, 0], "north"),
         (arr[:, -1], "south"),
     ]:
-        assert (border < cfg_sea).all(), f"the {name} border did not sink below sea level"
+        # Sea level is the datum now, so "below sea level" is simply negative.
+        assert (border < 0.0).all(), f"the {name} border did not sink below sea level"
 
 
 def test_coast_is_shallower_than_the_interior():
@@ -461,7 +466,7 @@ def test_degenerate_stencils_still_produce_a_field(fill):
     noise = np.random.default_rng(3).random((16, 16))
     out = shape_to_mask(noise, np.full((16, 16), fill), cfg)
     assert np.isfinite(out).all()
-    assert out.min() >= 0.0 and out.max() <= 1.0
+    assert out.min() >= -cfg.seabed_depth_m and out.max() <= cfg.max_elevation_m
 
 
 # --- the stage ---------------------------------------------------------------
@@ -481,8 +486,9 @@ def test_stage_fills_every_hex(tmp_path, layout, mode):
     state = _run_stage(path, grid_layout=layout, heightmap_mode=mode)
 
     assert len(state.hexes) == 16 * 16
+    cfg = WorldConfig(width=16, height=16)
     elevations = [h.elevation for h in state.hexes.values()]
-    assert all(0.0 <= e <= 1.0 for e in elevations)
+    assert all(-cfg.seabed_depth_m <= e <= cfg.max_elevation_m for e in elevations)
     assert len(set(elevations)) > 1, "every hex kept its default — nothing was written"
 
 
@@ -534,8 +540,8 @@ def test_coast_falloff_sinks_the_border(tmp_path):
     ringed = _run_stage(path, heightmap_coast_falloff=True, **cfg_kw)
 
     corner = plain.coord_at(0, 0)
-    assert plain.hexes[corner].elevation >= plain.metadata["config"]["sea_level"]
-    assert ringed.hexes[corner].elevation < ringed.metadata["config"]["sea_level"], (
+    assert plain.hexes[corner].elevation >= 0.0
+    assert ringed.hexes[corner].elevation < 0.0, (
         "heightmap_coast_falloff should pull the map edge under water"
     )
 

@@ -11,15 +11,18 @@ from worldgen.stages.terrain_class import TerrainClassificationStage
 
 @pytest.fixture(scope="module")
 def phase1_state():
-    cfg = WorldConfig(width=64, height=64, erosion_iterations=3000)
+    cfg = WorldConfig(width=64, height=64, erosion_droplets_per_hex=3.0)
     pipeline = GeneratorPipeline(42, cfg)
     pipeline.add_stage(ElevationStage).add_stage(ErosionStage).add_stage(TerrainClassificationStage)
     return pipeline.run()
 
 
-def test_elevations_normalized(phase1_state):
+def test_elevations_are_metres_above_sea_level(phase1_state):
+    cfg = WorldConfig(**phase1_state.metadata["config"])
     for h in phase1_state.hexes.values():
-        assert 0.0 <= h.elevation <= 1.0
+        # Metres above sea level, so the sea floor is negative and land is positive.
+        # Sea level is zero by definition rather than by a configured threshold.
+        assert -cfg.seabed_depth_m - 1.0 <= h.elevation <= cfg.max_elevation_m + 1.0
 
 
 def test_land_coverage(phase1_state):
@@ -40,7 +43,7 @@ def test_coast_borders_ocean(phase1_state):
 
 def test_mountain_not_isolated(phase1_state):
     mountains = [
-        coord for coord, h in phase1_state.hexes.items() if h.terrain_class == TerrainClass.MOUNTAIN
+        coord for coord, h in phase1_state.hexes.items() if h.terrain_class == TerrainClass.STEEP
     ]
     if not mountains:
         pytest.skip("No mountain hexes generated")
@@ -50,7 +53,7 @@ def test_mountain_not_isolated(phase1_state):
         for coord in mountains
         if not any(
             phase1_state.hexes.get(n, None)
-            and phase1_state.hexes[n].terrain_class == TerrainClass.MOUNTAIN
+            and phase1_state.hexes[n].terrain_class == TerrainClass.STEEP
             for n in neighbors(coord)
             if n in phase1_state.hexes
         )
@@ -62,7 +65,9 @@ def test_mountain_not_isolated(phase1_state):
 
 def test_elevation_gradient_tilts_north_high():
     """Negative south_bias should make northern rows higher on average."""
-    cfg = WorldConfig(width=32, height=32, erosion_iterations=0, elevation_gradient=(0.0, -0.8))
+    cfg = WorldConfig(
+        width=32, height=32, erosion_droplets_per_hex=0.0, elevation_gradient_m=(0.0, -1200.0)
+    )
     p = GeneratorPipeline(42, cfg)
     p.add_stage(ElevationStage)
     state = p.run()
@@ -76,7 +81,9 @@ def test_elevation_gradient_tilts_north_high():
 
 def test_elevation_gradient_default_no_bias():
     """Default gradient (0, 0) should not skew east vs. west elevation."""
-    cfg = WorldConfig(width=32, height=32, erosion_iterations=0, elevation_gradient=(0.0, 0.0))
+    cfg = WorldConfig(
+        width=32, height=32, erosion_droplets_per_hex=0.0, elevation_gradient_m=(0.0, 0.0)
+    )
     p = GeneratorPipeline(42, cfg)
     p.add_stage(ElevationStage)
     state = p.run()
@@ -84,11 +91,16 @@ def test_elevation_gradient_default_no_bias():
     west_elev = [h.elevation for (q, _), h in state.hexes.items() if q < 8]
     east_elev = [h.elevation for (q, _), h in state.hexes.items() if q >= 24]
     diff = abs(sum(east_elev) / len(east_elev) - sum(west_elev) / len(west_elev))
-    assert diff < 0.2, f"Default gradient produced unexpected east-west bias: {diff:.3f}"
+    # As a share of the map's vertical scale rather than an absolute figure in metres, so
+    # the tolerance means the same thing whatever max_elevation_m is set to.
+    span = cfg.max_elevation_m + cfg.seabed_depth_m
+    assert diff < 0.2 * span, (
+        f"Default gradient produced an east-west bias of {diff:.0f} m on a {span:.0f} m span"
+    )
 
 
 def test_reproducible():
-    cfg = WorldConfig(width=32, height=32, erosion_iterations=500)
+    cfg = WorldConfig(width=32, height=32, erosion_droplets_per_hex=3.0)
 
     def build():
         p = GeneratorPipeline(7, cfg)

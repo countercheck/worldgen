@@ -4,6 +4,7 @@ from ..core.hex import TerrainClass
 from ..core.hex_grid import neighbors
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
+from .terrain_class import classify, gradient_m_per_km
 
 
 class WaterBodiesStage(GeneratorStage):
@@ -34,7 +35,7 @@ class WaterBodiesStage(GeneratorStage):
                 for c in component:
                     hexes[c].terrain_class = TerrainClass.LAKE
 
-        _fix_coast_hexes(state)
+        _fix_coast_hexes(state, self.config)
         return state
 
 
@@ -51,7 +52,7 @@ def _bfs_component(seed, water: set) -> set:
     return component
 
 
-def _fix_coast_hexes(state: WorldState) -> None:
+def _fix_coast_hexes(state: WorldState, cfg) -> None:
     """Re-classify COAST hexes that border only lakes (not open ocean).
 
     TerrainClassificationStage runs before water body labelling, so it
@@ -60,11 +61,7 @@ def _fix_coast_hexes(state: WorldState) -> None:
     original terrain classification.
     """
     hexes = state.hexes
-    cfg_dict = state.metadata.get("config", {})
-    sea = cfg_dict.get("sea_level", 0.45)
-    coast_threshold = sea + 0.05
-    mountain_gradient = cfg_dict.get("terrain_mountain_gradient", 0.04)
-    hill_gradient = cfg_dict.get("terrain_hill_gradient", 0.02)
+    coast_threshold = cfg.coast_max_elevation_m
 
     for coord, hx in hexes.items():
         if hx.terrain_class != TerrainClass.COAST:
@@ -81,15 +78,8 @@ def _fix_coast_hexes(state: WorldState) -> None:
             # so downstream stages can treat it like coastal terrain if desired.
             continue
 
-        neighbor_elevs = [n.elevation for n in nbrs]
-        gradient = (
-            sum(abs(elev - ne) for ne in neighbor_elevs) / len(neighbor_elevs)
-            if neighbor_elevs
-            else 0.0
-        )
-        if gradient > mountain_gradient or elev > 0.8:
-            hx.terrain_class = TerrainClass.MOUNTAIN
-        elif gradient >= hill_gradient:
-            hx.terrain_class = TerrainClass.HILL
-        else:
-            hx.terrain_class = TerrainClass.FLAT
+        # Reclassified through the same function TerrainClassificationStage uses. This
+        # was a second copy of that logic, which meant the two could disagree about what
+        # a hill was — and both carried the altitude clause that called level high ground
+        # a mountain.
+        hx.terrain_class = classify(gradient_m_per_km(coord, hx, hexes, cfg), cfg)
