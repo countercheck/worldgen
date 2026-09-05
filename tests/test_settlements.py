@@ -96,12 +96,8 @@ def test_city_town_port_role_requires_river_tag():
     center, river_neighbor, hexes = _make_port_role_test_hexes()
 
     assert (
-        assign_city_town_role(center.coord, center, hexes, WorldConfig().terrain_mountain_gradient)
-        is not SettlementRole.PORT
+        assign_city_town_role(center.coord, center, hexes, WorldConfig()) is not SettlementRole.PORT
     )
 
     river_neighbor.tags.add("river")
-    assert (
-        assign_city_town_role(center.coord, center, hexes, WorldConfig().terrain_mountain_gradient)
-        is SettlementRole.PORT
-    )
+    assert assign_city_town_role(center.coord, center, hexes, WorldConfig()) is SettlementRole.PORT

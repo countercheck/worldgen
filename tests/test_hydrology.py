@@ -18,7 +18,7 @@ from .worlds import build_world
 
 
 def _build_pipeline(seed: int = 42, width: int = 32, height: int = 32):
-    cfg = WorldConfig(width=width, height=height, erosion_iterations=500)
+    cfg = WorldConfig(width=width, height=height)
     p = GeneratorPipeline(seed, cfg)
     p.add_stage(ElevationStage)
     p.add_stage(ErosionStage)
@@ -239,11 +239,14 @@ def test_lake_drainage_merges_without_rewiring_existing_river():
     assert flow_dir[merge] == downstream
     # The channel is joined, not seized: its own course is untouched.  Its *flow* is not,
     # and must not be — a stream below a junction carries what both sides bring it.  The
-    # basin takes in 21 (a 20-unit river plus the rain on its one hex) and evaporates 1,
-    # so 20 arrive here where the channel carried 5.  This used to assert 5.0, holding the
-    # junction to the smaller of the two and pouring the lake's throughput away at the
-    # confluence.
-    assert acc[merge] == 20.0
+    # basin takes in 21 (a 20-unit river plus the rain on its one hex) and evaporates the
+    # potential evapotranspiration off that one hex of surface, which in a temperate
+    # region is 350 mm against 800 mm of mean rainfall — 0.4375 of a hex's worth.  So
+    # 20.5625 arrive here where the channel carried 5.  This used to assert 5.0, holding
+    # the junction to the smaller of the two and pouring the lake's throughput away at
+    # the confluence.
+    expected = 21.0 - cfg.pet_mm() / cfg.mean_precip_mm
+    assert acc[merge] == pytest.approx(expected)
 
 
 def test_no_shared_hexes_between_rivers(hydro_state):
@@ -335,7 +338,6 @@ def test_split_at_confluences_tributary_keeps_pre_merge_flow_volume():
 _INFLOW_KW = dict(
     width=48,
     height=48,
-    erosion_iterations=800,
     continent_falloff_edges=("south", "east", "west"),
 )
 
@@ -469,9 +471,7 @@ def test_inflow_empty_edge_list_is_not_an_error():
 def test_inflow_needs_land_at_the_border():
     # The default map rings itself with sea, so no river can enter it by land.  Enabled
     # but inert, not an error.
-    state = build_world(
-        seed=11, until="HydrologyStage", width=48, height=48, erosion_iterations=800
-    )
+    state = build_world(seed=11, until="HydrologyStage", width=48, height=48)
     assert _sources(state) == []
 
 
@@ -571,11 +571,11 @@ def test_a_coastal_map_drains_to_the_sea():
         until="HydrologyStage",
         width=80,
         height=80,
-        erosion_iterations=600,
+        erosion_droplets_per_hex=0.8,
         grid_layout="offset",
         continent_falloff_edges=["south"],
         continent_shelf_variance=0.8,
-        elevation_gradient=[0.0, -0.5],
+        elevation_gradient_m=[0.0, -850.0],
     )
     lake = [h for h in state.hexes.values() if h.terrain_class == TerrainClass.INLAND_WATER]
     endorheic = [h for h in lake if "endorheic" in h.tags]

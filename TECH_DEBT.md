@@ -24,6 +24,10 @@
 | 12 | `_get_lake_components` dead code in `hydrology.py` | Code | **10** | XS |
 | 13 | `hydrology.py` is 781 lines — prime split candidate | Code | **9** | M |
 | 14 | Bare `dict`/`list` type annotations throughout stages | Code | **8** | S |
+| 15 | Rivers stay a list of paths while roads became a graph | Architecture | **8** | S |
+| 16 | Moisture smear blends the ocean's carrier value into coastal rainfall | Model | **12** | M |
+| 17 | `_assign_role` compares metre elevation against 0.70 — FORTRESS unreachable | Code | **12** | S |
+| 18 | Market siting scores a plain hex disc, not the day-reach the catchment walks | Model | **20** | L |
 
 ---
 
@@ -149,6 +153,7 @@ Several tunable thresholds are hardcoded in `stages/city_town.py` and `stages/se
 @classmethod
 def from_json(cls, path: str) -> "WorldState":
     from worldgen.export.json_export import load
+
     return load(path)
 ```
 
@@ -195,6 +200,7 @@ The canonical stage sequence is defined only inside the `generate()` function in
 ```python
 from .stages.biomes import BiomeStage
 from .stages.city_town import CityTownStage
+
 # ... 13 more
 pipeline.add_stage(ElevationStage)
 # ... 14 more add_stage calls
@@ -241,10 +247,10 @@ This is lower priority than the items above because the code is correct and well
 Multiple stage files use unparameterised type annotations:
 
 ```python
-hex_traffic: dict = defaultdict(float)        # should be dict[HexCoord, float]
-canonical_routes: dict = {}                    # should be dict[tuple, list[HexCoord]]
-hex_tier: dict = {}                            # should be dict[HexCoord, RoadTier]
-metadata: dict = field(default_factory=dict)   # should be dict[str, Any]
+hex_traffic: dict = defaultdict(float)  # should be dict[HexCoord, float]
+canonical_routes: dict = {}  # should be dict[tuple, list[HexCoord]]
+hex_tier: dict = {}  # should be dict[HexCoord, RoadTier]
+metadata: dict = field(default_factory=dict)  # should be dict[str, Any]
 ```
 
 These are legal Python 3.11 but suppress type-checker warnings that would catch bugs (e.g., passing a `HexCoord` key where a `str` is expected).
@@ -294,3 +300,115 @@ Highest-effort structural change — do last when Phase B tests provide a safety
 
 ### Phase F — Optional, low priority
 16. Split `hydrology.py` into two modules (**item 13**) — only if hydrology needs active development
+
+---
+
+### 15 — Rivers stay a list of paths while roads became a graph
+**Category:** Architecture | **Priority: 8** | **Effort: S**
+
+`WorldState.road_edges` is now `{edge: RoadEdge}` — one tier and one delta elevation per
+undirected edge. `WorldState.rivers` is still `list[River]`, each a whole path with a
+`flow_volume`. The asymmetry is deliberate and this entry exists so nobody "fixes" it by
+mistake, but two things in it are worth revisiting.
+
+**Why rivers were left alone.** The redundancy that made the road conversion worth doing
+is not there. Measured at 128×128: 98 rivers, 970 hex entries over 872 distinct edges —
+**1.11 entries per edge, against 89 for roads before the change** — and *no* edge shared
+between two rivers, because a tributary terminates at its confluence rather than
+continuing down the trunk. A drainage network is a tree; road journeys shared trunks
+almost entirely. A river is also genuinely a path — source, mouth, direction, one day a
+name — where a `Road` was only a journey someone happened to make.
+
+**The actual debt is two representations of flow.** `River.flow_volume` sits alongside
+`Hex.river_flow`, at different granularities, with nothing keeping them in step. The
+stages all read the per-hex value; `flow_volume` is written by hydrology and read by the
+renderers only. They have not drifted, and there is no test that would notice if they did.
+
+**And one asymmetry that has been checked and is fine.** `river_edges()` derives the
+hexsides a road may not travel from the *paths*, while `is_river()` and every road cost
+term read the `"river"` *tag*. If those disagreed a road could be blocked from a hexside
+whose hexes it does not consider river at all. Measured: 46 hexes sit on a river path
+untagged, and every one is the discharge — 33 LAKE, 13 OCEAN. No hex carries the tag
+without being on a path. The two agree exactly on land.
+
+**Do this if** rivers gain per-segment attributes the way roads did (navigability by
+tonnage, a ford's difficulty, a named reach), at which point an edge map earns its place.
+Until then the path form carries information the graph would lose.
+
+
+### 16 — Moisture smear blends the ocean's carrier value into coastal rainfall
+**Category:** Model | **Priority: 12** | **Effort: M**
+
+Ocean and lake hexes hold `moisture = 1.0` when the Gaussian smear runs — the
+*carrier* value the orographic sweep transports, not rainfall — and the smear blends
+it into every coastal land hex, windward and leeward alike. A lee shore draws rain
+from the sea behind it, which is the effect the orographic pass exists to prevent.
+
+**Fixed once, and reverted deliberately.** A land-only normalised convolution
+(smear `arr * land_mask` against a smeared mask) removes the artifact cleanly — and
+`test_each_climate_comes_out_as_the_country_it_is_named_after` immediately fails,
+because the artifact is quietly load-bearing: blending 1.0 into the coasts and then
+rescaling the land mean *widens* each climate's rainfall distribution, and the soil
+rainfall bands were calibrated against those widened distributions. Remove it and a
+mediterranean map's rainfall clusters inside the [`biome_dry_precip_mm`,
+`biome_wet_precip_mm`] arable band: 46% arable against temperate's 34%, and the
+"mediterranean comes out pastoral" acceptance claim inverts.
+
+**The real fix is a decision, not a patch:** what should make a 550 mm climate
+pastoral once the artifact is gone? Historically it is summer drought — seasonality
+the model does not represent — so either the rainfall bands get per-climate
+recalibration, or soil gains a seasonality term, and both change the acceptance
+table. The one-line convolution fix is in the review record, ready once that call
+is made.
+
+### 17 — `_assign_role` compares metre elevation against 0.70
+**Category:** Code | **Priority: 12** | **Effort: S**
+
+`city_town.py` still reads the retired [0, 1] elevation axis: any steep neighbour
+above 0.70 *metres* makes a settlement MINING, so FORTRESS is unreachable and — with
+the water tests generous — 73 of 74 organic settlements come out `port`. Deferred in
+the PR that introduced the metres axis ("needs a decision about what a fortress and
+a mine are"); recorded here so the deferral has an address.
+
+
+### 18 — Market siting scores a plain hex disc, not the day-reach the catchment walks
+**Category:** Model | **Priority: 20** | **Effort: L**
+
+`MarketStage._plant` ranks candidates by integrating surplus over plain hex rings out to
+`market_day_radius`: no travel cost, no water barrier, off-map as zero. The catchment the
+winner then receives is a cost-bounded Dijkstra with watershed edges. So the day radius
+means a *ring count* in the siting and a *cost budget* in the gather, a ridge beside a
+candidate does not lower its score, and markets are ranked on countryside the built
+catchment then fails to deliver. Six independent verifier runs in the PR #34 review
+confirmed the mechanism (planting score ≈ 4× the real gather, its land term as
+disconnected from the draw as its water term).
+
+**Fixed once, calibrated twice, and reverted deliberately.** The rewrite exists and
+works: score over a cached single-source day-reach Dijkstra plus the fishery rim on the
+same terms `fishery_rim` grants it, deplete exactly what was scored, seed the lazy-greedy
+heap with the ring disc as a provable upper bound (one ring slack for the rim) so
+exactness survives and the Dijkstra only runs on candidates that pop. What it cannot do
+is inherit the disc's calibration:
+
+- The floor's units change (score ≈ real gather, not 4× it), and no single value threads
+  the acceptance table. 12.0 reproduces disc-era density (15 markets on the 64×64
+  temperate reference against 13) and keeps count monotone in measured food across all
+  five climates — and then the tiers above and below break: a city stands away from
+  navigable water, a landlocked arid map grows a city of 8,754, both 96×96 chokepoint
+  fixtures grow zero villages, and every market's population moves across promotion
+  because every market sits in some city's shadow.
+- The deeper reason: cost-bounded scoring reads *local* concentration where the disc
+  read regional total. Spread-thin fertility (taiga, leached tropics) scores lower and
+  concentrated fertility (desert rivers, coasts with a fishery rim) scores higher, so
+  the whole settlement economy — floor, `city_min_draw`, chokepoint gates, the rural
+  share — needs recalibrating together, against the acceptance table the author wants,
+  not one test at a time.
+
+Sweep data from the review record (64×64, seed 42, island geometry, markets/medians):
+floor 8 → arid 15/845, boreal 17/812, tropical 18/857, med 24/1020, temperate 30/930 (no
+ordering violations, ~2× disc density); floor 12 → 6/6/7/14/15 (no violations, disc
+density); floors 10, 14, 16 each break count-follows-food between boreal and tropical.
+
+**Do this as its own branch**, with the acceptance table on the desk: pick the density,
+re-tune `city_min_draw` and the chokepoint gates against it, and update the PR-table
+numbers in the same change. The diff is small; the decision is not.

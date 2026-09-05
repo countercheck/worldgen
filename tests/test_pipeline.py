@@ -78,6 +78,7 @@ def test_stage_order_is_load_bearing():
         "HydrologyStage",  # climate's orographic pass needs rivers
         "ClimateStage",  # biomes need temperature and moisture
         "BiomeStage",  # land cover is derived from biome
+        "SoilStage",  # cover depends on soil: good ground carries wildwood until cleared
         "LandCoverStage",  # habitability scores land cover
         "HabitabilityStage",  # placement ranks on habitability
         "CityTownStage",  # roads join cities and towns
@@ -89,12 +90,40 @@ def test_stage_order_is_load_bearing():
     assert positions == sorted(positions), f"Stage order violated: {names}"
 
 
+_VILLAGE_STAGES = {
+    "VillagePlacementStage",
+    "VillageTrackStage",
+    "VillageCultivationStage",
+}
+
+
+def test_organic_runs_no_village_stages():
+    """The organic countryside is a productive surface, not a list of hamlets.
+
+    The village stages site a settlement on every hex clearing a habitability bar, which
+    buried ~80 markets under ~1,100 hamlets.  Sizing a market off a food surface and then
+    also enumerating that surface as settlements is double-counting the same peasantry.
+    """
+    names = {s.__name__ for s in default_stages("organic")}
+    assert not (names & _VILLAGE_STAGES), f"organic still plants villages: {names}"
+
+
+def test_classic_still_runs_the_village_stages():
+    """Removing them from organic must not touch classic — it is the comparison case."""
+    names = {s.__name__ for s in default_stages("classic")}
+    assert names >= _VILLAGE_STAGES, f"classic lost its village stages: {names}"
+
+
 def test_pipeline_runs_and_populates_a_world():
-    state = build_pipeline(width=32, height=32, erosion_iterations=200).run()
+    # 48x48 rather than 32x32: `continent_shelf_hexes` is capped at a quarter of the
+    # shorter side, so a 32-hex map is mostly coastal shelf and cannot muster the
+    # `settlement_min_reachable` hexes of connected interior a settlement needs. It is
+    # not a landscape, and asserting settlements on one asserts an accident.
+    state = build_pipeline(width=48, height=48).run()
     assert isinstance(state, WorldState)
-    assert len(state.hexes) == 32 * 32
-    assert state.settlements, "a 32x32 world produced no settlements"
-    assert state.roads, "a 32x32 world produced no roads"
+    assert len(state.hexes) == 48 * 48
+    assert state.settlements, "a 48x48 world produced no settlements"
+    assert state.road_edges, "a 48x48 world produced no roads"
 
 
 def test_until_truncates_the_run():
@@ -111,23 +140,49 @@ def test_until_rejects_a_stage_not_in_the_pipeline():
 
 def test_same_seed_same_world():
     """The project's central promise: one integer reproduces the whole map."""
-    kwargs = {"width": 32, "height": 32, "erosion_iterations": 200}
+    kwargs = {"width": 32, "height": 32}
     a = build_pipeline(seed=7, **kwargs).run()
     b = build_pipeline(seed=7, **kwargs).run()
 
     assert [h.elevation for h in a.hexes.values()] == [h.elevation for h in b.hexes.values()]
     assert sorted(s.coord for s in a.settlements) == sorted(s.coord for s in b.settlements)
-    assert sorted(tuple(r.path) for r in a.roads) == sorted(tuple(r.path) for r in b.roads)
+    assert sorted(a.road_edges.items()) == sorted(b.road_edges.items())
 
 
 def test_different_seed_different_world():
-    kwargs = {"width": 32, "height": 32, "erosion_iterations": 200}
+    kwargs = {"width": 32, "height": 32}
     a = build_pipeline(seed=7, **kwargs).run()
     b = build_pipeline(seed=8, **kwargs).run()
     assert [h.elevation for h in a.hexes.values()] != [h.elevation for h in b.hexes.values()]
 
 
 def test_seed_is_recorded_in_metadata():
-    state = build_pipeline(seed=123, width=32, height=32, erosion_iterations=200).run()
+    state = build_pipeline(seed=123, width=32, height=32).run()
     assert state.seed == 123
     assert state.metadata["seed"] == 123
+
+
+def test_organic_stage_order_is_load_bearing():
+    """The organic half of the ordering test, which never existed.
+
+    Every one of these orderings is annotated as deliberate in `default_stages`:
+    crossings before markets so a bridging point is a reason a market grows there;
+    land use straight after siting because a market is worth what its countryside
+    sends; cities before roads because population decides travellers; chokepoints
+    after roads because only the built network says which crossings carry traffic.
+    The classic list had a test and the organic list — where the ordering comments
+    actually live — had none, so any of them could be silently reshuffled.
+    """
+    names = [s.__name__ for s in default_stages("organic")]
+    order = [
+        "SoilStage",  # land use reads what the ground is
+        "LandCoverStage",  # soil decides what grows until somebody clears it
+        "CrossingStage",  # a bridging point should be a reason a market grows there
+        "MarketStage",  # land use founds what this stage sites
+        "LandUseStage",  # a market is worth what its countryside actually sends
+        "CityPromotionStage",  # promotion changes populations, populations drive travellers
+        "InterurbanRoadStage",  # chokepoints need the built network
+        "ChokepointStage",  # a bad site that has traffic anyway
+    ]
+    positions = [names.index(n) for n in order]
+    assert positions == sorted(positions), f"Stage order violated: {names}"

@@ -32,7 +32,9 @@ shape every map.
    - [3.7 Biomes](#37-biomes)
    - [3.8 Land Cover](#38-land-cover)
    - [3.9 Habitability](#39-habitability)
-   - [3.10 City & Town Placement](#310-city--town-placement)
+   - [3.10 City & Town Placement](#310-city--town-placement) — `classic`
+   - [3.10a River Crossings](#310a-river-crossings--organic) — `organic`
+   - [3.10b Market Centres](#310b-market-centres--organic) — `organic`
    - [3.11 Interurban Roads](#311-interurban-roads)
    - [3.12 Cultivation (Cities & Towns)](#312-cultivation-cities--towns)
    - [3.13 Village Placement](#313-village-placement)
@@ -49,10 +51,13 @@ shape every map.
 
 ### Scale
 
-- **1 hex = 1 km.** Hex size and elevation span can be tuned via
-  `hex_size_m` and `road_elev_range_m` (used for grade-percent math in
-  road costs), but the pipeline assumes the kilometre-scale interpretation
-  for things like settlement separation and cultivation radii.
+- **1 hex = 1 km**, set by `hex_size_m`. The pipeline assumes the kilometre-scale
+  interpretation throughout — settlement separation, cultivation radii, and every
+  haulage range are quoted in kilometres because a hex is one.
+- **Every physical field is in real units.** Elevation is metres above sea level,
+  temperature degrees Celsius, rainfall millimetres a year, catchment area square
+  kilometres, gradient metres per kilometre. None of them are normalised, so a threshold
+  written against one means the same thing on every map. See § [4](#4-configuration-reference).
 - **Default grid:** 128 × 128 (≈16,000 km², the size of a small kingdom).
 - **Coordinates:** axial `(q, r)`, flat-top hexagons.
   Neighbours, distance, ranges, and pixel conversion live in
@@ -80,11 +85,51 @@ and round-trip through `world.json`.
 
 ### Pipeline
 
-15 stages, run in this exact order
-([cli.py:58–74](../worldgen/cli.py#L58)). Each stage is a pure
-transformer: `state → state`
-([pipeline.py:20](../worldgen/core/pipeline.py#L20)). Stages never write
-files; that's `worldgen/export/`'s job.
+The stage list is defined once, in
+[worldgen/stages/\_\_init\_\_.py](../worldgen/stages/__init__.py), and both the CLI and
+the test fixtures read it from there. Each stage is a pure transformer: `state → state`
+([pipeline.py:20](../worldgen/core/pipeline.py#L20)). Stages never write files; that's
+`worldgen/export/`'s job.
+
+**There are two settlement models**, selected with `generate --model`. They share the nine
+physical stages and diverge after them:
+
+- **`classic`** (default) ranks hexes on habitability and places a *configured number* of
+  cities and towns at a fixed minimum separation, then sprinkles villages. Population is
+  drawn at random from a per-tier band and nothing about the site enters the number.
+- **`organic`** derives the hierarchy from pre-industrial haulage economics, and each of
+  its three tiers is a different question about reach. Markets go where the most surplus
+  can reach them inside a **day's return**; cities are markets that other *markets* can
+  reach over `haulage_range_land` with water counting fifteen times; villages stand where
+  the road has no way round — a bridgehead or a pass — and are sized from a **morning's
+  walk** out to the fields. None of the three is a target count.
+
+  Under all three sits a **soil** model (§ [3.7a](#37a-soil)): what the ground could
+  support, kept separate from what grows on it and from what is done with it. Good soil
+  carries wildwood until somebody clears it, cleared ground yields more than wood, and
+  where clearing stops is set by scarcity rather than by a radius
+  (§ [3.10c](#310c-land-use-clearing-and-rural-density--organic)) — so the map shows
+  assarted country round the markets and wood standing in the gaps.
+
+  It runs none of `classic`'s village stages: the dispersed peasantry is a productive
+  surface rather than a list of hamlets (§ [3.10b](#310b-market-centres--organic)), and it
+  now carries an explicit population — about 38 people per km² on a temperate map, against
+  England's ~35 in 1300. A temperate map carries ~80 settlements where `classic` carries
+  ~1,100. See § [3.10a](#310a-river-crossings--organic),
+  § [3.10b](#310b-market-centres--organic),
+  § [3.10c](#310c-land-use-clearing-and-rural-density--organic) and
+  § [3.11a](#311a-chokepoints--organic).
+
+The difference is not cosmetic. On one landlocked desert map at 128×128, `classic` places
+a city of 48,000 — and its five largest populations are identical, figure for figure, to
+those it produces on a fertile temperate coast, because they come from `rng.integers` and
+the land tells them nothing. `organic` caps the same map at 2,706 and rings its
+settlements around the shore of the inland sea.
+
+The diagram below shows the `classic` pipeline. `SoilStage` runs before `LandCoverStage` in both models. `organic`
+replaces `CityTownStage` with `CrossingStage → MarketStage → LandUseStage →
+CityPromotionStage`, inserts `ChokepointStage` after `InterurbanRoadStage`, and drops
+`CultivationStage` — `LandUseStage` does that job and more.
 
 ```mermaid
 flowchart TD
@@ -149,7 +194,7 @@ flowchart TD
 | `roads` | `list[Road]` | PRIMARY / SECONDARY / TRACK paths |
 | `metadata` | `dict` | `{"seed": ..., "config": ...}` snapshot |
 
-Convenience accessors: `all_land()`, `all_ocean()`, `all_lakes()`,
+Convenience accessors: `all_land()`, `all_open_water()`, `all_inland_water()`,
 `all_water()` ([world_state.py:49–79](../worldgen/core/world_state.py#L49)).
 
 ### `Hex` — [worldgen/core/hex.py:66–80](../worldgen/core/hex.py#L66)
@@ -199,7 +244,8 @@ Convenience accessors: `all_land()`, `all_ocean()`, `all_lakes()`,
 | `"river_mouth"` | River hex on map border or adjacent to ocean/lake | Hydrology |
 | `"ford"` | First road crossing of a river hex | `tag_river_crossings` |
 | `"bridge"` | Second road to cross the same river hex (upgrades a ford) | `tag_river_crossings` |
-| `"pass"` | HILL hex that's a local-max `habitability_town` within 3-hex range, no settlement | City/Town |
+| `"prominent_site"` | ROLLING hex that is a local-max `habitability_town` within 3-hex range, no settlement | City/Town (`classic`) |
+| `"pass"` | A col: a saddle whose flanks both rise at least `terrain_steep_gradient_m` | Chokepoints (`organic`) |
 | `"confluence_town"` | TOWN settled on a hex already tagged `"confluence"` | City/Town |
 
 Roads may cross a river but never travel along one: the hexsides a river is drawn
@@ -227,7 +273,8 @@ of anchorages) rather than a road in the channel; if the gap is wider than
 
 **Config:** `noise_octaves`, `noise_persistence`, `noise_lacunarity`,
 `noise_scale`, `domain_warp_strength`, `continent_falloff`,
-`elevation_gradient`.
+`continent_falloff_edges`, `continent_shelf_hexes`, `continent_shelf_variance`,
+`max_elevation_m`, `seabed_depth_m`, `elevation_gradient_m`.
 
 **Algorithm**
 
@@ -256,26 +303,44 @@ of anchorages) rather than a road in the channel; if the gap is wider than
    `persistence` keeps more detail in late octaves (rougher); higher
    `lacunarity` increases frequency between octaves (more high-frequency
    detail).
-4. **Linear gradient** (optional) tilts the map by `(gx, gy)` using
-   coordinates centred at `[-0.5, +0.5]`
-   ([elevation.py:46–50](../worldgen/stages/elevation.py#L46)). Useful
-   for biasing one edge upward (e.g., a continental ridge).
-5. **Continent falloff** (optional) multiplies by
-   `max(0, 1 - sqrt(qf² + rf²))` where `qf`, `rf` are normalised to
-   `[-1, +1]` — a circular cone that drops to 0 at the corners
-   ([elevation.py:52–56](../worldgen/stages/elevation.py#L52)). This
-   is what gives default worlds their island-on-ocean look.
-6. **Linear stretch** to `[0, 1]`
-   ([elevation.py:58–60](../worldgen/stages/elevation.py#L58)).
+4. **Linear stretch to `[0, 1]`.** This shaping stays, but only as scaffolding for the
+   falloff: the falloff blends *towards* the seabed and needs a known floor to blend
+   from. Applied to raw noise, which straddles zero, the map edge came out mid-range
+   instead of underwater, so whether the sea reached the border at all was a coin flip
+   per seed — and on a map where it did not, every drop of water was trapped inland.
+5. **Continent falloff** (optional) sinks the map's edges to the seabed over a shelf
+   `continent_shelf_hexes` wide. Only the edges named in `continent_falloff_edges`
+   participate, so land can run off the map on the others — a world that continues past
+   the border. Three details matter:
+   - The two axes combine with a **p-norm, not a minimum**. A minimum holds the shelf at
+     constant width right up to where two edges meet, giving a square corner; the p-norm
+     pulls the corner inward so headlands round off.
+   - The shelf's inner boundary wanders by `continent_shelf_variance`, applied
+     *multiplicatively* to a value already zero at the border — so however far the
+     coastline swings inland, the outermost ring stays underwater and the sea still
+     reaches the edge.
+   - The ramp is a **smoothstep**, easing at both ends, so the coast varies with the
+     noise behind it rather than being a uniform wall. Where that noise is high the drop
+     is still abrupt, which is what a sea cliff is.
+6. **Into metres above sea level.** `elevation = shaped × (max_elevation_m +
+   seabed_depth_m) − seabed_depth_m`. Sea level is the datum: land is positive, the sea
+   floor negative, and zero means sea level by definition rather than by a threshold.
+7. **Regional tilt** (optional) adds `elevation_gradient_m` as `[east, south]` metres
+   across the map, centred on `[-0.5, +0.5]`. It goes on **last**, in metres. It used to
+   run before the shaping, where a normalisation promptly stretched the result back out,
+   so asking for half a range of tilt got you rather less than that.
 
 **Gotchas**
 
-- The output range is always `[0, 1]` *after* stretch, but
-  `sea_level=0.45` is then used as a fixed cutoff. So elevation values
-  are not absolute — `0.45` means "the 45th percentile of the noise
-  distribution after falloff," not "450 m."
-- Without `continent_falloff`, expect a nearly-full-coverage land map
-  unless `sea_level` is raised.
+- Elevations are absolute. `450` means 450 m, not a percentile — every downstream test
+  ("is this ocean", "how far above the water does this stand", "is it above the
+  treeline") is a statement about the world rather than a position on a per-map axis.
+  There is no `sea_level` setting to raise; set `max_elevation_m` and `seabed_depth_m`.
+- Without `continent_falloff` (or with `continent_falloff_edges: []`), expect a
+  near-total land map whose interior basin is the terminal sink — endorheic by geometry.
+- The shelf width is capped at a quarter of the shorter side. On a map smaller than the
+  shelf there is no interior left to be a continent and the whole thing sinks; real maps
+  never hit this.
 
 ---
 
@@ -364,20 +429,35 @@ imported terrain exactly as it does a generated one.
 **Purpose:** Sculpt valleys by simulating water particles flowing downhill,
 removing high-frequency noise, and producing natural-looking channels.
 
-**Reads:** `hex.elevation` (and `sea_level` to bound the simulation to
-land).
-**Writes:** `hex.elevation` (modified, then re-normalised to `[0, 1]`).
+**Reads:** `hex.elevation`.
+**Writes:** `hex.elevation`, still in metres above sea level.
 
-**Config:** `erosion_iterations`, `erosion_inertia`, `erosion_capacity`,
-`erosion_deposition`, `erosion_erosion_rate`,
-`erosion_channel_affinity_gain`, `erosion_affinity_update_interval`,
-`sea_level`.
+**Config:** `erosion_droplets_per_hex`, `erosion_inertia`, `erosion_capacity`,
+`erosion_deposition`, `erosion_erosion_rate`, `erosion_channel_affinity_gain`,
+`erosion_affinity_update_interval`, `erosion_delta_min_load`, `max_elevation_m`,
+`seabed_depth_m`.
+
+**Units.** The erosion constants are *shares of the map's relief* rather than physical
+quantities: `erosion_capacity` multiplies a height difference, and the capacity floor and
+`erosion_delta_min_load` are absolute heights, all tuned against a `[0, 1]` range. Fed
+metres directly they become centimetres, a droplet's capacity collapses to nothing, every
+droplet deposits, and the whole map planes off to sea level within a couple of passes. So
+the stage converts to a normalised copy at its boundary and back on the way out —
+against the **known** span `max_elevation_m + seabed_depth_m`, so it is a fixed change of
+units, not a per-map stretch.
+
+**Dose.** Droplets run **per land hex**, not per map. A flat count is a different amount
+of weather depending on map size: at the old default of 15,000, a 32×32 map got 14.6
+droplets per hex and a 128×128 map 0.9 — a sixteenfold spread, and most of why small maps
+came out as Alpine massifs while the default map stayed a barely-touched noise field. Per
+*land* hex specifically, so a mostly-ocean map does not have its weather spread thinner
+over what land it has.
 
 **Algorithm** (particle-based hydraulic erosion, JIT-compiled with numba
 when available — falls back to pure Python).
 
-For each of `erosion_iterations` particles, drop one at a randomly chosen
-land hex and simulate up to `_MAX_STEPS = 64` steps of flow
+For each of `round(erosion_droplets_per_hex × land_hexes)` particles, drop one at a
+randomly chosen land hex and simulate up to `_MAX_STEPS = 64` steps of flow
 ([erosion.py:18, 42](../worldgen/stages/erosion.py#L18)):
 
 1. **Compute local gradient** from 4 neighbours (clamped at edges):
@@ -432,18 +512,34 @@ already-eroded channels, deepening them
 default `affinity_update_interval=500`, the first 500 particles spawn
 uniformly to discover channels, then later batches reinforce them.
 
+**Deltas.** A droplet reaching the sea with at least `erosion_delta_min_load` still
+aboard spreads it as a fan with a sharp radial falloff (weights 0.6 / 0.3 / 0.1 over three
+rings), never lifting anything above the waterline. Emptying the whole load into the
+single hex of entry built isolated spikes, and since droplets cross the waterline wherever
+they happen to reach it, those spikes smeared along the entire coastline — only a third of
+infilled sea hexes were within three hexes of a river mouth and a fifth were more than
+twenty away. Fanning lets the many droplets funnelled down one channel superpose into a
+delta at its mouth, while a lone droplet off a hillside leaves almost nothing.
+
 **Post-process**
 
-1. Gaussian blur with `sigma=0.5` to remove single-cell artefacts
-   ([erosion.py:145](../worldgen/stages/erosion.py#L145)).
-2. Linear stretch to `[0, 1]`
-   ([erosion.py:147–149](../worldgen/stages/erosion.py#L147)).
+1. Gaussian blur with `sigma=0.5` to remove single-cell artefacts.
+2. Convert back to metres against the known span.
+
+There is deliberately **no re-stretch to `[0, 1]`** here. It would undo the datum, putting
+the lowest point of the eroded map at the seabed and the highest at the peak whatever
+erosion had actually done to either. Sea level has to stay where it is for the word to
+mean anything, and a landscape that has been worn down should read as worn down rather
+than being scaled back up to fill the range it started with.
 
 **Gotchas**
 
-- Erosion is the bottleneck of the pipeline at default settings (15,000
-  particles × up to 64 steps). Halving `erosion_iterations` ≈ halves
-  total runtime with mostly cosmetic loss of channel detail.
+- Erosion is the bottleneck of the pipeline. Halving `erosion_droplets_per_hex` ≈ halves
+  total runtime, but it is not a cosmetic knob: it decides whether the map has valleys at
+  all. Below about one droplet per hex the rivers only scratch a line into the noise and
+  there is no floodplain. It is also a **climate** setting, because the orographic term
+  lifts on height above sea level — wearing the high ground down flattens the rain
+  shadow. `3.0` has floodplains and keeps most of the shadow.
 - Without numba, this stage is roughly 10× slower; install numba
   (`pip install numba`) for full speed.
 
@@ -453,46 +549,65 @@ uniformly to discover channels, then later batches reinforce them.
 
 [stages/terrain_class.py](../worldgen/stages/terrain_class.py)
 
-**Purpose:** Bucket every hex into `OCEAN / COAST / FLAT / HILL / MOUNTAIN`
-based on absolute elevation and local steepness.
+**Purpose:** Bucket every hex into `OCEAN / COAST / FLAT / ROLLING / STEEP / ESCARPMENT`.
+
+**The classes are bands of gradient, not of altitude.** They describe how the ground
+*lies*, so a high plateau is level ground and is classed as such. The old rule made
+anything above 0.8 of the elevation range a mountain regardless of slope, which put nearly
+a third of a 128×128 map's "mountain" hexes on ground gentler than 75 m/km — upland basins
+that are perfectly walkable and farmable, but were priced at ten times flat ground for
+roads and refused settlement outright. There is now no altitude term at all. Where
+altitude genuinely matters it is read directly: the treeline from `biome_treeline_temp_c`,
+and mine workings from a settlement's own elevation.
 
 **Reads:** `hex.elevation`, neighbours.
 **Writes:** `hex.terrain_class`.
 
-**Config:** `sea_level`, `terrain_hill_gradient`,
-`terrain_mountain_gradient`.
+**Config:** `coast_max_elevation_m`, `terrain_rolling_gradient_m`,
+`terrain_steep_gradient_m`, `terrain_escarpment_gradient_m`.
 
-**Algorithm** ([terrain_class.py:8–41](../worldgen/stages/terrain_class.py#L8)):
+**Algorithm** ([terrain_class.py](../worldgen/stages/terrain_class.py)):
 
 ```
-coast_threshold = sea_level + 0.05            # hardcoded offset
-
-# Pass 1
+# Pass 1 — sea level is the datum, so this is not a configured threshold
 for hex in all hexes:
-    if hex.elevation < sea_level:
+    if hex.elevation < 0.0:
         hex.terrain_class = OCEAN
 
 # Pass 2
 for hex in non-ocean hexes:
-    if hex.elevation < coast_threshold and any neighbour is OCEAN:
+    if hex.elevation < coast_max_elevation_m and any neighbour is OCEAN:
         hex.terrain_class = COAST
         continue
 
-    gradient = mean(|hex.elev - n.elev| for n in neighbours)
-    if gradient > terrain_mountain_gradient or hex.elevation > 0.8:
-        hex.terrain_class = MOUNTAIN
-    elif gradient >= terrain_hill_gradient:
-        hex.terrain_class = HILL
-    else:
-        hex.terrain_class = FLAT
+    gradient = tilt(hex)                              # m/km, see below
+    if   gradient >= terrain_escarpment_gradient_m:  ESCARPMENT
+    elif gradient >= terrain_steep_gradient_m:       STEEP
+    elif gradient >= terrain_rolling_gradient_m:     ROLLING
+    else:                                            FLAT
 ```
+
+**Gradient is measured as tilt**, the steepest fall across the hex taken over the three
+pairs of *opposite* neighbours (which are two kilometres apart, hence a halving). At
+1 hex = 1 km with elevation in metres this is a gradient in the ordinary sense, with
+nothing to convert.
+
+The obvious alternative — mean absolute difference to all six neighbours — answers a
+different question, and the wrong one. It reports how rough the *surroundings* are rather
+than how the ground underfoot lies, so it calls a valley floor steep: the valley sides
+stand above it on both flanks, and their height enters the mean whatever the floor is
+doing. Rivers run along valley floors, which is how that version came to price river
+corridors as mountain and drove roads *away* from the banks they should follow.
+
+Tilt cancels symmetric surroundings, which is what makes it right. A valley floor reads
+level because both flanks rise equally; so does a ridge crest, because both fall equally
+— and a crest is walkable along, whatever the drop either side. A hillside reads steep,
+because uphill and downhill neighbours genuinely differ.
 
 **Notes**
 
-- The `+0.05` coast offset and the hardcoded `> 0.8` mountain ceiling are
-  not in `WorldConfig` — see §5.
-- Inland water created by Erosion lows but never connecting to a map
-  edge is classified OCEAN here; the next stage corrects that.
+- Inland water created by Erosion lows but never connecting to a map edge is classified
+  OCEAN here; the next stage corrects that.
 
 ---
 
@@ -520,10 +635,10 @@ fix COAST hexes that ended up adjacent only to a lake.
    ocean neighbour:
    - If it sits beside a lake at low elevation, *keep* COAST (acts as a
      lake shore for downstream stages).
-   - Otherwise re-run the gradient classification (`HILL/FLAT/MOUNTAIN`).
+   - Otherwise re-run the gradient classification
+     (`FLAT/ROLLING/STEEP/ESCARPMENT`).
 
-   This pass uses `sea_level`, `terrain_hill_gradient`, and
-   `terrain_mountain_gradient` from `state.metadata["config"]` — that's
+   This pass reads the terrain gradient bands from `state.metadata["config"]` — that's
    why `pipeline.run()` snapshots config into metadata at startup.
 
 ---
@@ -541,7 +656,10 @@ river_mouth), `state.rivers`. May also raise lake water-levels and
 convert land hexes to LAKE/OCEAN if a basin needs to expand to its
 spillway.
 
-**Config:** `river_flow_threshold`, `river_flow_continuous`.
+**Config:** `channel_min_discharge`, `navigable_min_discharge`,
+`evapotranspiration_base_mm`, `evapotranspiration_per_c_mm`, `min_runoff_mm`,
+`river_flow_continuous`, `lake_chaining`, `endorheic_marsh_radius`,
+`endorheic_marsh_min_precip_mm`.
 
 **Algorithm**
 
@@ -579,17 +697,31 @@ Nine steps, top to bottom in
    acc[c] = 1 + sum(acc[upstream])
    ```
    Each hex contributes 1 unit; downstream hexes accumulate the sum of
-   their upstream tributaries. Map maximum is the largest river-mouth
-   value.
+   their upstream tributaries. **At 1 hex = 1 km, `acc` is catchment area in square
+   kilometres** — a physical quantity, comparable between one map and another. It is
+   written to `hex.catchment_km2` and read by the crossing and haulage models.
 
-5. **River extraction** ([hydrology.py:51–60](../worldgen/stages/hydrology.py#L51)):
+5. **River extraction** — a channel forms where enough water passes to keep one open:
    ```
-   n_river = max(1, round(n_land * river_flow_threshold))
-   river_set = top-n_river hexes by acc
+   PET          = evapotranspiration_base_mm
+                  + evapotranspiration_per_c_mm * max(0, temp_c)
+   runoff_mm    = max(min_runoff_mm,
+                      precip_mm - precip_mm / sqrt(1 + (precip_mm / PET)^2))
+   min_catchment = channel_min_discharge / runoff_mm
+   river_set     = {c for c, area in acc.items() if area >= min_catchment}
    ```
-   Sorting + slicing (rather than a quantile threshold) avoids over-
-   selection at tie boundaries. With default `river_flow_threshold=0.05`,
-   the top 5 % of land hexes by drainage become river hexes.
+   **Discharge, not rank.** The old `river_flow_threshold` was documented as a flow
+   minimum and implemented as "take the top 5% of land by accumulation", so every
+   climate — desert and rainforest alike — got 5.6% of its land under channel. Runoff
+   uses Pike's curve rather than subtracting the evaporative demand outright: ground
+   cannot evaporate rain it never received, so actual evaporation approaches the demand
+   where rain is plentiful and approaches the rain where it is not. A plain subtraction
+   zeroed every climate whose demand exceeds its rain — mediterranean (550 mm) and arid
+   (200 mm) both fell to the floor and drew identical rivers. Because the demand rises
+   with temperature, cold country still sheds nearly everything it receives.
+
+   `hex.river_flow` remains a normalised `[0, 1]` rank, retained for river *rendering*
+   width. Anything making a decision about a river reads `catchment_km2` instead.
 
 6. **Build River objects** — for each headwater (river hex with no
    upstream river hex), trace `flow_dir` to its mouth
@@ -651,80 +783,94 @@ sub-passes, run sequentially.
 `hex.river_flow`.
 **Writes:** `hex.temperature`, `hex.moisture`.
 
-**Config:** `base_temperature`, `latitude_temp_range`,
-`altitude_lapse_rate`, `wind_direction`, `orographic_strength`,
-`base_moisture`, `moisture_bleed_passes`, `moisture_bleed_strength`,
-`sea_level`.
+**Config:** `regional_climate`, `mean_temperature_c`, `latitude_temp_range_c`,
+`lapse_rate_c_per_km`, `wind_direction`, `orographic_strength`,
+`moisture_resupply_per_hex`, `mean_precip_mm`, `base_precip_mm`,
+`moisture_bleed_passes`, `moisture_bleed_strength`, `max_elevation_m`.
 
-#### Temperature ([climate.py:18–39](../worldgen/stages/climate.py#L18))
+**The map is a region, not a world.** 500 km at 1 hex = 1 km is about 4.5° of latitude,
+some 3 °C; altitude does far more over the same distance and rain shadow more again. So
+the region has one climate, named by `regional_climate`, and the variety within it comes
+from terrain. Each climate also carries a **palette** of biomes it can produce, which is
+what stops an arid region growing a jungle three valleys over.
 
-For each hex:
+#### Temperature — degrees Celsius
+
 ```
-row_frac = row / max(height - 1, 1)           # 0 at top, 1 at bottom; `row` is the
-                                              # grid row, which is `r` on an axial grid
-                                              # and the true north-south axis on offset
-lat_temp = sin(row_frac * π)                   # 0 at poles, 1 at equator
-temperature = base_temperature
-            + (lat_temp - 2/π) * latitude_temp_range
-            - elevation * altitude_lapse_rate
-temperature = clamp(temperature, 0, 1)
+row_frac    = row / max(height - 1, 1)        # 0 at top, 1 at bottom; `row` is the grid
+                                              # row, which is `r` on an axial grid and
+                                              # the true north-south axis on an offset one
+lat_temp    = sin(row_frac * π)               # 0 at poles, 1 at equator
+temperature = mean_temperature_c
+            + (lat_temp - 2/π) * latitude_temp_range_c
+            - max(0, elevation_m) / 1000 * lapse_rate_c_per_km
 ```
 
-The `2/π` subtraction is the mean of `sin` over `[0, π]`, so
-`base_temperature` represents the *true map-average* temperature instead
-of the equator value. The output is then Gaussian-blurred with
-`sigma=1.0` to smooth pixel-by-pixel jaggedness
-([climate.py:36](../worldgen/stages/climate.py#L36)).
+The `2/π` subtraction is the mean of `sin` over `[0, π]`, so `mean_temperature_c` is the
+true map-average rather than the equator value. The output is Gaussian-blurred with
+`sigma=1.0`.
 
-**At default settings** (`latitude_temp_range=0.1`, `altitude_lapse_rate=0.4`):
-elevation dominates latitude. A peak at elevation `0.8` is `0.32` colder
-than sea level — equivalent to crossing more than the entire pole-to-
-equator gradient. This was tuned for `1 hex = 1 km`; a continent-scale
-map (1 hex = 100 km) would need a much larger `latitude_temp_range`.
+Two things follow from the units. `lapse_rate_c_per_km` is the **real environmental lapse
+rate**, 6.5 °C/km, not a tuning constant. And the lapse is applied to height above the
+**waterline** — `max(0, elevation)` — so a hex at sea level gets none, which is what makes
+the result a real temperature rather than one relative to the map's own lowest point.
 
-#### Moisture ([climate.py:41–161](../worldgen/stages/climate.py#L41))
+`latitude_temp_range_c` defaults to `0.0` because across 128 km it is genuinely
+negligible; raise it only for a continent-scale map.
 
-Three sub-steps:
+#### Moisture — millimetres a year
 
-1. **Orographic precipitation.** Sort all hexes by their dot product with
-   the wind direction (so upwind hexes process first). The wind carries
-   atmospheric moisture; lifting it over higher terrain causes it to
-   condense as rain ([climate.py:52–93](../worldgen/stages/climate.py#L52)):
+1. **Orographic precipitation.** Sort all hexes by their dot product with the wind
+   direction, so upwind hexes process first. The wind carries atmospheric moisture;
+   lifting it over higher terrain condenses it as rain:
    ```
-    incoming = mean(atm[upwind neighbours]) or 1.0 if none upwind
-    lift     = max(0, hex.elevation - sea_level)
-    fraction = min(1, lift * orographic_strength)
-    precip   = incoming * fraction
-    hex.moisture = precip
-    atm[hex]     = incoming - precip          # depleted moving downwind
-    ```
-   Result: windward slopes are wet, lee slopes (rain shadows) dry.
+   incoming = mean(atm[upwind neighbours]) or 1.0 if none upwind
+   lift     = max(0, elevation_m) / max_elevation_m
+   fraction = min(1, lift * orographic_strength)
+   precip   = incoming * fraction
+   left     = max(0, incoming - precip)
+   atm[hex] = left + moisture_resupply_per_hex * (1 - left)      # air picks moisture back up
+   ```
+   Windward slopes are wet, lee slopes dry.
 
-2. **River + coastal bonuses** ([climate.py:96–108](../worldgen/stages/climate.py#L96)).
-   For every land hex:
-   - If `moisture_bleed_passes == 0` (default), add `+0.15` if any
-     neighbour has `"river"` tag.
-   - Add `+0.1` if any neighbour is OCEAN or LAKE.
+   **The resupply term matters.** Without it the sweep is a one-way drying: whatever the
+   first barrier takes is gone for good, so the far side of a 128 km map receives nothing
+   at all, rainfall spans a factor of eight from coast to interior, and a temperate map
+   reads 60% shrubland. Real air is resupplied continuously by evaporation, which is why
+   a rain shadow is a local feature tens of kilometres deep rather than everything
+   downwind of the first hill.
 
-   These are cumulative — a coastal river-adjacent hex gets `+0.25`.
+2. **River and coastal bonuses.** For every land hex: `+0.15` if any neighbour carries
+   the `"river"` tag (only when `moisture_bleed_passes == 0`), and `+0.1` if any
+   neighbour is OCEAN or LAKE. Cumulative, so a coastal river-adjacent hex gets `+0.25`.
 
-3. **Normalisation** to land-only `[0, 1]` ([climate.py:110–118](../worldgen/stages/climate.py#L110)).
+3. **Gaussian smear** at `sigma=2.0`. Weather systems are wide, and rain falls either
+   side of the ridge that lifted it rather than only on the hex that did the lifting.
 
-4. **Optional moisture bleed** ([climate.py:120–154](../worldgen/stages/climate.py#L120)).
-   When `moisture_bleed_passes > 0`, the flat `+0.15` river bonus is
-   replaced by an iterative diffusion: each pass, a hex gains
-   `moisture_bleed_strength * max(neighbour.river_flow)` from any
-   river-tagged neighbour at `≥` its own elevation (recipient lower-or-equal
-   to the river hex). This builds a wider
-   moisture corridor along big rivers, especially in valleys, but never
-   uphill. Re-normalised after the passes.
+4. **Into millimetres a year.** The orographic pass produces a *relative* pattern —
+   which slopes catch the rain and which sit in a shadow — and says nothing about whether
+   the region is wet or dry. A **linear** scale putting the land mean on
+   `mean_precip_mm`, plus `base_precip_mm`, supplies that:
+   ```
+   moisture = moisture * (mean_precip_mm / land_mean) + base_precip_mm
+   ```
+   Linear is the honest choice: if a leeward valley receives a third of what the windward
+   slope does, that ratio is a fact about the terrain and should survive being told how
+   wet the region is overall. The previous version stretched to `[0, 1]` and fitted a
+   **gamma** to move the mean onto a target — which held the bounds but warped the
+   distribution to do it, so the leeward-to-windward ratio came out different for a wet
+   region than for a dry one. In millimetres there are no bounds to hold.
 
-5. **Base moisture floor** ([climate.py:156–160](../worldgen/stages/climate.py#L156)):
-   add `base_moisture` to every land hex (then clamp to `[0, 1]`). Use
-   to dial the whole world wetter or drier.
+5. **Optional moisture bleed.** When `moisture_bleed_passes > 0`, the flat `+0.15` river
+   bonus is replaced by an iterative diffusion: each pass a hex gains
+   `moisture_bleed_strength × max(neighbour.river_flow)` from any river-tagged neighbour
+   at or above its own elevation. This builds a wider moisture corridor along big rivers,
+   especially in valleys, but never uphill. There is no ceiling on the result — moisture
+   is millimetres now, and a valley that receives more rain than the ridge above it is
+   simply a wetter valley.
 
-**Ocean and lake hexes** keep `moisture = 1.0`
-([climate.py:60–74](../worldgen/stages/climate.py#L60)).
+**Ocean and lake hexes** keep `moisture = 1.0`, a sentinel rather than a rainfall figure;
+nothing downstream reads rainfall on water.
 
 ---
 
@@ -739,44 +885,186 @@ moisture, elevation, and water/river adjacency.
 `hex.moisture`, `hex.tags`.
 **Writes:** `hex.biome`.
 
-**Config:** `biome_alpine_elev`, `biome_cold_temp`, `biome_warm_temp`,
-`biome_dry_moist`, `biome_wet_moist`.
+**Config:** `regional_climate`, `biome_treeline_temp_c`, `biome_snowline_temp_c`,
+`biome_cold_temp_c`,
+`biome_warm_temp_c`, `biome_dry_precip_mm`, `biome_wet_precip_mm`,
+`wetland_min_runoff_mm`, `endorheic_marsh_min_precip_mm`.
 
-**Algorithm** ([biomes.py:7–46](../worldgen/stages/biomes.py#L7)):
+**Algorithm** ([biomes.py](../worldgen/stages/biomes.py)):
 
 ```
 if terrain_class in (OCEAN, LAKE):
     biome = OCEAN
-elif elevation > alpine_elev:                         # default 0.85
+elif temperature_c < biome_snowline_temp_c:                 # default -8 C
     biome = ALPINE
-elif temperature < cold_temp:                         # default 0.25
-    biome = TUNDRA   if moisture < dry_moist          # default 0.20
-            BOREAL   otherwise
-elif temperature >= warm_temp:                        # default 0.60
-    biome = DESERT     if moisture < dry_moist
-            GRASSLAND  if dry_moist <= moisture < wet_moist   # default 0.50
-            TROPICAL   if moisture >= wet_moist
-else:  # temperate
-    biome = SHRUBLAND        if moisture < dry_moist
-            GRASSLAND        if dry_moist <= moisture < wet_moist
-            TEMPERATE_FOREST if moisture >= wet_moist
+elif temperature_c < biome_treeline_temp_c:                 # default -2 C
+    biome = TUNDRA
+elif temperature_c < biome_cold_temp_c:                     # default 5 C
+    biome = pick(BOREAL, ...)
+elif temperature_c >= biome_warm_temp_c:                    # default 18 C
+    biome = pick(DESERT, ...)    if precip_mm < biome_dry_precip_mm
+            pick(GRASSLAND, ...) if dry <= precip_mm < biome_wet_precip_mm  # 1000 mm
+            pick(TROPICAL, ...)  otherwise
+else:  # temperate band
+    biome = pick(DESERT, ...)            if precip_mm < biome_dry_precip_mm
+            pick(GRASSLAND, ...)         if dry <= precip_mm < wet
+            pick(TEMPERATE_FOREST, ...)  otherwise
+```
 
-# WETLAND override (post-pass)
-if terrain_class in (FLAT, COAST)
-   and moisture > wet_moist
-   and "river" in tags
-   and elevation <= alpine_elev:
+**`pick` draws from the region's palette**, taking the first candidate the climate can
+actually produce and falling back towards its staple. So a hex that would have been
+tropical in a boreal region becomes the closest thing that region has, rather than
+importing a biome from three climate zones away. Desert is offered before shrubland in
+the cool-and-dry branch because a dry region does not stop being a desert for being cool
+— the Gobi and the Great Basin are cold deserts.
+
+**The treeline is a temperature, not a height.** The altitude it falls at follows from the
+region's warmth and the lapse rate: ~1850 m temperate, ~500 m boreal, above 4300 m
+tropical. A fixed altitude could not say any of that, and the fraction-of-range version it
+replaced said the opposite — it gave every map the same share of alpine ground however low
+its hills. `WorldConfig.treeline_m()` reports that altitude, but the stage tests each
+hex's own temperature, so the line bends with latitude instead of being computed once at
+the map's mean.
+
+**Two lines divide cold country, not one.** Above the treeline nothing grows tall; above
+the *snowline* nothing grows at all. Between them is tundra — treeless but vegetated, and
+that is most of what stands above a subarctic treeline. Only above `biome_snowline_temp_c`
+is ground genuinely barren, and that is ALPINE. At the default -8 °C no map with 1500 m of
+relief has any permanent snow on it, which is correct: a temperate range that high has no
+glaciers either. Raise `max_elevation_m` towards 2400 and bare peaks appear on their own.
+
+**Below the treeline and cold is taiga, whatever the rainfall.** The cold band used to
+split TUNDRA from BOREAL on `biome_dry_precip_mm` — the same 400 mm that separates desert
+from steppe — which made rain the thing that stops trees in the subarctic. It is not; cold
+is, and the treeline already says so. Siberian larch grows on 200–400 mm, and the boreal
+region's own mean is 450, so any rain shadow tipped land into tundra at zero food value.
+Between the elevation-keyed ALPINE test and this one, a boreal map came out 41% bare rock
+and 23% tundra, and supported five settlements on fifteen thousand land hexes. It is now
+49% taiga and 41% tundra, with no bare rock at all, and supports fourteen. No other
+climate's map changes by a single hex — none of them has land below -2 °C.
+
+**Wetland overrides**, applied afterwards:
+
+```
+# Riverside waterlogging
+if terrain_class in (FLAT, COAST) and "river" in tags
+   and runoff_mm(precip, temp) > wetland_min_runoff_mm
+   and temperature_c >= biome_treeline_temp_c:
+    biome = WETLAND
+
+# The shore of a closed basin
+if "endorheic_shore" in tags and terrain_class in (FLAT, COAST)
+   and precip_mm >= endorheic_marsh_min_precip_mm
+   and temperature_c >= biome_treeline_temp_c:
     biome = WETLAND
 ```
 
+Waterlogging is tested on **runoff, not rainfall**. It is not a question of how much rain
+arrives but of whether the ground can get rid of it: flat land beside a river, where what
+the sky delivers exceeds what the air takes back, holds a water table at the surface. The
+rainfall version asked for more than the wet biome band, which on a temperate map at
+800 mm almost nothing reaches, so bogs vanished from the map entirely — and it would have
+called a cold region dry when cold country is exactly where peat forms, because so little
+of its rain evaporates away.
+
+The endorheic rule's moisture floor keeps arid basins as salt pans: a closed basin in a
+desert is a playa, not a swamp.
+
 **Notes**
 
-- Thresholds are in normalised `[0, 1]` units, matched to
-  `temperature` and `moisture`.
-- The WETLAND override depends on the `"river"` tag, so it only fires
-  *immediately* on river hexes — not a thick wetland buffer. To get
-  wider wetlands, raise `moisture_bleed_passes` so more hexes pass the
-  `moisture > wet_moist` test.
+- Both wetland rules depend on a tag, so they fire only on or beside the feature — not as
+  a thick buffer. For wider wetlands raise `moisture_bleed_passes`.
+- Keep `biome_treeline_temp_c` clear of every climate's own mean temperature. The cold
+  tests run ahead of every other temperature rule, so a treeline landing at sea level puts
+  a whole region above it: at `1.0`, which is the boreal region's mean, a boreal map grew
+  no taiga at all and supported five settlements on sixteen thousand hexes.
+- ALPINE and TUNDRA do not go through `pick`. They are what happens when ground is too
+  cold to grow anything, which every region has somewhere above it, so `_ALWAYS` lists
+  them both and any palette can produce them.
+
+---
+
+### 3.7a Soil
+
+[stages/soil.py](../worldgen/stages/soil.py)
+
+**Purpose:** Say what the ground could support, before anything is done with it.
+
+**Reads:** `hex.terrain_class`, `hex.elevation` (through the gradient), `hex.moisture`,
+`hex.temperature`, `hex.biome`, `hex.tags`, `hex.catchment_km2`.
+**Writes:** `hex.soil`.
+
+**Config:** § [4.8](#48-soil-food-and-habitability--37a-soil-39-habitability).
+
+#### Why it exists
+
+`food_value` used to key on `land_cover`, which said a hex was fertile **because grass grew
+on it**. That is backwards, and it is why the map could not tell a floodplain from a chalk
+down. Grass on temperate lowland is what you get after clearing or on thin soil; the best
+ground in northern Europe carried wildwood until somebody assarted it.
+
+Soil is now asked about directly, and the answer is a ladder:
+`UNUSABLE < GRAZING < MARGINAL < ARABLE < PRIME`.
+
+```
+water, wetland, above the treeline          → UNUSABLE
+
+alluvium: gentle ground on or beside a
+river with catchment >= ford_max_catchment  → PRIME
+
+otherwise the worse of two arms:
+  slope    >= terrain_escarpment_gradient_m → UNUSABLE
+           >= terrain_steep_gradient_m      → GRAZING
+           otherwise                        → ARABLE
+  rainfall <  soil_dry_farming_min_precip_mm → UNUSABLE
+           <  biome_dry_precip_mm            → GRAZING
+           <= biome_wet_precip_mm            → ARABLE
+           <  food_drowned_precip_mm         → MARGINAL
+           otherwise                         → UNUSABLE
+
+then, last of all:
+  temperature < biome_cold_temp_c            → capped at MARGINAL
+```
+
+**Rainfall fails differently at each end.** Under the dry-farming limit nothing is grown at
+all. Between that and the arable band you get steppe, where grass grows and a crop will not,
+which is grazing. Above the band the ground is leached and waterlogged, which is poor
+*arable*, not pasture — the first version of this rule was symmetric, and calling a
+rainforest "grazing" was the tell that it was wrong.
+
+**Alluvium skips the rainfall arm, because the Nile does not need rain.** In a desert the
+floodplain is not merely the best land, it is the only land — which is why an arid map's
+settlements string along its rivers instead of being absent altogether.
+
+**The cold cap is applied last, so it binds alluvium too.** A flood meadow on the Lena is
+the best ground in the taiga and still will not grow wheat. Capping before that branch let a
+boreal floodplain out at PRIME, which would have said a subarctic river bottom is worth what
+Kent is; and without the cap at all, a boreal map comes out 13% arable and 42% richer.
+
+**One new threshold, and only one.** `soil_dry_farming_min_precip_mm` is the dry-farming
+limit; every other figure is a setting that already existed and already meant the right
+thing. `ford_max_catchment_km2` is the neatest of the reuses — it is the same question asked
+from the other side, since a river you cannot wade is one that floods and lays down silt.
+
+**Result at 128×128, seed 42:**
+
+| climate | unusable | grazing | marginal | arable | prime |
+|---|---|---|---|---|---|
+| temperate | 10.6% | 28.1% | 24.0% | **33.6%** | 3.7% |
+| mediterranean | 12.3% | **68.2%** | 8.6% | 10.2% | 0.7% |
+| arid | **84.8%** | 6.3% | 0.9% | 7.4% | 0.7% |
+| boreal | 57.4% | 20.0% | 19.7% | **0.0%** | 2.9% |
+| tropical | 19.1% | 24.1% | **48.8%** | 4.3% | 3.7% |
+
+Mediterranean comes out pastoral, arid is desert with its life on the rivers, the taiga
+grows no wheat at all, and the tropics are leached. One rule set; the region decides.
+
+#### Land cover follows soil
+
+`LandCoverStage` now takes the region's own woodland on PRIME and ARABLE ground — oak here,
+taiga there, gallery forest along a desert river — so **good soil is under trees until
+somebody clears it**. A temperate map went from 50% open grass to 41% woodland and 27% dense
+forest, which is what northern Europe looked like before the assarting centuries.
 
 ---
 
@@ -790,7 +1078,7 @@ and `moisture`. Adds visual texture without rolling new dice.
 **Reads:** `hex.terrain_class`, `hex.biome`, `hex.moisture`.
 **Writes:** `hex.land_cover`.
 
-**Config:** `biome_wet_moist` (used to set the dense-forest threshold).
+**Config:** `biome_wet_precip_mm` (sets the dense-forest threshold).
 
 **Algorithm** ([land_cover.py:16–44](../worldgen/stages/land_cover.py#L16)):
 
@@ -839,36 +1127,42 @@ at each tier's cultivation radius (8 / 4 / 2).
 **Writes:** `hex.habitability_city`, `hex.habitability_town`,
 `hex.habitability_village`.
 
-**Config:** `food_fertile_value`, `food_marginal_value`,
-`food_wetland_value`, `food_water_value`, `habitability_agri_weight`,
+**Config:** `food_prime_value`, `food_arable_value`, `food_marginal_value`,
+`food_grazing_value`, `food_wetland_value`, `food_water_value`, `habitability_agri_weight`,
 `habitability_river_bonus`, `habitability_coast_bonus`,
 `habitability_hill_bonus`, `habitability_confluence_bonus`,
 `cultivation_city_radius`, `cultivation_town_radius`,
-`cultivation_village_radius`, `biome_dry_moist`, `biome_wet_moist`.
+`cultivation_village_radius`, `biome_dry_precip_mm`, `biome_wet_precip_mm`,
+`food_drowned_precip_mm`.
 
 **Algorithm** ([habitability.py](../worldgen/stages/habitability.py)):
 
 ```
 # Per-hex food value, by land cover band
-OPEN, WOODLAND            → food_fertile_value  × moisture_factor
-SCRUB, DENSE_FOREST       → food_marginal_value × moisture_factor
-BOG, MARSH                → food_wetland_value
-OPEN_WATER                → food_water_value
+PRIME soil                → food_prime_value
+ARABLE soil               → food_arable_value
+MARGINAL soil             → food_marginal_value
+GRAZING soil              → food_grazing_value
+UNUSABLE soil             → 0
+BOG, MARSH                → food_wetland_value    (cover, not soil: a fen is not ploughland)
+OPEN_WATER                → food_water_value      (cover, not soil: the sea is a fishery)
 TUNDRA/DESERT/ALPINE/ROCK → 0.0
 
-# Moisture is not monotonic for farming — a tent, not a ramp
-moisture_factor(m) = 1.0                        if biome_dry_moist <= m <= biome_wet_moist
-                   = m / biome_dry_moist        if m < biome_dry_moist
-                   = (1-m) / (1-biome_wet_moist) if m > biome_wet_moist
+# Rainfall is not monotonic for farming — a tent, not a ramp.
+# dry = biome_dry_precip_mm, wet = biome_wet_precip_mm, drowned = food_drowned_precip_mm
+moisture_factor(p) = 0.0                          if p <= 0 or p >= drowned
+                   = p / dry                      if p < dry
+                   = 1.0                          if dry <= p <= wet
+                   = (drowned - p)/(drowned - wet) if p > wet
 
 # Hard zeros — you cannot found a settlement here
-if terrain_class in (OCEAN, LAKE, MOUNTAIN) or biome == WETLAND:
+if terrain_class in (OCEAN, LAKE, STEEP, ESCARPMENT) or biome == WETLAND:
     every score = 0.0
 
 # Site bonuses, identical across tiers
 bonus  = habitability_river_bonus      if hex or neighbour has "river"
        + habitability_coast_bonus      if hex or neighbour is COAST
-       + habitability_hill_bonus       if HILL with a FLAT neighbour
+       + habitability_hill_bonus       if a rise with a level neighbour
        + habitability_confluence_bonus if "confluence" in hex.tags
 
 # One score per tier, each normalised against its own map-max
@@ -915,13 +1209,15 @@ constraints.
 **Reads:** `hex.habitability_city`, `hex.habitability_town`,
 `hex.terrain_class`, `hex.biome`,
 `hex.elevation`, neighbours.
-**Writes:** `hex.settlement`, `state.settlements`, `hex.tags` (`"pass"`,
+**Writes:** `hex.settlement`, `state.settlements`, `hex.tags` (`"prominent_site"`,
 `"confluence_town"`).
+
+**Model:** `classic` only. The `organic` model replaces this stage with
+§ [3.10b](#310b-market-centres--organic).
 
 **Config:** `target_city_count`, `target_town_count`, `city_min_separation`,
 `town_min_separation`, `settlement_min_reachable`, plus the road-grade
-parameters used for reachability (`hex_size_m`, `road_elev_range_m`,
-`road_slope_cap_pct`).
+parameters used for reachability (`hex_size_m`, `road_slope_cap_pct`).
 
 **Reachability filter.** For each candidate hex, BFS over land
 neighbours where the connecting edge satisfies
@@ -956,16 +1252,261 @@ role from `_assign_role` (below).
 
 ```
 PORT         if "river" tag, COAST terrain, or any neighbour matches either
-MINING       elif any mountain neighbour has elevation > 0.70
-FORTRESS     elif any mountain neighbour (but lower)
+MINING       elif any STEEP/ESCARPMENT neighbour has elevation > 0.70
+FORTRESS     elif any STEEP/ESCARPMENT neighbour (but lower)
 AGRICULTURAL elif >= 3 neighbours are GRASSLAND or TEMPERATE_FOREST
 MARKET       otherwise
 ```
 
-**Pass tagging** ([city_town.py:130–142](../worldgen/stages/city_town.py#L130)):
-After settlements are placed, every empty HILL hex that is the local-max
-`habitability_town` within 3-hex range gets the `"pass"` tag. Used for rendering
+`_assign_role` is shared by all three placement stages — classic cities and towns,
+villages, and organic markets — so the roles mean the same thing whichever model ran.
+
+> **Known stale: the `0.70` cutoff.** It dates from when elevation ran `0` to `1`. In
+> metres it is seventy centimetres, so in practice every settlement with a steep
+> neighbour is classed `MINING` and `FORTRESS` is unreachable — a 96×96 temperate map
+> yields 71 mining settlements and no fortresses. Left as-is deliberately: what a fortress
+> or a mine *is* has not been defined, so there is no basis yet for choosing a real
+> altitude. Both roles are currently decorative — nothing downstream reads
+> `Settlement.role` except the renderer's glyph choice.
+
+**Pass tagging:** after settlements are placed, every empty ROLLING hex that is the
+local-max `habitability_town` within 3-hex range gets the `"prominent_site"` tag. Nothing reads it. Used for rendering
 mountain passes and as a convenient query for module authors.
+
+---
+
+### 3.10a River Crossings — `organic`
+
+[stages/crossings.py](../worldgen/stages/crossings.py)
+
+**Purpose:** Decide where a river can be got across, before anything is built on the map.
+
+A river is not uniformly crossable. Most of its length is an obstacle; a few places are
+not, and those places are why towns sit where they do. This stage runs **before** market
+placement, deliberately: a bridging point is the cheapest ground in a district to reach
+from both banks, so it should be a *reason* a market grows there rather than something
+noticed afterwards.
+
+**Reads:** `hex.catchment_km2`, `hex.elevation`, `hex.tags`.
+**Writes:** `hex.tags` (`"ford"`, `"bridge"`).
+
+**Config:** `ford_max_catchment_km2`, `crossing_relief_m`, `bridge_pressure_per_span`,
+`crossing_pressure_radius`, `crossing_min_separation`.
+
+**The distinction the stage rests on:** a **ford is terrain and is free** — shallow
+braided water anyone can wade, needing nobody's permission. A **bridge is capital**, and
+appears only where enough traffic will use it. Nobody bridges to nowhere.
+
+```
+span      = effective width, in multiples of the wadeable catchment,
+            inflated by local relief / crossing_relief_m
+ford      if span <= 1                      # you can wade it
+bridge    if surplus within crossing_pressure_radius
+             >= bridge_pressure_per_span * span
+           and no other crossing within crossing_min_separation
+```
+
+**Relief, not just discharge.** Fast water takes your feet from under you whatever its
+depth, and at a kilometre to the hex it is the approaches rather than the span that defeat
+a bridge — both scale with how steep the ground is, so relief makes a reach behave like a
+bigger river for fording and for building alike. A floodplain has a few metres of relief;
+a gorge has hundreds.
+
+**Relief is measured as channel drop**, along the watercourse, not as the spread of the
+surrounding ground. The latter reports how deep the *valley* is — median 255 m on a test
+map — which killed all but 2 of 126 fords. A river running along a flat valley floor
+between high sides is easy to cross; the valley's depth is not the crossing's problem.
+
+---
+
+### 3.10b Market Centres — `organic`
+
+[stages/markets.py](../worldgen/stages/markets.py), over
+[stages/haulage.py](../worldgen/stages/haulage.py)
+
+**Purpose:** Place market towns where the most surplus can reach them inside a day's
+return, and size them from what they actually gather. Replaces `CityTownStage`.
+
+**Reads:** the food surface, `hex.terrain_class`, `hex.elevation`, `hex.tags`,
+crossings.
+**Writes:** `state.settlements`, `hex.settlement`, `hex.territory`,
+`hex.territory_cost`.
+
+**Config:** § [4.10](#410-haulage-and-markets--the-organic-model).
+
+#### The countryside is a surface, not a list of settlements
+
+The decisive simplification. A market's draw is the surplus of its catchment, and whether
+you discretise that catchment into forty hamlets or integrate over the food field gives
+the same number — so the dispersed peasantry is modelled as a **continuous productive
+surface and never enumerated**. Historically faithful village density would be ~900
+objects on a 128×128 map (Domesday: ~13,000 vills over ~130,000 km²), almost none of which
+carry military or administrative weight.
+
+**This is why `organic` omits `VillagePlacementStage`, `VillageTrackStage` and
+`VillageCultivationStage`.** They site a hamlet on every hex clearing a habitability bar,
+which buried 74 markets under 835 settlements on a 128×128 temperate map — so most of what
+the viewer showed was not the haulage model. `classic` keeps all three and is unchanged. A
+settlement tier *below* the market will return, but gated on holding something — a bridge,
+a pass — rather than sprinkled across the countryside.
+
+The win is legibility rather than speed. The three stages cost 0.8 s of a 15.2 s pipeline;
+`InterurbanRoadStage` is 12.3 s of the 14.4 s that remain, and SVG export of a map with 835
+settlements dominated the wall clock of a full `generate` run either way.
+
+**Surplus, not production, is what travels.** A farming household eats most of what it
+grows; `marketable_surplus_fraction` (~20%) is what can leave. Sizing markets off the
+surplus is why the tier ratios come out right with no target counts anywhere.
+
+#### Planting — lazy greedy, which is exact here
+
+```
+heap = [(-score(c), c) for c in sorted(settleable_land)]
+while heap:
+    _, c = heappop(heap)
+    if c in suppressed:            continue    # 1. suppression
+    s = score(c)                               # 2. recompute against current remaining
+    if s < -heap[0][0] - EPS:                  # 3. stale → re-push
+        heappush(heap, (-s, c)); continue
+    if s < market_viability_floor: break       # 4. true max below floor → done
+    plant(c)
+    for d, n in kernel_of(c):
+        remaining[n] *= (1 - share(d))         # partial depletion
+    suppressed |= hex_range(c, market_min_separation)
+```
+
+Depletion only ever *reduces* other sites' scores, so the score function is monotone
+non-increasing and a popped entry that is still fresh is provably the true maximum.
+
+**That predicate order is load-bearing** — suppression, then recompute, then staleness,
+then the floor. Testing the floor before the staleness check ends the loop on the first
+suppressed hex popped.
+
+**Partial depletion, not hard claiming.** A market takes a distance-decayed *share* of the
+surplus it reaches, so rich country supports another market 8 km away while poor country
+supports none for 30. Hard claiming would collapse spacing to one number and reinvent
+`city_min_separation` with extra steps.
+
+#### Catchments and population
+
+One multi-source Dijkstra from every market seat over the travel-cost field, budget
+`market_day_radius`, ties broken on `(cost, coord, owner)`. Each claimed land hex then
+donates its adjacent unclaimed water hexes to its owner — a **fishery rim**, granted
+rather than traversed, so a coastal market gets its `food_water_value` without claiming a
+strait.
+
+```
+draw(m)       = Σ over catchment of surplus[h] * usable_fraction(cost_h, market_day_radius)
+population(m) = max(1, round(draw(m) * people_per_food))
+```
+
+`usable_fraction` reaches **exactly zero** at the range limit. It is not a soft decay: it
+is the distance at which the team has eaten the load. One constant sets reach and falloff
+together.
+
+**The travel-cost field is not the road-cost field**, and this was got wrong once. Reusing
+`river_hex_cost` (12.0) exceeded the 10.0 day budget outright, and `terrain_base_cost`'s
+3×/10× bands made the median step 3.0, so markets reached 3 hexes instead of 10. Both are
+excluded. Ascent uses **Naismith's rule** (`travel_ascent_per_hex`) rather than
+`road_slope_cost`, because a catchment is walked, not engineered — the road curve prices
+*grading* a slope and saturates at ten times base, which over eroded terrain shrinks a
+catchment to a third of its proper reach.
+
+Catchments are terrain-shaped, not round: measured disc-fill is 0.43 at the median, and
+they visibly stop at ridges and stretch down valleys.
+
+---
+
+### 3.10c Land Use, Clearing and Rural Density — `organic`
+
+[stages/land_use.py](../worldgen/stages/land_use.py)
+
+**Purpose:** Decide what is actually done with each hex, size the markets on it, and count
+who lives on the land. Replaces `CultivationStage` in the `organic` model.
+
+**Reads:** `hex.soil`, `hex.territory`, `hex.territory_cost`, `state.metadata["market_seats"]`.
+**Writes:** `hex.land_use`, `hex.cultivated`, `hex.rural_population`, `state.settlements`.
+
+**Config:** § [4.8](#48-soil-food-and-habitability--37a-soil-39-habitability), § [4.10](#410-haulage-and-markets--the-organic-model).
+
+#### Clearing is priced, and the margin is set by scarcity
+
+The old rule drew a disc — eight hexes round a city, four round a town — so a city on thin
+ground cleared exactly as far as one on a floodplain. What decides it now is rent:
+
+```
+rent(hex) = potential_food * usable_fraction(territory_cost, market_day_radius)
+cleared   ⟺  rent >= clearing_margin * max(rent over that catchment)
+```
+
+Transport cost stands in for the effort of working land that far out, and **the bar is
+relative to the best land in reach**. A market with a floodplain has a high bar and leaves
+its hillsides to sheep; a market on uniformly thin ground has a low bar and ploughs the
+scrub. The worse the land, the more pressure to use bad land — the extensive margin set
+against the best alternative available, which is what rent theory actually says.
+
+Measured on a temperate 128×128: markets whose best ground is only ARABLE plough down to a
+mean soil rank of 2.29, markets with PRIME in reach stop at 2.69. An absolute threshold
+cannot produce that — under one, a poor market simply clears less.
+
+Von Thünen's rings still fall out, because rent falls with cost. What is new is that a
+ring's *width* varies with what its catchment holds.
+
+It needs one knob and one pass: no per-soil clearing costs, and no fixed point to iterate,
+because rent depends on the catchment and the soil and both are settled before this runs.
+
+```
+water                                   → WATER
+UNUSABLE soil                           → WASTE
+outside every catchment, ploughable     → WOOD     (the wildwood: reached by nobody)
+outside every catchment, otherwise      → WASTE
+GRAZING soil in a catchment             → PASTURE  (grazing needs no clearing)
+ploughable, rent clears the margin      → ARABLE
+ploughable, rent does not               → WOOD
+```
+
+`hex.cultivated` survives as a derived boolean (`land_use is ARABLE`) because the classic
+village stages and the JSON schema both read it.
+
+#### Cleared ground yields more, which is what makes clearing worth doing
+
+```
+actual_food = potential_food * yield_of[land_use]
+```
+
+Wood on prime soil feeds a third of what the same soil feeds under the plough. A settlement
+therefore grows by assarting its hinterland rather than merely by sitting in it, and the map
+shows cleared country round the markets with wood standing in the gaps.
+
+#### Sizing lives here, so population has one owner
+
+`MarketStage` plants and allocates on **potential** food — a settler picks land for what it
+will yield once worked, not for the wildwood standing on it. This stage clears, then founds
+and sizes each market from **actual** food. Nothing writes a provisional population that a
+later stage overwrites.
+
+#### Rural density is the same sum read the other way round
+
+```
+rural_population = actual_food * (1 - marketable_surplus_fraction) * people_per_food
+```
+
+The peasantry has been in the arithmetic since markets were built: a market draws
+`marketable_surplus_fraction` of what its catchment yields, so the other two thirds feeds the
+people who grew it. Defining it this way means the two figures reconcile by construction
+rather than by calibration.
+
+**Result at 128×128, seed 42:**
+
+| climate | arable | pasture | wood | waste | people/km² | rural share |
+|---|---|---|---|---|---|---|
+| temperate | 10% | 8% | 47% | 27% | 38.5 | 87% |
+| mediterranean | 4% | 7% | 15% | 66% | 17.6 | 85% |
+| arid | 2% | 2% | 7% | 81% | 10.8 | 88% |
+| boreal | 4% | 4% | 16% | 67% | 12.1 | 89% |
+| tropical | 6% | 9% | 47% | 30% | 24.0 | 90% |
+
+"Waste" is the medieval word and the right one: unenclosed ground nobody is working.
 
 ---
 
@@ -982,17 +1523,14 @@ with self-reinforcing pheromone trails.
 **Writes:** `state.roads`, `hex.road_connections`, `hex.tags`
 (`"ford"` / `"bridge"`), `hex.habitability_village` (+0.2 boost).
 
-**Config:** `road_travellers_city`, `road_travellers_town`,
-`road_gravity_exponent`, `road_bank_discount`,
-`road_bank_discount_min_flow`, `road_pheromone_factor`,
-`road_mountain_cost`, `road_hill_cost`, `road_flat_cost`,
-`road_water_cost`, `road_embark_cost`, `road_disembark_cost`,
+**Config:** `road_travellers_per_pop`, `road_travellers_max`,
+`road_gravity_exponent`, `road_pheromone_factor`,
+`road_flat_cost`, `road_water_cost`, `road_embark_cost`, `road_disembark_cost`,
 `road_river_crossing_base`, `road_river_crossing_flow`,
 `road_river_hex_cost`, `road_ferry_max_hop`,
 `road_slope_cost`, `road_slope_free_pct`, `road_slope_cap_pct`,
 `road_slope_cap_mult`, `road_min_traffic`, `road_river_traffic_min`,
-`road_primary_pct`, `road_secondary_pct`, `hex_size_m`,
-`road_elev_range_m`.
+`road_primary_pct`, `road_secondary_pct`, `hex_size_m`.
 
 #### Cost model — [stages/road_cost.py](../worldgen/stages/road_cost.py)
 
@@ -1005,87 +1543,141 @@ function (cost of the transition between two hexes).
 combined in [interurban_roads.py:35–39](../worldgen/stages/interurban_roads.py#L35)):
 ```
 base_cost = match terrain_class:
-    OCEAN | LAKE → road_water_cost          (default 0.05)
-    MOUNTAIN     → road_mountain_cost       (10.0)
-    HILL         → road_hill_cost           (3.0)
-    COAST | FLAT → road_flat_cost           (1.0)
+    OPEN_WATER | INLAND_WATER → road_water_cost  (default 0.05)
+    COAST | LAND              → road_flat_cost   (1.0)
 
-river_hex_cost = road_river_hex_cost if river_flow > 0 else 0
+# No steepness term. The climb is priced on the *edge* by
+# road_delta_elevation_per_hex, from the actual metres of rise between the
+# two hexes; a per-hex surcharge on top billed the same ascent twice, and
+# billed it wrongly wherever the band and the grade disagreed.
 
-bank_discount  = road_bank_discount * max(adjacent_flow, road_bank_discount_min_flow)
-                                    if beside a river and not on one else 0
-pheromone      = road_pheromone_factor * traffic_so_far[hex]
+river_hex_cost = road_river_hex_cost if on a river else 0
 
-node_cost = max(0, base_cost + river_hex_cost - bank_discount - pheromone)
+pheromone = road_pheromone_factor * traffic_so_far[hex]
+
+node_cost = max(0, base + river_hex_cost - pheromone)
 ```
 
-The bank discount makes routes prefer to follow river valleys (Roman
-"river roads") **along the bank rather than down the channel**, so which side
-of a river a road — and anything standing on it — is on stays readable. The
-matching `river_hex_cost` prices out threading a meander or a braid, where two
-river hexes sit side by side without a drawn hexside between them for the
-channel exclusion to catch. The pheromone term makes the *order* of traveller
-processing matter — once enough travellers have used a path, it becomes
-cheap and subsequent travellers reinforce it. This is what concentrates
-random travellers onto a small number of recognisable highways.
+Roads follow river valleys — Roman "river roads" — but **nothing pays them to**.
+There was a `road_bank_discount` here, a fraction knocked off the cost of any hex beside
+a river. It was deleted, because the pull it claimed was almost entirely geometry: a
+valley floor is the low, level, well-watered ground that already leads somewhere, and the
+cost model rewards all three without being told about rivers at all.
 
-**Edge cost** ([road_cost.py:62–92](../worldgen/stages/road_cost.py#L62)):
-```
-edge_cost = slope_edge_cost + water_edge_cost + river_crossing_edge_cost
+Measured on a 128×128 temperate map, roads run on a riverbank **2.78×** as often as bank
+occurs in the dry land. With the discount removed that falls to **2.52×** — nine tenths of
+the effect survives the term that was supposed to cause it. What the discount bought was
+not worth two config knobs and a paragraph of tuning.
 
-# slope_edge_cost
-grade_pct = |Δelev| * road_elev_range_m * 100 / hex_size_m   # percent
-if grade_pct <= road_slope_free_pct:                # default 3 %
-    slope = 0
-elif grade_pct >= road_slope_cap_pct:               # default 25 %
-    slope = road_slope_cost * road_slope_cap_mult   # = 2 * 10 = 20
-else:
-    raw = road_slope_cost * (grade_pct - free) / (cap - grade_pct)
-    slope = min(raw, road_slope_cost * road_slope_cap_mult)
-
-# water_edge_cost (charged on land↔water transitions)
-embark    = road_embark_cost     (8.0)   if to_water and not from_water
-disembark = road_disembark_cost  (8.0)   if from_water and not to_water
-
-# river_crossing_edge_cost (charged on land↔river transitions)
-flow = max(from.river_flow, to.river_flow)
-crossing = road_river_crossing_base + road_river_crossing_flow * flow
-                                    (default 4 + 12*flow)
-```
-
-A perpendicular crossing of a 1-hex-wide river hits `river_crossing_edge_cost`
-twice (entering, then leaving the river hex), so the base+flow values
-represent **half** the total perpendicular-crossing cost. Travelling
-*along* a river never triggers it, since both hexes are river hexes
-([road_cost.py:78–83](../worldgen/stages/road_cost.py#L78)).
+`river_hex_cost` is the term that does earn its place, and it pulls the other way: it
+keeps roads *off* the channel, so which side of a river a road — and anything standing on
+it — is on stays readable. Travelling along the channel is excluded outright by
+`make_road_edge_cost`; `river_hex_cost` covers the meander and braid cases that hexside
+rule cannot see.
 
 #### Traveller simulation — [interurban_roads.py:44–91](../worldgen/stages/interurban_roads.py#L44)
 
-For each settlement, emit `road_travellers_city` (default 500) or
-`road_travellers_town` (default 100) travellers. Process them in random
-order. Each traveller picks a destination via gravity:
+For each settlement, emit `population × road_travellers_per_pop` travellers,
+capped at `road_travellers_max`. Process them busiest-origin-first — the
+pheromone makes order decide which route is worn first and which then snap
+onto it, so trunk routes are laid before the journeys that tributary into
+them; a random order had minor journeys laying track for trunk routes to
+follow. Ties keep settlement order, so it stays deterministic.
+
+Each traveller picks a destination via gravity:
 ```
 dist[d]   = max(1, hex_distance(origin, d))
-weight[d] = population[d] / dist[d] ^ road_gravity_exponent      (default 1.5)
+weight[d] = population[d] / dist[d] ^ road_gravity_exponent      (default 2.5)
 prob[d]   = weight[d] / sum(weight)        # excluding origin
 ```
-Then A*-paths from origin to chosen destination using the (live, pheromone-
-updated) cost functions. Traffic on every hex of the path is incremented.
+Then routes to that destination — but **to the network, not to the hex**. A
+traveller bound for a town does not need a road of his own all the way there;
+he needs to reach the road that already goes there. So the search
+(`astar_to_any`) runs against every hex from which the destination is already
+reachable along roads that exist, and stops at whichever it touches first. The
+rest of the journey is that road. The first traveller finds nothing and paths
+the whole way, becoming the road everyone after him joins.
+
+This is what stops the network being a mat. Pathing all the way to the seat
+had each route find its own line, and A* — whose heuristic assumes 1.0 per
+step, and so misprices anything cheaper — cannot reliably find the same line
+twice, so routes ran *beside* one another rather than joining. Aiming at the
+network means a route joins it by construction rather than by the
+pathfinder's good luck.
+
+It is also far cheaper, because the search ends at the first road it meets
+rather than at the far side of the map. Measured at 128×128 against pathing
+to the hex: **217k node expansions against 1,329k, a road stage of 1.6s
+against 7.4s, and 11.8% of the land covered against 19.3%** — with braiding
+at 9.7% against 32.7% and clean degree-2 corridor at 70% against 43%. Plain
+Dijkstra, which is optimal and therefore the ceiling, gives 12.3% coverage
+and 4.1% braiding for 39.7s: routing to the network gets a *better* network
+than optimal point-to-point routing, ten times faster, because it is
+answering a better question.
+
+Traffic on every hex of the path is incremented.
 
 To save A* calls, each (origin, destination) pair is cached as a
-**canonical route** ([interurban_roads.py:73–75](../worldgen/stages/interurban_roads.py#L73)).
-The first traveller does the pathing; everyone after re-uses it. Before
-falling back to a fresh A*, the stage tries to **stitch** through an
-intermediate settlement (`origin → mid → dest` if both legs are already
-canonical) and uses whichever is cheaper
-([interurban_roads.py:152–189](../worldgen/stages/interurban_roads.py#L152)).
+**canonical route**. The first traveller does the pathing; everyone after
+re-uses it.
+
+There used to be a second cache in front of that: `_stitch_via_junction`
+welded two existing legs together at an intermediate settlement rather than
+pathing directly. It never compared the stitch against the direct route — A*
+ran only when *no* stitch candidate existed at all — so once a handful of
+legs existed almost everything after was a concatenation, and concatenations
+became legs for the next stitch. Measured at 128×128: **1,690 of 1,944 routes
+(87%) were never pathfound**, the median stitched route ran 168 hexes against
+66 for a routed one, and the worst was 1,047 hexes between endpoints 24 km
+apart. It is deleted.
+
+After tiering the network is **split into road and sea**. An edge with a foot in
+open water is a sea leg, not a road, and goes to `WorldState.sea_edges`; only dry
+edges stay in `road_edges`. Routes cross water because water is cheap to cross,
+rightly so — sea carriage ran at a fraction of land carriage before the railway —
+but while the two were mixed the distinction could not be drawn. On the 128×128
+reference map **half the network by hex count was water**, "road coverage" of
+9.4% was really 6.0%, and the single connected network was single only *through*
+the sea: by land alone it was forty networks tied together by eight crossings
+averaging 62 water hexes apiece.
+
+`_join_by_land` then adds what the traffic model declined to, on a cost function
+that refuses water outright: **one road network per landmass**. A network in which
+neighbouring markets can only be reached by boat is not a road network and a
+wargame cannot march down it. `VillageTrackStage` is land-only for the same reason.
+
+It joins **road components, not settlements**, and the difference is load-bearing.
+A spur that lands a sea leg survives `prune_orphan_roads` — a road to a harbour is
+a road to somewhere — but it holds no settlement, so a settlement-only rule had
+nothing to join it to; `ChokepointStage` then founded a village on such a spur and
+the village came out cut off by land from the 37 settlements it shared ground with.
+Joining components means anything founded later is on the one network by
+construction, whatever founds it. A settlement standing on no road at all counts as
+a component of one, so the component rule subsumes the seat rule it replaced.
+
+It also builds *less* road than the seat rule did. That version added only the
+routed path to its joined set rather than the whole component the seat belonged to,
+so a second seat in the same stranded piece was routed again and got a road of its
+own to the trunk. Merging whole components connects each piece once: on the 128×128
+temperate reference map the network fell from 1,560 hexes to 1,338 with the same
+connectivity.
+
+After that, two passes tidy the network. `route_through_settlements` bends
+any road skirting a settlement so it passes through instead (§ 4.19), and
+`prune_orphan_roads` drops any component reaching neither a settlement nor a
+ferry landing — `road_river_traffic_min` admits a riverbank edge on a single
+traveller, so a stretch of towpath can qualify while joining nothing. The
+connectivity guarantee then runs over **every** settlement, not just the
+cities: it used to require two or more cities, so the organic model had
+nothing watching it, and the map stayed connected only because stitching made
+most routes concatenations of the same few legs.
 
 #### Tier classification — [interurban_roads.py:93–114](../worldgen/stages/interurban_roads.py#L93)
 
 After all travellers are processed, hexes are filtered:
 ```
-eligible = hexes where traffic >= road_min_traffic                   (default 3)
-        OR hex.river_flow > 0 and traffic >= road_river_traffic_min  (default 1)
+eligible = edges where traffic >= road_min_traffic                   (default 3)
+        OR "river" in hex.tags and traffic >= road_river_traffic_min (default 1)
 ```
 Sort by traffic descending, then:
 - top `road_primary_pct` (10 %) → PRIMARY
@@ -1116,6 +1708,98 @@ component, and inserts those paths as PRIMARY roads. Bounded to
   ([interurban_roads.py:140–147](../worldgen/stages/interurban_roads.py#L140)).
   This feeds VillagePlacementStage so that road corridors attract
   villages.
+
+---
+
+### 3.11a Chokepoints — `organic`
+
+[stages/chokepoints.py](../worldgen/stages/chokepoints.py)
+
+**Purpose:** Found the settlement tier below the market, on bridgeheads and passes that
+carry real traffic. This is the tier `organic` withholds from `VillagePlacementStage` —
+gated on holding something rather than sprinkled across the countryside.
+
+**Reads:** `state.road_edges`, `hex.tags`, `hex.elevation`, `hex.territory`,
+`hex.territory_cost`, the food surface.
+**Writes:** `state.settlements`, `hex.settlement`, and a `pass` tag on every saddle that
+qualifies.
+
+**Config:** § [4.10](#410-haulage-and-markets--the-organic-model).
+
+#### It runs after the roads, and that is the whole idea
+
+A chokepoint is not a good site that happens to have traffic; it is a bad site that has
+traffic anyway. Only the built network can say which crossings carry any, so this cannot
+run before `InterurbanRoadStage` — and because every candidate already sits on a road, the
+settlements it founds perturb nothing. No route is recut, so the traffic that justified a
+village is the same traffic after it exists.
+
+#### Both halves of the gate bind
+
+```
+candidate  =  carries a road of at least chokepoint_min_road_tier
+              AND (is a bridge, is beside one, or is a pass)
+              AND is settleable, and unoccupied
+```
+
+A bridge on a farm track is a plank, not a town; a busy road over open country is passing
+through nowhere in particular. On a 128×128 temperate map about twenty features clear
+both, which is what actually sets the size of this tier — `chokepoint_min_draw` only says
+which of those are worth a glyph.
+
+#### A pass is a saddle the ground either side forbids going round
+
+Read off the neighbour ring: walk the six in order and count the *runs* of ground standing
+above you. None is a summit or a pit, one is a hillside, two or more is a col. The relief
+reported is the **lesser** of the two flanks, because a pass is only as walled as its
+weaker side — one cliff and one gentle rise is somewhere you simply walk over.
+
+The threshold is `terrain_steep_gradient_m` rather than a setting of its own. A hex is
+1 km across, so that figure is already the gradient at which the map says "pack animals,
+terraces, no wheels", and a separate knob could only disagree with the terrain bands about
+what a road cannot climb.
+
+**Passes are rare, and that is the model working.** `slope_edge_cost` charges every metre
+of climb, so a router offered a way round a ridge takes it. On 1500 m of relief a temperate
+map has 19 qualifying saddles and roads use 2 of them; at 2400 m there are 70 and roads use
+none. A pass settlement appears only where the ground leaves no way round.
+
+#### Sized from what the markets left behind
+
+```
+residual(hex)  =  surplus * (1 - usable_fraction(territory_cost, market_day_radius))
+                  if the hex is in a market's catchment, else surplus
+```
+
+`gather` weights every hex by `usable_fraction` of the distance to its market, falling to
+exactly zero at `market_day_radius` — so the complement is precisely the fraction the
+market could not haul, and ground outside every catchment was never drawn on at all.
+
+This is what stops the tier double-counting the one above it: **a village on a market's
+doorstep finds nothing left and is not founded**, with no rule anywhere saying villages may
+not stand near markets. Market populations are unchanged by this stage.
+
+Planting is greedy over the residual, claiming a village's fields **outright** rather than
+taking the decaying share markets use. Markets compete for the same countryside, which is
+what makes their spacing follow the land; the fields around a village are walked out to and
+back from daily and are not shared with anybody.
+
+The floor is then applied to the **real** catchment draw, not to the estimate planting ranks
+on, and the survivors are re-partitioned — so `chokepoint_min_draw × people_per_food` is
+exactly the smallest village in people, and no village is left holding the smaller catchment
+it had while a rejected neighbour was still in.
+
+**Result at 128×128, seed 42, `continent_falloff_edges: [south]`:**
+
+| climate | cities | towns | villages | of which on passes | median village |
+|---|---|---|---|---|---|
+| temperate | 3 | 73 | 6 | 2 | 277 |
+| mediterranean | 1 | 38 | 1 | 0 | 120 |
+| arid | 0 | 14 | 0 | — | — |
+| boreal | 0 | 14 | 0 | — | — |
+
+Against a median market town of 967 on the temperate map, and a largest city of 39,805 —
+three tiers, each an order apart, and none of them a target count.
 
 ---
 
@@ -1242,9 +1926,19 @@ interfere with the cultivation frontier signal used by VillagePlacement.
 ## 4. Configuration Reference
 
 All defaults live in [worldgen/core/config.py](../worldgen/core/config.py).
-Validation rules are in `__post_init__`
-([config.py:42](../worldgen/core/config.py#L42)) and are noted inline
-below.
+Validation rules are in `__post_init__` and are noted inline below.
+
+**Everything here is a physical quantity in real units** — metres, degrees Celsius,
+millimetres of rain a year, kilometres, square kilometres. That was not always true: the
+generator used to carry elevation, temperature and moisture on normalised `[0, 1]` axes,
+which meant a threshold written against one of them silently meant something different on
+every map, because each axis was re-stretched to the range that map happened to occupy.
+Six such normalisations were removed. Where a setting replaced one, the row says so.
+
+Two settings are shipped in [worldgen/default_config.yaml](../worldgen/default_config.yaml)
+with commentary; `worldgen init-config` writes that file out. `tests/test_docs.py` checks
+that every field below exists and that no field is missing, so this table cannot drift
+from the dataclass again without the suite failing.
 
 ### 4.1 Grid
 
@@ -1253,6 +1947,7 @@ below.
 | `width` | `int` | `128` | ≥ 1 | Map width in hexes (`1 hex = 1 km` by convention) |
 | `height` | `int` | `128` | ≥ 1 | Map height in hexes |
 | `grid_layout` | `str` | `"axial"` | `axial` \| `offset` | Grid shape — see below |
+| `model` | `str` | `"classic"` | `classic` \| `organic` | Which settlement and road model the pipeline runs. In the config rather than only on the CLI so `world.json` records which model made the map — seed plus config is the reproduction record. The `--model` flag overrides it |
 
 `grid_layout` decides which hexes a world is built from:
 
@@ -1274,19 +1969,28 @@ water-body stages drain to.
 Columns are spaced `1.5 * hex_size` apart and rows `sqrt(3) * hex_size`, so an offset
 map comes out square at `height ≈ 0.87 * width` — `128 x 111`, for instance.
 
-### 4.2 Elevation Noise — § [3.1](#31-elevation)
+### 4.2 Elevation — § [3.1](#31-elevation)
+
+Elevation is **metres above sea level**. Sea level is the datum, so it is zero by
+definition and is not a setting — the old `sea_level` fraction is retired. What kind of
+country the map is comes from the two vertical-scale settings below.
 
 
 | Param | Type | Default | Range | Effect |
 |---|---|---|---|---|
-| `sea_level` | `float` | `0.45` | `[0, 1]` | Below this, hexes become OCEAN. Used by Erosion (skips ocean), TerrainClass, WaterBodies, Climate (orographic floor) |
+| `max_elevation_m` | `float` | `1500.0` | `> 0` | Highest ground above sea level. The single most consequential setting for what country this is: `800` gives downland, `1500` mixed uplands, `3000` an Alpine massif |
+| `seabed_depth_m` | `float` | `200.0` | `> 0` | How deep the sea floor lies at the map edge. A continental shelf, not an abyss. How much of the map ends up underwater follows from this and `max_elevation_m` |
+| `coast_max_elevation_m` | `float` | `100.0` | `≥ 0` | Land no higher than this beside the sea is classed COAST |
 | `noise_octaves` | `int` | `6` | ≥ 1 | Number of fBm octaves. Higher = more detail at the cost of speed |
 | `noise_persistence` | `float` | `0.5` | `(0, 1]` typ. | Amplitude multiplier per octave (`amp *= persistence^i`). Higher = rougher terrain |
-| `noise_lacunarity` | `float` | `2.0` | `> 1` typ. | Frequency multiplier per octave (`freq *= lacunarity^i`). Higher = more high-frequency detail |
-| `noise_scale` | `float` | `3.0` | `> 0` | Coordinate scale: domain spans `[0, noise_scale]`. Higher = "zoomed in" (more land variation per hex) |
-| `domain_warp_strength` | `float` | `0.3` | `≥ 0` | Magnitude of the domain warp offset. `0` disables warping; higher values produce more organic coastlines |
-| `continent_falloff` | `bool` | `True` | — | Apply circular cone falloff to bias water at edges. Turn off for full-coverage land maps |
-| `elevation_gradient` | `(float, float)` | `(0.0, 0.0)` | — | Linear tilt added post-noise. `(0.1, 0)` raises the right edge by 0.1 |
+| `noise_lacunarity` | `float` | `2.0` | `> 1` typ. | Frequency multiplier per octave (`freq *= lacunarity^i`) |
+| `noise_scale` | `float` | `3.0` | `> 0` | Coordinate scale: domain spans `[0, noise_scale]`. Higher = more variation per hex |
+| `domain_warp_strength` | `float` | `0.3` | `≥ 0` | Magnitude of the domain-warp offset. `0` disables warping; higher gives more organic coastlines |
+| `continent_falloff` | `bool` | `True` | — | Apply edge falloff so the sea rings the map and every river has a coast to reach. `False` gives a landlocked map whose interior basin is the terminal sink — endorheic by geometry |
+| `continent_falloff_edges` | `tuple[str, ...]` | `('north', 'south', 'east', 'west')` | subset of the four | Which edges the sea comes in from. Drop an edge to let the land run off the map there instead of ending in a coast. `()` is the same as `continent_falloff: false`. Rivers can still drain off any border, ocean or not, so a partly-open map is not a trapped one |
+| `continent_shelf_hexes` | `int` | `10` | `≥ 1` | Width in hexes (km) of the shelf over which land drops to the sea. In hexes rather than a fraction of the map, so the coastal gradient is the same per km at any size. Capped at a quarter of the shorter side |
+| `continent_shelf_variance` | `float` | `0.35` | `[0, 1]` | How much the shelf's inner edge wanders. `0` gives a coast of even width; higher makes bays and headlands. The terrain noise already moves the shoreline a good deal, so this is a nudge |
+| `elevation_gradient_m` | `(float, float)` | `(0.0, 0.0)` | — | Directional tilt `[east, south]` **in metres**, applied after shaping. `(0, -600)` stands the north edge 600 m higher and runs the map downhill to the south. Replaces `elevation_gradient`, which was a fraction of an abstract range |
 
 ### 4.2a Elevation from an Image — § [3.1a](#31a-elevation-from-an-image)
 
@@ -1300,67 +2004,242 @@ map comes out square at `height ≈ 0.87 * width` — `128 x 111`, for instance.
 
 ### 4.3 Terrain Classification — § [3.3](#33-terrain-classification)
 
+Terrain classes are **bands of gradient, in metres of rise per kilometre**. They describe
+how the ground lies, not how high it is, so a high plateau is level ground and is classed
+as such. Absolute rather than a fraction of the elevation range, so a band means the same
+thing whatever the map's vertical scale — the old `terrain_hill_gradient` made a mountain
+120 m/km on one map and 20 m/km on another.
+
 | Param | Type | Default | Range | Effect |
 |---|---|---|---|---|
-| `terrain_hill_gradient` | `float` | `0.02` | `≥ 0` | Mean-neighbour-Δelev threshold for HILL classification |
-| `terrain_mountain_gradient` | `float` | `0.04` | `≥ 0` | Threshold for MOUNTAIN. Hexes with elevation > 0.8 are also MOUNTAIN regardless of gradient |
+| `terrain_rolling_gradient_m` | `float` | `30.0` | `≥ 0` | m/km above which ground stops being FLAT. Below it: level going — plough it, cart across it |
+| `terrain_steep_gradient_m` | `float` | `100.0` | `> rolling` | m/km above which wheels stop working. ROLLING below, STEEP above |
+| `terrain_escarpment_gradient_m` | `float` | `250.0` | `> steep` | m/km above which it is a break of slope: on foot and with effort |
 
 ### 4.4 Erosion — § [3.2](#32-erosion)
 
 | Param | Type | Default | Range | Effect |
 |---|---|---|---|---|
-| `erosion_iterations` | `int` | `15000` | ≥ 0 | Total particles dropped. The dominant cost in the pipeline. Halve to halve runtime; double for finer channels |
-| `erosion_inertia` | `float` | `0.05` | `[0, 1]` | Direction smoothing. `0` = pure gradient descent; near `1` = particle ignores terrain |
-| `erosion_capacity` | `float` | `4.0` | `> 0` | Sediment-carrying capacity multiplier. Higher = particles erode more aggressively |
-| `erosion_deposition` | `float` | `0.3` | `[0, 1]` typ. | Fraction of excess sediment deposited each step when over-capacity |
-| `erosion_erosion_rate` | `float` | `0.3` | `[0, 1]` typ. | Fraction of capacity deficit eroded each step |
-| `erosion_channel_affinity_gain` | `float` | `0.5` | `≥ 0` (validated) | Affinity bump per erosion event. Higher = stronger channel-reinforcement bias |
-| `erosion_affinity_update_interval` | `int` | `500` | `≥ 1` (validated) | Particles between channel-affinity re-weighting passes |
+| `erosion_droplets_per_hex` | `float` | `3.0` | `≥ 0` | Droplets run **per land hex**, not per map, so the dose means the same at any size. Replaces `erosion_iterations`, a flat count that gave a 32×32 map 14.6 droplets per hex and a 128×128 map 0.9 — a sixteenfold spread, and most of why small maps came out as Alpine massifs. It decides whether the map has valleys: below about one per hex the rivers only scratch a line into the noise and there is no floodplain. It is also a climate setting, since the orographic term lifts on height above sea level and wearing the high ground down flattens the rain shadow |
+| `erosion_inertia` | `float` | `0.05` | `[0, 1]` | Direction smoothing. `0` = pure gradient descent; near `1` = the droplet ignores terrain |
+| `erosion_capacity` | `float` | `4.0` | `> 0` | Sediment-carrying capacity multiplier. Higher = droplets erode more aggressively |
+| `erosion_deposition` | `float` | `0.3` | `[0, 1]` typ. | Fraction of excess sediment deposited each step when over capacity |
+| `erosion_erosion_rate` | `float` | `0.3` | `[0, 1]` typ. | Fraction of the capacity deficit eroded each step |
+| `erosion_channel_affinity_gain` | `float` | `0.5` | `≥ 0` (validated) | Affinity bump per erosion event. Higher = stronger channel reinforcement |
+| `erosion_affinity_update_interval` | `int` | `500` | `≥ 1` (validated) | Droplets between channel-affinity re-weighting passes |
+| `erosion_delta_min_load` | `float` | `0.15` | `≥ 0` (validated) | Sediment a droplet must still carry on reaching the sea for it to build anything. Below this the load is treated as carried away along the shore. Without it every droplet trickling off a nearby hillside deposited where it entered the water, silting the shelf evenly instead of building deltas at the river mouths |
+
+The erosion constants are shares of the map's relief rather than physical quantities, so
+the stage converts to a normalised copy at its boundary and back to metres on the way out
+— against the **known** span, so it is a fixed change of units and not a per-map stretch.
+
+#### Valley widening
+
+Droplets only incise: each cuts along its own path, so the model carves narrow V-notches
+and nothing ever widens them. Real valleys get their width from the channel migrating
+sideways over geological time, planing the floor flat between bluffs — the Mississippi's
+floor is tens of kilometres across, the Nile's ten to twenty, and neither was cut by water
+going straight down. Carving and drainage decide each other, so this runs as a short
+convergence loop rather than a single pass. Floodplains come out 79% wider.
+
+| Param | Type | Default | Range | Effect |
+|---|---|---|---|---|
+| `valley_carve_passes` | `int` | `3` | `≥ 0` (validated) | Cut, re-measure the drainage, cut again. One pass does not do it: widening a valley moves the water into it, so the network measured before the first cut is not the one that exists after |
+| `valley_width_max` | `float` | `6.0` | `≥ 0` (validated) | Cap on valley half-width, in hexes. `0` disables widening entirely |
+| `valley_width_exponent` | `float` | `0.6` | `≥ 0` (validated) | Discharge → width. `0.5` is the textbook root |
+| `valley_floor_slope_m` | `float` | `2.5` | `≥ 0` (validated) | Rise per hex away from the channel, in metres. Small but not zero, so a floodplain drains toward its river rather than ponding |
+| `valley_max_relief_m` | `float` | `100.0` | `≥ 0` (validated) | How much height a river may plane away per pass, in metres. What stops a valley eating the landscape: a channel cuts a floodplain out of ground near its own level but cannot take down a bluff standing well above it, so anything higher is valley wall and stays. This is what makes valleys self-limiting — pinched in a gorge, broad where the ground is already low |
+| `valley_channel_fraction` | `float` | `0.02` | `(0, 1]` (validated) | What fraction of the land counts as channel, by discharge — the cells valleys are planed outward from |
 
 ### 4.5 Hydrology — § [3.5](#35-hydrology)
 
+A channel forms where enough water passes to keep one open: **discharge = catchment area
+× runoff depth**. This replaced `river_flow_threshold`, which was documented as a flow
+minimum and implemented as a rank — the top 5% of land by accumulation — so desert and
+rainforest alike got 5.6% of their land under channel. Now arid country drains 1.2% with
+no navigable river at all, and tropical 12.6%.
+
 | Param | Type | Default | Range | Effect |
 |---|---|---|---|---|
-| `river_flow_threshold` | `float` | `0.05` | `[0, 1]` (validated) | Top fraction of land hexes by flow accumulation that become rivers. `0` disables rivers |
-| `river_flow_continuous` | `bool` | `False` | — | If true, `hex.river_flow` is set on every draining land hex (good for flow heatmaps); else only on river hexes |
+| `channel_min_discharge` | `float` | `20000.0` | `> 0` | Catchment km² × runoff mm needed to cut a channel |
+| `navigable_min_discharge` | `float` | `60000.0` | `> channel` | ...and to float a boat. Consumed by the haulage model: a navigable hex multiplies a city's supply reach |
+| `evapotranspiration_base_mm` | `float` | `50.0` | `≥ 0` | Rain the ground and its plants take before anything runs off, even at freezing |
+| `evapotranspiration_per_c_mm` | `float` | `30.0` | `≥ 0` | ...plus this much per degree of mean temperature. Why cold country sheds nearly all its rain and the taiga is full of rivers |
+| `min_runoff_mm` | `float` | `25.0` | `≥ 0` | Floor, so even a desert drains its largest valleys |
+| `wetland_min_runoff_mm` | `float` | `300.0` | `≥ 0` | Runoff above which flat riverside ground waterlogs. Tested on runoff, not rainfall: waterlogging is not about how much rain arrives but whether the ground can shed it |
+| `river_flow_continuous` | `bool` | `False` | — | Record `hex.river_flow` on every draining land hex rather than only on channel hexes. A diagnostic for inspecting the drainage field; it does not add rivers to the map |
+| `lake_chaining` | `bool` | `True` | — | Allow a lake to spill into a strictly lower lake, not just the sea. Chains of lakes stepping down to the coast are the only outlet on a landlocked map |
+| `endorheic_marsh_radius` | `int` | `1` | `≥ 0` | Where a basin genuinely has no outlet, water leaves by evaporation; this many hexes of its shore become wetland. `0` disables |
+| `endorheic_marsh_min_precip_mm` | `float` | `300.0` | `≥ 0` | A closed basin drier than this is a salt pan, not a marsh, and gets no wetland shore |
+| `endorheic_evaporation_scale` | `float` | `1.0` | `≥ 0` (validated) | Multiplier on the potential evapotranspiration a basin loses its water to. Whether a basin is closed is a **water balance**, not a shape: it overflows when the rivers reaching it plus the rain on its surface exceed what evaporates off that surface. Above `1` closes more basins; `0` makes every basin with any inflow overflow. It replaced a test the routing was making by accident — a basin came out closed when path-finding happened to fail on it, so a dry basin with an easy saddle drained while a wet one ringed by hills did not, backwards on both counts. On one map 5,234 of 7,089 lake hexes came out endorheic |
+| `rain_shadow_strength` | `float` | `0.5` | `[0, 1]` (validated) | How much the rain shadow shapes the **rivers**, not only the biomes. `0` rains evenly on every hex; `1` takes the orographic pattern at its word, so a catchment behind mountains raises a smaller river and a lake there is likelier to evaporate away than to overflow. The map's total rainfall does not change with this — only where it falls. Below `1` because the pattern models only rain wrung out by lift, and taken literally it leaves every plain a desert |
+
+#### Rivers from off the map
+
+The grid is a region, not a world, so a river may well have gathered its water beyond the
+border. An **inlet** is a border land hex whose own terrain already descends inland; it is
+seeded with a catchment it did not earn on this map, which makes it arrive already wide
+instead of starting as a trickle at the edge. Off-map inlet *erosion* by droplets was
+tried twice, measured worse than not doing it, and reverted — a droplet is one raindrop
+wherever it starts, so seeding them at a mouth digs a pit that inverts the inland fall and
+disqualifies the very cell it was meant to serve. Discharge seeding does the job instead.
+
+| Param | Type | Default | Range | Effect |
+|---|---|---|---|---|
+| `river_inflow_count` | `int` | `2` | `≥ 0` (validated) | How many rivers enter from beyond the border. `0` disables, and the map drains outward only |
+| `river_inflow_volume` | `float` | `0.15` | `≥ 0` (validated) | Size of that off-map catchment, as a fraction of this map's own land area. Relative rather than absolute so the same value means the same thing on any grid size: `0.15` is a river carrying half again what the largest wholly-on-map river would |
+| `river_inflow_min_separation` | `int` | `6` | `≥ 0` (validated) | Minimum spacing between inlets, in hexes. Without it the best few candidates are usually the same valley mouth, and the map gets one river drawn three times |
+| `river_inflow_edges` | `tuple[str, ...]` | all four | edge names (validated) | Which edges water may arrive from. Narrowing it puts the off-map highlands on a chosen side: `["west"]` means every river from beyond the border enters in the west. Normalised like `continent_falloff_edges` — any case, any order, deduplicated |
+| `river_inflow_length_bias` | `float` | `2.0` | `≥ 0` (validated) | Exponent on the length of the course an inlet would take, preferring water that crosses the map over water that ducks back off it. `0` ignores length entirely |
+| `river_inflow_min_length` | `float` | `0.1` | `≥ 0` (validated) | Shortest course worth importing a river for, as a fraction of the longer map dimension. Weighting alone still leaves stubs, because the separation rule can leave nothing but stubs to choose from once the first inlet is placed — and a river that enters the map and leaves it four hexes later reads as a mistake rather than as geography. A map offering nothing longer gets fewer rivers than `river_inflow_count` asks for, which is the honest outcome; `0` disables the floor |
 
 ### 4.6 Climate — § [3.6](#36-climate)
 
+The map is a **region, not a world**: 500 km at 1 hex = 1 km is about 4.5° of latitude,
+some 3 °C. Altitude does far more over the same distance and rain shadow more again. So
+the region has one named climate, and the variety within it comes from terrain.
+
+Temperature is in **degrees Celsius** and rainfall in **millimetres a year**. Both used to
+be `[0, 1]` axes; three defects were hiding in the moisture one alone, including a
+`moisture_factor` that returned zero above `1.0` and so, read in millimetres, zeroed every
+hex's food on the map.
+
 | Param | Type | Default | Range | Effect |
 |---|---|---|---|---|
-| `wind_direction` | `(float, float)` | `(1.0, 0.0)` | — | Prevailing wind vector (orographic precip & atmospheric moisture transport). Magnitude is normalised; only direction matters |
-| `base_temperature` | `float` | `0.5` | `[0, 1]` (validated) | Map-mean temperature. `0`=arctic, `1`=tropical |
-| `latitude_temp_range` | `float` | `0.1` | `[0, 1]` (validated) | Pole-to-equator temperature spread. Tiny default tuned for `1 hex = 1 km`; raise for continent-scale maps |
-| `altitude_lapse_rate` | `float` | `0.4` | `≥ 0` | Temperature drop per unit elevation. With default settings, elevation dominates latitude — high mountains are reliably alpine |
-| `orographic_strength` | `float` | `2.0` | `> 0` | Orographic precipitation aggressiveness. Higher = wetter windward slopes, drier rain shadows |
-| `base_moisture` | `float` | `0.0` | typically `[0, 1]` | Flat moisture floor added to every land hex after normalisation. Use to dial the world wetter or drier |
-| `moisture_bleed_passes` | `int` | `0` | `≥ 0` (validated) | If `0`, use the simple `+0.15` flat river bonus. If `> 0`, run that many elevation-gated diffusion passes from rivers (creates wider riparian zones) |
-| `moisture_bleed_strength` | `float` | `0.3` | `[0, 1]` (validated) | Per-pass bleed strength. Only used when `moisture_bleed_passes > 0` |
+| `regional_climate` | `str` | `'temperate'` | `boreal`, `temperate`, `mediterranean`, `arid`, `tropical` | Sets the region's mean temperature and rainfall, and the palette of biomes it can produce — so an arid region runs desert to steppe to alpine with altitude but never grows a jungle three valleys over |
+| `mean_temperature_c` | `float \| None` | `None` → from climate | `-30..40` | Mean annual temperature at sea level. Blank takes it from `regional_climate` (boreal 1, temperate 10, mediterranean 16, arid 21, tropical 26). Pinning it while also naming a climate is rarely what you want |
+| `mean_precip_mm` | `float \| None` | `None` → from climate | `(0, 12000]` | Mean annual rainfall over land. Blank takes it from `regional_climate` (boreal 450, temperate 800, mediterranean 550, arid 200, tropical 2000) |
+| `lapse_rate_c_per_km` | `float` | `6.5` | `≥ 0` | How fast air cools with height. 6.5 is the standard environmental lapse rate — a real rate, applied to height above the waterline |
+| `latitude_temp_range_c` | `float` | `0.0` | `≥ 0` | Degrees between the map's pole-ward and equator-ward edges. Negligible across a region; raise only for a continental map |
+| `wind_direction` | `(float, float)` | `(1.0, 0.0)` | — | Prevailing wind vector driving orographic precipitation and moisture transport. Magnitude is normalised; only direction matters |
+| `orographic_strength` | `float` | `2.0` | `> 0` | Wind-driven precipitation intensity. Higher = wetter windward slopes and drier rain shadows |
+| `moisture_resupply_per_hex` | `float` | `0.08` | `[0, 1]` | Share of its moisture deficit the air makes back each km by evaporation. Without it a rain shadow runs from the first hill to the map edge: rainfall spanned 8× coast to interior and a temperate map read 60% shrubland |
+| `base_precip_mm` | `float` | `0.0` | — | Flat rainfall bias in mm/year added to every land hex after the orographic pass. Shifts a whole map wetter or drier without changing the pattern |
+| `moisture_bleed_passes` | `int` | `0` | `≥ 0` (validated) | Moisture carried inland along a river, so a valley is greener than the ground above it. `0` uses the flat river bonus only |
+| `moisture_bleed_strength` | `float` | `0.3` | `[0, 1]` (validated) | Share of the difference moved per pass. Only used when `moisture_bleed_passes > 0` |
 
 ### 4.7 Biome Thresholds — § [3.7](#37-biomes)
 
-All thresholds are in normalised `[0, 1]` units, matched to `hex.elevation`,
-`hex.temperature`, and `hex.moisture`.
+Real units throughout: Celsius for temperature bands, millimetres a year for rainfall.
 
 | Param | Type | Default | Range | Effect |
 |---|---|---|---|---|
-| `biome_alpine_elev` | `float` | `0.85` | `[0, 1]` | Above this, biome is ALPINE regardless of climate |
-| `biome_cold_temp` | `float` | `0.25` | `[0, 1]` | Below this, biomes go TUNDRA / BOREAL |
-| `biome_warm_temp` | `float` | `0.6` | `[0, 1]` | Above this, biomes go DESERT / GRASSLAND / TROPICAL. Between cold and warm, temperate biomes apply |
-| `biome_dry_moist` | `float` | `0.2` | `[0, 1]` | Below this in any temp band, the dry biome (DESERT/SHRUBLAND/TUNDRA) is chosen |
-| `biome_wet_moist` | `float` | `0.5` | `[0, 1]` | Above this, the wettest biome of the band (TROPICAL / TEMPERATE_FOREST / BOREAL) is chosen. Also gates the WETLAND override and DENSE_FOREST in LandCover |
+| `biome_treeline_temp_c` | `float` | `-2.0` | `≤ biome_cold_temp_c` | Mean annual temperature at which trees stop. **The treeline is a temperature, not a height** — the altitude it falls at follows from the region's warmth and the lapse rate: ~1850 m temperate, ~500 m boreal, above 4300 m tropical. Replaces `biome_alpine_elev`, a fixed fraction that gave every map the same share of alpine ground however low its hills. Keep it clear of every climate's own mean: the alpine test runs ahead of every temperature rule, so a treeline landing at sea level makes a whole region bare rock |
+| `biome_snowline_temp_c` | `float` | `-8.0` | `< biome_treeline_temp_c` | Mean annual temperature at which continuous plant cover stops — the second of the two lines that divide cold country. Between snowline and treeline is tundra: treeless but vegetated, and most of what stands above a subarctic treeline. Only above this is ground barren, and that is ALPINE. Deliberately colder than 1500 m of relief can reach, so a default map has no permanent snow — a temperate range that high has no glaciers either. Raise `max_elevation_m` towards 2400 and bare peaks appear |
+| `biome_cold_temp_c` | `float` | `5.0` | `< warm` | Below this the cold biomes take over — taiga gives way to broadleaf woodland around here |
+| `biome_warm_temp_c` | `float` | `18.0` | `> cold` | Above this the warm biomes take over, where subtropical vegetation begins |
+| `biome_dry_precip_mm` | `float` | `400.0` | `< wet` | Below about this you get steppe and desert |
+| `biome_wet_precip_mm` | `float` | `1000.0` | `> dry` | Above about this, closed wet forest. Also gates DENSE_FOREST in Land Cover |
+| `food_drowned_precip_mm` | `float` | `3000.0` | `> biome_wet_precip_mm` | Annual rainfall at which ground is leached, waterlogged and worth nothing for farming. The wet arm of the agricultural curve falls to zero here |
 
-### 4.8 Settlements — § [3.10](#310-city--town-placement), [3.13](#313-village-placement)
+### 4.8 Soil, food and habitability — § [3.7a](#37a-soil), [3.9](#39-habitability)
+
+Food value of one hex, by land cover band. `TUNDRA`, `DESERT`, `ALPINE` and `BARE_ROCK`
+are always `0`.
 
 | Param | Type | Default | Range | Effect |
 |---|---|---|---|---|
-| `target_city_count` | `int` | `6` | ≥ 0 | Maximum cities placed. Actual count may be lower if fewer candidates pass separation |
+| `food_prime_value` | `float` | `1.4` | ≥ 0 | `PRIME` — alluvium: the floodplain of a river too big to wade |
+| `food_arable_value` | `float` | `1.0` | ≥ 0 | `ARABLE` — ordinary farmland |
+| `food_marginal_value` | `float` | `0.55` | ≥ 0 | `MARGINAL` — ploughable and poor: leached, waterlogged, or podzol |
+| `food_grazing_value` | `float` | `0.35` | ≥ 0 | `GRAZING` — too steep to plough or too dry to crop; run stock on it |
+| `food_wetland_value` | `float` | `0.15` | ≥ 0 | `BOG`, `MARSH` — valued on cover, not soil, because a fen is not ploughland. Deliberately below water: neither good fishing nor good ploughing |
+| `food_water_value` | `float` | `0.4` | ≥ 0 | `OPEN_WATER` — fishing, and valued on cover for the same reason. Non-zero so a coastal site is not penalised for having sea in its catchment |
+| `soil_dry_farming_min_precip_mm` | `float` | `250.0` | ≥ 0 | The dry-farming limit: annual rainfall below which no crop is grown without irrigation, whatever the ground is like. **The only new threshold the soil rules need** — everything else reuses `terrain_rolling_gradient_m`, `terrain_steep_gradient_m`, `terrain_escarpment_gradient_m`, `biome_dry_precip_mm`, `biome_wet_precip_mm`, `food_drowned_precip_mm`, `biome_cold_temp_c` and `ford_max_catchment_km2`, each of which already means the right thing. At `250` an arid map is 85% unusable with its life on the rivers; at `400` it is 87% and mediterranean loses a fifth of its grazing |
+| `yield_arable` | `float` | `1.0` | ≥ 0 | What cleared ground under the plough yields, as a fraction of its soil's potential |
+| `yield_pasture` | `float` | `0.55` | ≥ 0 | What grazed ground yields |
+| `yield_wood` | `float` | `0.30` | ≥ 0 | What ground still under trees yields. The gap between this and `yield_arable` is what gives clearing economic weight — a settlement grows by assarting its hinterland, not merely by sitting in it |
+| `clearing_margin` | `float` | `0.45` | ≥ 0 | Where clearing stops, as a fraction of the **best rent the settlement can reach**. Relative rather than absolute, and that is the substance: a market with a floodplain has a high bar and leaves its hillsides to sheep, while a market on uniformly thin ground has a low bar and ploughs the scrub — the worse the land, the more pressure to use bad land. The extensive margin set against the best alternative available, which is what rent theory actually says |
+
+Fertile and marginal hexes are additionally scaled by a rainfall curve peaking across
+`[biome_dry_precip_mm, biome_wet_precip_mm]` and falling to `0` at both ends — too dry is
+desert, too wet is `food_drowned_precip_mm`. Water and wetland ignore it.
+
+| Param | Type | Default | Range | Effect |
+|---|---|---|---|---|
+| `habitability_agri_weight` | `float` | `0.40` | ≥ 0 | Weight on the catchment mean |
+| `habitability_river_bonus` | `float` | `0.25` | ≥ 0 | Flat, if the hex or a neighbour carries a river |
+| `habitability_harbour_bonus` | `float` | `0.60` | Site bonus for access to water that will float a barge — sea, lake, or a river above `navigable_min_discharge`. Distinct from `habitability_coast_bonus`, which is amenity: a beach to land a boat on. This one is about **bulk**, and it is the largest site bonus there is because it is the largest thing about a site — a town on navigable water can be provisioned from fifteen times the distance, which is the whole reason cities exist in this model. It has to be this big to be visible: a harbour site loses about a fifth of its day-range catchment to sea, which scores `food_water_value` (0.4) against arable's 1.0, so on agriculture alone it is worth ~22% less than an inland site and inland sites outnumber it nine to one. Before this term **not one of 74 markets stood on navigable water**, and no city could be maritime |
+| `habitability_coast_bonus` | `float` | `0.25` | ≥ 0 | Flat, if the hex or a neighbour is `COAST` |
+| `habitability_hill_bonus` | `float` | `0.15` | ≥ 0 | For a site overlooking the ground beside it, scaled by `habitability_hill_relief_m` |
+| `habitability_hill_relief_m` | `float` | `75.0` | `> 0` (validated) | Metres of drop a site must command to be paid that bonus in full; below it the bonus scales down. It used to be paid flat to any ROLLING hex with a FLAT neighbour, which asked two band questions and got the wrong answer to both — a knoll and a bluff were worth the same, and a level floodplain beside a bluff collected the bonus for standing *under* the drop that commands it |
+| `habitability_confluence_bonus` | `float` | `0.10` | ≥ 0 | Flat, on a river junction (this hex only) |
+
+Bonuses are binary within each term: a hex with one river neighbour scores the same as one
+ringed by six, and adjacency is radius 1 only.
+
+### 4.9 Settlements — the classic model — § [3.10](#310-city--town-placement), [3.13](#313-village-placement)
+
+Used by `generate --model classic`. Counts and spacing are **inputs**: the map is told how
+many cities to have, so it produces six whether it is one fertile plain or landlocked
+desert. See § 4.10 for the model that derives them instead.
+
+| Param | Type | Default | Range | Effect |
+|---|---|---|---|---|
+| `target_city_count` | `int` | `6` | ≥ 0 | Maximum cities placed. The actual count may be lower if fewer candidates pass separation |
 | `target_town_count` | `int` | `24` | ≥ 0 | Maximum towns placed |
 | `city_min_separation` | `int` | `20` | ≥ 1 | Minimum hex distance between cities |
-| `town_min_separation` | `int` | `8` | ≥ 1 | Minimum hex distance between towns. (Villages always use a hardcoded `3`.) |
-| `settlement_min_reachable` | `int` | `100` | `≥ 1` (validated) | Minimum hexes reachable below the slope cap. Filters out unreachable peaks and tiny islands |
+| `town_min_separation` | `int` | `8` | ≥ 1 | Minimum hex distance between towns |
+| `settlement_min_reachable` | `int` | `100` | `≥ 1` (validated) | Minimum hexes reachable below the slope cap. Filters out unreachable peaks and tiny islands. Used by **both** models |
 
-### 4.9 Cultivation Radii — § [3.12](#312-cultivation-cities--towns), [3.15](#315-village-cultivation)
+### 4.10 Haulage and markets — the organic model
+
+Used by `generate --model organic`. Before rail and the motor lorry, the binding
+constraint on where people live and how large a place can grow is what it costs to move
+bulk grain, and that one constraint generates the whole hierarchy — so there is no target
+count anywhere here.
+
+Each range is a **travel-cost budget rather than a distance**, so terrain shortens it: at
+1 hex = 1 km they are calibrated to give the historical figure on flat ground and less
+across hills. The ordering `rural_field_radius < market_day_radius < haulage_range_land`
+is the model's core claim and is enforced in `__post_init__`.
+
+| Param | Type | Default | Range | Effect |
+|---|---|---|---|---|
+| `rural_field_radius` | `float` | `2.5` | `> 0` | The daily walk out to the fields; sets cultivated extent. Chisholm: cropping intensity falls off past ~1 km, and land past 3–4 km is grazing or waste |
+| `market_day_radius` | `float` | `10.0` | `> rural_field_radius` | Out to market, business done, and home inside a day. Bracton held markets should stand 6⅔ miles apart, being a third of a twenty-mile day out and a third back; English market towns do cluster at 10–15 km |
+| `haulage_range_land` | `float` | `40.0` | `> market_day_radius` | Travel cost at which bulk food is worth nothing overland — the team has eaten the cargo. The softest figure here; what is well attested is the ratio below |
+| `haulage_transship_cost` | `float` | `8.0` | What it costs to get a cargo onto the water and off again, charged once at each land↔water transition, in the same units as `haulage_range_land`. Without it the sea is a teleport: at a fifteenth the cost per hex a cargo once afloat crosses the map for nothing, so every coastal market reached 55 of 74 others and the tier it exists to create flattened completely. A quay is real capital — wharfage, lighters, the risk — and charging it makes a short hop not worth the trouble while a long haul plainly is. That asymmetry is the shape of pre-industrial trade, and why a few great ports emerge rather than a coastline of equals. Validated `≥ 0` |
+| `haulage_range_water_mult` | `float` | `15.0` | `≥ 1` | How much further the same cargo goes by water. Diocletian's Price Edict prices land carriage at roughly 55× sea and 11× river per tonne-kilometre. **This is why large pre-industrial cities sit on navigable water and inland ones stay small**: nothing gates a city, water simply extends what can feed it |
+| `marketable_surplus_fraction` | `float` | `0.20` | `(0, 1]` | Share of what a farming household grows that can leave for a market; it eats the rest. Sizing markets off the *surplus* rather than the production is why the tier ratios come out right without target counts |
+| `people_per_food` | `float` | `400.0` | `> 0` | People supported per unit of haulage-weighted food. Calibrated so market towns land in their historical 500–2500 band: across five seeds at 128×128 this gives medians of 1260–1700 and a largest of 4200–5450 |
+| `travel_ascent_per_hex` | `float` | `125.0` | `> 0` | Naismith's rule: metres of ascent costing as much as one hex of level ground. Catchments are *walked*, not engineered, so they use this rather than `road_slope_cost` — that curve prices grading a road and saturates at ten times base, which over eroded terrain shrinks a catchment to a third of its proper reach |
+| `travel_ford_cost` | `float` | `8.0` | `≥ 0` | Getting across away from a crossing, per multiple of the wadeable span, charged on each land–river edge. Deliberately has no fixed term, unlike `road_river_crossing_base`: that base is the capital of *building* a bridge, and somebody walking to market pays no capital |
+
+Those set what a market can reach. The three below decide where markets are planted: a
+site is scored on the surplus it can gather inside a day's return, the best site is taken,
+the surplus it draws on is depleted, and the scan repeats until nothing clears the floor.
+
+| Param | Type | Default | Range | Effect |
+|---|---|---|---|---|
+| `city_min_draw` | `float` | `40.0` | How much *other markets'* surplus must be able to reach a town before it is a city. The one density knob for the tier above the market, and the same shape as `market_viability_floor` below it: an absolute threshold on what can be gathered rather than a target count, so a rich coast grows several cities and a landlocked desert grows none. Not comparable to the floor — a market gathers a countryside inside a day's cart, a city gathers *markets* over `haulage_range_land` with water counting fifteen times. At `40.0`: 2 cities on a temperate coast (20,781 / 12,397 against a median town of 445), 1 on a mediterranean map, **0 on an arid one whether coastal or landlocked**. It survived the soil recalibration unchanged, which is worth recording rather than assuming — the surplus fraction rose by 1.6× while actual food fell, and the two shifts cancelled. Validated `> 0` |
+| `market_viability_floor` | `float` | `24.0` | `> 0` | The one density knob, replacing `target_city_count` and `target_town_count` both: stop planting once the best remaining site scores below this. Planting scores are *surplus*, so this scales with `marketable_surplus_fraction`, which the soil model moved from 0.20 to 0.32. At 24.0 a temperate map with `continent_falloff_edges: [south]` gives 76–92 markets across seeds 42/7/3/11/19, against 20 on an arid one — an absolute threshold on gathered surplus rather than a target, so density follows the land. **Lowering it raises the rural population too**, and that is a real feedback rather than rounding: more markets mean more catchments, more catchments mean more ground cleared, and cleared ground feeds more people than the wood it replaced — 38 per km² at 24.0 against 48 at 16.0 on the same terrain |
+| `chokepoint_min_road_tier` | `str` | `secondary` | `primary` \| `secondary` \| `track` | Least road tier a crossing must carry before it is worth a settlement. A bridge on a farm track is a plank, not a town. **This is what actually sets the size of the village tier**: on a 128×128 temperate map `secondary` admits about twenty candidate features, `track` admits a hundred and twenty |
+| `chokepoint_min_separation` | `int` | `2` | `>= 0` | Suppression disc, and how far a village must stand off an existing settlement. The economics would mostly do this anyway — there is no residual surplus close to a market — but a bridge on a town's own doorstep is the town's bridge whatever the arithmetic says |
+| `chokepoint_min_draw` | `float` | `0.30` | `>= 0` | The smallest village worth founding, in food units; multiply by `people_per_food` to read it as people, so `0.30` is 54 — hamlet scale, which is what a bridgehead settlement was. It also has to be: this tier lives on *residual* surplus, and the residual thinned when the soil model raised the market count from 65 to 76 on the same map, so at the hundred-person figure this used to mean, a temperate map grows exactly one village. Applied to the real catchment draw rather than to the estimate planting ranks on, which is what makes that relation exact. What is gathered is *residual* surplus — what the markets could not haul — over `rural_field_radius`, so it is not comparable with `market_viability_floor` |
+| `market_min_separation` | `int` | `5` | `≥ 1` | A suppression disc only, to stop two markets sharing a hexside. Real spacing comes from competition for surplus, which is what makes markets dense on rich ground and sparse on poor — a fixed separation cannot express that |
+| `market_kernel_decay` | `float` | `4.0` | `> 0` | `d₀` in the `1/(1 + d/d₀)` share a market takes from each hex it reaches |
+
+### 4.11 River crossings — fords and bridges
+
+A river is not uniformly crossable. Most of its length is an obstacle; a few places are
+not, and those places are why towns sit where they do. Crossings are settled **before**
+anything is built, so a bridging point can be the reason a market grows there rather than
+something noticed afterwards.
+
+A **ford is terrain and is free** — shallow braided water anyone can wade, needing nobody's
+permission. A **bridge is capital** and appears only where enough traffic will use it.
+
+| Param | Type | Default | Range | Effect |
+|---|---|---|---|---|
+| `ford_max_catchment_km2` | `float` | `60.0` | `> 0` | Catchment area at or below which the water can be waded. A physical figure comparable between maps, unlike `river_flow`, which is normalised against the largest accumulation present and so is a rank rather than a quantity. A stream draining a few tens of km² is ankle deep and a step across; one draining thousands is not |
+| `crossing_relief_m` | `float` | `60.0` | `> 0` | Local relief, in metres, that doubles how hard a reach is to get across. Fast water takes your feet from under you whatever its depth, and at a kilometre to the hex it is the approaches rather than the span that defeat a bridge — both scale with how steep the ground is. A floodplain has a few metres of this; a gorge has hundreds |
+| `bridge_pressure_per_span` | `float` | `3.0` | `> 0` | Surplus needed within reach per multiple of the widest wadeable span before a bridge is worth building. A river twice that width needs twice the traffic. Nobody bridges to nowhere |
+| `crossing_pressure_radius` | `int` | `6` | `≥ 1` | How far either bank is searched for that surplus |
+| `crossing_min_separation` | `int` | `4` | `≥ 1` | Nobody builds two bridges within sight of each other |
+| `crossing_use_cost` | `float` | `0.5` | `≥ 0` | Cost of using an existing ford or bridge |
+
+### 4.12 Cultivation Radii — § [3.12](#312-cultivation-cities--towns), [3.15](#315-village-cultivation)
 
 | Param | Type | Default | Range | Effect |
 |---|---|---|---|---|
@@ -1368,117 +2247,98 @@ All thresholds are in normalised `[0, 1]` units, matched to `hex.elevation`,
 | `cultivation_town_radius` | `int` | `4` | ≥ 0 | Around each town |
 | `cultivation_village_radius` | `int` | `2` | ≥ 0 | Around each village (runs after villages place) |
 
-These radii do double duty: each is also the catchment Habitability scores that
-tier on (§ [3.9](#39-habitability)).
+These radii do double duty: each is also the catchment Habitability scores that tier on
+(§ [3.9](#39-habitability)).
 
-### 4.9a Habitability — § [3.9](#39-habitability)
-
-Food value of one hex, by land cover band. `TUNDRA`, `DESERT`, `ALPINE` and
-`BARE_ROCK` are always `0`.
-
-| Param | Type | Default | Range | Effect |
-|---|---|---|---|---|
-| `food_fertile_value` | `float` | `1.0` | ≥ 0 | `OPEN`, `WOODLAND` — prime arable |
-| `food_marginal_value` | `float` | `0.4` | ≥ 0 | `SCRUB`, `DENSE_FOREST` — grazing and hard-to-clear forest |
-| `food_wetland_value` | `float` | `0.15` | ≥ 0 | `BOG`, `MARSH` — deliberately below water; neither good fishing nor good ploughing |
-| `food_water_value` | `float` | `0.4` | ≥ 0 | `OPEN_WATER` — fishing. Non-zero so a coastal site is not penalised for having sea in its catchment |
-
-Fertile and marginal hexes are additionally scaled by a moisture curve peaking
-across `[biome_dry_moist, biome_wet_moist]` and falling to `0` at both extremes.
-Water and wetland ignore it.
-
-| Param | Type | Default | Range | Effect |
-|---|---|---|---|---|
-| `habitability_agri_weight` | `float` | `0.40` | ≥ 0 | Weight on the catchment mean |
-| `habitability_river_bonus` | `float` | `0.25` | ≥ 0 | Flat, if the hex or a neighbour carries a river |
-| `habitability_coast_bonus` | `float` | `0.25` | ≥ 0 | Flat, if the hex or a neighbour is `COAST` |
-| `habitability_hill_bonus` | `float` | `0.15` | ≥ 0 | Flat, for a `HILL` with a `FLAT` neighbour |
-| `habitability_confluence_bonus` | `float` | `0.10` | ≥ 0 | Flat, on a river junction (this hex only) |
-
-Bonuses are binary within each term: a hex with one river neighbour scores the
-same as one ringed by six, and adjacency is radius 1 only.
-
-### 4.10 World Scale — § [3.11](#311-interurban-roads)
-
-These exist so road-grade calculations can express slopes in real-world
-percent terms, not normalised elevation deltas.
+### 4.13 World Scale — § [3.11](#311-interurban-roads)
 
 | Param | Type | Default | Range | Effect |
 |---|---|---|---|---|
 | `hex_size_m` | `float` | `1000.0` | `> 0` (validated) | Metres per hex. With the default, `1 hex = 1 km` |
-| `road_elev_range_m` | `float` | `3000.0` | `> 0` (validated) | Real-world elevation span of the `[0, 1]` range. With defaults, an elevation Δ of `0.01` between adjacent hexes equals 30 m over 1 km = 3 % grade |
 
-### 4.11 Roads — Terrain Costs — § [3.11](#311-interurban-roads)
+`road_elev_range_m` is retired. Elevation is metres throughout, so nothing needs
+converting from a `[0, 1]` range: a grade is `(Δelevation_m / hex_size_m) × 100` directly.
 
-Node-cost (cost to *enter* a hex) by `terrain_class`. See [road_cost.py](../worldgen/stages/road_cost.py).
+### 4.14 Roads — Terrain Costs — § [3.11](#311-interurban-roads)
+
+Node cost (cost to *enter* a hex) by `terrain_class`. See
+[road_cost.py](../worldgen/stages/road_cost.py).
+
+There is no steepness surcharge, and the settings that were one — `road_mountain_cost`,
+`road_hill_cost`, and the `road_rolling_cost` / `road_steep_cost` / `road_escarpment_cost`
+that briefly replaced them — are all retired. Grade is priced per edge from the metres of
+rise between two hexes, so a per-hex band charged the same climb a second time, and
+charged it wrongly wherever the band and the grade disagreed: a level valley floor was
+taxed at escarpment rates because the bluff above it fell inside the averaging window.
 
 | Param | Type | Default | Effect |
 |---|---|---|---|
-| `road_mountain_cost` | `float` | `10.0` | Node cost for MOUNTAIN |
-| `road_hill_cost` | `float` | `3.0` | Node cost for HILL |
-| `road_flat_cost` | `float` | `1.0` | Node cost for FLAT and COAST |
-| `road_water_cost` | `float` | `0.05` | Node cost for OCEAN/LAKE. Validated `≥ 0`. Low to allow short over-water hops; the heavy lifting is in the embark/disembark edge cost |
+| `road_flat_cost` | `float` | `1.0` | Node cost for any land hex, coast included |
+| `road_water_cost` | `float` | `0.05` | Node cost for open or inland water. Validated `≥ 0`. Low to allow short over-water hops; the heavy lifting is in the embark/disembark edge cost |
 
-### 4.12 Roads — Traveller Simulation
+### 4.15 Roads — Traveller Simulation
 
 | Param | Type | Default | Range | Effect |
 |---|---|---|---|---|
-| `road_travellers_city` | `int` | `500` | ≥ 0 | Travellers emitted per city |
-| `road_travellers_town` | `int` | `100` | ≥ 0 | Per town |
-| `road_travellers_village` | `int` | `20` | ≥ 0 | Reserved; not currently consumed by InterurbanRoadStage (which only pathes between cities and towns) |
-| `road_gravity_exponent` | `float` | `1.5` | `≥ 0` | Distance exponent in gravity model. Higher = travellers strongly prefer nearby destinations |
-| `road_bank_discount` | `float` | `0.5` | `[0, 1]` typ. | Maximum node-cost reduction on a hex *beside* a river, multiplied by the largest adjacent river's flow. River hexes themselves get nothing |
-| `road_bank_discount_min_flow` | `float` | `0.2` | `[0, 1]` (validated) | Floor on `river_flow` used in the discount. Prevents tiny headwaters from losing the discount entirely |
+| `road_travellers_per_pop` | `float` | `0.04` | `> 0` | Travellers emitted per head of population. Replaces the three per-tier counts, which made a market of 6,200 and one of 900 each send the same hundred people — population entered only on the *destination* side of the gravity term, so every origin wore the same road out of its gates. `0.04` keeps the total near what the tier counts gave (about 8,000 over 74 markets at 128×128), so it redistributes rather than changes the dose |
+| `road_travellers_max` | `int` | `500` | `≥ 1` | Cap per settlement, so one large city cannot drown the map. Reached only above 12,500 people |
+| `road_gravity_exponent` | `float` | `2.5` | `≥ 0` | Distance exponent in the gravity model: a destination's appeal is `pop / distance ** this`. `2.5` rather than the `1.5` a modern gravity model would use, because a laden cart is not a lorry — at `1.5` a traveller was nearly as likely to make for a town 40 km off as one 10 km away, so 72% of every possible pair of settlements ended up with a road of its own and the network came out a mat rather than a hierarchy |
 | `road_pheromone_factor` | `float` | `0.1` | `≥ 0` | Cost reduction per unit traffic. Higher = stronger highway-reinforcement effect |
 
-### 4.13 Roads — Water Transitions
+### 4.16 Roads — Water Transitions
 
-Edge cost (charged once on the land↔water transition).
+Edge cost, charged once on the land↔water transition.
 
 | Param | Type | Default | Effect |
 |---|---|---|---|
 | `road_embark_cost` | `float` | `8.0` | Land → water (validated `≥ 0`) |
 | `road_disembark_cost` | `float` | `8.0` | Water → land (validated `≥ 0`) |
 
-### 4.14 Roads — River Crossings
+### 4.17 Roads — River Crossings
 
-Edge cost charged on each land↔river transition. A perpendicular crossing
-of a 1-hex-wide river hits this twice (entering and leaving the river hex).
+Edge cost charged on each land↔river transition. A perpendicular crossing of a 1-hex-wide
+river hits this twice, entering and leaving the river hex.
 
 | Param | Type | Default | Effect |
 |---|---|---|---|
-| `road_river_crossing_base` | `float` | `4.0` | Constant component (validated `≥ 0`) |
+| `road_river_crossing_base` | `float` | `4.0` | Constant component (validated `≥ 0`) — the capital of building a bridge |
 | `road_river_crossing_flow` | `float` | `12.0` | Multiplied by `max(from.river_flow, to.river_flow)`. Big rivers are dramatically more expensive to bridge |
-| `road_river_hex_cost` | `float` | `12.0` | Node cost for standing a road on a river hex (validated `≥ 0`). Stops roads threading a channel where no drawn hexside exists to exclude; a crossing pays it once |
-| `road_ferry_max_hop` | `int` | `4` | Longest boat hop used to join a component a river mesh cuts off (validated `≥ 1`). Beyond it routing raises `RoutingError` |
+| `road_river_hex_cost` | `float` | `16.0` | Raised from `12.0` alongside `road_delta_elevation_per_hex` — pricing the climb continuously made the valley floor more attractive, it being the flattest line there is, and roads began taking the channel as often as it occurs (3.6% of road hexes against 3.2% of the land) rather than declining it. `16.0` restores the avoidance at 3.1% and improves bank-following with it, 2.72x to 2.78x; it saturates there, and `20.0` behaves identically. Node cost for standing a road *on* a river hex (validated `≥ 0`). Prices out threading a meander or braid while leaving a genuine crossing affordable |
+| `road_ferry_max_hop` | `int` | `4` | Longest boat hop used to join a component a river mesh cuts off (validated `≥ 1`). Beyond it, routing raises `RoutingError` |
 
-### 4.15 Roads — Slope Penalty
+### 4.18 Roads — Slope Penalty
 
-Slope cost is a **rational** function of grade percent — zero below `free_pct`,
-saturating at `cost * cap_mult` near `cap_pct`. See
-[road_cost.py:17–29](../worldgen/stages/road_cost.py#L17).
-
-| Param | Type | Default | Effect |
-|---|---|---|---|
-| `road_slope_cost` | `float` | `2.0` | Base slope penalty multiplier |
-| `road_slope_free_pct` | `float` | `3.0` | Grade % below which slope is free (validated `≥ 0`) |
-| `road_slope_cap_pct` | `float` | `25.0` | Grade % at which penalty saturates. Validated `> road_slope_free_pct` |
-| `road_slope_cap_mult` | `float` | `10.0` | Multiplier applied at saturation. Validated `> 0`. So max slope cost = `2.0 * 10 = 20` per edge |
-
-The same `road_slope_cap_pct` is also the threshold for the
-**`grade_is_under_cap`** check used by `settlement_min_reachable` —
-i.e., if no road would willingly cross a 25 %+ grade, no settlement
-should be placed where its only escape requires one.
-
-### 4.16 Roads — Network Classification
+Slope cost is a rational function of grade percent — zero below `free_pct`, saturating at
+`cost × cap_mult` near `cap_pct`. See [road_cost.py](../worldgen/stages/road_cost.py).
 
 | Param | Type | Default | Effect |
 |---|---|---|---|
+| `road_delta_elevation_per_hex` | `float` | `25.0` | Metres of elevation change costing as much as one hex of level going — **the switchback, priced**. At 1 hex = 1 km a road climbing 200 m is not a straight ramp but several kilometres of zigzag folded inside that hex, and this is the exchange rate that says so. Anchored on `travel_ascent_per_hex` (125, Naismith's rule for a walker) divided by about five, a laden cart being far more sensitive to gradient than a man on foot. Symmetric in up and down, unlike the walker's: a road is cut-and-fill, and a steep descent needs braking and washes out. Validated `> 0` |
+| `road_switchback_grade_pct` | `float` | `10.0` | A road edge at or above this grade tags both its hexes `"switchback"`. The zigzag is priced but cannot be drawn at this scale — a switchback is a hundred-metre feature and a hex is a kilometre — so the tag is how a reader, or a wargame counting movement, knows the segment is slow. Validated in `(0, road_slope_cap_pct]` |
+| `road_slope_cap_pct` | `float` | `25.0` | Grade % at which the penalty saturates. Validated `> road_slope_free_pct` |
+
+`road_slope_cap_pct` is now a **refusal**, not a saturation. The curve it replaced was free
+below 3% and levelled off at ten times base above 25%, so a road met a 65% face, paid a flat
+twenty for it, and went straight up: on a 4000 m map the steepest road grade was **64.8%**,
+and with the refusal it is **24.4%**. The free band was no better — 3% is exactly
+`terrain_rolling_gradient_m`, the FLAT boundary, so every flat edge cost nothing and every
+flat route was a tie.
+
+The same threshold is also the **`grade_is_under_cap`** check used by
+`settlement_min_reachable`: if no road would cross a 25%+ grade, no settlement should be
+placed where its only escape requires one.
+
+### 4.19 Roads — Network Classification
+
+| Param | Type | Default | Effect |
+|---|---|---|---|
+| `road_settlement_skirt_cost` | `float` | `4.0` | What a road pays to pass a settlement at one hex without entering it — an edge whose two ends both neighbour the same seat. The cost-model half of the rule `route_through_settlements` applies afterwards, and the half that can actually shift a route at one hex: a *discount* on the town cannot, because the direct route and the detour both pay for the same two ring hexes, so the detour's extra cost is exactly what the town costs. Drive that to zero and the detour ties; it never wins, and ties go to heap order. Modest at `4.0`, about four hexes of level going — enough to shift a road that was indifferent, not enough to drag one over a mountain to call at a village. Validated `≥ 0` |
+| `road_settlement_detour_max_mult` | `float` | `4.0` | A road passing a settlement at one hex is bent through it instead — a road skirting a town at the width of a field is a motor-age idea. This caps what the detour may cost, as a multiple of the edge it replaces; validated `≥ 2.0`, since a detour is two legs where there was one and so costs double on even ground by construction. What it bounds is the ground *beyond* that: the town on the far bank of a river, or up an escarpment. It catches a dear crossing and a steep bank together, which a grade cap would not — the worst case measured cost 31× its bypass at a grade of 4%, having been hauled onto a river channel rather than up anything |
 | `road_min_traffic` | `int` | `3` | Minimum traffic for a hex to count as a road at all |
-| `road_river_traffic_min` | `int` | `1` | Lower threshold for river hexes (validated `≥ 0`). Lets riverbanks become roads even with light traffic |
-| `road_primary_pct` | `float` | `0.10` | Top fraction of eligible hexes (by traffic) that become PRIMARY |
-| `road_secondary_pct` | `float` | `0.30` | Next fraction that become SECONDARY. Remaining eligible hexes become unranked (no road drawn) |
-| `road_track_pct` | `float` | `0.60` | Currently unused by InterurbanRoadStage (TRACK is reserved for village connectors). Kept in config so the three percentages sum to 1.0 |
+| `road_river_traffic_min` | `int` | `1` | Lower threshold for river hexes (validated `≥ 0`). Lets riverbanks become roads on light traffic |
+| `road_primary_pct` | `float` | `0.10` | Top fraction of eligible hexes, by traffic, that become PRIMARY |
+| `road_secondary_pct` | `float` | `0.30` | Next fraction, which become SECONDARY |
+| `road_track_pct` | `float` | `0.60` | Currently unused by InterurbanRoadStage — TRACK is reserved for village connectors. Kept so the three percentages sum to 1.0 |
 
 ---
 
@@ -1491,8 +2351,8 @@ shape map output. Change these by editing the source file.
 |---|---|---|---|
 | `_MAX_STEPS` | `64` | [erosion.py:18](../worldgen/stages/erosion.py#L18) | Max steps per erosion particle. Larger = longer-running particles, deeper channels |
 | `_EVAPORATION` | `0.99` | [erosion.py:19](../worldgen/stages/erosion.py#L19) | Per-step water evaporation. Lower = particles die faster, less erosion downstream |
-| Coast threshold offset | `+0.05` | [terrain_class.py:10](../worldgen/stages/terrain_class.py#L10), [water_bodies.py:71](../worldgen/stages/water_bodies.py#L71) | `coast_threshold = sea_level + 0.05`. Land hex below this with an ocean neighbour → COAST |
-| Mountain elevation cap | `> 0.8` | [terrain_class.py:36](../worldgen/stages/terrain_class.py#L36), [water_bodies.py:96](../worldgen/stages/water_bodies.py#L96) | Forces MOUNTAIN regardless of gradient |
+| Erosion delta fan weights | `0.6 / 0.3 / 0.1` | [erosion.py](../worldgen/stages/erosion.py) | Radial falloff over three rings when a droplet unloads at the sea |
+| Role: MINING elevation cutoff | `> 0.70` | [city_town.py:21](../worldgen/stages/city_town.py#L21) | **Stale.** A leftover from normalised elevation; 0.70 m in the current units, so `FORTRESS` is never assigned. See § [3.10](#310-city--town-placement) |
 | Hydrology epsilon (BFS) | `1e-6` | [hydrology.py:35](../worldgen/stages/hydrology.py#L35) | Per-step plateau tilt magnitude |
 | Hydrology epsilon (coord) | `1e-4 * eps` | [hydrology.py:38](../worldgen/stages/hydrology.py#L38) | Coordinate-based tiebreak (≈`1e-10`) |
 | Elevation Dijkstra penalty | `× 1000` | [hydrology.py:435](../worldgen/stages/hydrology.py#L435) | Cost multiplier for uphill movement during stalled-river extension |
@@ -1500,20 +2360,20 @@ shape map output. Change these by editing the source file.
 | Temperature Gaussian sigma | `1.0` | [climate.py:36](../worldgen/stages/climate.py#L36) | Smoothing pass on temperature field |
 | Flat river moisture bonus | `+0.15` | [climate.py:103](../worldgen/stages/climate.py#L103) | Used when `moisture_bleed_passes == 0` |
 | Coastal moisture bonus | `+0.10` | [climate.py:107](../worldgen/stages/climate.py#L107) | Always applied to land hexes adjacent to OCEAN/LAKE |
-| LandCover dense-forest threshold | `(wet_moist + 1) / 2` | [land_cover.py:37](../worldgen/stages/land_cover.py#L37) | Splits TEMPERATE_FOREST into DENSE_FOREST vs WOODLAND |
+| Moisture Gaussian sigma | `2.0` | [climate.py](../worldgen/stages/climate.py) | Smear on the rainfall field. Weather systems are wide; rain falls either side of the ridge that lifted it |
+| LandCover dense-forest threshold | `wet_precip_mm * 1.5` | [land_cover.py](../worldgen/stages/land_cover.py) | Splits TEMPERATE_FOREST into DENSE_FOREST vs WOODLAND |
 | Habitability land-cover bands | sets | [habitability.py:21–23](../worldgen/stages/habitability.py#L21) | Which covers count as fertile / marginal / wetland. The *values* are config (§4) |
 | City population range | `[10_000, 50_000]` | [city_town.py:69](../worldgen/stages/city_town.py#L69) | Uniform random per city |
 | Town population range | `[1_000, 10_000]` | [city_town.py:113](../worldgen/stages/city_town.py#L113) | |
-| Town placement role: MINING elev cutoff | `> 0.70` | [city_town.py:21](../worldgen/stages/city_town.py#L21) | Mountain neighbour elevation needed for MINING role |
 | Town placement role: AGRICULTURAL fertile-neighbour count | `>= 3` | [city_town.py:26](../worldgen/stages/city_town.py#L26) | GRASSLAND or TEMPERATE_FOREST neighbours required |
-| Pass tag radius | `3` hexes | [city_town.py:137](../worldgen/stages/city_town.py#L137) | Local-max `habitability_town` neighbourhood for `"pass"` tag |
+| Prominent-site tag radius | `3` hexes | [city_town.py:137](../worldgen/stages/city_town.py#L137) | Local-max `habitability_town` neighbourhood for `"prominent_site"` tag |
 | Village population range | `[100, 1_000]` | [village_placement.py:90](../worldgen/stages/village_placement.py#L90) | |
 | Village minimum separation | `3` hexes | [village_placement.py:89](../worldgen/stages/village_placement.py#L89) | Hardcoded — not a `WorldConfig` parameter |
 | Village frontier weight bonus | `× 2.0` | [village_placement.py:67](../worldgen/stages/village_placement.py#L67) | |
 | Village road-adjacent bonus | `× 1.5` | [village_placement.py:69](../worldgen/stages/village_placement.py#L69) | |
 | Road-adjacent habitability boost | `+0.2` (cap 1.0) | [interurban_roads.py:147](../worldgen/stages/interurban_roads.py#L147) | Applied to `habitability_village` only, after road tiers are decided; feeds VillagePlacement |
 | Cultivation `RESISTANT` set | `{BOG, MARSH, BARE_ROCK, ALPINE, TUNDRA, DESERT, OPEN_WATER}` | [cultivation.py:6–16](../worldgen/stages/cultivation.py#L6) | Land covers immune to cultivation, used by both Cultivation and VillagePlacement |
-| WorldState JSON schema version | `"1.1"` | [world_state.py:22–23](../worldgen/core/world_state.py#L22) | Written by `to_dict`. `from_dict` accepts `1.0` and `1.1`; a `1.0` file's single `habitability` is read into all three tier scores. Anything else is rejected by name |
+| WorldState JSON schema version | `"1.2"` | [world_state.py:27–28](../worldgen/core/world_state.py#L27) | Written by `to_dict`. `from_dict` accepts `1.0`, `1.1` and `1.2`; a `1.0` file's single `habitability` is read into all three tier scores, and `1.0`/`1.1` files get defaults for `territory` and `catchment_km2`. Anything else is rejected by name |
 
 ---
 

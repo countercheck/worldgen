@@ -3,13 +3,16 @@
 Two readings of the same picture, selected by `WorldConfig.heightmap_mode`:
 
 ``elevation``
-    The image is a greyscale heightmap.  Luminance maps linearly onto [0, 1], black
-    lowest and white highest, and that is the terrain.
+    The image is a greyscale heightmap.  Luminance maps linearly onto the map's vertical
+    scale, black at the sea floor and white at `max_elevation_m`, and that is the terrain.
 
 ``coastline``
     The image is only a land/sea stencil.  Heights still come from the generator's own
-    noise, shaped so that everything the stencil calls land sits above `sea_level` and
+    noise, shaped so that everything the stencil calls land sits above sea level and
     everything it calls sea sits below.  The coastline you drew is the coastline you get.
+
+Elevation is metres above sea level throughout, as everywhere else in the generator, so
+sea level is zero by definition rather than a configured threshold.
 
 The conversion functions are pure and take arrays, so the maths is testable without
 touching the filesystem.  The stage delegates the actual file read to
@@ -22,7 +25,7 @@ import numpy as np
 
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
-from .elevation import blend_to_seabed, falloff_ramp, noise_field, write_elevations
+from .elevation import blend_to_seabed, falloff_ramp, noise_field, to_metres, write_elevations
 
 
 def _box_axis(a: np.ndarray, m: int, axis: int) -> np.ndarray:
@@ -92,35 +95,32 @@ def _smoothstep(t: np.ndarray) -> np.ndarray:
 
 
 def shape_to_mask(noise: np.ndarray, mask: np.ndarray, cfg) -> np.ndarray:
-    """Fit the noise field to a land/sea stencil.
+    """Fit the noise field to a land/sea stencil, in metres above sea level.
 
-    Land is lifted into `[sea_level, 1]` and sea pushed into `[continent_seabed,
-    sea_level)`, so the classification that follows reproduces the stencil exactly rather
-    than approximately.
+    Sea level is the datum, so land is simply positive and sea negative and the
+    classification that follows reproduces the stencil exactly rather than approximately.
+    Land rises towards `max_elevation_m`, sea falls towards `-seabed_depth_m`.
 
     Both sides ramp over `continent_shelf_hexes` measured from the coast, which is what
     keeps the shore shallow: a coastal hex sits just off sea level and the terrain only
     reaches its full range once it is a shelf's width inland.  Dropping straight to the
     noise's own values at the water's edge would put a cliff along every coast.
 
-    The result is then stretched to fill [0, 1] with sea level pinned in place.  That is
-    not cosmetic.  `ErosionStage` finishes by rescaling whatever range it is handed onto
-    [0, 1], which moves sea level relative to the terrain — and this field is built
-    against a fixed sea level, so the rescale would drag the whole shelf under.  Measured
-    on a 96x83 import, it took the continent from 32% of the map to 2%: a coastline
-    dissolved into specks.  Filling the range here makes that rescale a no-op, so erosion
-    carves the terrain exactly as it does for a generated world and leaves the coast where
-    the stencil put it.
+    This used to work on a [0, 1] axis anchored on a configured `sea_level`, and finished
+    by stretching the result to fill that range — a defence against `ErosionStage`
+    rescaling whatever it was handed back onto [0, 1], which moved sea level relative to
+    the terrain and, measured on a 96x83 import, took a continent from 32% of the map to
+    2%.  Erosion no longer rescales, and sea level no longer moves, so the defence is
+    gone with the thing it defended against.
     """
     from scipy.ndimage import distance_transform_edt
 
-    sea_level = float(cfg.sea_level)
     shelf = max(1.0, float(cfg.continent_shelf_hexes))
 
     # A hair either side of sea level, so a coastal hex classifies as the stencil drew it
-    # rather than landing exactly on the threshold and going whichever way the comparison
+    # rather than landing exactly on the datum and going whichever way the comparison
     # happens to fall.
-    margin = min(1e-3, sea_level * 0.01)
+    margin = 1e-3
 
     out = np.empty(mask.shape, dtype=np.float64)
 
@@ -131,47 +131,15 @@ def shape_to_mask(noise: np.ndarray, mask: np.ndarray, cfg) -> np.ndarray:
         # which is the right answer for a stencil with no coast.
         d_land = distance_transform_edt(mask)
         t = _smoothstep(np.clip(d_land / shelf, 0.0, 1.0))
-        floor = sea_level + margin
-        out[mask] = (floor + (1.0 - floor) * noise * t)[mask]
+        # The margin comes out of the range rather than being added past it, so the
+        # highest land lands exactly on max_elevation_m and never a hair above.
+        out[mask] = (margin + (cfg.max_elevation_m - margin) * noise * t)[mask]
 
     sea = ~mask
     if sea.any():
         d_sea = distance_transform_edt(sea)
         s = _smoothstep(np.clip(d_sea / shelf, 0.0, 1.0))
-        ceiling = sea_level - margin
-        out[sea] = (ceiling * (1.0 - s))[sea]
-
-    return fill_range(out, sea_level)
-
-
-def fill_range(arr: np.ndarray, sea_level: float) -> np.ndarray:
-    """Stretch *arr* to span [0, 1] with `sea_level` held where it is.
-
-    Each side of the waterline is scaled independently, so no hex crosses it: the deepest
-    sea lands on 0, the highest land on 1, and the coastline is exactly where it was.
-
-    The waterline is read back off the field rather than passed in, so this is correct
-    wherever it is applied — including after the edge falloff, which moves the coast.
-
-    Reaching [0, 1] needs the field to have both sea and land in it.  A stencil that is
-    all one or the other cannot be anchored at both ends, and the caller is expected to
-    say so; there is no arrangement of an all-land map that both keeps every hex above
-    sea level and puts something at zero.
-    """
-    out = arr.copy()
-
-    land = out >= sea_level
-    sea = ~land
-
-    if sea.any():
-        depth = sea_level - out[sea].min()
-        if depth > 0.0:
-            out[sea] = sea_level - (sea_level - out[sea]) * (sea_level / depth)
-
-    if land.any():
-        relief = out[land].max() - sea_level
-        if relief > 0.0:
-            out[land] = sea_level + (out[land] - sea_level) * ((1.0 - sea_level) / relief)
+        out[sea] = -(margin + (cfg.seabed_depth_m - margin) * s)[sea]
 
     return out
 
@@ -227,37 +195,36 @@ class ImageElevationStage(GeneratorStage):
                 # edges are passed explicitly — a config whose `continent_falloff_edges`
                 # was trimmed or emptied for the generated path would otherwise turn the
                 # promised ring into a partial one, or a silent no-op.
+                #
+                # In metres the blend is towards the sea floor rather than towards a
+                # configured seabed fraction, and needs no re-anchoring afterwards: sea
+                # level is the datum, so a hex the falloff pulls under is under, and
+                # nothing downstream rescales the field out from under it.
                 t = falloff_ramp(cfg, coast_gen, w, h, edges={"north", "south", "east", "west"})
-                arr = blend_to_seabed(arr, t, cfg)
-                # The blend pulls the field back off the [0, 1] span `shape_to_mask` gave
-                # it and moves the waterline inward, so re-anchor against the coast the
-                # falloff has just drawn.  Without this the opt-in path walks straight
-                # back into the erosion renormalisation that `fill_range` exists to
-                # defuse, and drowns the land it did not mean to take.
-                arr = fill_range(arr, cfg.sea_level)
+                arr = blend_to_seabed(arr, t, -cfg.seabed_depth_m)
 
-            if not (arr < cfg.sea_level).any():
+            if not (arr < 0.0).any():
                 warnings.warn(
-                    "the coastline stencil has no sea in it, so the elevation field "
-                    "cannot span [0, 1]; erosion's renormalisation will flood part of "
-                    "the map. Leave some sea in the stencil, or set "
-                    "heightmap_coast_falloff to ring the map with it.",
+                    "the coastline stencil has no sea in it, so every river drains to a "
+                    "border rather than to a coast. Leave some sea in the stencil, or "
+                    "set heightmap_coast_falloff to ring the map with it.",
                     stacklevel=2,
                 )
-            elif not (arr >= cfg.sea_level).any():
-                # The mirror case: with nothing anchoring the land side, erosion's
-                # renormalisation stretches the sea floor upward and manufactures a
-                # continent the stencil never drew.
+            elif not (arr >= 0.0).any():
+                # The mirror case, and the likelier mistake of the two: a drawing whose
+                # polarity is the wrong way round thresholds to all sea, and the run
+                # goes on to generate an empty ocean rather than saying anything.
                 warnings.warn(
-                    "the coastline stencil has no land in it, so the elevation field "
-                    "cannot span [0, 1]; erosion's renormalisation will raise land the "
-                    "stencil did not draw. Add some land, or check heightmap_invert — "
-                    "a dark-on-light drawing thresholds to all sea unless inverted.",
+                    "the coastline stencil has no land in it, so the whole map comes out "
+                    "ocean. Add some land, or check heightmap_invert — a dark-on-light "
+                    "drawing thresholds to all sea unless inverted.",
                     stacklevel=2,
                 )
         else:
-            arr = resample_to_grid(lum, w, h)
+            # Luminance is a [0, 1] reading of the picture; the same conversion the noise
+            # path uses puts it on the map's real vertical scale.
+            arr = to_metres(resample_to_grid(lum, w, h), cfg)
 
-        write_elevations(state, np.clip(arr, 0.0, 1.0))
+        write_elevations(state, arr)
 
         return state

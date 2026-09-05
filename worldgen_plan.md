@@ -122,13 +122,13 @@ Implement axial coordinate operations. Reference: https://www.redblobgames.com/g
 @dataclass
 class WorldState:
     seed: int
-    width: int                      # hex columns
-    height: int                     # hex rows
+    width: int  # hex columns
+    height: int  # hex rows
     hexes: dict[HexCoord, Hex]
     rivers: list[River]
     settlements: list[Settlement]
     roads: list[Road]
-    metadata: dict                  # stores all generator params
+    metadata: dict  # stores all generator params
 
     @classmethod
     def empty(cls, seed: int, config: WorldConfig) -> WorldState: ...
@@ -137,23 +137,26 @@ class WorldState:
     def all_land(self) -> list[Hex]: ...
     def all_water(self) -> list[Hex]: ...
 
+
 @dataclass
 class River:
-    hexes: list[HexCoord]           # ordered source → mouth
+    hexes: list[HexCoord]  # ordered source → mouth
     flow_volume: float
+
 
 @dataclass
 class Settlement:
     coord: HexCoord
-    tier: SettlementTier            # CITY, TOWN, VILLAGE
-    role: SettlementRole            # AGRICULTURAL, PORT, MINING, FORTRESS, MARKET
+    tier: SettlementTier  # CITY, TOWN, VILLAGE
+    role: SettlementRole  # AGRICULTURAL, PORT, MINING, FORTRESS, MARKET
     population: int
     name: str
+
 
 @dataclass
 class Road:
     path: list[HexCoord]
-    tier: RoadTier                  # PRIMARY, SECONDARY, TRACK
+    tier: RoadTier  # PRIMARY, SECONDARY, TRACK
 ```
 
 ### Task 0.5 — `core/pipeline.py`
@@ -164,6 +167,7 @@ class GeneratorStage(ABC):
 
     @abstractmethod
     def run(self, state: WorldState) -> WorldState: ...
+
 
 class GeneratorPipeline:
     def __init__(self, seed: int, config: WorldConfig):
@@ -182,7 +186,7 @@ Each stage receives its own child RNG derived from the pipeline RNG so stage ord
 class WorldConfig:
     width: int = 128
     height: int = 128
-    sea_level: float = 0.45         # elevation threshold for ocean
+    sea_level: float = 0.45  # elevation threshold for ocean
     # Elevation
     noise_octaves: int = 6
     noise_persistence: float = 0.5
@@ -201,7 +205,7 @@ class WorldConfig:
     latitude_temp_range: float = 0.6
     altitude_lapse_rate: float = 0.4
     # Settlements
-    city_min_separation: int = 20   # hex distance
+    city_min_separation: int = 20  # hex distance
     town_min_separation: int = 8
     target_city_count: int = 6
     target_town_count: int = 24
@@ -220,6 +224,8 @@ matplotlib renderer that colorizes hexes by a given attribute and saves PNG.
 
 ```python
 def render(state: WorldState, attribute: str, output_path: str): ...
+
+
 # attribute: "elevation" | "moisture" | "temperature" | "biome" | "river_flow" | "habitability"
 ```
 
@@ -410,7 +416,7 @@ def traversal_cost(hex: Hex) -> float:
         TerrainClass.COAST: 1.2,
         TerrainClass.HILL: 3.0,
         TerrainClass.MOUNTAIN: 10.0,
-        TerrainClass.OCEAN: float('inf'),
+        TerrainClass.OCEAN: float("inf"),
     }[hex.terrain_class]
     if hex.river_flow > 0:
         base += config.road_river_crossing_cost  # river crossing penalty
