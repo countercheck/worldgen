@@ -35,13 +35,22 @@ from worldgen.stages.chokepoints import (
     saddle_relief_m,
 )
 
-# 96x96 with the gate opened to `track`, rather than the 128x128 and `secondary` that ship.
-# At production's settings this map grows no village at all — once a bridge has to be
-# genuinely crossed to hold anything, secondary-tier crossings are rare — and a rule
+# 112x112 at seed 1, with the gate opened to `track` rather than the `secondary` that
+# ships. At production's settings this map grows no village at all — once a bridge has to
+# be genuinely crossed to hold anything, secondary-tier crossings are rare — and a rule
 # cannot be shown to bind on an empty tier. Opening the gate one tier gives one genuine
-# village (a bridgehead on prime ground) for 2.4 s instead of 40, and every rule under
-# test is the same rule. This comment once promised ten villages, two on passes: six of
-# those stood at bridges no road touched, which is the bug the crossing test fixed.
+# village in each climate, and every rule under test is the same rule.
+#
+# Moved here from 96x96 seed 42, which this branch emptied. Not a regression: roads follow
+# riverbanks now instead of cutting across channels, which is the corridor property
+# `test_river_corridor_preference_in_roads` had been carrying as an xfail. On the old
+# fixture the bridges a road actually crosses fell from 4 to 2 and road hexes standing on
+# a river from 28 to 18, while the bridges *tagged* rose from 41 to 58 — more rivers, less
+# reason to cross them. So the village tier is thinner everywhere by design, and a fixture
+# has to be somewhere with enough genuine crossings for the rules to have a subject. The
+# residual surplus is untouched by any of this: 511 before, 520 after.
+_CHOKE_SEED = 1
+_CHOKE_SIZE = 112
 _CHOKE_DEFAULTS = {
     "regional_climate": "temperate",
     "continent_falloff_edges": ("south",),
@@ -51,7 +60,13 @@ _CHOKE_DEFAULTS = {
 
 def _world(**over):
     """Memoised, so the several tests wanting the same world pay for it once."""
-    return build_world(seed=42, width=96, height=96, model="organic", **{**_CHOKE_DEFAULTS, **over})
+    return build_world(
+        seed=_CHOKE_SEED,
+        width=_CHOKE_SIZE,
+        height=_CHOKE_SIZE,
+        model="organic",
+        **{**_CHOKE_DEFAULTS, **over},
+    )
 
 
 def _villages(state):
@@ -273,9 +288,9 @@ def test_villages_take_nothing_from_the_markets(choke_world):
     cannot recur here.
     """
     before = build_world(
-        seed=42,
-        width=96,
-        height=96,
+        seed=_CHOKE_SEED,
+        width=_CHOKE_SIZE,
+        height=_CHOKE_SIZE,
         model="organic",
         until="InterurbanRoadStage",
         **_CHOKE_DEFAULTS,
@@ -341,7 +356,13 @@ def test_one_settlement_to_a_hex(choke_world):
 
 def test_same_seed_same_villages():
     a = _world()
-    b = build_pipeline(seed=42, width=96, height=96, model="organic", **_CHOKE_DEFAULTS).run()
+    b = build_pipeline(
+        seed=_CHOKE_SEED,
+        width=_CHOKE_SIZE,
+        height=_CHOKE_SIZE,
+        model="organic",
+        **_CHOKE_DEFAULTS,
+    ).run()
     assert sorted((s.coord, s.population) for s in _villages(a)) == sorted(
         (s.coord, s.population) for s in _villages(b)
     )
