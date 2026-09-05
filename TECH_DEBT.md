@@ -29,6 +29,7 @@
 | 17 | `_assign_role` compares metre elevation against 0.70 — FORTRESS unreachable | Code | **12** | S |
 | 18 | Market siting scores a plain hex disc, not the day-reach the catchment walks | Model | **20** | L |
 | 19 | One off-map river strips the floodplain off half the map's channels | Model | **28** | M |
+| 20 | An off-map river imports discharge but no sediment, so it cuts where it should build | Model | **18** | M |
 
 ---
 
@@ -526,3 +527,53 @@ also moves the soil map and therefore the whole settlement economy, so it wants 
 acceptance table on the desk — see item 18, which is the same kind of change and says the
 same thing. **Fix the size dependence first**, or the measurement is not yet fit to be
 promoted over the rule.
+
+
+### 20 — An off-map river imports discharge but no sediment
+**Category:** Model | **Priority: 18** | **Effort: M**
+
+An inlet is seeded with a catchment it never earned on this map, and that imported
+discharge is read everywhere it matters: `navigable` floats a boat on it, `_widen_valleys`
+sizes a belt from it, `catchment_km2` records it. What it is *not* given is a load. Every
+droplet in `_drop_particle` starts `sediment = 0.0` and `water = 1.0`, and droplets are
+seeded at uniformly random land cells, so nothing arrives at an inlet carrying anything.
+
+An imported river therefore has the discharge of a great river and the sediment budget of
+whichever single hex it happened to enter on. Measured on a 96×96 map, seed 11, with two
+inlets admitted (`continent_falloff_edges` dropping the north):
+
+| | hexes | max catchment | droplet deposition, mean | meander term, mean |
+|---|---|---|---|---|
+| imported rivers | 51 | 1,528 km² | **−0.199** | 0.164 |
+| native rivers | 583 | 1,588 km² | −0.188 | 0.068 |
+
+And at the mouths, over each river's last three hexes:
+
+| | droplet deposition, mean |
+|---|---|
+| imported | **−0.247** |
+| native | −0.146 |
+
+So a river draining 1,528 km² reaches the coast and **cuts**, more so than the native
+rivers around it. `_deposit_delta` exists precisely to build a delta out of what a river
+carries, and no droplet ever carries the imported catchment's load to it. The only alluvium
+an imported river gets is the meander term — planed, not aggraded — which is 2.4× the native
+figure purely because the imported discharge buys it a wider belt.
+
+**This is why the earlier attempt failed.** Off-map inlet erosion by droplets was tried
+twice and reverted, on the grounds that "a droplet is one raindrop wherever it starts, so
+seeding them at a mouth digs a pit that inverts the inland fall and disqualifies the very
+cell it was meant to serve". That is exactly right, and it diagnoses the instrument rather
+than the idea: a droplet seeded at an inlet arrives with `water = 1.0` and `sediment = 0.0`,
+which is full erosive capacity and nothing to drop, so of course it cuts. A droplet standing
+for a river should arrive *pre-loaded* — some `water` and some `sediment` proportional to
+the catchment being imported — and would then deposit on entry rather than excavate.
+
+**The shape of the fix:** give `_drop_particle` initial `water` and `sediment` arguments,
+default them to the present `1.0` and `0.0` so nothing else moves, and seed a small number
+of pre-loaded droplets at each inlet in proportion to `river_inflow_volume`. Then the test
+is the one the earlier attempt should have had: an imported trunk river builds a delta at
+its mouth rather than trenching one, measured against the native rivers on the same map.
+
+Worth doing **after item 19**, which changes how much floodplain any of these rivers get in
+the first place.
