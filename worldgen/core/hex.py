@@ -234,6 +234,13 @@ class Hex:
     # alone cannot express a site "overlooking a plain": what makes that site good is the
     # drop it commands, not the gradient it sits on.
     relief: float = 0.0
+    # Depth of loose river-laid sediment, 0 to 1 against the map's own richest ground.
+    # Not a terrain type: a floodplain is ordinary land that happens to be floored with
+    # silt, and it can be forest or grass or ploughed like any other.  What it is *not*
+    # is a fact about slope — flat ground is not alluvial and alluvium is not always
+    # flat — which is why this is measured from where the sediment went rather than
+    # inferred from the shape of the ground it went to.
+    alluvium: float = 0.0
     terrain_class: TerrainClass = TerrainClass.LAND
     settlement: Settlement | None = None
     road_connections: set[HexCoord] = field(default_factory=set)

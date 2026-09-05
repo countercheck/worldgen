@@ -19,7 +19,7 @@ flowchart TB
     subgraph CORE["core/ — types + orchestration, no I/O"]
         CFG[config.py<br/>WorldConfig · ClimateContext]
         PIPE[pipeline.py<br/>GeneratorStage · GeneratorPipeline]
-        WS[world_state.py<br/>WorldState · River · Road · Ferry<br/>schema v1.4]
+        WS[world_state.py<br/>WorldState · River · Road · Ferry<br/>schema v1.5]
         HEX[hex.py<br/>Hex · TerrainClass · Settlement<br/>TerrainLabel · terrain_label]
         GRID[hex_grid.py<br/>axial / offset layouts]
         ERR[errors.py]
@@ -113,6 +113,7 @@ computes. The short version:
 | quantity | produced by | notes |
 |---|---|---|
 | `elevation` | Elevation, then Erosion | Erosion also widens valleys; see below |
+| `alluvium` | Erosion | where the sediment went, not what shape the ground took |
 | `slope`, `relief` | TerrainClassification | measured, never banded |
 | `terrain_class` | TerrainClassification, WaterBodies | four values, all categorical |
 | rain pattern | `precipitation.py` | shared, runs inside both Climate and Hydrology |
@@ -156,6 +157,28 @@ whether a body of water reaches the map edge, which decides what the sink fill s
 what a river may terminate at, and what counts as a coast. It was called ocean and lake,
 which claimed a salinity nothing here tracks.
 
+### Alluvium is measured, not inferred
+
+`alluvium` records how deep the loose river-laid sediment lies, and only `ErosionStage`
+can answer that, because it is a fact about *where the sediment travelled* rather than
+about the shape of the ground it ended up on. Nothing later in the pipeline can recover
+it: a hillside cut down to a gentle grade and a valley floor built up to the same height
+are the same elevation and the same slope, and nothing alike to plough. That is also why
+an old save file reads it back as 0.0 rather than deriving it, where `slope` is recomputed
+freely.
+
+It comes from two places, and the second is easy to think redundant. Droplets record what
+they net deposit, which finds deltas and the bottoms of valleys. But the ground a channel
+has planed flat by wandering across it is alluvial too — a meander belt is built
+*sideways*, so a pass can floor a whole valley with silt and change the mean elevation
+across it hardly at all. `_widen_valleys` already knows that footprint exactly; dropping
+it would lose most of the floodplain on the map.
+
+The two arrive in incomparable units — a sum of elevation changes, and a fraction of a
+reach in cells — so each is brought onto its own [0, 1] before they are added rather than
+weighted against each other raw. Belt depth is scaled against the reach of *its own*
+channel, not the widest on the map: a small river's floodplain is narrow, not stony.
+
 ### Erosion computes its own drainage, on purpose
 
 `ErosionStage` carves valley floors outward from its channels, so it needs to know where
@@ -166,3 +189,8 @@ measuring the same quantity rather than by one calling the other across a stage 
 it cannot reach. Carving also runs as a short convergence loop, because widening a valley
 moves the drainage into it and a network measured before the first cut is not the one that
 exists after.
+
+The alluvium record rides along on the same convergence loop for the same reason, and it
+is what makes the field testable: silt is laid down against erosion's channels and can
+then be measured against hydrology's rivers three stages later. It thins monotonically
+away from them, which is the check that the two networks really do agree.

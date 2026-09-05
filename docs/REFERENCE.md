@@ -2051,6 +2051,41 @@ convergence loop rather than a single pass. Floodplains come out 79% wider.
 | `valley_max_relief_m` | `float` | `100.0` | `≥ 0` (validated) | How much height a river may plane away per pass, in metres. What stops a valley eating the landscape: a channel cuts a floodplain out of ground near its own level but cannot take down a bluff standing well above it, so anything higher is valley wall and stays. This is what makes valleys self-limiting — pinched in a gorge, broad where the ground is already low |
 | `valley_channel_fraction` | `float` | `0.02` | `(0, 1]` (validated) | What fraction of the land counts as channel, by discharge — the cells valleys are planed outward from |
 
+#### Alluvium
+
+`_drop_particle` works out how much sediment each droplet lays down and spends the number
+on the elevation alone, which throws away the more useful half of it: how high the ground
+ended up is a poor proxy for what it is made of. A hillside cut down to a gentle grade and
+a valley floor built up to the same height are the same elevation, the same slope, and
+nothing alike to plough. `Hex.alluvium` records the sediment itself, as a depth in
+`[0, 1]` against the map's own richest ground.
+
+Two sources, and **the second is the larger**. *Net droplet deposition*, with erosion
+subtracted — sediment picked back up has left, so a channel that deposits on one pass and
+scours on the next is holding nothing, and summing only the deposits would call every busy
+channel deep soil. This finds deltas and valley bottoms. Then *the meander belts*
+`_widen_valleys` already computes, which is most of the floodplain on a map: a valley floor
+is laid down by the channel moving *sideways*, so a planation pass can floor a whole valley
+with silt and change the mean elevation across it hardly at all. Vertical deposition cannot
+see it.
+
+The two arrive in incomparable units — a sum of elevation changes, and a fraction of a
+reach in cells — so each is brought onto its own `[0, 1]` before they are added, rather
+than weighted against each other raw. Otherwise the dial between them means something
+different on every map. Belt depth is scaled against the reach of its **own** channel, not
+the widest on the map: scaling globally made `(flow/max_flow)**0.6` tiny for anything but
+the trunk river, so every other valley read as bare and the map showed one bright ribbon.
+A small river's floodplain is narrow, not stony.
+
+The field is read off the erosion model and never fed back into it, so the elevations are
+bit-identical whatever these are set to.
+
+| Param | Type | Default | Range | Effect |
+|---|---|---|---|---|
+| `alluvium_floodplain_gain` | `float` | `1.0` | `≥ 0` (validated) | How much a floodplain belt counts as alluvial, at its channel. `0` leaves only droplet deposition, which finds deltas and valley bottoms but not meander belts |
+| `alluvium_smoothing` | `float` | `1.0` | `≥ 0` (validated) | Blur in cells before normalising. Droplets deposit at points and soil does not. `0` disables |
+| `alluvium_quantile` | `float` | `0.98` | `(0, 1]` (validated) | Depth treated as full, for the droplet term only. A quantile rather than the maximum, which is one cell at the front of one delta and would flatten every floodplain on the map against it |
+
 ### 4.5 Hydrology — § [3.5](#35-hydrology)
 
 A channel forms where enough water passes to keep one open: **discharge = catchment area
@@ -2140,6 +2175,7 @@ are always `0`.
 | Param | Type | Default | Range | Effect |
 |---|---|---|---|---|
 | `food_prime_value` | `float` | `1.4` | ≥ 0 | `PRIME` — alluvium: the floodplain of a river too big to wade |
+| `food_alluvium_bonus` | `float` | `0.5` | ≥ 0 | What deep alluvium adds, as a multiple of the soil's base value: `potential_food` returns `soil_value * (1 + food_alluvium_bonus * alluvium)`. **Multiplicative on purpose.** Silt is a soil, not a climate — it renews what cropping strips, which is why the great river valleys carry the people they do, but it does not water a desert or hold a crop on bare rock. A flat bonus would have made a silted dune farmland, and the deltas are exactly where the alluvium runs deepest. `soil_value` is already zero for `UNUSABLE`, and no multiplier lifts a zero |
 | `food_arable_value` | `float` | `1.0` | ≥ 0 | `ARABLE` — ordinary farmland |
 | `food_marginal_value` | `float` | `0.55` | ≥ 0 | `MARGINAL` — ploughable and poor: leached, waterlogged, or podzol |
 | `food_grazing_value` | `float` | `0.35` | ≥ 0 | `GRAZING` — too steep to plough or too dry to crop; run stock on it |

@@ -44,13 +44,20 @@ def potential_food(hx, cfg) -> float:
 
     This is what *siting* reads. A settler picks land for what it will be once worked, not
     for the wildwood standing on it today.
+
+    Alluvium multiplies the result rather than adding to it, and so only rewards ground
+    that could already feed somebody.  Silt is a soil, not a climate: it renews what
+    cropping strips and is why the great river valleys carry the people they do, but it
+    does not water a desert or hold a crop on bare rock.  Adding a flat bonus would have
+    made a silted dune farmland, and the deltas are exactly where the alluvium is deepest.
+    `soil_value` is already zero for UNUSABLE ground, so no multiplier can lift it.
     """
     cover = hx.land_cover
     if cover is LandCover.OPEN_WATER:
         return cfg.food_water_value
     if cover in WETLAND_COVER:
         return cfg.food_wetland_value
-    return soil_value(hx.soil, cfg)
+    return soil_value(hx.soil, cfg) * (1.0 + cfg.food_alluvium_bonus * hx.alluvium)
 
 
 def actual_food(hx, cfg) -> float:
