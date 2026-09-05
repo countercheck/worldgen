@@ -135,6 +135,32 @@ class WorldConfig:
     erosion_affinity_update_interval: int = 500
     erosion_delta_min_load: float = 0.15
 
+    # Valley widening.  Droplets only incise — each cuts along its own path — so the model
+    # carves narrow V-notches and nothing ever widens them.  Real valleys get their width
+    # from the channel migrating sideways over geological time, planing the floor flat
+    # between bluffs: the Mississippi's floor is tens of km across, the Nile's ten to
+    # twenty, and neither was cut by water going straight down.
+    #
+    # Carving and drainage decide each other — widening a valley moves the water into it —
+    # so this runs as a short convergence loop rather than a single pass, recomputing the
+    # flow network after each cut.  `valley_width_max` of 0 disables the whole thing.
+    valley_carve_passes: int = 3
+    valley_width_max: float = 6.0  # Cap on valley half-width, in hexes (1 hex = 1 km)
+    valley_width_exponent: float = 0.6  # Discharge -> width; 0.5 is the textbook root
+    # Rise per hex away from the channel.  Small but not zero: a floodplain drains toward
+    # its river rather than ponding.
+    valley_floor_slope: float = 0.0015
+    # How much height the river can plane away, as a fraction of the map's full relief,
+    # per pass.  This is what stops a valley eating the landscape: a channel cuts a
+    # floodplain out of ground near its own level but cannot take down a bluff standing
+    # well above it, so anything higher is valley wall and stays.  The fill stops there
+    # rather than passing through, which makes valleys self-limiting — pinched in a gorge,
+    # broad where the ground is already low.
+    valley_max_relief: float = 0.06
+    # What fraction of the land counts as channel, by discharge.  These are the cells
+    # valleys are planed outward from.
+    valley_channel_fraction: float = 0.02
+
     # Hydrology
     # How much the rain shadow shapes the rivers.  The wind drops its moisture climbing a
     # range and arrives dry on the far side, and this decides whether the water reflects
@@ -197,6 +223,22 @@ class WorldConfig:
             )
         self.wind_direction = _coerce_pair("wind_direction", self.wind_direction)
         self.elevation_gradient = _coerce_pair("elevation_gradient", self.elevation_gradient)
+        if self.valley_carve_passes < 0:
+            raise ValueError(f"valley_carve_passes must be >= 0, got {self.valley_carve_passes}")
+        if self.valley_width_max < 0:
+            raise ValueError(f"valley_width_max must be >= 0, got {self.valley_width_max}")
+        if self.valley_width_exponent < 0:
+            raise ValueError(
+                f"valley_width_exponent must be >= 0, got {self.valley_width_exponent}"
+            )
+        if self.valley_floor_slope < 0:
+            raise ValueError(f"valley_floor_slope must be >= 0, got {self.valley_floor_slope}")
+        if self.valley_max_relief < 0:
+            raise ValueError(f"valley_max_relief must be >= 0, got {self.valley_max_relief}")
+        if not (0.0 < self.valley_channel_fraction <= 1.0):
+            raise ValueError(
+                f"valley_channel_fraction must be in (0, 1], got {self.valley_channel_fraction}"
+            )
         if not (0.0 <= self.rain_shadow_strength <= 1.0):
             raise ValueError(
                 f"rain_shadow_strength must be in [0, 1], got {self.rain_shadow_strength}"
