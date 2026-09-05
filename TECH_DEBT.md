@@ -28,7 +28,7 @@
 | 16 | Moisture smear blends the ocean's carrier value into coastal rainfall | Model | **12** | M |
 | 17 | `_assign_role` compares metre elevation against 0.70 — FORTRESS unreachable | Code | **12** | S |
 | 18 | Market siting scores a plain hex disc, not the day-reach the catchment walks | Model | **20** | L |
-| 19 | Measured alluvium thins with map size, and disagrees with the `PRIME` rule | Model | **21** | M |
+| 19 | One off-map river strips the floodplain off half the map's channels | Model | **28** | M |
 
 ---
 
@@ -415,7 +415,7 @@ re-tune `city_min_draw` and the chokepoint gates against it, and update the PR-t
 numbers in the same change. The diff is small; the decision is not.
 
 
-### 19 — Measured alluvium thins with map size, and disagrees with the `PRIME` rule
+### 19 — One off-map river strips the floodplain off half the map's channels
 **Category:** Model | **Priority: 21** | **Effort: M**
 
 Two problems in the same field, found while merging the ported water model into
@@ -445,20 +445,53 @@ rest of the land. That still satisfies the assertion, which only asks that one b
 the other, but 82 m/km is an 8% grade and silt does not sit on it. At 48×48 the same figures
 are 39 against 123, which is the real claim.
 
-**Two candidates, not yet separated.** `alluvium_quantile` normalises the droplet term
-against the 98th percentile, and the ported model raises much bigger rivers — off-map
-inflows seed catchments of up to 3,926 km² where the old model's largest was 386 — so a few
-enormous deltas could be lifting the percentile and flattening every ordinary floodplain
-against it, which is the failure mode the quantile exists to prevent, recurring one scale
-up. Alternatively the meander term has shifted: it is scaled per-channel against
-`_widen_valleys`' belts, and both the belts and the channel set moved with the new
-hydrology. **Measure which before changing either** — the fix for one is not the fix for
-the other, and the two terms are added after separate normalisation precisely so they can
-be tuned apart.
+**The cause, measured.** Not the quantile — the droplet term is stable across sizes
+(normalised mean 0.0090 at 48×48 against 0.0080 at 96×96). It is the meander term, which
+falls from a mean of 0.0997 to 0.0196 and from covering 18.6% of land to 4.1%.
 
-**Test at more than one size.** The suite's alluvium fixtures are all 48×48; the entire
-effect above is invisible there. Whatever the fix, the regression test for it has to run at
-two sizes at least.
+`_widen_valleys` sizes every channel's belt as a fraction of the largest flow **on the
+map**, and disqualifies a channel outright if the result is under one cell:
+
+```python
+reach = width_max * (flow[i, j] / max_flow) ** width_exponent
+if reach < 1.0:
+    continue          # no belt at all
+```
+
+At the shipped `width_max = 6.0` and `width_exponent = 0.6` a channel needs about 5.25% of
+`max_flow` to get any belt. Off-map inflows seed a catchment of `river_inflow_volume` ×
+land area — 0.15 of it — which is far more than any river the map raises for itself, so
+one imported river sets `max_flow` for everything:
+
+| world | `max_flow` | channels | of those, with a belt |
+|---|---|---|---|
+| 48×48, inflows on | 53.0 | 26 | 26 (100%) |
+| 48×48, inflows off | 53.0 | 26 | 26 (100%) |
+| **96×96, inflows on** | **1142.5** | 131 | **68 (52%)** |
+| 96×96, inflows off | 174.0 | 131 | 131 (100%) |
+
+At 48×48 the default sea ring leaves no border land, so no inlet is admitted and the two
+columns agree — which is exactly why every alluvium fixture passes. At 96×96 the inlet
+takes, `max_flow` goes up 6.6×, and **half the map's channels lose their floodplain
+entirely**. Alluvium beside a river: 0.320 with inflows off, 0.123 with them on.
+
+The terrain effect is a redistribution rather than a loss — one imported river gets a very
+wide valley and the rest get none, so the mean slope profile barely moves (49.7 m/km at the
+channel with inflows, 57.4 without). It is the *count* of floored cells that collapses, and
+that is what the alluvium record is made of.
+
+**This is the same defect the branch already fixed once, in the other term.** Belt *depth*
+used to be scaled globally and was changed to scale against each channel's own reach,
+because "`(flow/max_flow)**0.6` is tiny for anything but the trunk river, so every other
+valley read as bare and the map showed one bright ribbon". Belt *width* still scales
+globally, and now has a trunk river imported from off the map to be tiny against.
+
+**The fix is a calibration decision, not a patch.** Scaling `reach` against a high quantile
+of channel flow rather than the maximum is the smallest change and matches what
+`_normalise_alluvium` already does for the same reason — but it widens valleys on every map
+at every size, which moves the soil, the food and therefore the settlement economy. Excluding
+the seeded catchment from `max_flow` is narrower and leaves the imported river's own valley
+too small. Either way, measure at two sizes and put the acceptance table on the desk.
 
 ### The second problem: two mechanisms, one floodplain
 
