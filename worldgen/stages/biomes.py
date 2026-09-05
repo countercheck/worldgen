@@ -59,11 +59,16 @@ class BiomeStage(GeneratorStage):
                 else:
                     h.biome = pick(Biome.TEMPERATE_FOREST, Biome.BOREAL, Biome.GRASSLAND)
 
+        # Level ground, measured rather than looked up: a wetland forms where water can
+        # stand, which is a fact about the gradient and not about which side of a
+        # classification threshold the hex fell.
+        flat_slope = self.config.terrain_hill_gradient
+
         # Assign WETLAND to flat or coastal river hexes with very high moisture (below alpine
         # elevation).  FLAT → BOG, COAST → MARSH in LandCoverStage.
         for h in state.hexes.values():
             if (
-                h.terrain_class in (TerrainClass.FLAT, TerrainClass.COAST)
+                (h.slope < flat_slope or h.terrain_class == TerrainClass.COAST)
                 and h.moisture > wet_moist
                 and "river" in h.tags
                 and h.elevation <= alpine_elev
@@ -80,7 +85,7 @@ class BiomeStage(GeneratorStage):
         for h in state.hexes.values():
             if (
                 "endorheic_shore" in h.tags
-                and h.terrain_class in (TerrainClass.FLAT, TerrainClass.COAST)
+                and (h.slope < flat_slope or h.terrain_class == TerrainClass.COAST)
                 and h.moisture >= marsh_min_moisture
                 and h.elevation <= alpine_elev
             ):

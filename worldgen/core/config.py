@@ -124,6 +124,10 @@ class WorldConfig:
     # Terrain classification
     terrain_hill_gradient: float = 0.02
     terrain_mountain_gradient: float = 0.04
+    # Ground above this is barren whatever its gradient — a plateau high enough that
+    # altitude, not steepness, is what strips it.  Paired with the gradient thresholds
+    # rather than folded into them, since the two say different things.
+    terrain_bare_elevation: float = 0.8
 
     # Erosion
     erosion_iterations: int = 15000
@@ -468,6 +472,10 @@ class WorldConfig:
     habitability_river_bonus: float = 0.25
     habitability_coast_bonus: float = 0.25
     habitability_hill_bonus: float = 0.15
+    # Relief at which the overlooking bonus is paid in full — how far a site must stand
+    # above the ground beside it to command the view completely.  Below this the bonus is
+    # scaled down, so a knoll and a bluff are not worth the same.
+    habitability_hill_relief: float = 0.05
     habitability_confluence_bonus: float = 0.10
 
     # World scale
@@ -475,8 +483,6 @@ class WorldConfig:
     road_elev_range_m: float = 3000.0  # metres for full 0→1 elevation span
 
     # Roads — base terrain costs
-    road_mountain_cost: float = 10.0
-    road_hill_cost: float = 3.0
     road_flat_cost: float = 1.0
 
     # Roads — traveller simulation
@@ -570,7 +576,16 @@ _EDGES = ("north", "south", "east", "west")
 
 # Settings that used to exist. A key here is dropped with a warning naming what replaced
 # it, so a config written against an older version still loads instead of crashing.
-_RETIRED_FIELDS: dict[str, str] = {}
+_RETIRED_FIELDS: dict[str, str] = {
+    "road_mountain_cost": (
+        "steepness is charged per edge by its actual grade, so a per-hex surcharge "
+        "billed the same climb twice; tune road_slope_cost instead"
+    ),
+    "road_hill_cost": (
+        "steepness is charged per edge by its actual grade, so a per-hex surcharge "
+        "billed the same climb twice; tune road_slope_cost instead"
+    ),
+}
 
 
 def _construct(cls: type, data: dict) -> "WorldConfig":

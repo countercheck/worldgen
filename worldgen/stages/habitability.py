@@ -127,7 +127,7 @@ class HabitabilityStage(GeneratorStage):
         for coord, hx in hexes.items():
             if (
                 hx.terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE)
-                or hx.terrain_class == TerrainClass.MOUNTAIN
+                or hx.slope > cfg.terrain_mountain_gradient
                 or hx.biome == Biome.WETLAND
             ):
                 for tier in radii:
@@ -147,10 +147,15 @@ class HabitabilityStage(GeneratorStage):
             ):
                 bonus += cfg.habitability_coast_bonus
 
-            if hx.terrain_class == TerrainClass.HILL and any(
-                n.terrain_class == TerrainClass.FLAT for n in nbrs
-            ):
-                bonus += cfg.habitability_hill_bonus
+            # A site overlooking a plain.  What earns the bonus is the drop the site
+            # commands and the flat ground it commands it over — not the gradient it
+            # stands on, which is what the old hill-beside-flat test actually measured.
+            # Scaled by relief rather than granted whole, so a knoll and a bluff are not
+            # worth the same.
+            if hx.relief > 0.0 and any(n.slope < cfg.terrain_hill_gradient for n in nbrs):
+                bonus += cfg.habitability_hill_bonus * min(
+                    1.0, hx.relief / cfg.habitability_hill_relief
+                )
 
             if "confluence" in hx.tags:
                 bonus += cfg.habitability_confluence_bonus

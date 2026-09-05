@@ -1,4 +1,5 @@
 from tests.worlds import build_pipeline, build_world
+from worldgen.core.config import WorldConfig
 from worldgen.core.hex import Biome, Hex, SettlementRole, SettlementTier, TerrainClass
 from worldgen.stages.city_town import _assign_role as assign_city_town_role
 
@@ -92,7 +93,13 @@ def test_city_town_port_role_requires_river_tag():
     """Adjacency to water alone is not a port — the neighbour must carry the river tag."""
     center, river_neighbor, hexes = _make_port_role_test_hexes()
 
-    assert assign_city_town_role(center.coord, center, hexes) is not SettlementRole.PORT
+    assert (
+        assign_city_town_role(center.coord, center, hexes, WorldConfig().terrain_mountain_gradient)
+        is not SettlementRole.PORT
+    )
 
     river_neighbor.tags.add("river")
-    assert assign_city_town_role(center.coord, center, hexes) is SettlementRole.PORT
+    assert (
+        assign_city_town_role(center.coord, center, hexes, WorldConfig().terrain_mountain_gradient)
+        is SettlementRole.PORT
+    )

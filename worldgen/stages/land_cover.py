@@ -8,18 +8,27 @@ class LandCoverStage(GeneratorStage):
         wet_moist = self.config.biome_wet_moist
 
         for h in state.hexes.values():
-            h.land_cover = _derive(h, wet_moist)
+            h.land_cover = _derive(
+                h,
+                wet_moist,
+                self.config.terrain_mountain_gradient,
+                self.config.terrain_bare_elevation,
+            )
 
         return state
 
 
-def _derive(h, wet_moist: float) -> LandCover:
+def _derive(h, wet_moist: float, bare_slope: float, bare_elevation: float) -> LandCover:
     tc = h.terrain_class
     b = h.biome
 
     if tc in (TerrainClass.OCEAN, TerrainClass.LAKE):
         return LandCover.OPEN_WATER
-    if tc == TerrainClass.MOUNTAIN:
+    # Broken ground carries no soil — but a shore is a shore however steep it is, which
+    # the terrain classes said by making COAST win over the steepness bands.  Reading the
+    # slope directly loses that precedence unless it is stated, and a cliff-backed river
+    # mouth came out bare rock instead of the marsh it is.
+    if tc != TerrainClass.COAST and (h.slope > bare_slope or h.elevation > bare_elevation):
         return LandCover.BARE_ROCK
     if b == Biome.ALPINE:
         return LandCover.ALPINE

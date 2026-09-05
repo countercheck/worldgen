@@ -14,26 +14,36 @@ class TerrainClassificationStage(GeneratorStage):
             if h.elevation < sea:
                 h.terrain_class = TerrainClass.OCEAN
 
-        # Pass 2: classify land hexes
+        # Pass 2: measure the ground, then classify what is genuinely categorical.
+        #
+        # Slope and relief are recorded per hex rather than folded into a class, because
+        # steepness is a continuum: thresholding it here made six downstream stages read a
+        # label instead of the terrain, and a hex is either side of a cutoff for reasons
+        # that have nothing to do with what is being asked of it.
         for (q, r), h in state.hexes.items():
-            if h.terrain_class == TerrainClass.OCEAN:
-                continue
-
             elev = h.elevation
             nbrs = [state.hexes[n] for n in neighbors((q, r)) if n in state.hexes]
+            neighbor_elevs = [n.elevation for n in nbrs]
+            if neighbor_elevs:
+                gradient = sum(abs(elev - ne) for ne in neighbor_elevs) / len(neighbor_elevs)
+                h.relief = elev - min(neighbor_elevs)
+            else:
+                gradient = 0.0
+                h.relief = 0.0
+            h.slope = gradient
+
+            if h.terrain_class == TerrainClass.OCEAN:
+                continue
 
             # COAST: low-elevation land adjacent to ocean
             if elev < coast_threshold and any(n.terrain_class == TerrainClass.OCEAN for n in nbrs):
                 h.terrain_class = TerrainClass.COAST
                 continue
 
-            neighbor_elevs = [n.elevation for n in nbrs]
-            if neighbor_elevs:
-                gradient = sum(abs(elev - ne) for ne in neighbor_elevs) / len(neighbor_elevs)
-            else:
-                gradient = 0.0
-
-            if gradient > self.config.terrain_mountain_gradient or elev > 0.8:
+            if (
+                gradient > self.config.terrain_mountain_gradient
+                or elev > self.config.terrain_bare_elevation
+            ):
                 h.terrain_class = TerrainClass.MOUNTAIN
             elif gradient >= self.config.terrain_hill_gradient:
                 h.terrain_class = TerrainClass.HILL

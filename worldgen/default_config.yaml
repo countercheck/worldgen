@@ -240,8 +240,6 @@ road_elev_range_m: 3000.0 # Elevation span in metres representing the full 0→1
 # ---------------------------------------------------------------------------
 # Roads: base terrain costs (pathfinding multipliers by terrain type)
 # ---------------------------------------------------------------------------
-road_mountain_cost: 10.0  # Cost multiplier for mountain hexes. Default: 10.0
-road_hill_cost: 3.0       # Cost multiplier for hill hexes. Default: 3.0
 road_flat_cost: 1.0       # Cost multiplier for flat hexes. Default: 1.0
 
 # ---------------------------------------------------------------------------

@@ -65,6 +65,7 @@ def _fix_coast_hexes(state: WorldState) -> None:
     coast_threshold = sea + 0.05
     mountain_gradient = cfg_dict.get("terrain_mountain_gradient", 0.04)
     hill_gradient = cfg_dict.get("terrain_hill_gradient", 0.02)
+    bare_elevation = cfg_dict.get("terrain_bare_elevation", 0.8)
 
     for coord, hx in hexes.items():
         if hx.terrain_class != TerrainClass.COAST:
@@ -87,7 +88,7 @@ def _fix_coast_hexes(state: WorldState) -> None:
             if neighbor_elevs
             else 0.0
         )
-        if gradient > mountain_gradient or elev > 0.8:
+        if gradient > mountain_gradient or elev > bare_elevation:
             hx.terrain_class = TerrainClass.MOUNTAIN
         elif gradient >= hill_gradient:
             hx.terrain_class = TerrainClass.HILL

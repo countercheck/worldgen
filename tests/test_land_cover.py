@@ -43,7 +43,9 @@ def test_ocean_terrain_is_open_water(lc_state):
 
 def test_mountain_terrain_is_bare_rock(lc_state):
     for h in lc_state.hexes.values():
-        if h.terrain_class == TerrainClass.MOUNTAIN:
+        if h.terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE, TerrainClass.COAST):
+            continue
+        if h.slope > WorldConfig().terrain_mountain_gradient:
             assert h.land_cover == LandCover.BARE_ROCK, (
                 f"Mountain hex has land_cover {h.land_cover}"
             )
@@ -59,9 +61,13 @@ def test_wetland_biome_is_bog_or_marsh(lc_state):
 
 
 def test_boreal_biome_is_dense_forest(lc_state):
-    # MOUNTAIN terrain overrides biome for land cover; skip those hexes
+    # Steep ground overrides biome for land cover; skip those hexes
     for h in lc_state.hexes.values():
-        if h.biome == Biome.BOREAL and h.terrain_class != TerrainClass.MOUNTAIN:
+        if (
+            h.biome == Biome.BOREAL
+            and h.slope <= WorldConfig().terrain_mountain_gradient
+            and h.elevation <= WorldConfig().terrain_bare_elevation
+        ):
             assert h.land_cover == LandCover.DENSE_FOREST, (
                 f"BOREAL non-mountain hex has land_cover {h.land_cover}"
             )

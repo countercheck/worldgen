@@ -21,6 +21,7 @@ from worldgen.stages.road_cost import (
     river_edges,
     river_hex_cost,
     road_edge_cost,
+    slope_edge_cost,
     terrain_base_cost,
     water_edge_cost,
 )
@@ -36,14 +37,6 @@ def _ocean(coord):
 
 def _lake(coord):
     return Hex(coord=coord, elevation=0.0, terrain_class=TerrainClass.LAKE)
-
-
-def _mountain(coord):
-    return Hex(coord=coord, elevation=0.9, terrain_class=TerrainClass.MOUNTAIN)
-
-
-def _hill(coord):
-    return Hex(coord=coord, elevation=0.7, terrain_class=TerrainClass.HILL)
 
 
 def _river_flat(coord, flow=1.0):
@@ -68,11 +61,29 @@ def test_terrain_base_cost_water_is_finite():
     assert cfg.road_water_cost < cfg.road_flat_cost  # water is cheaper per-hex than land
 
 
-def test_terrain_base_cost_land_classes():
+def test_terrain_base_cost_is_flat_across_land():
+    """Steepness is charged per edge, by grade, and must not be charged again per hex.
+
+    The node cost used to add a hill and a mountain rate on top of `slope_edge_cost`,
+    which prices the elevation a road actually climbs. That was the same terrain paid for
+    twice — and paid off a threshold, so a level floodplain under a bluff was billed as
+    mountain while a long gentle haul up to the same height was billed as flat.
+    """
     cfg = WorldConfig()
-    assert terrain_base_cost(_flat((0, 0)), cfg) == cfg.road_flat_cost
-    assert terrain_base_cost(_hill((0, 0)), cfg) == cfg.road_hill_cost
-    assert terrain_base_cost(_mountain((0, 0)), cfg) == cfg.road_mountain_cost
+    steep = Hex(coord=(0, 0), elevation=0.9, slope=0.20)
+    gentle = Hex(coord=(1, 0), elevation=0.9, slope=0.001)
+    assert terrain_base_cost(steep, cfg) == cfg.road_flat_cost
+    assert terrain_base_cost(gentle, cfg) == cfg.road_flat_cost
+
+
+def test_grade_is_what_makes_a_climb_expensive():
+    # The term that does carry steepness: a road up a wall costs more than one along a
+    # shelf, and it reads the elevations rather than a label either hex carries.
+    cfg = WorldConfig()
+    low = Hex(coord=(0, 0), elevation=0.10)
+    high = Hex(coord=(1, 0), elevation=0.90)
+    level = Hex(coord=(1, 0), elevation=0.11)
+    assert slope_edge_cost(low, high, cfg) > slope_edge_cost(low, level, cfg)
 
 
 # ---------- bank_discount --------------------------------------------------

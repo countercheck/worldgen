@@ -50,10 +50,11 @@ def terrain_base_cost(hx, cfg) -> float:
     tc = hx.terrain_class
     if tc in WATER:
         return cfg.road_water_cost
-    if tc == TerrainClass.MOUNTAIN:
-        return cfg.road_mountain_cost
-    if tc == TerrainClass.HILL:
-        return cfg.road_hill_cost
+    # No surcharge for steep ground here.  Every edge is already charged its real grade by
+    # `slope_edge_cost`, computed from the elevation difference the road actually climbs,
+    # so a flat hill and mountain rate on top of that charged the same terrain twice — and
+    # charged it off a threshold, which is why a level floodplain under a bluff was priced
+    # as mountain.  The continuous term is the correct one and it was always there.
     return cfg.road_flat_cost
 
 

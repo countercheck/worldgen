@@ -5,7 +5,7 @@ from ..core.world_state import WorldState
 from .road_cost import grade_is_under_cap
 
 
-def _assign_role(coord, hx, hexes) -> SettlementRole:
+def _assign_role(coord, hx, hexes, mountain_slope) -> SettlementRole:
     nbrs = [hexes[n] for n in neighbors(coord) if n in hexes]
 
     if (
@@ -16,7 +16,7 @@ def _assign_role(coord, hx, hexes) -> SettlementRole:
     ):
         return SettlementRole.PORT
 
-    mountain_nbrs = [n for n in nbrs if n.terrain_class == TerrainClass.MOUNTAIN]
+    mountain_nbrs = [n for n in nbrs if n.slope > mountain_slope]
     if mountain_nbrs:
         if any(n.elevation > 0.70 for n in mountain_nbrs):
             return SettlementRole.MINING
@@ -31,6 +31,8 @@ def _assign_role(coord, hx, hexes) -> SettlementRole:
 
 class CityTownStage(GeneratorStage):
     def run(self, state: WorldState) -> WorldState:
+        hill_slope = self.config.terrain_hill_gradient
+        mountain_slope = self.config.terrain_mountain_gradient
         hexes = state.hexes
         cfg = self.config
 
@@ -72,7 +74,7 @@ class CityTownStage(GeneratorStage):
                 continue
             if all(distance(coord, c) >= cfg.city_min_separation for c in city_coords):
                 pop = int(self.rng.integers(10_000, 50_001))
-                role = _assign_role(coord, hx, hexes)
+                role = _assign_role(coord, hx, hexes, mountain_slope)
                 name = f"{hx.biome.name.lower()}_city_{city_idx}"
                 s = Settlement(
                     coord=coord,
@@ -117,7 +119,7 @@ class CityTownStage(GeneratorStage):
                 continue
             if all(distance(coord, c) >= cfg.town_min_separation for c in town_coords):
                 pop = int(self.rng.integers(1_000, 10_001))
-                role = _assign_role(coord, hx, hexes)
+                role = _assign_role(coord, hx, hexes, mountain_slope)
                 name = f"{hx.biome.name.lower()}_town_{town_idx}"
                 s = Settlement(
                     coord=coord,
@@ -136,7 +138,9 @@ class CityTownStage(GeneratorStage):
         # Pass tags for mountain passes
         all_coords = set(city_coords + town_coords)
         for coord, hx in hexes.items():
-            if hx.terrain_class != TerrainClass.HILL:
+            # A pass sits on the shoulder between peaks: broken ground, but not the
+            # summits either side of it.
+            if not (hill_slope <= hx.slope <= mountain_slope):
                 continue
             if coord in all_coords:
                 continue
