@@ -101,6 +101,17 @@ def _color_getter(attribute: str, labels: dict):
     if attribute == "temperature":
         cmap = mpl.colormaps["RdYlBu_r"]
         return (lambda h: cmap(h.temperature)), False, False
+    if attribute == "alluvium":
+        # Browns rather than a diverging map: this is soil depth, one-ended, and the
+        # question a reader asks of it is where the good ground is.
+        cmap = mpl.colormaps["YlOrBr"]
+
+        def get_color(h):
+            if h.terrain_class in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER):
+                return TERRAIN_COLORS[labels[h.coord]]
+            return cmap(h.alluvium)
+
+        return get_color, False, False
     if attribute == "river_flow":
         cmap = mpl.colormaps["Blues"]
 

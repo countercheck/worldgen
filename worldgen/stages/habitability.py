@@ -54,6 +54,12 @@ def food_value(hx, cfg, dry: float, wet: float) -> float:
 
     Wetland sits *below* open water, being neither good fishing nor good ploughing, which
     matches bog and marsh already resisting cultivation outright.
+
+    Alluvium multiplies the result rather than adding to it, and so only rewards ground
+    that could already feed somebody.  Silt is a soil, not a climate: it renews what
+    cropping strips and is why the great river valleys carry the people they do, but it
+    does not water a desert or hold a crop on bare rock.  Adding a flat bonus would have
+    made a silted dune farmland, and the deltas are exactly where the alluvium is deepest.
     """
     cover = hx.land_cover
     if cover is LandCover.OPEN_WATER:
@@ -66,7 +72,8 @@ def food_value(hx, cfg, dry: float, wet: float) -> float:
         base = cfg.food_marginal_value
     else:
         return 0.0
-    return base * moisture_factor(hx.moisture, dry, wet)
+    soil = 1.0 + cfg.food_alluvium_bonus * hx.alluvium
+    return base * soil * moisture_factor(hx.moisture, dry, wet)
 
 
 def _ring_offsets(max_radius: int) -> list[list[tuple[int, int]]]:

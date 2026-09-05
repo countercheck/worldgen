@@ -27,6 +27,7 @@ _EVAPORATION = 0.99
 @_jit
 def _deposit_delta(
     arr: np.ndarray,
+    alluvium: np.ndarray,
     ci: int,
     cj: int,
     sediment: float,
@@ -90,11 +91,18 @@ def _deposit_delta(
                 if 0 <= i < w and 0 <= j < h and arr[i, j] < sea_level:
                     raised = arr[i, j] + share
                     arr[i, j] = raised if raised < sea_level else sea_level
+                    # The silt arrives whether or not the ground can rise to show it: a
+                    # delta that has already prograded to sea level goes on receiving
+                    # sediment and building seaward.  Crediting the clamped elevation gain
+                    # instead would score the richest ground on the map — the front of an
+                    # established delta — as the barest.
+                    alluvium[i, j] += share
 
 
 @_jit
 def _drop_particle(
     arr: np.ndarray,
+    alluvium: np.ndarray,
     channel_affinity: np.ndarray,
     px: float,
     py: float,
@@ -119,7 +127,7 @@ def _drop_particle(
         if ci < 0 or ci >= w or cj < 0 or cj >= h:
             break
         if arr[ci, cj] < sea_level:
-            _deposit_delta(arr, ci, cj, sediment, w, h, sea_level, delta_min_load)
+            _deposit_delta(arr, alluvium, ci, cj, sediment, w, h, sea_level, delta_min_load)
             break
 
         # Gradient from 4 neighbors (clamp at edges)
@@ -153,10 +161,20 @@ def _drop_particle(
             deposit = deposition * (sediment - cap)
             arr[ci, cj] += deposit
             sediment -= deposit
+            # Where the water slowed and dropped its load.  This number was already being
+            # computed and spent on the elevation alone, which threw away the more useful
+            # half of it: how high the ground ended up is a poor proxy for what it is made
+            # of.  A hillside cut down to a gentle grade and a valley floor built up to the
+            # same height are the same elevation and nothing alike to plough.
+            alluvium[ci, cj] += deposit
         else:
             erode = min(erosion_rate * (cap - sediment), abs(dh) if dh < 0 else 0.0)
             arr[ci, cj] -= erode
             sediment += erode
+            # Netted, not accumulated: sediment picked back up has left.  A channel that
+            # deposits on one droplet's pass and scours on the next is holding nothing, and
+            # summing only the deposits would call every busy channel deep soil.
+            alluvium[ci, cj] -= erode
             if erode > 0.0:
                 channel_affinity[ci, cj] += affinity_gain
 
@@ -346,6 +364,7 @@ def _widen_valleys(
     floor_slope: float,
     max_relief: float,
     channel_fraction: float,
+    meander: np.ndarray | None = None,
 ) -> None:
     """Plane a flat floor outward from each channel, in place.
 
@@ -374,6 +393,14 @@ def _widen_valleys(
     Neighbours here are the four of the array rather than the six of the hex grid: this
     fills an area rather than tracing a line, so the shape of the neighbourhood washes out,
     and it is the same square-lattice approximation `_drop_particle` already makes.
+
+    When *meander* is given, each planed cell is credited there with how deep inside the
+    belt it lies, and the array keeps the largest credit across calls.  The footprint of
+    this fill is exactly the ground the channel has wandered over, which is the ground it
+    has floored with its own sediment — the alluvium of a floodplain is laid down by the
+    river moving sideways, so it cannot be read off the net vertical deposition the
+    droplets record.  A pass can plane a meander belt flat and change the mean elevation
+    across it hardly at all.
     """
     if width_max <= 0.0:
         return
@@ -394,6 +421,10 @@ def _widen_valleys(
     w, h = arr.shape
     target = np.full((w, h), np.inf)
     budget = np.zeros((w, h))
+    # The reach of the channel each cell was claimed by, carried along with the fill so a
+    # cell knows how far into its own belt it lies rather than only how far it is from a
+    # channel.  Belts differ in width by an order of magnitude across one map.
+    origin = np.zeros((w, h))
     queue: deque = deque()
 
     for i, j in channels:
@@ -403,6 +434,7 @@ def _widen_valleys(
             continue
         target[i, j] = arr[i, j]
         budget[i, j] = reach
+        origin[i, j] = reach
         queue.append((i, j))
 
     while queue:
@@ -423,10 +455,63 @@ def _widen_valleys(
             if floor < target[ni, nj] - 1e-12:
                 target[ni, nj] = floor
                 budget[ni, nj] = remaining
+                origin[ni, nj] = origin[i, j]
                 queue.append((ni, nj))
 
     cut = np.isfinite(target)
     arr[cut] = np.minimum(arr[cut], target[cut])
+
+    if meander is not None:
+        # How far into its *own* belt a cell lies: full at the channel, nothing at the
+        # bluff.  Measured against the reach of the channel that claimed it rather than
+        # against the widest on the map, because a small river's floodplain is narrow, not
+        # stony — the Loire's silt and a tributary's are the same stuff, and the difference
+        # between them is how much ground each covers.  Scaling every belt by the largest
+        # one instead left a single bright trunk river on a map of bare valleys.
+        share = np.zeros_like(meander)
+        np.divide(budget, origin, out=share, where=origin > 0.0)
+        np.maximum(meander, np.where(cut, np.clip(share, 0.0, 1.0), 0.0), out=meander)
+
+
+def _normalise_alluvium(
+    deposition: np.ndarray,
+    meander: np.ndarray,
+    land: np.ndarray,
+    quantile: float,
+    floodplain_gain: float,
+    smoothing: float,
+) -> np.ndarray:
+    """Combine the two sediment records into a soil depth in [0, 1].
+
+    The two arrive in incomparable units — one is a sum of elevation changes, the other a
+    fraction of a reach in cells — so each is brought onto its own [0, 1] before they are
+    added, rather than weighted against each other raw.  Otherwise the dial between them
+    would mean something different on every map.
+
+    Deposition is scaled against a high quantile rather than its maximum, because the
+    maximum is a single cell at the front of one delta.  Dividing by that puts every
+    floodplain on the map within a rounding error of bare rock, which is the one thing
+    this field exists to distinguish.  Ground above the quantile simply clips.
+
+    Erosion is netted out first and the result floored at zero: a hillside that lost more
+    than it gained has no soil left, and how much more is not a depth of anything.
+    """
+    gained = np.where(land, np.maximum(deposition, 0.0), 0.0)
+    positive = gained[gained > 0.0]
+    if positive.size:
+        scale = float(np.quantile(positive, quantile))
+        if scale <= 0.0:
+            scale = float(positive.max())
+        if scale > 0.0:
+            gained = gained / scale
+
+    out = gained + floodplain_gain * np.where(land, meander, 0.0)
+    if smoothing > 0.0:
+        # Droplets deposit at points and soil does not exist at points.  Blurring before
+        # the clamp also stops a single well-travelled cell reading as a lone rich hex in
+        # the middle of a valley whose floor is all the same silt.
+        out = gaussian_filter(out, sigma=smoothing)
+    return np.clip(np.where(land, out, 0.0), 0.0, 1.0)
 
 
 class ErosionStage(GeneratorStage):
@@ -454,6 +539,9 @@ class ErosionStage(GeneratorStage):
 
             # Channel affinity: starts uniform, biases later particles toward established channels
             channel_affinity = np.ones((w, h))
+            # Net sediment laid down per cell, in elevation units.  Signed: a cell that is
+            # scoured more than it is silted ends up negative, and is floored later.
+            deposition = np.zeros((w, h))
 
             # Initial sample indices (uniform random)
             indices = self.rng.integers(0, n_land, size=n_iter)
@@ -462,6 +550,7 @@ class ErosionStage(GeneratorStage):
                 sq, sr = int(land_arr[indices[step], 0]), int(land_arr[indices[step], 1])
                 _drop_particle(
                     arr,
+                    deposition,
                     channel_affinity,
                     float(sq),
                     float(sr),
@@ -527,6 +616,7 @@ class ErosionStage(GeneratorStage):
                 )
             }
 
+            meander = np.zeros((w, h))
             for _ in range(cfg.valley_carve_passes):
                 _widen_valleys(
                     arr,
@@ -537,7 +627,24 @@ class ErosionStage(GeneratorStage):
                     cfg.valley_floor_slope,
                     cfg.valley_max_relief,
                     cfg.valley_channel_fraction,
+                    meander,
                 )
+
+            # Soil is settled last, against the final coastline.  Deposition was recorded
+            # over the pre-renormalisation field and the belts over the carved one, but
+            # neither is read until here, so both are scored against the ground the rest of
+            # the pipeline will actually see.
+            alluvium = _normalise_alluvium(
+                deposition,
+                meander,
+                arr >= cfg.sea_level,
+                cfg.alluvium_quantile,
+                cfg.alluvium_floodplain_gain,
+                cfg.alluvium_smoothing,
+            )
+            for col in range(w):
+                for row in range(h):
+                    state.hexes[state.coord_at(col, row)].alluvium = float(alluvium[col, row])
 
         for col in range(w):
             for row in range(h):

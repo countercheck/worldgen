@@ -112,7 +112,7 @@ def test_new_saves_carry_the_bumped_version(tmp_path):
 
     path = tmp_path / "world.json"
     json_export.save(_small_world(), path)
-    assert json.loads(path.read_text())["version"] == "1.4"
+    assert json.loads(path.read_text())["version"] == "1.5"
 
 
 def test_an_unknown_version_is_rejected_by_name(tmp_path):

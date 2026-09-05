@@ -118,6 +118,15 @@ erosion_channel_affinity_gain: 0.5     # Affinity gain per deposition event; hig
 erosion_affinity_update_interval: 500  # Update channel affinity every N droplets. Default: 500
 erosion_delta_min_load: 0.15 # Sediment a droplet must still carry when it reaches the sea for it to build anything. Below this the load is treated as carried away along the shore rather than settling. Without it every droplet that trickled off a nearby hillside deposited where it entered the water, silting the shelf evenly instead of building deltas at the river mouths. Default: 0.15
 
+# Alluvium — the loose river-laid sediment the erosion model moves.  Recorded per hex as
+# a depth in [0, 1] against the map's own richest ground, from two sources: what droplets
+# net deposit, and the ground a channel has planed flat by wandering across it.  The
+# second is the larger, because a meander belt is built sideways and can change the mean
+# elevation across itself hardly at all.  Shows up in `render --attribute alluvium`.
+alluvium_floodplain_gain: 1.0 # How much a floodplain belt counts as alluvial, at its channel. 0 leaves only droplet deposition, which finds deltas and valley bottoms but not meander belts. Default: 1.0
+alluvium_smoothing: 1.0       # Blur in cells before normalising. Droplets deposit at points and soil does not. 0 disables. Default: 1.0
+alluvium_quantile: 0.98       # Depth treated as full, for the droplet term only. A quantile rather than the maximum, which is one cell at the front of one delta and would flatten every floodplain on the map against it. Default: 0.98
+
 # ---------------------------------------------------------------------------
 # Hydrology
 # ---------------------------------------------------------------------------
@@ -216,6 +225,7 @@ food_fertile_value: 1.0    # Prime arable. Default: 1.0
 food_marginal_value: 0.4   # Grazing and hard-to-clear forest. Default: 0.4
 food_wetland_value: 0.15   # Neither good fishing nor good ploughing; below water on purpose. Default: 0.15
 food_water_value: 0.4      # Fishing. Non-zero so a coastal site is not penalised for having sea in its catchment. Default: 0.4
+food_alluvium_bonus: 0.5   # What deep alluvium adds, as a multiple of the band's base value. Multiplicative on purpose: silt is a soil, not a climate, so it lifts ground that could already feed somebody and does not turn a desert or a bare-rock delta into a granary. Default: 0.5
 
 # Fertile and marginal hexes are additionally scaled by a moisture curve peaking across
 # the [biome_dry_moist, biome_wet_moist] band and falling to 0 at both extremes — too dry

@@ -165,6 +165,28 @@ class WorldConfig:
     # valleys are planed outward from.
     valley_channel_fraction: float = 0.02
 
+    # Alluvium — the loose sediment the erosion model already moves and used to throw
+    # away.  Every droplet that deposits is laying down silt somewhere, and where that
+    # silt ends up is the difference between farmland and the rock it washed off; the
+    # quantity was being computed and discarded on the same line.  Recorded as a depth in
+    # [0, 1] relative to the map's own richest ground, since nothing here carries real
+    # soil units.
+    #
+    # `alluvium_floodplain_gain` is the second source and the larger one: ground planed
+    # flat by a wandering channel is floored with what that channel left behind, which is
+    # why floodplains are farmed and the hills above them are grazed.  Vertical deposition
+    # alone misses it entirely — a meander belt is built by the river moving sideways, and
+    # the net elevation change over a pass can be nil.  0 leaves only droplet deposition.
+    alluvium_floodplain_gain: float = 1.0
+    # Blur applied before normalising, in cells.  Droplet deposition is a point process
+    # and lands speckled; soil is not.  0 disables.
+    alluvium_smoothing: float = 1.0
+    # Applies to the droplet term only, which arrives in elevation units and has to be
+    # brought onto the same [0, 1] as the belts before the two are added.  This is the
+    # depth treated as full — a quantile rather than the maximum, which is a single cell
+    # at the front of one delta and would flatten every floodplain on the map against it.
+    alluvium_quantile: float = 0.98
+
     # Hydrology
     # How much the rain shadow shapes the rivers.  The wind drops its moisture climbing a
     # range and arrives dry on the far side, and this decides whether the water reflects
@@ -239,6 +261,11 @@ class WorldConfig:
             raise ValueError(f"valley_floor_slope must be >= 0, got {self.valley_floor_slope}")
         if self.valley_max_relief < 0:
             raise ValueError(f"valley_max_relief must be >= 0, got {self.valley_max_relief}")
+        for name in ("alluvium_floodplain_gain", "alluvium_smoothing"):
+            if getattr(self, name) < 0:
+                raise ValueError(f"{name} must be >= 0, got {getattr(self, name)}")
+        if not (0.0 < self.alluvium_quantile <= 1.0):
+            raise ValueError(f"alluvium_quantile must be in (0, 1], got {self.alluvium_quantile}")
         if not (0.0 < self.valley_channel_fraction <= 1.0):
             raise ValueError(
                 f"valley_channel_fraction must be in (0, 1], got {self.valley_channel_fraction}"
@@ -384,6 +411,7 @@ class WorldConfig:
             "food_marginal_value",
             "food_wetland_value",
             "food_water_value",
+            "food_alluvium_bonus",
             "habitability_agri_weight",
             "habitability_river_bonus",
             "habitability_coast_bonus",
@@ -466,6 +494,13 @@ class WorldConfig:
     food_marginal_value: float = 0.4
     food_wetland_value: float = 0.15
     food_water_value: float = 0.4
+    # What deep alluvium adds to a hex's food value, as a multiple of its band's base.
+    # A floodplain is the best farmland there is and the reason river valleys are where
+    # people are: silt renews the soil faster than cropping strips it, so the same cover
+    # and the same rainfall feed appreciably more on alluvium than on the hillside it
+    # washed off.  Multiplicative, so it lifts good ground and does not turn bare rock or
+    # desert into a granary — dry silt is still dry.
+    food_alluvium_bonus: float = 0.5
 
     # Habitability — weight on the catchment mean, plus flat site bonuses
     habitability_agri_weight: float = 0.40

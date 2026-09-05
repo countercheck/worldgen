@@ -24,9 +24,12 @@ ROAD_TIER_RANK = {RoadTier.TRACK: 0, RoadTier.SECONDARY: 1, RoadTier.PRIMARY: 2}
 # a clear message instead of silently missing fields.  1.3 records "slope" and "relief"
 # and stops recording a steepness class: "flat", "hill" and "mountain" were thresholds on
 # the slope now stored, and an earlier file's band reads back as plain land, with the
-# slope recomputed by whoever needs it.
-SCHEMA_VERSION = "1.4"
-SUPPORTED_SCHEMA_VERSIONS = frozenset({"1.0", "1.1", "1.2", "1.3", "1.4"})
+# slope recomputed by whoever needs it.  1.5 records "alluvium"; an earlier file reads
+# back as 0.0, which is the honest answer — it was never measured, and unlike slope it
+# cannot be recovered from the elevations, since it records where sediment travelled
+# rather than what shape the ground ended up in.
+SCHEMA_VERSION = "1.5"
+SUPPORTED_SCHEMA_VERSIONS = frozenset({"1.0", "1.1", "1.2", "1.3", "1.4", "1.5"})
 
 # Terrain class names an older file may carry.  The steepness bands were thresholds on the
 # slope now stored, so land is land and how steep it was is a number that file never wrote
@@ -178,6 +181,7 @@ class WorldState:
                     "terrain_class": h.terrain_class.value,
                     "slope": h.slope,
                     "relief": h.relief,
+                    "alluvium": h.alluvium,
                     "land_cover": h.land_cover.value if h.land_cover is not None else None,
                     "river_flow": h.river_flow,
                     "habitability_city": h.habitability_city,
@@ -263,6 +267,7 @@ class WorldState:
                 terrain_class=_terrain_class_from(hd["terrain_class"]),
                 slope=hd.get("slope", 0.0),
                 relief=hd.get("relief", 0.0),
+                alluvium=hd.get("alluvium", 0.0),
                 land_cover=LandCover(hd["land_cover"])
                 if hd.get("land_cover") is not None
                 else None,
