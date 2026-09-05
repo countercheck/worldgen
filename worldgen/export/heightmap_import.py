@@ -4,17 +4,24 @@ The only `Image.open` in the feature lives here, because `export/` is the layer 
 allowed to touch the filesystem.  `ImageElevationStage` calls `load_luminance` rather than
 opening the file itself.
 
-Everything that can go wrong with a file is normalised to `ValueError`, which is what the
-CLI catches and turns into a `ClickException`.  Pillow raises `OSError`,
+Everything that can go wrong with a file is normalised to `HeightmapError`, which is what
+the CLI catches and turns into a `ClickException`.  Pillow raises `OSError`,
 `UnidentifiedImageError` and `DecompressionBombError` for the various ways an image can be
 unreadable, and none of those are `ValueError`, so without this they would each surface as
-a raw traceback.
+a raw traceback.  A distinct type rather than plain `ValueError` lets the CLI catch
+exactly the user-input failures without also swallowing the traceback of a genuine bug in
+a downstream stage — numpy shape mismatches are `ValueError` too.
 """
 
 import warnings
 
 import numpy as np
 from PIL import Image, UnidentifiedImageError
+
+
+class HeightmapError(ValueError):
+    """A heightmap file the user pointed at cannot be used as terrain."""
+
 
 # 16-bit greyscale, in the byte orders Pillow distinguishes.
 _UINT16_MODES = frozenset({"I;16", "I;16B", "I;16L", "I;16N"})
@@ -42,19 +49,24 @@ def load_luminance(path) -> tuple[np.ndarray, np.ndarray | None]:
             # `Image.open` only reads the header.  A truncated or corrupt file does not
             # fail until the pixels are actually pulled in.
             im.load()
+            if im.mode == "P" and "transparency" in im.info:
+                # A palette image keeps its transparency in a chunk, not a band, so
+                # `getbands()` would report no alpha and a PNG-8 stencil's transparent
+                # background would be read as its palette colour instead.
+                im = im.convert("RGBA")
             lum = _luminance(im, path)
             alpha = _alpha(im)
     except (FileNotFoundError, IsADirectoryError) as exc:
-        raise ValueError(f"heightmap {path!r} could not be opened: {exc}") from exc
+        raise HeightmapError(f"heightmap {path!r} could not be opened: {exc}") from exc
     except UnidentifiedImageError as exc:
-        raise ValueError(f"heightmap {path!r} is not an image Pillow can read") from exc
+        raise HeightmapError(f"heightmap {path!r} is not an image Pillow can read") from exc
     except Image.DecompressionBombError as exc:
-        raise ValueError(f"heightmap {path!r} is too large to decode safely: {exc}") from exc
+        raise HeightmapError(f"heightmap {path!r} is too large to decode safely: {exc}") from exc
     except OSError as exc:
-        raise ValueError(f"heightmap {path!r} could not be read: {exc}") from exc
+        raise HeightmapError(f"heightmap {path!r} could not be read: {exc}") from exc
 
     if lum.size == 0:
-        raise ValueError(f"heightmap {path!r} has no pixels")
+        raise HeightmapError(f"heightmap {path!r} has no pixels")
     return lum, alpha
 
 
@@ -73,7 +85,7 @@ def _luminance(im: Image.Image, path: str) -> np.ndarray:
         arr = np.asarray(im).astype(np.float64)
         peak = float(arr.max()) if arr.size else 0.0
         if peak > 65535.0:
-            raise ValueError(
+            raise HeightmapError(
                 f"heightmap {path!r} holds values up to {peak:.0f}, beyond the 16-bit "
                 "range this importer can scale; convert it to 8- or 16-bit greyscale"
             )
@@ -96,8 +108,15 @@ def _luminance(im: Image.Image, path: str) -> np.ndarray:
         # Floating point is already in whatever units the author chose.  Taking it as
         # [0, 1] is the only reading that does not amount to a histogram stretch.
         arr = np.asarray(im).astype(np.float64)
+        if arr.size and not np.isfinite(arr).all():
+            # NaN is the usual nodata encoding for float DEMs, and it slides through a
+            # min/max range check because every comparison with NaN is False.
+            raise HeightmapError(
+                f"heightmap {path!r} contains NaN or infinite pixels (nodata?); fill "
+                "them in before importing"
+            )
         if arr.size and (arr.min() < 0.0 or arr.max() > 1.0):
-            raise ValueError(
+            raise HeightmapError(
                 f"heightmap {path!r} is floating point with values outside [0, 1] "
                 f"({arr.min():.3f} to {arr.max():.3f}); rescale it before importing"
             )

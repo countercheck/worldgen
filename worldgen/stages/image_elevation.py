@@ -25,7 +25,7 @@ import numpy as np
 
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
-from .elevation import falloff_ramp, noise_field, to_metres, write_elevations
+from .elevation import blend_to_seabed, falloff_ramp, noise_field, to_metres, write_elevations
 
 
 def _box_axis(a: np.ndarray, m: int, axis: int) -> np.ndarray:
@@ -70,7 +70,7 @@ def resample_to_grid(pixels: np.ndarray, width: int, height: int) -> np.ndarray:
     if pixels.ndim != 2 or pixels.size == 0:
         raise ValueError(f"expected a 2-D image array, got shape {pixels.shape}")
 
-    out = _box_axis(_box_axis(pixels.astype(np.float64), height, axis=0), width, axis=1)
+    out = _box_axis(_box_axis(np.asarray(pixels, dtype=np.float64), height, axis=0), width, axis=1)
     return out.T  # (px_h, px_w) -> (row, col) -> (col, row)
 
 
@@ -82,11 +82,11 @@ def land_mask(
     Alpha wins where the image has a meaningful one — drawing a continent on a
     transparent background is the natural way to make a stencil, and its brightness then
     means nothing.  `load_luminance` already reports a uniformly opaque band as absent,
-    so this only defers to alpha when the alpha actually varies.
+    so this only defers to alpha when the alpha actually varies.  *invert* applies to
+    either source: a stencil whose land is the transparent side flips the same way a
+    dark-on-light one does.
     """
-    if alpha is not None:
-        return alpha >= 0.5
-    mask = lum >= threshold
+    mask = alpha >= 0.5 if alpha is not None else lum >= threshold
     return ~mask if invert else mask
 
 
@@ -191,20 +191,33 @@ class ImageElevationStage(GeneratorStage):
             if cfg.heightmap_coast_falloff:
                 # Opt-in, because the stencil is normally the authority: this rings the
                 # map with sea whatever was drawn, which guarantees rivers a coast to
-                # reach at the cost of eating a landmass that ran off the edge.
+                # reach at the cost of eating a landmass that ran off the edge.  All four
+                # edges are passed explicitly — a config whose `continent_falloff_edges`
+                # was trimmed or emptied for the generated path would otherwise turn the
+                # promised ring into a partial one, or a silent no-op.
                 #
                 # In metres the blend is towards the sea floor rather than towards a
                 # configured seabed fraction, and needs no re-anchoring afterwards: sea
                 # level is the datum, so a hex the falloff pulls under is under, and
                 # nothing downstream rescales the field out from under it.
-                t = falloff_ramp(cfg, coast_gen, w, h)
-                arr = arr * t - cfg.seabed_depth_m * (1.0 - t)
+                t = falloff_ramp(cfg, coast_gen, w, h, edges={"north", "south", "east", "west"})
+                arr = blend_to_seabed(arr, t, -cfg.seabed_depth_m)
 
             if not (arr < 0.0).any():
                 warnings.warn(
                     "the coastline stencil has no sea in it, so every river drains to a "
                     "border rather than to a coast. Leave some sea in the stencil, or "
                     "set heightmap_coast_falloff to ring the map with it.",
+                    stacklevel=2,
+                )
+            elif not (arr >= 0.0).any():
+                # The mirror case, and the likelier mistake of the two: a drawing whose
+                # polarity is the wrong way round thresholds to all sea, and the run
+                # goes on to generate an empty ocean rather than saying anything.
+                warnings.warn(
+                    "the coastline stencil has no land in it, so the whole map comes out "
+                    "ocean. Add some land, or check heightmap_invert — a dark-on-light "
+                    "drawing thresholds to all sea unless inverted.",
                     stacklevel=2,
                 )
         else:

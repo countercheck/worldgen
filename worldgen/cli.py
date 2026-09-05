@@ -14,6 +14,33 @@ def cli():
     pass
 
 
+def _load_world_config(config_path: str | None) -> WorldConfig:
+    """One loader for every command that takes --config.
+
+    The dispatch on extension used to be copied per command, and the copies had already
+    diverged: one wrapped errors in `ClickException`, another let the same bad file
+    escape as a raw traceback.  Everything a user can get wrong — a missing file,
+    malformed YAML or JSON, a value the config rejects — comes out as a clean message.
+    """
+    if not config_path:
+        return WorldConfig()
+    try:
+        if config_path.lower().endswith((".yaml", ".yml")):
+            import yaml
+
+            try:
+                return WorldConfig.from_yaml(config_path)
+            except yaml.YAMLError as exc:
+                raise click.ClickException(
+                    f"config {config_path!r} is not valid YAML: {exc}"
+                ) from exc
+        return WorldConfig.from_json(config_path)
+    except (FileNotFoundError, IsADirectoryError) as exc:
+        raise click.ClickException(f"config {config_path!r} could not be opened: {exc}") from exc
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+
 @cli.command()
 @click.option("--seed", type=int, default=42, help="Random seed")
 @click.option("--config", type=str, default=None, help="Config JSON file")
@@ -71,13 +98,7 @@ def generate(
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
-    if config:
-        if config.lower().endswith((".yaml", ".yml")):
-            cfg = WorldConfig.from_yaml(config)
-        else:
-            cfg = WorldConfig.from_json(config)
-    else:
-        cfg = WorldConfig()
+    cfg = _load_world_config(config)
 
     if width:
         cfg.width = width
@@ -101,12 +122,16 @@ def generate(
     if cfg.heightmap_path:
         click.echo(f"  Heightmap: {cfg.heightmap_path} ({cfg.heightmap_mode})")
 
+    from .export.heightmap_import import HeightmapError
+
     pipeline = GeneratorPipeline(seed, cfg)
     for stage in stages_for(cfg, cfg.model):
         pipeline.add_stage(stage)
     try:
         state = pipeline.run()
-    except ValueError as exc:
+    except HeightmapError as exc:
+        # Only the user-input failures; a plain ValueError from a downstream stage is a
+        # bug and keeps its traceback.
         raise click.ClickException(str(exc)) from exc
 
     click.echo("Writing output...")
@@ -429,16 +454,7 @@ def import_heightmap(
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
 
-    try:
-        if config_path:
-            if config_path.lower().endswith((".yaml", ".yml")):
-                cfg = WorldConfig.from_yaml(config_path)
-            else:
-                cfg = WorldConfig.from_json(config_path)
-        else:
-            cfg = WorldConfig()
-    except ValueError as exc:
-        raise click.ClickException(str(exc)) from exc
+    cfg = _load_world_config(config_path)
 
     if width:
         cfg.width = width
@@ -455,14 +471,19 @@ def import_heightmap(
     click.echo(f"Importing {input_path} as {cfg.heightmap_mode}...")
     click.echo(f"  Size: {cfg.width}×{cfg.height} ({cfg.grid_layout})")
 
-    from .stages.image_elevation import ImageElevationStage
+    from .export.heightmap_import import HeightmapError
     from .stages.terrain_class import TerrainClassificationStage
 
+    # The elevation slot comes from the shared registry, so whatever stages_for resolves
+    # it to (the swap is its job, not this command's) is what runs here.  Erosion is
+    # deliberately absent — skipping it is what makes this the faithful path — so the
+    # list is the slot plus classification, not a truncation of the full pipeline.
+    elevation_stage = stages_for(cfg)[0]
     pipeline = GeneratorPipeline(seed, cfg)
-    pipeline.add_stage(ImageElevationStage).add_stage(TerrainClassificationStage)
+    pipeline.add_stage(elevation_stage).add_stage(TerrainClassificationStage)
     try:
         state = pipeline.run()
-    except ValueError as exc:
+    except HeightmapError as exc:
         raise click.ClickException(str(exc)) from exc
 
     from .export.json_export import save as save_json

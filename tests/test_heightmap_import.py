@@ -147,6 +147,40 @@ def test_palette_images_load(tmp_path):
     assert lum.min() >= 0.0 and lum.max() <= 1.0
 
 
+def test_palette_transparency_is_still_the_stencil(tmp_path):
+    """PNG-8 keeps its transparency in a chunk, not a band.
+
+    `getbands()` on a palette image reports no alpha, so a hand-drawn stencil exported as
+    an indexed PNG (a common editor default) used to lose its transparent background and
+    read as whatever colour the palette gave those pixels — measured, a 25% continent
+    imported as 100% land.
+    """
+    rgba = np.zeros((32, 32, 4), np.uint8)
+    rgba[..., :3] = 255
+    rgba[8:24, 8:24, 3] = 255  # opaque continent, transparent sea
+    path = tmp_path / "pal8.png"
+    Image.fromarray(rgba, "RGBA").quantize().save(path)
+
+    im = Image.open(path)
+    assert im.mode == "P" and "transparency" in im.info, "the fixture must be indexed"
+
+    lum, alpha = load_luminance(str(path))
+    assert alpha is not None, "palette transparency was dropped"
+    assert land_mask(lum, alpha, 0.5, False).mean() == pytest.approx(0.25)
+
+
+def test_float_nan_is_rejected(tmp_path):
+    """NaN is the usual float-DEM nodata encoding, and it slides through min/max checks
+    because every comparison with NaN is False — so it used to import as NaN elevations."""
+    arr = np.full((4, 4), 0.5, np.float32)
+    arr[0, 0] = np.nan
+    path = tmp_path / "nodata.tif"
+    Image.fromarray(arr, "F").save(path)
+
+    with pytest.raises(ValueError, match="NaN"):
+        load_luminance(str(path))
+
+
 def test_shape_is_rows_by_columns(tmp_path):
     lum, _ = load_luminance(_save(tmp_path, np.zeros((5, 3), np.uint8), "ns.png"))
     assert lum.shape == (5, 3), "a 3-wide, 5-tall image should load as (5, 3)"
@@ -241,6 +275,17 @@ def test_alpha_overrides_brightness():
     """A stencil drawn on transparency is white-on-nothing; brightness means nothing."""
     lum = np.array([[0.0, 1.0]])
     assert land_mask(lum, np.array([[1.0, 0.0]]), 0.5, False).tolist() == [[True, False]]
+
+
+def test_invert_applies_to_the_alpha_stencil():
+    """A mask whose land is the transparent side flips like a dark-on-light one.
+
+    `invert` used to be consulted only on the brightness path, so setting it against an
+    alpha stencil silently did nothing and land and sea came out swapped.
+    """
+    lum = np.array([[0.0, 1.0]])
+    alpha = np.array([[1.0, 0.0]])
+    assert land_mask(lum, alpha, 0.5, True).tolist() == [[False, True]]
 
 
 def test_stencil_is_honoured_exactly():
@@ -360,6 +405,46 @@ def test_stencil_without_sea_warns(tmp_path):
     path = _save(tmp_path, np.full((64, 64), 255, np.uint8), "allland.png")
     with pytest.warns(UserWarning, match="no sea"):
         _run_stage(path, heightmap_mode="coastline")
+
+
+def test_stencil_without_land_warns(tmp_path):
+    """The mirror of the no-sea case, which used to pass silently.
+
+    With nothing anchoring the land side, erosion's renormalisation stretches the sea
+    floor upward and manufactures a continent the stencil never drew.
+    """
+    path = _save(tmp_path, np.zeros((64, 64), np.uint8), "allsea.png")
+    with pytest.warns(UserWarning, match="no land"):
+        _run_stage(path, heightmap_mode="coastline")
+
+
+def test_coast_falloff_rings_every_edge_regardless_of_config(tmp_path):
+    """The opt-in ring promises sea on all sides, whatever the drawn stencil says.
+
+    It used to reuse the generated path's `continent_falloff_edges`, so a config that
+    trimmed or emptied that list made the ring partial or a silent no-op — and the stage
+    then advised setting the very flag the user had already set.
+    """
+    path = _save(tmp_path, np.full((64, 64), 255, np.uint8), "allland.png")
+    state = _run_stage(
+        path,
+        heightmap_mode="coastline",
+        heightmap_coast_falloff=True,
+        continent_falloff_edges=[],
+    )
+
+    w, h = 16, 16
+    arr = np.array(
+        [[state.hexes[state.coord_at(c, r)].elevation for r in range(h)] for c in range(w)]
+    )
+    for border, name in [
+        (arr[0, :], "west"),
+        (arr[-1, :], "east"),
+        (arr[:, 0], "north"),
+        (arr[:, -1], "south"),
+    ]:
+        # Sea level is the datum now, so "below sea level" is simply negative.
+        assert (border < 0.0).all(), f"the {name} border did not sink below sea level"
 
 
 def test_coast_is_shallower_than_the_interior():
