@@ -30,6 +30,7 @@
 | 18 | Market siting scores a plain hex disc, not the day-reach the catchment walks | Model | **20** | L |
 | 19 | One off-map river strips the floodplain off half the map's channels | Model | **28** | M |
 | 20 | An off-map river imports discharge but no sediment, so it cuts where it should build | Model | **18** | M |
+| 21 | Runoff is linearised at the map's mean rainfall, so dry ground sheds too much | Model | **18** | M |
 
 ---
 
@@ -577,3 +578,46 @@ its mouth rather than trenching one, measured against the native rivers on the s
 
 Worth doing **after item 19**, which changes how much floodplain any of these rivers get in
 the first place.
+
+
+### 21 — Runoff is linearised at the map's mean rainfall
+**Category:** Model | **Priority: 18** | **Effort: M**
+
+`runoff_mm` is Pike's curve, and it is markedly non-linear in rainfall: the ground takes
+most of the rain in a dry region and little of it in a wet one, which is the whole reason
+the curve replaced a flat subtraction. But it is evaluated **once, at the map's mean**, and
+the result used as a single figure for every hex:
+
+```python
+runoff_mm = self.config.runoff_mm(self.config.mean_precip_mm)   # hydrology.py:100
+discharge = hx.catchment_km2 * cfg.runoff_mm(cfg.mean_precip_mm) # haulage.py:59
+```
+
+Half of what this used to cost has already been paid. `rain_per_hex` weights flow
+accumulation by the orographic pattern, so `acc` counts hexes of *relative* rain rather
+than bare area and a rain-shadowed catchment already raises a smaller river. What is left
+is that converting that accumulation to a discharge assumes runoff scales **linearly** with
+rainfall, when it does not.
+
+Measured on a 96×96 temperate map (seed 42, rainfall spanning 158–4,586 mm against a mean
+of 800):
+
+| | rainfall | runoff, actual | runoff, as linearised | error |
+|---|---|---|---|---|
+| driest decile | 401 mm | 137.5 mm | 240.5 mm | **1.75× too much** |
+| median | 588 mm | 286.8 mm | 352.0 mm | 1.23× too much |
+| wettest decile | 1,582 mm | 1,239.9 mm | 947.7 mm | **0.76× too little** |
+
+So dry country is credited with nearly twice the water it sheds and wet uplands with three
+quarters of theirs — a spread of 2.3× applied the wrong way round. Channels therefore form
+too readily in rain shadows and too reluctantly on windward slopes, and `navigable` inherits
+the same error through `haulage.py`, floating boats on desert rivers that would not carry
+them.
+
+**The fix is small; the recalibration is not.** Weighting each hex's contribution by
+`runoff_mm(hx.moisture, hx.temperature) / runoff_mm(mean_precip_mm)` inside `rain_per_hex`
+puts the non-linearity where the rain already is, and leaves the threshold a single figure —
+one function call and no new setting. What it changes is how much of every map is under
+channel, which is `channel_min_discharge`'s calibration and the wetland and navigability
+figures with it. Measure across all five climates before and after; the point of the change
+is that arid and tropical should move in *opposite* directions.
