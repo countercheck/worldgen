@@ -3,7 +3,17 @@ from pathlib import Path
 
 import matplotlib as mpl
 
-from ..core.hex import Biome, LandCover, LandUse, SettlementTier, SoilQuality, TerrainClass
+from ..core.hex import (
+    DEFAULT_TERRAIN_BANDS,
+    Biome,
+    LandCover,
+    LandUse,
+    SettlementTier,
+    SoilQuality,
+    TerrainClass,
+    TerrainLabel,
+    terrain_label,
+)
 from ..core.hex_grid import axial_to_pixel, road_polylines
 from ..core.world_state import RoadTier, WorldState
 
@@ -15,16 +25,18 @@ TEMPERATURE_RAMP_C = (-20.0, 35.0)
 # Fixed for the same reason as the temperature ramp: so two maps can be compared.
 PRECIP_RAMP_MM = (0.0, 2500.0)
 
+# Keyed on the map *label* rather than on the terrain class, because the class no longer
+# carries steepness — the bands are derived from measured slope at draw time.
 TERRAIN_COLORS = {
-    TerrainClass.OCEAN: (0.2, 0.4, 0.8),
-    TerrainClass.LAKE: (0.35, 0.6, 0.85),
-    TerrainClass.COAST: (0.9, 0.8, 0.4),
+    TerrainLabel.OCEAN: (0.2, 0.4, 0.8),
+    TerrainLabel.LAKE: (0.35, 0.6, 0.85),
+    TerrainLabel.COAST: (0.9, 0.8, 0.4),
     # Four bands of gradient, darkening as the ground steepens, so the relief reads as a
     # ramp rather than as four unrelated categories.
-    TerrainClass.FLAT: (0.4, 0.8, 0.4),
-    TerrainClass.ROLLING: (0.7, 0.6, 0.3),
-    TerrainClass.STEEP: (0.5, 0.5, 0.5),
-    TerrainClass.ESCARPMENT: (0.32, 0.29, 0.28),
+    TerrainLabel.FLAT: (0.4, 0.8, 0.4),
+    TerrainLabel.ROLLING: (0.7, 0.6, 0.3),
+    TerrainLabel.STEEP: (0.5, 0.5, 0.5),
+    TerrainLabel.ESCARPMENT: (0.32, 0.29, 0.28),
 }
 
 BIOME_COLORS = {
@@ -87,8 +99,8 @@ def _get_color_biome(h) -> tuple[float, float, float]:
     return BIOME_COLORS.get(h.biome, (0.5, 0.5, 0.5))
 
 
-def _get_color_terrain(h) -> tuple[float, float, float]:
-    return TERRAIN_COLORS[h.terrain_class]
+def _get_color_terrain(h, bands=DEFAULT_TERRAIN_BANDS) -> tuple[float, float, float]:
+    return TERRAIN_COLORS[terrain_label(h, *bands)]
 
 
 def _hex_vertices(cx: float, cy: float, size: float) -> list[tuple[float, float]]:
@@ -141,8 +153,8 @@ def _color_getter(attribute: str):
         cmap = mpl.colormaps["Blues"]
 
         def get_color(h):
-            if h.terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE):
-                return TERRAIN_COLORS[h.terrain_class]
+            if h.terrain_class in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER):
+                return _get_color_terrain(h)
             return cmap(min(h.river_flow * 3, 1.0))
 
         return get_color, False, False
@@ -194,8 +206,9 @@ def _color_getter(attribute: str):
         import colorsys
 
         def get_color(h):
-            if h.terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE) and h.territory is None:
-                return TERRAIN_COLORS[h.terrain_class]
+            water = h.terrain_class in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
+            if water and h.territory is None:
+                return _get_color_terrain(h)
             if h.territory is None:
                 return (0.85, 0.85, 0.85)
             hue = ((hash(h.territory) % 997) / 997.0) % 1.0

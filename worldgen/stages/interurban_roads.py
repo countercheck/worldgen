@@ -206,7 +206,10 @@ class InterurbanRoadStage(GeneratorStage):
         sea_edges = {
             key: tier
             for key, tier in road_edges.items()
-            if any(hexes[c].terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE) for c in key)
+            if any(
+                hexes[c].terrain_class in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
+                for c in key
+            )
         }
         for key in sea_edges:
             del road_edges[key]
@@ -243,7 +246,7 @@ class InterurbanRoadStage(GeneratorStage):
         for coord, hx in hexes.items():
             if hx.settlement is not None:
                 continue
-            if hx.terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE):
+            if hx.terrain_class in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER):
                 continue
             if any(n in road_hex_set for n in neighbors(coord)):
                 hx.habitability_village = min(1.0, hx.habitability_village + 0.2)
@@ -335,7 +338,7 @@ class InterurbanRoadStage(GeneratorStage):
         Land only, deliberately — the cost function refuses water outright, so this cannot
         satisfy itself with the sea leg that already exists.
         """
-        water = (TerrainClass.OCEAN, TerrainClass.LAKE)
+        water = (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
         dry = {c for c, hx in hexes.items() if hx.terrain_class not in water}
 
         def land_cost(hx):

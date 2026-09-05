@@ -4,6 +4,18 @@ from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
 
 
+def _is_level(hx, cfg) -> bool:
+    """Ground flat enough for water to stand on it.
+
+    A gradient test rather than a class one.  Water ponds or it runs off, and which it
+    does depends on how the ground actually lies — not on which side of a band boundary
+    the classifier put the hex, which is how a level floodplain beside a bluff came out
+    too steep to hold a bog.  A shore counts however it lies, because what makes it
+    waterlogged is the water table rather than the slope.
+    """
+    return hx.terrain_class is TerrainClass.COAST or hx.slope < cfg.terrain_rolling_gradient_m
+
+
 class BiomeStage(GeneratorStage):
     def run(self, state: WorldState) -> WorldState:
         treeline_temp = self.config.biome_treeline_temp_c
@@ -31,7 +43,7 @@ class BiomeStage(GeneratorStage):
             return candidates[-1]
 
         for h in state.hexes.values():
-            if h.terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE):
+            if h.terrain_class in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER):
                 h.biome = Biome.OCEAN
             # Two lines divide cold country, and both are temperatures: the treeline,
             # above which nothing grows tall, and the snowline, above which nothing grows
@@ -84,7 +96,7 @@ class BiomeStage(GeneratorStage):
         min_runoff = self.config.wetland_min_runoff_mm
         for h in state.hexes.values():
             if (
-                h.terrain_class in (TerrainClass.FLAT, TerrainClass.COAST)
+                _is_level(h, self.config)
                 and self.config.runoff_mm(h.moisture, h.temperature) > min_runoff
                 and "river" in h.tags
                 and h.temperature >= treeline_temp
@@ -101,7 +113,7 @@ class BiomeStage(GeneratorStage):
         for h in state.hexes.values():
             if (
                 "endorheic_shore" in h.tags
-                and h.terrain_class in (TerrainClass.FLAT, TerrainClass.COAST)
+                and _is_level(h, self.config)
                 and h.moisture >= marsh_min_moisture
                 and h.temperature >= treeline_temp
             ):

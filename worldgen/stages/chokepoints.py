@@ -307,7 +307,7 @@ class ChokepointStage(GeneratorStage):
             s = Settlement(
                 coord=coord,
                 tier=SettlementTier.VILLAGE,
-                role=_assign_role(coord, hx, hexes),
+                role=_assign_role(coord, hx, hexes, cfg),
                 population=population,
                 name=f"{hx.biome.name.lower()}_{kind}_{i}",
             )

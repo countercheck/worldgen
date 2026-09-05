@@ -16,7 +16,7 @@ from worldgen.core.hex_grid import distance
 from worldgen.stages.land_use import LandUseStage
 from worldgen.stages.markets import MarketStage, depletion_kernel
 
-_WATER = (TerrainClass.OCEAN, TerrainClass.LAKE)
+_WATER = (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
 
 
 def _market_world(seed=42, width=64, height=64, **overrides):
@@ -92,7 +92,7 @@ def test_markets_avoid_unsettleable_ground(markets):
     for s in markets.settlements:
         hx = markets.hexes[s.coord]
         assert hx.terrain_class not in _WATER, f"market in the water at {s.coord}"
-        assert hx.terrain_class != TerrainClass.STEEP, f"market on a peak at {s.coord}"
+        assert hx.slope < WorldConfig().terrain_steep_gradient_m, f"market on a peak at {s.coord}"
         assert hx.biome is not Biome.WETLAND, f"market in a bog at {s.coord}"
 
 
@@ -150,7 +150,7 @@ def test_high_ground_is_left_unclaimed(markets):
     unclaimed_mountain = [
         h
         for h in markets.hexes.values()
-        if h.terrain_class == TerrainClass.STEEP and h.territory is None
+        if h.slope >= WorldConfig().terrain_steep_gradient_m and h.territory is None
     ]
     assert unclaimed_mountain, "every mountain got claimed — the budget is not binding"
 

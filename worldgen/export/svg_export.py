@@ -2,7 +2,7 @@ import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ..core.hex import SettlementTier
+from ..core.hex import DEFAULT_TERRAIN_BANDS, SettlementTier, terrain_bands, terrain_label
 from ..core.hex_grid import axial_to_pixel, neighbors, road_polylines
 from ..core.world_state import RoadTier, WorldState
 from ..render.debug_viewer import (
@@ -85,9 +85,14 @@ def _xml_escape(s: str) -> str:
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-def _get_hex_fill(h, color_mode: str, elev_span: tuple[float, float] | None = None) -> str:
+def _get_hex_fill(
+    h,
+    color_mode: str,
+    elev_span: tuple[float, float] | None = None,
+    bands: tuple[float, float, float] = DEFAULT_TERRAIN_BANDS,
+) -> str:
     if color_mode == "terrain":
-        rgb = TERRAIN_COLORS.get(h.terrain_class, (0.5, 0.5, 0.5))
+        rgb = TERRAIN_COLORS.get(terrain_label(h, *bands), (0.5, 0.5, 0.5))
     elif color_mode == "land_cover":
         rgb = (
             LAND_COVER_COLORS.get(h.land_cover, (0.5, 0.5, 0.5))
@@ -112,7 +117,7 @@ def _get_hex_fill(h, color_mode: str, elev_span: tuple[float, float] | None = No
         if h.biome is not None:
             rgb = BIOME_COLORS.get(h.biome, (0.5, 0.5, 0.5))
         else:
-            rgb = TERRAIN_COLORS.get(h.terrain_class, (0.5, 0.5, 0.5))
+            rgb = TERRAIN_COLORS.get(terrain_label(h, *bands), (0.5, 0.5, 0.5))
     return _rgb_to_hex(*rgb[:3])
 
 
@@ -406,10 +411,12 @@ def render(ws: WorldState, config: SVGConfig | None = None) -> str:
             elevs = [h.elevation for h in ws.hexes.values()]
             elev_span = (min(elevs), max(elevs))
         out.append('  <g id="layer-terrain">')
+        # The bands this world was generated with, not today's defaults.
+        bands = terrain_bands(ws)
         for hex_item in ws.hexes.values():
             px, py = axial_to_pixel(hex_item.coord, size)
             verts = _hex_vertices(px + ox, py + oy, size)
-            fill = _get_hex_fill(hex_item, color_mode, elev_span)
+            fill = _get_hex_fill(hex_item, color_mode, elev_span, bands)
             out.append(f'    <polygon points="{_points_str(verts)}" fill="{fill}" stroke="none"/>')
         out.append("  </g>")
 

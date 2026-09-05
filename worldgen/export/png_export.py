@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 
 from PIL import Image, ImageDraw, ImageFont
 
-from ..core.hex import SettlementTier
+from ..core.hex import DEFAULT_TERRAIN_BANDS, SettlementTier, terrain_bands, terrain_label
 from ..core.hex_grid import axial_to_pixel, neighbors, road_polylines
 from ..core.world_state import RoadTier, WorldState
 from ..render.debug_viewer import (
@@ -81,9 +81,13 @@ def _hex_verts(cx: float, cy: float, size: float) -> list[tuple[int, int]]:
     ]
 
 
-def _get_hex_fill(h, color_mode: str) -> tuple[int, int, int]:
+def _get_hex_fill(
+    h,
+    color_mode: str,
+    bands: tuple[float, float, float] = DEFAULT_TERRAIN_BANDS,
+) -> tuple[int, int, int]:
     if color_mode == "terrain":
-        rgb = TERRAIN_COLORS.get(h.terrain_class, (0.5, 0.5, 0.5))
+        rgb = TERRAIN_COLORS.get(terrain_label(h, *bands), (0.5, 0.5, 0.5))
     elif color_mode == "land_cover":
         rgb = (
             LAND_COVER_COLORS.get(h.land_cover, (0.5, 0.5, 0.5))
@@ -101,7 +105,7 @@ def _get_hex_fill(h, color_mode: str) -> tuple[int, int, int]:
         if h.biome is not None:
             rgb = BIOME_COLORS.get(h.biome, (0.5, 0.5, 0.5))
         else:
-            rgb = TERRAIN_COLORS.get(h.terrain_class, (0.5, 0.5, 0.5))
+            rgb = TERRAIN_COLORS.get(terrain_label(h, *bands), (0.5, 0.5, 0.5))
     return _rgb_int(*rgb[:3])
 
 
@@ -388,10 +392,12 @@ def render(ws: WorldState, config: PNGConfig | None = None) -> Image.Image:
     draw = ImageDraw.Draw(img)
 
     if "terrain" in layers:
+        # The bands this world was generated with, not today's defaults.
+        bands = terrain_bands(ws)
         for hex_item in ws.hexes.values():
             px, py = axial_to_pixel(hex_item.coord, size)
             verts = _hex_verts(px + ox, py + oy, size)
-            fill = _get_hex_fill(hex_item, color_mode)
+            fill = _get_hex_fill(hex_item, color_mode, bands)
             draw.polygon(verts, fill=fill)
 
     if "grid" in layers:

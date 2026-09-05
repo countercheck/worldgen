@@ -122,7 +122,7 @@ def test_grade_reachable_count_skips_water():
     # Ocean hexes should never be counted or crossed
     grid = {(q, r): Hex(coord=(q, r)) for q in range(3) for r in range(3)}
     for r in range(3):
-        grid[(1, r)].terrain_class = TerrainClass.OCEAN
+        grid[(1, r)].terrain_class = TerrainClass.OPEN_WATER
 
     count = grade_reachable_count((0, 0), grid, lambda a, b: True, max_count=100)
     # Only left column (q=0, r=0..2 = 3 hexes)
@@ -136,7 +136,7 @@ def test_grade_reachable_count_start_missing():
 
 
 def test_grade_reachable_count_start_water():
-    grid = {(0, 0): Hex(coord=(0, 0), terrain_class=TerrainClass.OCEAN)}
+    grid = {(0, 0): Hex(coord=(0, 0), terrain_class=TerrainClass.OPEN_WATER)}
     count = grade_reachable_count((0, 0), grid, lambda a, b: True, max_count=100)
     assert count == 0
 
@@ -149,7 +149,7 @@ def _water_grid(water: set, length: int = 6) -> dict:
     return {
         (q, 0): Hex(
             coord=(q, 0),
-            terrain_class=TerrainClass.OCEAN if q in water else TerrainClass.FLAT,
+            terrain_class=TerrainClass.OPEN_WATER if q in water else TerrainClass.LAND,
         )
         for q in range(length)
     }
@@ -197,7 +197,7 @@ def test_split_path_all_water_returns_nothing():
 
 def test_split_path_lake_counts_as_water():
     grid = _water_grid(set())
-    grid[(2, 0)] = Hex(coord=(2, 0), terrain_class=TerrainClass.LAKE)
+    grid[(2, 0)] = Hex(coord=(2, 0), terrain_class=TerrainClass.INLAND_WATER)
     assert split_path_on_water(_path(), grid) == [[(0, 0), (1, 0)], [(3, 0), (4, 0), (5, 0)]]
 
 
@@ -243,7 +243,7 @@ def test_water_transitions_multiple_crossings():
 
 def test_water_transitions_lake_counts_as_water():
     grid = _water_grid(set())
-    grid[(2, 0)] = Hex(coord=(2, 0), terrain_class=TerrainClass.LAKE)
+    grid[(2, 0)] = Hex(coord=(2, 0), terrain_class=TerrainClass.INLAND_WATER)
     assert water_transitions(_path(), grid) == [(1, 0), (3, 0)]
 
 
@@ -274,7 +274,7 @@ def test_water_transitions_single_hex_path():
 def _grid(*paths, water: frozenset = frozenset()) -> dict:
     """A grid covering every coord in *paths*, with the given coords made ocean."""
     return {
-        c: Hex(coord=c, terrain_class=TerrainClass.OCEAN if c in water else TerrainClass.FLAT)
+        c: Hex(coord=c, terrain_class=TerrainClass.OPEN_WATER if c in water else TerrainClass.LAND)
         for p in paths
         for c in p
     }

@@ -5,26 +5,54 @@ HexCoord = tuple[int, int]
 
 
 class TerrainClass(Enum):
-    """How the ground lies underfoot — a gradient, not a landform.
+    """What kind of place a hex is, where the kinds are genuinely different kinds.
 
-    These used to be FLAT / HILL / MOUNTAIN, which read as altitude and were partly
-    computed that way: anything above four fifths of the elevation range was called a
-    mountain however level it was, so nearly a third of "mountain" hexes on a 128x128 map
-    were gentler than 75 m/km.  A high plateau is walkable, ploughable ground and should
-    not be priced like a peak.
+    Water is not steep land with the water turned up, and a shore is a fact about what a
+    hex adjoins — those are categories.  So is whether a body of water drains off the map,
+    which is the whole of what OPEN_WATER and INLAND_WATER distinguish.
 
-    So every name here describes slope, and the thresholds are in metres of rise per
-    kilometre rather than a fraction of the map's elevation range.  Absolute figures mean
-    the same thing whatever `road_elev_range_m` is set to; the old fractions silently
-    became nonsense at any other span, calling a 20 m/km rise a mountain on a 500 m map.
+    Steepness is not a category.  It is a continuum, and the FLAT / ROLLING / STEEP /
+    ESCARPMENT bands that used to live here were thresholds on `Hex.slope` that six stages
+    read in place of the terrain.  A hex fell either side of a cutoff for reasons unrelated
+    to the question being asked of it, which is how a level floodplain beside a bluff came
+    out classified as escarpment, and was then scored as unfarmable ground a road should
+    climb around.  Ask `slope` and `relief` instead, in the units the question is really
+    in: metres of rise per kilometre, and metres of command over the ground below.
 
-        FLAT        under 3%    level going: plough it, cart across it
-        ROLLING     3 to 10%    undulating; farmed, and a laden cart manages
-        STEEP       10 to 25%   pack animals, terraces, no wheels
-        ESCARPMENT  over 25%    a break of slope; on foot and with effort
+    The words survive where they belong.  `terrain_label` derives them for maps and
+    legends, which is a presentation concern, so nothing in the pipeline branches on them.
+    """
 
-    Altitude still matters, but it is asked about where it belongs: `biome_alpine_elev`
-    decides where the treeline is, and roles read `elevation` directly.
+    # Water that reaches the map edge, and so carries what enters it away.  Called
+    # "ocean" once, which claimed a salinity nothing tracks; what the generator actually
+    # knows is that this body drains off the map, and that is what every use of it means
+    # — the outlet priority-flood seeds from, the terminal a river may end at, the thing a
+    # basin is *not*.
+    OPEN_WATER = "open_water"
+    # Water with no way off the map.  A basin, in other words: it fills to its spillway
+    # and overflows, or evaporates what reaches it and is closed.  Fresh or salt is not
+    # the question — the Caspian is the second of these and salt, Baikal the second and
+    # fresh.
+    INLAND_WATER = "inland_water"
+    COAST = "coast"
+    LAND = "land"
+
+
+class TerrainLabel(Enum):
+    """The vocabulary a map is drawn and read in — not one the generator reasons in.
+
+    A GM wants to see the ground named, and a wargame's movement rules are written in
+    these words, so the bands are worth keeping at the edge.  Deriving them here rather
+    than storing them on the hex is what stops them becoming load-bearing again.
+
+        FLAT        under 30 m/km   level going: plough it, cart across it
+        ROLLING     30 to 100       undulating; farmed, and a laden cart manages
+        STEEP       100 to 250      pack animals, terraces, no wheels
+        ESCARPMENT  over 250        a break of slope; on foot and with effort
+
+    Ocean and lake stay in this vocabulary for the same reason: they are the words an
+    atlas uses, and a reader wants them.  It is only the *generator* that has no business
+    claiming a chemistry it does not model.
     """
 
     OCEAN = "ocean"
@@ -36,11 +64,61 @@ class TerrainClass(Enum):
     ESCARPMENT = "escarpment"
 
 
-# Ground too steep to plough, settle, or take a cart across. Several stages ask this
-# question and they must agree: before ESCARPMENT existed each of them tested MOUNTAIN
-# alone, and adding a steeper band without this would have quietly let settlements onto
-# the steepest ground on the map.
-STEEP_LAND = frozenset({TerrainClass.STEEP, TerrainClass.ESCARPMENT})
+def is_steep(hx, steep_gradient_m: float) -> bool:
+    """Ground too steep to plough, settle, or take a cart across.
+
+    Several stages ask this question and they must agree, which is what the `STEEP_LAND`
+    frozenset used to be for.  It is a threshold on a measured gradient now rather than a
+    set of class names, so a stage that wants a different bar can ask for one — a road
+    refuses a grade a village merely finds inconvenient — instead of every caller being
+    stuck with wherever the enum's boundary happened to fall.
+    """
+    return hx.slope >= steep_gradient_m
+
+
+def terrain_label(hx, rolling: float, steep: float, escarpment: float) -> TerrainLabel:
+    """Band a hex's steepness into the word a reader expects to see on the map."""
+    if hx.terrain_class is TerrainClass.OPEN_WATER:
+        return TerrainLabel.OCEAN
+    if hx.terrain_class is TerrainClass.INLAND_WATER:
+        return TerrainLabel.LAKE
+    if hx.terrain_class is TerrainClass.COAST:
+        return TerrainLabel.COAST
+    if hx.slope >= escarpment:
+        return TerrainLabel.ESCARPMENT
+    if hx.slope >= steep:
+        return TerrainLabel.STEEP
+    if hx.slope >= rolling:
+        return TerrainLabel.ROLLING
+    return TerrainLabel.FLAT
+
+
+DEFAULT_TERRAIN_BANDS = (30.0, 100.0, 250.0)
+
+
+def terrain_bands(ws) -> tuple[float, float, float]:
+    """The gradient bands a world was generated with, for anything drawing it.
+
+    Read back off the serialised config rather than off a live `WorldConfig`, so a world
+    loaded from JSON is drawn in its own bands instead of in today's defaults.
+    """
+    cfg = ws.metadata.get("config", {})
+    return (
+        cfg.get("terrain_rolling_gradient_m", DEFAULT_TERRAIN_BANDS[0]),
+        cfg.get("terrain_steep_gradient_m", DEFAULT_TERRAIN_BANDS[1]),
+        cfg.get("terrain_escarpment_gradient_m", DEFAULT_TERRAIN_BANDS[2]),
+    )
+
+
+def terrain_labels(ws) -> dict:
+    """Every hex's map label, using the thresholds the world was generated with.
+
+    Read back off the serialised config rather than off a live `WorldConfig`, so a world
+    loaded from JSON is drawn in the bands it was made with instead of in today's
+    defaults.
+    """
+    bands = terrain_bands(ws)
+    return {coord: terrain_label(h, *bands) for coord, h in ws.hexes.items()}
 
 
 class LandCover(Enum):
@@ -146,7 +224,17 @@ class Hex:
     # stream draining 30 km2 is the same stream whatever else is on the map.
     river_flow: float = 0.0
     catchment_km2: float = 0.0
-    terrain_class: TerrainClass = TerrainClass.FLAT
+    # How steep the ground is: the mean elevation difference to the neighbours, in metres
+    # per kilometre.  Kept as the number rather than thresholded into bands, because
+    # steepness is a continuum and the thresholds were load-bearing in six places — which
+    # is how a flat floodplain beside a bluff came out classified as escarpment, and was
+    # scored as unfarmable ground a road should climb around.
+    slope: float = 0.0
+    # How far this hex stands above the lowest ground touching it, in metres.  Steepness
+    # alone cannot express a site "overlooking a plain": what makes that site good is the
+    # drop it commands, not the gradient it sits on.
+    relief: float = 0.0
+    terrain_class: TerrainClass = TerrainClass.LAND
     settlement: Settlement | None = None
     road_connections: set[HexCoord] = field(default_factory=set)
     tags: set[str] = field(default_factory=set)

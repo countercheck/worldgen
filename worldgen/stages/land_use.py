@@ -44,9 +44,9 @@ from .city_town import _assign_role
 from .habitability import actual_food, potential_food
 from .haulage import gather, usable_fraction
 
-_WATER = (TerrainClass.OCEAN, TerrainClass.LAKE)
+_WATER = (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
 
-WATER = (TerrainClass.OCEAN, TerrainClass.LAKE)
+WATER = (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
 # Soil you can get a plough into at all. GRAZING fails it for the two reasons that make
 # ground grazing in the first place: too steep for the share, or too dry for the seed.
 PLOUGHABLE = frozenset({SoilQuality.MARGINAL, SoilQuality.ARABLE, SoilQuality.PRIME})
@@ -160,7 +160,7 @@ class LandUseStage(GeneratorStage):
             s = Settlement(
                 coord=coord,
                 tier=SettlementTier.TOWN,
-                role=_assign_role(coord, hx, hexes),
+                role=_assign_role(coord, hx, hexes, cfg),
                 population=population,
                 name=f"{hx.biome.name.lower()}_market_{i}",
             )

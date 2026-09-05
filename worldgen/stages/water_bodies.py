@@ -4,16 +4,15 @@ from ..core.hex import TerrainClass
 from ..core.hex_grid import neighbors
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
-from .terrain_class import classify, gradient_m_per_km
 
 
 class WaterBodiesStage(GeneratorStage):
-    """Classify water hexes as OCEAN (map-edge-connected) or LAKE (inland).
+    """Sort water into what drains off the map and what does not.
 
-    TerrainClassificationStage assigns OCEAN to every hex below sea level.
+    TerrainClassificationStage assigns OPEN_WATER to every hex below sea level.
     This stage flood-fills connected water components: any component that
-    touches the map border keeps TerrainClass.OCEAN; inland components are
-    reclassified to TerrainClass.LAKE.
+    touches the map border keeps TerrainClass.OPEN_WATER; inland components are
+    reclassified to TerrainClass.INLAND_WATER.
 
     A follow-up pass fixes COAST hexes that are now adjacent only to lakes
     (not open ocean) by re-evaluating their terrain class.
@@ -22,7 +21,7 @@ class WaterBodiesStage(GeneratorStage):
     def run(self, state: WorldState) -> WorldState:
         hexes = state.hexes
 
-        water: set = {c for c, hx in hexes.items() if hx.terrain_class == TerrainClass.OCEAN}
+        water: set = {c for c, hx in hexes.items() if hx.terrain_class == TerrainClass.OPEN_WATER}
         visited: set = set()
 
         for seed in water:
@@ -33,7 +32,7 @@ class WaterBodiesStage(GeneratorStage):
             touches_edge = any(state.on_border(c) for c in component)
             if not touches_edge:
                 for c in component:
-                    hexes[c].terrain_class = TerrainClass.LAKE
+                    hexes[c].terrain_class = TerrainClass.INLAND_WATER
 
         _fix_coast_hexes(state, self.config)
         return state
@@ -67,19 +66,21 @@ def _fix_coast_hexes(state: WorldState, cfg) -> None:
         if hx.terrain_class != TerrainClass.COAST:
             continue
         nbrs = [hexes[n] for n in neighbors(coord) if n in hexes]
-        adjacent_to_ocean = any(n.terrain_class == TerrainClass.OCEAN for n in nbrs)
+        adjacent_to_ocean = any(n.terrain_class == TerrainClass.OPEN_WATER for n in nbrs)
         if adjacent_to_ocean:
             continue  # correctly COAST
 
         # Not adjacent to open ocean — reclassify
         elev = hx.elevation
-        if elev < coast_threshold and any(n.terrain_class == TerrainClass.LAKE for n in nbrs):
+        if elev < coast_threshold and any(
+            n.terrain_class == TerrainClass.INLAND_WATER for n in nbrs
+        ):
             # Low-elevation land beside a lake — leave as COAST (lake shore)
             # so downstream stages can treat it like coastal terrain if desired.
             continue
 
-        # Reclassified through the same function TerrainClassificationStage uses. This
-        # was a second copy of that logic, which meant the two could disagree about what
-        # a hill was — and both carried the altitude clause that called level high ground
-        # a mountain.
-        hx.terrain_class = classify(gradient_m_per_km(coord, hx, hexes, cfg), cfg)
+        # Not a shore after all, so it is simply land.  This used to re-derive a
+        # steepness band here, duplicating the classification stage's arithmetic to pick
+        # between three labels; with steepness carried on the hex as a number there is
+        # one answer and no sum to repeat.
+        hx.terrain_class = TerrainClass.LAND

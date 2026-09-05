@@ -19,7 +19,7 @@ def _small_world() -> WorldState:
     ws = WorldState.empty(seed=1, width=4, height=4)
     for h in ws.hexes.values():
         h.biome = Biome.GRASSLAND
-        h.terrain_class = TerrainClass.FLAT
+        h.terrain_class = TerrainClass.LAND
         h.land_cover = LandCover.OPEN
         h.temperature = 0.5
         h.moisture = 0.5

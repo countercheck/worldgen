@@ -4,7 +4,7 @@ import pytest
 
 from tests.worlds import build_pipeline
 from worldgen.core.config import WorldConfig
-from worldgen.core.hex import Hex
+from worldgen.core.hex import Hex, TerrainClass
 from worldgen.core.hex_grid import distance, neighbors
 from worldgen.stages.crossings import BRIDGE, FORD, river_span
 from worldgen.stages.road_cost import is_river
@@ -47,13 +47,13 @@ def test_catchment_area_grows_downstream(crossed):
     Measured over the land hexes only — a river's path ends on the water body it empties
     into, and the sea drains nothing.
     """
-    water = ("ocean", "lake")
+    water = (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
     checked = 0
     for river in crossed.rivers:
         areas = [
             crossed.hexes[c].catchment_km2
             for c in river.hexes
-            if c in crossed.hexes and crossed.hexes[c].terrain_class.value not in water
+            if c in crossed.hexes and crossed.hexes[c].terrain_class not in water
         ]
         if len(areas) > 2:
             checked += 1

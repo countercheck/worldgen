@@ -22,23 +22,25 @@ class LandCoverStage(GeneratorStage):
         )
 
         for h in state.hexes.values():
-            h.land_cover = _derive(h, wet_moist, wildwood)
+            h.land_cover = _derive(
+                h, wet_moist, self.config.terrain_escarpment_gradient_m, wildwood
+            )
 
         return state
 
 
-def _derive(h, wet_moist: float, wildwood: Biome | None = None) -> LandCover:
+def _derive(h, wet_moist: float, escarpment_m: float, wildwood: Biome | None = None) -> LandCover:
     tc = h.terrain_class
     b = h.biome
 
-    if tc in (TerrainClass.OCEAN, TerrainClass.LAKE):
+    if tc in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER):
         return LandCover.OPEN_WATER
     # Only a genuine break of slope is bare. STEEP ground — a tenth to a quarter — holds
     # soil perfectly well: it is where terraces, vineyards and hanging woods go. Stripping
     # it to rock put a third of a 128x128 map under bare stone. Above the treeline it
     # comes out ALPINE on the next line anyway, which is the honest reason high steep
     # ground looks barren.
-    if tc == TerrainClass.ESCARPMENT:
+    if h.slope >= escarpment_m:
         return LandCover.BARE_ROCK
     if b == Biome.ALPINE:
         return LandCover.ALPINE

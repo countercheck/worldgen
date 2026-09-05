@@ -1,7 +1,7 @@
 import pytest
 
 from worldgen.core.config import WorldConfig
-from worldgen.core.hex import TerrainClass
+from worldgen.core.hex import TerrainClass, TerrainLabel, terrain_labels
 from worldgen.core.pipeline import GeneratorPipeline
 from worldgen.core.world_state import WorldState
 from worldgen.stages.climate import ClimateStage
@@ -43,7 +43,7 @@ def test_moisture_is_a_plausible_annual_rainfall(climate_state):
 
 def test_standing_water_is_not_short_of_rain(climate_state):
     for h in climate_state.hexes.values():
-        if h.terrain_class == TerrainClass.OCEAN:
+        if h.terrain_class == TerrainClass.OPEN_WATER:
             assert h.moisture == pytest.approx(
                 climate_state.metadata["config"]["mean_precip_mm"]
             ), f"water hex has {h.moisture:.0f} mm — it should not read as the driest ground"
@@ -54,13 +54,14 @@ def test_mountains_colder_than_flat(climate_state):
     height = climate_state.height
     mountain_temps = []
     flat_temps = []
+    labels = terrain_labels(climate_state)
     for (_, r), h in climate_state.hexes.items():
         mid = height * 0.3 < r < height * 0.7
         if not mid:
             continue
-        if h.terrain_class == TerrainClass.STEEP:
+        if labels[h.coord] is TerrainLabel.STEEP:
             mountain_temps.append(h.temperature)
-        elif h.terrain_class == TerrainClass.FLAT:
+        elif labels[h.coord] is TerrainLabel.FLAT:
             flat_temps.append(h.temperature)
 
     if mountain_temps and flat_temps:
@@ -76,7 +77,7 @@ def test_rain_shadow_present(climate_state):
     # MOUNTAIN meant "steep or high"; the classes are bands of gradient now, and a steep
     # hex can sit at any altitude. Testing the mechanism is both truer and less brittle
     # than testing a proxy that has stopped holding.
-    water = (TerrainClass.OCEAN, TerrainClass.LAKE)
+    water = (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
 
     land = [h.elevation for h in climate_state.hexes.values() if h.terrain_class not in water]
     land.sort()
@@ -122,7 +123,9 @@ def test_reproducibility():
 
 
 def _mean_land_temperature(state) -> float:
-    temps = [h.temperature for h in state.hexes.values() if h.terrain_class != TerrainClass.OCEAN]
+    temps = [
+        h.temperature for h in state.hexes.values() if h.terrain_class != TerrainClass.OPEN_WATER
+    ]
     return sum(temps) / len(temps) if temps else 0.0
 
 
@@ -171,12 +174,12 @@ def test_mean_temperature_preserves_latitude_shape():
         polar_temps = [
             h.temperature
             for (_, r), h in state.hexes.items()
-            if h.terrain_class != TerrainClass.OCEAN and r < height * 0.15
+            if h.terrain_class != TerrainClass.OPEN_WATER and r < height * 0.15
         ]
         equatorial_temps = [
             h.temperature
             for (_, r), h in state.hexes.items()
-            if h.terrain_class != TerrainClass.OCEAN and height * 0.4 < r < height * 0.6
+            if h.terrain_class != TerrainClass.OPEN_WATER and height * 0.4 < r < height * 0.6
         ]
         if polar_temps and equatorial_temps:
             assert sum(equatorial_temps) / len(equatorial_temps) > sum(polar_temps) / len(
@@ -198,7 +201,7 @@ def _mean_land_moisture(state) -> float:
     vals = [
         h.moisture
         for h in state.hexes.values()
-        if h.terrain_class not in (TerrainClass.OCEAN, TerrainClass.LAKE)
+        if h.terrain_class not in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
     ]
     return sum(vals) / len(vals) if vals else 0.0
 
@@ -255,7 +258,7 @@ def test_moisture_bleed_requires_river_tag():
 
     state = WorldState.empty(seed=1, width=3, height=1)
     for hx in state.hexes.values():
-        hx.terrain_class = TerrainClass.FLAT
+        hx.terrain_class = TerrainClass.LAND
         hx.elevation = 0.0
     state.hexes[(0, 0)].elevation = 500.0
     state.hexes[(0, 0)].river_flow = 1.0
@@ -265,7 +268,7 @@ def test_moisture_bleed_requires_river_tag():
 
     tagged_state = WorldState.empty(seed=1, width=3, height=1)
     for hx in tagged_state.hexes.values():
-        hx.terrain_class = TerrainClass.FLAT
+        hx.terrain_class = TerrainClass.LAND
         hx.elevation = 0.0
     tagged_state.hexes[(0, 0)].elevation = 500.0
     tagged_state.hexes[(0, 0)].river_flow = 1.0
@@ -311,7 +314,7 @@ def test_erosion_dose_does_not_wash_the_rain_shadow_away():
             p.add_stage(stage)
         state = p.run()
 
-        water = (TerrainClass.OCEAN, TerrainClass.LAKE)
+        water = (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
         land = [h.elevation for h in state.hexes.values() if h.terrain_class not in water]
         land.sort()
         high = land[int(len(land) * 0.8)]

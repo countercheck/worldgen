@@ -39,7 +39,7 @@ class VillagePlacementStage(GeneratorStage):
         candidates = []
         weights = []
         for coord, hx in hexes.items():
-            if hx.terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE):
+            if hx.terrain_class in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER):
                 continue
             if hx.settlement is not None:
                 continue
@@ -54,7 +54,8 @@ class VillagePlacementStage(GeneratorStage):
                 not hexes[n].cultivated
                 for n in neighbors(coord)
                 if n in hexes
-                and hexes[n].terrain_class not in (TerrainClass.OCEAN, TerrainClass.LAKE)
+                and hexes[n].terrain_class
+                not in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
             )
             road_adjacent = bool(hx.road_connections) or any(
                 hexes[n].road_connections for n in neighbors(coord) if n in hexes
@@ -89,7 +90,7 @@ class VillagePlacementStage(GeneratorStage):
                 continue
             if all(distance(coord, c) >= 3 for c in placed_coords):
                 pop = int(self.rng.integers(100, 1_001))
-                role = _assign_role(coord, hx, hexes)
+                role = _assign_role(coord, hx, hexes, self.config)
                 name = f"{hx.biome.name.lower()}_village_{village_idx}"
                 s = Settlement(
                     coord=coord,

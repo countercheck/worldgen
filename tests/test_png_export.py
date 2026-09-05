@@ -18,7 +18,7 @@ def _small_world() -> WorldState:
     ws = WorldState.empty(seed=99, width=4, height=4)
     h = ws.hexes[(0, 0)]
     h.biome = Biome.GRASSLAND
-    h.terrain_class = TerrainClass.FLAT
+    h.terrain_class = TerrainClass.LAND
     h.land_cover = LandCover.OPEN
     h.elevation = 0.5
     ws.settlements = [
@@ -306,7 +306,7 @@ def _water_crossing_world() -> WorldState:
     """A road that puts to sea mid-route: two land legs, two shore points."""
     ws = WorldState.empty(seed=99, width=6, height=3)
     for r in range(3):
-        ws.hexes[(3, r)].terrain_class = TerrainClass.OCEAN
+        ws.hexes[(3, r)].terrain_class = TerrainClass.OPEN_WATER
     lay_road(ws, [(1, 1), (2, 1), (3, 1), (4, 1), (5, 1)], RoadTier.PRIMARY)
     return ws
 

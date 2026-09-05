@@ -20,29 +20,22 @@ from worldgen.stages.road_cost import (
     river_edges,
     river_hex_cost,
     road_edge_cost,
+    slope_edge_cost,
     terrain_base_cost,
     water_edge_cost,
 )
 
 
 def _flat(coord):
-    return Hex(coord=coord, elevation=0.5, terrain_class=TerrainClass.FLAT)
+    return Hex(coord=coord, elevation=0.5, terrain_class=TerrainClass.LAND)
 
 
 def _ocean(coord):
-    return Hex(coord=coord, elevation=0.0, terrain_class=TerrainClass.OCEAN)
+    return Hex(coord=coord, elevation=0.0, terrain_class=TerrainClass.OPEN_WATER)
 
 
 def _lake(coord):
-    return Hex(coord=coord, elevation=0.0, terrain_class=TerrainClass.LAKE)
-
-
-def _mountain(coord):
-    return Hex(coord=coord, elevation=0.9, terrain_class=TerrainClass.STEEP)
-
-
-def _hill(coord):
-    return Hex(coord=coord, elevation=0.7, terrain_class=TerrainClass.ROLLING)
+    return Hex(coord=coord, elevation=0.0, terrain_class=TerrainClass.INLAND_WATER)
 
 
 def _river_flat(coord, flow=1.0):
@@ -67,11 +60,29 @@ def test_terrain_base_cost_water_is_finite():
     assert cfg.road_water_cost < cfg.road_flat_cost  # water is cheaper per-hex than land
 
 
-def test_terrain_base_cost_land_classes():
+def test_terrain_base_cost_is_flat_across_land():
+    """Steepness is charged per edge, by grade, and must not be charged again per hex.
+
+    The node cost used to add a hill and a mountain rate on top of `slope_edge_cost`,
+    which prices the elevation a road actually climbs. That was the same terrain paid for
+    twice — and paid off a threshold, so a level floodplain under a bluff was billed as
+    mountain while a long gentle haul up to the same height was billed as flat.
+    """
     cfg = WorldConfig()
-    assert terrain_base_cost(_flat((0, 0)), cfg) == cfg.road_flat_cost
-    assert terrain_base_cost(_hill((0, 0)), cfg) == cfg.road_rolling_cost
-    assert terrain_base_cost(_mountain((0, 0)), cfg) == cfg.road_steep_cost
+    steep = Hex(coord=(0, 0), elevation=900.0, slope=200.0)
+    gentle = Hex(coord=(1, 0), elevation=900.0, slope=1.0)
+    assert terrain_base_cost(steep, cfg) == cfg.road_flat_cost
+    assert terrain_base_cost(gentle, cfg) == cfg.road_flat_cost
+
+
+def test_grade_is_what_makes_a_climb_expensive():
+    # The term that does carry steepness: a road up a wall costs more than one along a
+    # shelf, and it reads the elevations rather than a label either hex carries.
+    cfg = WorldConfig()
+    low = Hex(coord=(0, 0), elevation=100.0)
+    high = Hex(coord=(1, 0), elevation=900.0)
+    level = Hex(coord=(1, 0), elevation=110.0)
+    assert slope_edge_cost(low, high, cfg) > slope_edge_cost(low, level, cfg)
 
 
 # ---------- water_edge_cost ------------------------------------------------
@@ -158,7 +169,7 @@ def test_road_edge_cost_combines_water_and_river():
     # the channel, which is the combination under test.
     river_mouth = _river_flat((0, 0), flow=0.5)
     river_mouth.elevation = 0.5
-    sea = Hex(coord=(1, 0), elevation=0.5, terrain_class=TerrainClass.OCEAN)
+    sea = Hex(coord=(1, 0), elevation=0.5, terrain_class=TerrainClass.OPEN_WATER)
     cost = road_edge_cost(river_mouth, sea, cfg)
     expected = (
         cfg.road_embark_cost + cfg.road_river_crossing_base + 0.5 * cfg.road_river_crossing_flow
@@ -196,7 +207,7 @@ def test_astar_takes_water_shortcut_across_strait():
 
     path = astar(hexes, (0, 1), (20, 1), node_cost, edge_cost)
     assert path is not None
-    has_water = any(hexes[c].terrain_class == TerrainClass.OCEAN for c in path)
+    has_water = any(hexes[c].terrain_class == TerrainClass.OPEN_WATER for c in path)
     assert has_water, "A* should cross the strait rather than take an impossible detour"
 
 
@@ -220,7 +231,7 @@ def test_astar_avoids_water_when_short_land_detour_available():
 
     path = astar(hexes, (0, 1), (4, 1), node_cost, edge_cost)
     assert path is not None
-    has_water = any(hexes[c].terrain_class == TerrainClass.OCEAN for c in path)
+    has_water = any(hexes[c].terrain_class == TerrainClass.OPEN_WATER for c in path)
     assert not has_water, f"Short land detour should beat a 1-hex water hop, got {path}"
 
 
@@ -459,7 +470,7 @@ def test_ferry_lands_on_dry_land_off_the_channel():
     )
     for landing in (ferry.a, ferry.b):
         hx = hexes[landing]
-        assert hx.terrain_class not in (TerrainClass.OCEAN, TerrainClass.LAKE)
+        assert hx.terrain_class not in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
         assert hx.river_flow <= 0, f"anchorage at {landing} sits in the channel"
 
 
@@ -469,7 +480,7 @@ def test_ferry_link_raises_when_every_landing_is_wet():
     hexes, river = _cut_grid()
     blocked = river_edges([river])
     for coord in ((4, 0), (5, 0)):
-        hexes[coord].terrain_class = TerrainClass.OCEAN
+        hexes[coord].terrain_class = TerrainClass.OPEN_WATER
     near = reachable_under_constraint(hexes, (0, 0), blocked, frozenset())
 
     with pytest.raises(RoutingError, match="no dry land off the channel"):

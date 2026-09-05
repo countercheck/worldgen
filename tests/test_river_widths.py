@@ -10,7 +10,7 @@ from worldgen.export import rivers
 def _grid(flows: dict) -> dict:
     """A grid of (q, 0) hexes carrying the given per-hex river flows."""
     return {
-        (q, 0): Hex(coord=(q, 0), terrain_class=TerrainClass.FLAT, river_flow=f)
+        (q, 0): Hex(coord=(q, 0), terrain_class=TerrainClass.LAND, river_flow=f)
         for q, f in flows.items()
     }
 

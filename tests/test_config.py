@@ -286,42 +286,58 @@ def test_world_config_validates_heightmap_fields(kwargs, message):
         WorldConfig(**kwargs)
 
 
-def test_the_road_knobs_the_haulage_branch_deleted_are_retired_not_unknown(tmp_path):
-    """A config that generated a world yesterday must not crash today.
+@pytest.mark.parametrize(
+    "kwargs,message",
+    [
+        ({"river_inflow_count": -1}, "river_inflow_count"),
+        ({"river_inflow_volume": -0.1}, "river_inflow_volume"),
+        ({"river_inflow_min_separation": -1}, "river_inflow_min_separation"),
+        ({"river_inflow_edges": ["nrth"]}, "river_inflow_edges"),
+        ({"river_inflow_edges": [3]}, "river_inflow_edges"),
+        ({"river_inflow_length_bias": -0.1}, "river_inflow_length_bias"),
+        ({"river_inflow_min_length": -0.1}, "river_inflow_min_length"),
+        # The shared edge parser names the setting that was actually wrong, so a typo in
+        # one edge list is never reported against the other.
+        ({"continent_falloff_edges": ["nrth"]}, "continent_falloff_edges"),
+    ],
+)
+def test_world_config_validates_river_inflow_fields(kwargs, message):
+    with pytest.raises(ValueError, match=message):
+        WorldConfig(**kwargs)
 
-    These eight were deleted when slope pricing went continuous, the bank discount was
-    retired, and travellers went per head of population. Each must die as a deprecation
-    that says where its job went — not as an unknown-key error with a fuzzy guess.
+
+def test_river_inflow_edges_are_canonicalised():
+    # Same normalisation the falloff edges get: a comma-separated string, any case, any
+    # order, deduplicated, and stable so two equivalent configs compare equal.
+    assert WorldConfig(river_inflow_edges="West, north ,west").river_inflow_edges == (
+        "north",
+        "west",
+    )
+    assert WorldConfig(river_inflow_edges=[]).river_inflow_edges == ()
+
+
+def test_world_config_validates_evaporation_scale():
+    with pytest.raises(ValueError, match="endorheic_evaporation_scale"):
+        WorldConfig(endorheic_evaporation_scale=-0.1)
+
+
+def test_every_climate_evaporates_something_and_the_warm_ones_evaporate_more():
+    """The basin water balance reads potential evapotranspiration, not a per-climate knob.
+
+    It is the same term the runoff model takes off the top of the rain, which is what
+    stops the basins and the rivers disagreeing about the climate — and being keyed on
+    temperature it orders itself: a desert basin loses more than a subarctic one without
+    anybody tabulating that fact.
     """
-    old = {
-        "road_slope_cost": 4.0,
-        "road_slope_free_pct": 2.0,
-        "road_slope_cap_mult": 10.0,
-        "road_bank_discount": 0.5,
-        "road_bank_discount_min_flow": 0.1,
-        "road_travellers_city": 60,
-        "road_travellers_town": 25,
-        "road_travellers_village": 6,
-    }
-    path = tmp_path / "old.yaml"
-    path.write_text("width: 32\n" + "".join(f"{k}: {v}\n" for k, v in old.items()))
+    from worldgen.core.config import CLIMATE_CONTEXTS
 
-    with pytest.warns(DeprecationWarning):
-        cfg = WorldConfig.from_yaml(str(path))
-    assert cfg.width == 32
+    pets = {name: WorldConfig(regional_climate=name).pet_mm() for name in CLIMATE_CONTEXTS}
+    assert all(v > 0 for v in pets.values()), pets
+    # Warmer regions must evaporate more, or the balance has the world backwards.
+    assert pets["boreal"] < pets["temperate"] < pets["mediterranean"] < pets["arid"], pets
 
 
-def test_the_model_is_a_config_field_and_validated():
-    """The model rides in the config so world.json records which model made the map."""
-    assert WorldConfig().model == "classic"
-    assert WorldConfig(model="organic").model == "organic"
-    with pytest.raises(ValueError, match="model"):
-        WorldConfig(model="baroque")
-
-
-def test_zero_divisor_knobs_fail_loudly():
-    """Both are divisors; at zero they used to crash mid-pipeline, not at load."""
-    with pytest.raises(ValueError, match="market_kernel_decay"):
-        WorldConfig(market_kernel_decay=0.0)
-    with pytest.raises(ValueError, match="crossing_relief_m"):
-        WorldConfig(crossing_relief_m=0.0)
+@pytest.mark.parametrize("value", [-0.1, 1.1])
+def test_world_config_validates_rain_shadow_strength(value):
+    with pytest.raises(ValueError, match="rain_shadow_strength"):
+        WorldConfig(rain_shadow_strength=value)

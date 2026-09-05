@@ -107,7 +107,7 @@ class CrossingStage(GeneratorStage):
         surplus = {
             coord: potential_food(hx, cfg) * cfg.marketable_surplus_fraction
             for coord, hx in hexes.items()
-            if hx.terrain_class not in (TerrainClass.OCEAN, TerrainClass.LAKE)
+            if hx.terrain_class not in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
         }
 
         # sorted() throughout: which of two equally good sites gets the bridge decides

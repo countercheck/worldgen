@@ -5,7 +5,7 @@ from ..core.hex import TerrainClass
 from ..core.hex_grid import astar, distance, neighbors
 from ..core.world_state import ROAD_TIER_RANK, Ferry, RoadTier, road_edge_key
 
-WATER = (TerrainClass.OCEAN, TerrainClass.LAKE)
+WATER = (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
 
 
 def delta_elevation(from_hx, to_hx) -> float:
@@ -79,12 +79,11 @@ def terrain_base_cost(hx, cfg) -> float:
     tc = hx.terrain_class
     if tc in WATER:
         return cfg.road_water_cost
-    if tc == TerrainClass.ESCARPMENT:
-        return cfg.road_escarpment_cost
-    if tc == TerrainClass.STEEP:
-        return cfg.road_steep_cost
-    if tc == TerrainClass.ROLLING:
-        return cfg.road_rolling_cost
+    # No steepness surcharge here.  The climb between two hexes is already priced on the
+    # edge, from the actual metres of rise, so banding the hex and charging again billed
+    # the same ascent twice — and billed it wrongly where the band and the grade
+    # disagreed, taxing a level valley floor at escarpment rates because the bluff above
+    # it was in the averaging window.
     return cfg.road_flat_cost
 
 

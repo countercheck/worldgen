@@ -275,7 +275,10 @@ def _is_water(hexes: dict[HexCoord, Hex], coord: HexCoord) -> bool:
     same way `split_path_on_water` keeps it rather than cutting the path there.
     """
     hx = hexes.get(coord)
-    return hx is not None and hx.terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE)
+    return hx is not None and hx.terrain_class in (
+        TerrainClass.OPEN_WATER,
+        TerrainClass.INLAND_WATER,
+    )
 
 
 def water_transitions(path: list[HexCoord], hexes: dict[HexCoord, Hex]) -> list[HexCoord]:
@@ -395,7 +398,10 @@ def split_path_on_water(path: list[HexCoord], hexes: dict[HexCoord, Hex]) -> lis
     current: list[HexCoord] = []
     for coord in path:
         hx = hexes.get(coord)
-        if hx is not None and hx.terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE):
+        if hx is not None and hx.terrain_class in (
+            TerrainClass.OPEN_WATER,
+            TerrainClass.INLAND_WATER,
+        ):
             if len(current) >= 2:
                 segments.append(current)
             current = []
@@ -417,7 +423,7 @@ def grade_reachable_count(
     If start is missing or water, returns 0."""
     if start not in hexes:
         return 0
-    if hexes[start].terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE):
+    if hexes[start].terrain_class in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER):
         return 0
 
     visited: set[HexCoord] = {start}
@@ -430,7 +436,7 @@ def grade_reachable_count(
             if nb not in hexes or nb in visited:
                 continue
             nb_hx = hexes[nb]
-            if nb_hx.terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE):
+            if nb_hx.terrain_class in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER):
                 continue
             if grade_ok(hexes[coord], nb_hx):
                 visited.add(nb)

@@ -62,7 +62,7 @@ def _water_components(state, terrain_class):
 def test_ocean_bodies_touch_border(world):
     """Every connected OCEAN water body must include at least one map-edge hex."""
     w, h = world.width, world.height
-    for comp in _water_components(world, TerrainClass.OCEAN):
+    for comp in _water_components(world, TerrainClass.OPEN_WATER):
         assert any(_on_border(c, w, h) for c in comp), (
             f"OCEAN component of size {len(comp)} has no map-edge hex"
         )
@@ -72,7 +72,7 @@ def test_lake_bodies_no_border(world):
     """No LAKE hex may be on the map edge (lakes are entirely inland)."""
     w, h = world.width, world.height
     for coord, hx in world.hexes.items():
-        if hx.terrain_class == TerrainClass.LAKE:
+        if hx.terrain_class == TerrainClass.INLAND_WATER:
             assert not _on_border(coord, w, h), (
                 f"LAKE hex {coord} is on the map edge — should be OCEAN"
             )
@@ -85,7 +85,7 @@ def test_all_water_classified(world):
     world rather than a comparison against a per-map threshold.
     """
     sea = 0.0
-    water_types = (TerrainClass.OCEAN, TerrainClass.LAKE)
+    water_types = (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
     for coord, hx in world.hexes.items():
         if hx.elevation < sea:
             assert hx.terrain_class in water_types, (
@@ -97,7 +97,7 @@ def test_all_water_classified(world):
 def test_lake_has_outflow_river(world):
     """Each LAKE must have an outflow: a border river hex whose connected river path
     (without re-entering this lake) reaches ocean, border, or another lake."""
-    lake_comps = _water_components(world, TerrainClass.LAKE)
+    lake_comps = _water_components(world, TerrainClass.INLAND_WATER)
     if not lake_comps:
         pytest.skip("No lakes in this world — nothing to check")
 
@@ -105,7 +105,7 @@ def test_lake_has_outflow_river(world):
     land = {
         c
         for c, hx in world.hexes.items()
-        if hx.terrain_class not in (TerrainClass.OCEAN, TerrainClass.LAKE)
+        if hx.terrain_class not in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
     }
 
     def downstream_reaches_terminal(start, comp_set):
@@ -121,10 +121,10 @@ def test_lake_has_outflow_river(world):
                 if nbr not in world.hexes or nbr in visited:
                     continue
                 nhx = world.hexes[nbr]
-                if nhx.terrain_class == TerrainClass.OCEAN:
+                if nhx.terrain_class == TerrainClass.OPEN_WATER:
                     return True
                 # Accept reaching a *different* lake as a valid intermediate terminal
-                if nhx.terrain_class == TerrainClass.LAKE and nbr not in comp_set:
+                if nhx.terrain_class == TerrainClass.INLAND_WATER and nbr not in comp_set:
                     return True
                 if nbr in land and "river" in nhx.tags:
                     visited.add(nbr)
@@ -153,7 +153,7 @@ def test_lake_chain_terminates(world):
     the next water body.  If that next body is another lake, recurse; if it is ocean or
     border the chain terminates successfully.  Tracking visited lake indices detects cycles.
     """
-    lake_comps = _water_components(world, TerrainClass.LAKE)
+    lake_comps = _water_components(world, TerrainClass.INLAND_WATER)
     if not lake_comps:
         pytest.skip("No lakes in this world — nothing to check")
 
@@ -161,7 +161,7 @@ def test_lake_chain_terminates(world):
     land = {
         c
         for c, hx in world.hexes.items()
-        if hx.terrain_class not in (TerrainClass.OCEAN, TerrainClass.LAKE)
+        if hx.terrain_class not in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
     }
     hex_to_lake_idx = {c: i for i, comp in enumerate(lake_comps) for c in comp}
 
@@ -187,7 +187,7 @@ def test_lake_chain_terminates(world):
                 if nbr not in world.hexes or nbr in visited:
                     continue
                 nhx = world.hexes[nbr]
-                if nhx.terrain_class == TerrainClass.OCEAN:
+                if nhx.terrain_class == TerrainClass.OPEN_WATER:
                     return "ocean", found_lakes
                 if nbr in hex_to_lake_idx:
                     found_lakes.add(hex_to_lake_idx[nbr])

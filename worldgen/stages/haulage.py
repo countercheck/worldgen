@@ -320,12 +320,12 @@ def settleable(hexes, cfg) -> set:
     The same exclusions `HabitabilityStage` scores to zero — you do not found a village on
     open water, a mountain face, or a bog — kept in one place so the two cannot drift.
     """
-    from ..core.hex import STEEP_LAND, Biome
+    from ..core.hex import Biome, is_steep
 
     return {
         coord
         for coord, hx in hexes.items()
         if hx.terrain_class not in WATER
-        and hx.terrain_class not in STEEP_LAND
+        and not is_steep(hx, cfg.terrain_steep_gradient_m)
         and hx.biome is not Biome.WETLAND
     }

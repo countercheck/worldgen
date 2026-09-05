@@ -1,6 +1,11 @@
+import heapq
+from collections import deque
+
 import numpy as np
 from scipy.ndimage import gaussian_filter
 
+from ..core.hex_grid import distance as hex_distance
+from ..core.hex_grid import neighbors as hex_neighbors
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
 
@@ -160,6 +165,270 @@ def _drop_particle(
         px, py = new_px, new_py
 
 
+def _neighbour_table(state: WorldState, w: int, h: int) -> list[list[tuple[int, int]]]:
+    """Each grid cell's in-bounds hex neighbours, as flat-indexed (col, row) pairs.
+
+    Built once and shared by the sink fill and the accumulation across every carve pass.
+    Those walk every cell six ways several times over, and resolving the neighbourhood
+    through `coord_at`, `neighbors` and `grid_index` each time made the widening cost more
+    than the droplet simulation it follows — about four times the test suite's runtime.
+    The mapping is the same on every pass, so it is worth computing once.
+    """
+    table: list[list[tuple[int, int]]] = []
+    for i in range(w):
+        for j in range(h):
+            cell = []
+            for n in hex_neighbors(state.coord_at(i, j)):
+                if n not in state.hexes:
+                    continue
+                ni, nj = state.grid_index(n)
+                if 0 <= ni < w and 0 <= nj < h:
+                    cell.append((ni, nj))
+            table.append(cell)
+    return table
+
+
+def _fill_sinks(
+    arr: np.ndarray, sea_level: float, neighbours: list[list[tuple[int, int]]]
+) -> np.ndarray:
+    """A copy of *arr* with its depressions filled to their spill level (Barnes et al).
+
+    Accumulation needs this and the droplets guarantee it will be needed: they leave the
+    surface pitted, and without filling, drainage dies at the first depression it meets.
+    That is not a small error — it is the difference between a map of short disconnected
+    segments and one with trunk rivers, and it was most of why the channels being widened
+    coincided with only a third of the rivers hydrology later found.  Hydrology fills
+    sinks for exactly this reason before it routes anything; measuring the same quantity
+    means filling them here too.
+
+    Returns a copy: the fill decides where water *would* run, and is no reason to raise
+    the actual ground.
+    """
+    filled = arr.copy()
+    w, h = arr.shape
+    visited = np.zeros((w, h), dtype=bool)
+    heap: list[tuple[float, int, int]] = []
+
+    # Seed from the sea and the map edge, the two places water leaves by.
+    for i in range(w):
+        for j in range(h):
+            if arr[i, j] < sea_level or i in (0, w - 1) or j in (0, h - 1):
+                heapq.heappush(heap, (float(filled[i, j]), i, j))
+                visited[i, j] = True
+
+    while heap:
+        elev, i, j = heapq.heappop(heap)
+        for ni, nj in neighbours[i * h + j]:
+            if visited[ni, nj]:
+                continue
+            visited[ni, nj] = True
+            filled[ni, nj] = max(filled[ni, nj], elev)
+            heapq.heappush(heap, (float(filled[ni, nj]), ni, nj))
+    return filled
+
+
+def _grid_flow_accumulation(
+    arr: np.ndarray,
+    sea_level: float,
+    neighbours: list[list[tuple[int, int]]],
+    inflow: dict[tuple[int, int], float] | None = None,
+) -> np.ndarray:
+    """How much land drains through each cell, by steepest descent over the hex grid.
+
+    Valleys have to be widened where the rivers will be, and the droplet affinity does not
+    answer that — it records where droplets wandered while the terrain was still being
+    cut, and only about one cell in five of the finished river network sits on it.
+    Hydrology chooses its rivers by flow accumulation, so this measures the same thing.
+
+    Cells are handled high to low, each passing its total to its lowest neighbour, so one
+    sort does the work of a traversal per cell.  Routing runs over the sink-filled
+    surface, not the raw one, so water crosses a depression rather than disappearing into
+    it — without that the network is a scatter of short segments and no trunk river ever
+    forms.
+    """
+    w, h = arr.shape
+    land = arr >= sea_level
+    acc = np.where(land, 1.0, 0.0)
+    # A river entering from off the map brings a catchment this map never had.  Seeding it
+    # here is what makes the valley match the water: widening scales its reach by
+    # discharge, so without this an imported trunk is measured as the trickle its first
+    # few on-map hexes would raise, and gets a trickle's valley.
+    for cell, volume in (inflow or {}).items():
+        if land[cell]:
+            acc[cell] = max(acc[cell], volume)
+
+    # Route over the filled surface, so water crosses a depression instead of vanishing
+    # into it — the same thing hydrology does, and the reason the two agree on where the
+    # rivers are.
+    routing = _fill_sinks(arr, sea_level, neighbours)
+    order = [(int(i), int(j)) for i, j in np.argwhere(land)]
+    order.sort(key=lambda c: -routing[c])
+
+    for i, j in order:
+        lowest = None
+        lowest_elev = routing[i, j]
+        for ni, nj in neighbours[i * h + j]:
+            if not land[ni, nj]:
+                continue
+            if routing[ni, nj] < lowest_elev:
+                lowest_elev = routing[ni, nj]
+                lowest = (ni, nj)
+        if lowest is not None:
+            acc[lowest] += acc[i, j]
+    return acc
+
+
+def _inflow_mouths(
+    arr: np.ndarray,
+    sea_level: float,
+    state: WorldState,
+    neighbours: list[list[tuple[int, int]]],
+    edges: tuple,
+    count: int,
+    separation: int,
+) -> list[tuple[int, int]]:
+    """Border cells where a river from beyond the map would enter, best first.
+
+    The criterion is hydrology's: land on a chosen edge whose ground falls away inland.
+    Erosion cannot ask which hexes hydrology will pick — that runs three stages later and
+    needs a priority-flood this stage has no reason to do — but it does not have to.
+    Carving these deepens the very descent hydrology ranks on, so the mouths chosen here
+    are the ones it goes on to choose, and the two agree by construction.
+
+    Ranked by drop and thinned by `separation`, so two inlets do not land in one valley.
+    """
+    if count <= 0:
+        return []
+    w, h = arr.shape
+    wanted = set(edges)
+    candidates: list[tuple[float, tuple[int, int]]] = []
+
+    for i in range(w):
+        for j in range(h):
+            on_edge = set()
+            if i == 0:
+                on_edge.add("west")
+            if i == w - 1:
+                on_edge.add("east")
+            if j == 0:
+                on_edge.add("north")
+            if j == h - 1:
+                on_edge.add("south")
+            if not (on_edge & wanted) or arr[i, j] < sea_level:
+                continue
+            best = 0.0
+            for ni, nj in neighbours[i * h + j]:
+                if arr[ni, nj] < sea_level:
+                    continue
+                if ni in (0, w - 1) or nj in (0, h - 1):
+                    continue  # still on the border: along the edge, not into the map
+                best = max(best, arr[i, j] - arr[ni, nj])
+            if best > 0.0:
+                candidates.append((best, (i, j)))
+
+    candidates.sort(key=lambda c: (-c[0], c[1]))
+    chosen: list[tuple[int, int]] = []
+    for _drop, cell in candidates:
+        if len(chosen) >= count:
+            break
+        coord = state.coord_at(*cell)
+        if all(hex_distance(coord, state.coord_at(*c)) >= separation for c in chosen):
+            chosen.append(cell)
+    return chosen
+
+
+def _widen_valleys(
+    arr: np.ndarray,
+    discharge: np.ndarray,
+    sea_level: float,
+    width_max: float,
+    width_exponent: float,
+    floor_slope: float,
+    max_relief: float,
+    channel_fraction: float,
+) -> None:
+    """Plane a flat floor outward from each channel, in place.
+
+    Droplet erosion only ever incises: a droplet cuts along the line it travels, so the
+    field ends up carved into V-notches one cell wide however long it runs.  What widens a
+    real valley is the channel wandering sideways across it for a very long time, planing
+    everything down to about its own level — lateral planation, which a point process has
+    no way to express.  This is that missing term.
+
+    The result is deliberately a *flat floor between bluffs* rather than a broadened V.
+    Lateral planation cuts to grade and stops at what it cannot shift, so the floor is
+    level and the step up to the valley wall is abrupt — the Mississippi's bluff line, the
+    escarpment walling the Nile.  Lowering cells to the channel out to a width and leaving
+    everything past it alone gives that step for free; a smooth falloff would give a soft
+    bowl, which reads as a dry basin rather than a valley.
+
+    Reach scales with *discharge*, since floodplain width goes roughly with the square
+    root of drainage area — hence the exponent.  Ground standing more than `max_relief`
+    above the floor is valley wall: it is left alone, and the fill stops rather than
+    stepping over it, which is what keeps a valley to its valley instead of planing the
+    countryside, and makes `width_max` a cap rather than the usual outcome.
+
+    Cells are never raised, only cut, and never below the channel doing the cutting — so
+    this cannot invent a sink, drown land, or undo the droplets' work.
+
+    Neighbours here are the four of the array rather than the six of the hex grid: this
+    fills an area rather than tracing a line, so the shape of the neighbourhood washes out,
+    and it is the same square-lattice approximation `_drop_particle` already makes.
+    """
+    if width_max <= 0.0:
+        return
+    land = arr >= sea_level
+    if not land.any():
+        return
+
+    flow = np.where(land, discharge, 0.0)
+    max_flow = float(flow.max())
+    if max_flow <= 0.0:
+        return
+
+    threshold = float(np.quantile(flow[land], 1.0 - channel_fraction))
+    channels = np.argwhere(land & (flow >= threshold))
+    if len(channels) == 0:
+        return
+
+    w, h = arr.shape
+    target = np.full((w, h), np.inf)
+    budget = np.zeros((w, h))
+    queue: deque = deque()
+
+    for i, j in channels:
+        i, j = int(i), int(j)
+        reach = width_max * (flow[i, j] / max_flow) ** width_exponent
+        if reach < 1.0:
+            continue
+        target[i, j] = arr[i, j]
+        budget[i, j] = reach
+        queue.append((i, j))
+
+    while queue:
+        i, j = queue.popleft()
+        remaining = budget[i, j] - 1.0
+        if remaining < 0.0:
+            continue
+        # The floor rises a little away from the channel, so a floodplain drains toward
+        # its river instead of ponding.
+        floor = target[i, j] + floor_slope
+        for ni, nj in ((i + 1, j), (i - 1, j), (i, j + 1), (i, j - 1)):
+            if not (0 <= ni < w and 0 <= nj < h) or not land[ni, nj]:
+                continue
+            if arr[ni, nj] - floor > max_relief:
+                continue  # valley wall: too high to plane, and the fill stops here
+            # A cell reached by two valleys takes the lower floor: at a confluence the
+            # larger river governs, which is what it does on the ground.
+            if floor < target[ni, nj] - 1e-12:
+                target[ni, nj] = floor
+                budget[ni, nj] = remaining
+                queue.append((ni, nj))
+
+    cut = np.isfinite(target)
+    arr[cut] = np.minimum(arr[cut], target[cut])
+
+
 class ErosionStage(GeneratorStage):
     def run(self, state: WorldState) -> WorldState:
         cfg = self.config
@@ -245,12 +514,56 @@ class ErosionStage(GeneratorStage):
 
         arr = gaussian_filter(arr, sigma=0.5)
 
-        # Back to metres. There is deliberately no re-stretch to [0, 1] here: it would
-        # undo the datum, putting the lowest point of the eroded map at the seabed and
-        # the highest at the peak whatever erosion had actually done to either. Sea level
-        # has to stay where it is for the word to mean anything, and a landscape that has
-        # been worn down should read as worn down rather than being scaled back up to
-        # fill the range it started with.
+        # Back to metres below. There is deliberately no re-stretch to [0, 1] first: it
+        # would undo the datum, putting the lowest point of the eroded map at the seabed
+        # and the highest at the peak whatever erosion had actually done to either. Sea
+        # level has to stay where it is for the word to mean anything, and a landscape
+        # that has been worn down should read as worn down rather than being scaled back
+        # up to fill the range it started with.
+        #
+        # Carve the valleys, then look again at where the water runs, and carve again.
+        # One pass does not do it: widening a valley moves the drainage into it, so the
+        # network measured before the first cut is not the network that exists after —
+        # against hydrology's rivers a one-shot carve landed on about a quarter of them.
+        # Letting terrain and drainage settle against each other is what a landscape
+        # evolution model does, and it is the only way the two agree by the time anything
+        # downstream reads either.
+        if land_coords and cfg.valley_width_max > 0.0:
+            # Rivers that enter from off the map bring a catchment this map never had, and
+            # nothing here knew about it: accumulation starts every cell at one hex of
+            # rain, so an imported trunk was measured as the trickle its first few on-map
+            # hexes raise, and widening gave it a trickle's valley.  Seed the mouths with
+            # what they actually carry — the same quantity hydrology seeds them with — and
+            # the valley follows the water without any special case for it.
+            neighbours = _neighbour_table(state, w, h)
+            inflow_volume = max(1.0, cfg.river_inflow_volume * len(land_coords))
+            inflow = {
+                mouth: inflow_volume
+                for mouth in _inflow_mouths(
+                    arr,
+                    sea_shaped,
+                    state,
+                    neighbours,
+                    tuple(cfg.river_inflow_edges),
+                    cfg.river_inflow_count,
+                    cfg.river_inflow_min_separation,
+                )
+            }
+
+            # The two height knobs are quoted in metres and the field is normalised, so
+            # they are divided by the same span the array was built with.
+            for _ in range(cfg.valley_carve_passes):
+                _widen_valleys(
+                    arr,
+                    _grid_flow_accumulation(arr, sea_shaped, neighbours, inflow),
+                    sea_shaped,
+                    cfg.valley_width_max,
+                    cfg.valley_width_exponent,
+                    cfg.valley_floor_slope_m / span,
+                    cfg.valley_max_relief_m / span,
+                    cfg.valley_channel_fraction,
+                )
+
         for col in range(w):
             for row in range(h):
                 metres = float(arr[col, row]) * span - cfg.seabed_depth_m

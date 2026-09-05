@@ -45,15 +45,34 @@ ROAD_TIER_RANK = {RoadTier.TRACK: 0, RoadTier.SECONDARY: 1, RoadTier.PRIMARY: 2}
 # 1.5 put "delta_elevation_m" on each edge, signed in the direction of the key.  It is the
 # quantity that decides how slow a segment is, and nothing reading a world should have to
 # reconstruct the cost model to find it.  An older file loads with zeroes.
-SCHEMA_VERSION = "1.6"
-SUPPORTED_SCHEMA_VERSIONS = frozenset({"1.0", "1.1", "1.2", "1.3", "1.4", "1.5", "1.6"})
+# 1.7 stopped storing steepness as a class and started storing it as a measurement:
+# "slope" in metres of rise per kilometre and "relief" in metres of command over the
+# lowest neighbouring ground, with "terrain_class" reduced to the four kinds that are
+# genuinely kinds — open water, inland water, coast, land.  An older file loads: its
+# steepness bands translate to LAND and its water classes to the two new names, but the
+# numbers cannot be recovered from the words, so both default to zero.  A world written
+# before this re-renders flat.  Regenerate rather than re-render.
+SCHEMA_VERSION = "1.7"
+SUPPORTED_SCHEMA_VERSIONS = frozenset({"1.0", "1.1", "1.2", "1.3", "1.4", "1.5", "1.6", "1.7"})
 
 
-# Terrain classes before they were reframed as bands of gradient. "hill" and "mountain"
-# named landforms and were partly decided on altitude; the bands that replaced them are
-# named for slope and measured in metres per kilometre. The mapping is the closest
-# equivalent, so a world saved earlier still loads.
-_TERRAIN_ALIASES = {"hill": "rolling", "mountain": "steep"}
+# Terrain classes from before steepness stopped being a class at all.  "hill" and
+# "mountain" named landforms and were partly decided on altitude; the gradient bands that
+# briefly replaced them were named for slope; and now none of them is a terrain class,
+# because the ground's steepness is measured on the hex instead.  Every one of them loads
+# as LAND, and the two water names carry over to what they always meant.  A world saved
+# earlier still opens; it just has no `slope` to draw, which is why re-rendering one
+# comes out flat.
+_TERRAIN_ALIASES = {
+    "hill": "land",
+    "mountain": "land",
+    "flat": "land",
+    "rolling": "land",
+    "steep": "land",
+    "escarpment": "land",
+    "ocean": "open_water",
+    "lake": "inland_water",
+}
 
 
 @dataclass
@@ -199,20 +218,20 @@ class WorldState:
         return [
             h
             for h in self.hexes.values()
-            if h.terrain_class not in (TerrainClass.OCEAN, TerrainClass.LAKE)
+            if h.terrain_class not in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
         ]
 
-    def all_ocean(self) -> list[Hex]:
-        """All ocean hexes (map-edge-connected water bodies)."""
+    def all_open_water(self) -> list[Hex]:
+        """Water that reaches the map edge, and so carries what enters it away."""
         from .hex import TerrainClass
 
-        return [h for h in self.hexes.values() if h.terrain_class == TerrainClass.OCEAN]
+        return [h for h in self.hexes.values() if h.terrain_class == TerrainClass.OPEN_WATER]
 
-    def all_lakes(self) -> list[Hex]:
-        """All lake hexes (inland water bodies)."""
+    def all_inland_water(self) -> list[Hex]:
+        """Water with no way off the map: a basin, fresh or salt."""
         from .hex import TerrainClass
 
-        return [h for h in self.hexes.values() if h.terrain_class == TerrainClass.LAKE]
+        return [h for h in self.hexes.values() if h.terrain_class == TerrainClass.INLAND_WATER]
 
     def all_water(self) -> list[Hex]:
         """All water hexes (ocean and lakes)."""
@@ -221,7 +240,7 @@ class WorldState:
         return [
             h
             for h in self.hexes.values()
-            if h.terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE)
+            if h.terrain_class in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
         ]
 
     def to_dict(self) -> dict:
@@ -242,6 +261,8 @@ class WorldState:
                     "temperature": h.temperature,
                     "biome": h.biome.value if h.biome is not None else None,
                     "terrain_class": h.terrain_class.value,
+                    "slope": h.slope,
+                    "relief": h.relief,
                     "land_cover": h.land_cover.value if h.land_cover is not None else None,
                     "soil": h.soil.value if h.soil is not None else None,
                     "land_use": h.land_use.value if h.land_use is not None else None,
@@ -352,6 +373,10 @@ class WorldState:
                 temperature=hd["temperature"],
                 biome=Biome(hd["biome"]) if hd.get("biome") is not None else None,
                 terrain_class=TerrainClass(terrain),
+                # Absent before 1.7, and not recoverable from the class name that
+                # replaced them: a world written earlier draws flat until regenerated.
+                slope=hd.get("slope", 0.0),
+                relief=hd.get("relief", 0.0),
                 land_cover=LandCover(hd["land_cover"])
                 if hd.get("land_cover") is not None
                 else None,

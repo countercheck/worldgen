@@ -19,11 +19,11 @@ from worldgen.stages.haulage import (
 )
 
 
-def _hex(coord, terrain=TerrainClass.FLAT, **kw):
+def _hex(coord, terrain=TerrainClass.LAND, **kw):
     return Hex(coord=coord, terrain_class=terrain, **kw)
 
 
-def _strip(length, terrain=TerrainClass.FLAT):
+def _strip(length, terrain=TerrainClass.LAND):
     """A one-row corridor, so travel cost equals distance on flat ground."""
     return {(q, 0): _hex((q, 0), terrain) for q in range(length)}
 
@@ -76,7 +76,7 @@ def test_zero_range_carries_nothing():
 
 def test_open_water_is_navigable():
     cfg = WorldConfig()
-    for terrain in (TerrainClass.OCEAN, TerrainClass.LAKE):
+    for terrain in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER):
         assert navigable(_hex((0, 0), terrain), cfg)
 
 
@@ -118,7 +118,7 @@ def test_water_multiplies_reach():
     """
     cfg = WorldConfig()
     inland = haulage_range(_hex((0, 0)), cfg)
-    port = haulage_range(_hex((1, 0), TerrainClass.OCEAN), cfg)
+    port = haulage_range(_hex((1, 0), TerrainClass.OPEN_WATER), cfg)
     assert inland == cfg.haulage_range_land
     assert port == pytest.approx(inland * cfg.haulage_range_water_mult)
     assert port > inland
@@ -210,7 +210,7 @@ def test_water_is_not_traversable():
     """Otherwise one coastal seat claims a whole sea, and every catchment beyond it."""
     cfg = WorldConfig()
     hexes = _strip(9)
-    hexes[(4, 0)] = _hex((4, 0), TerrainClass.OCEAN)
+    hexes[(4, 0)] = _hex((4, 0), TerrainClass.OPEN_WATER)
     owner, _ = allocate_catchments(hexes, [(0, 0)], 50.0, cfg)
     assert (3, 0) in owner
     assert (5, 0) not in owner, "catchment walked across open water"
@@ -236,7 +236,7 @@ def test_allocation_is_deterministic_regardless_of_seat_order():
 def test_a_coastal_seat_gets_the_water_it_touches():
     cfg = WorldConfig()
     hexes = _strip(4)
-    hexes[(3, 0)] = _hex((3, 0), TerrainClass.OCEAN)
+    hexes[(3, 0)] = _hex((3, 0), TerrainClass.OPEN_WATER)
     owner, cost = allocate_catchments(hexes, [(0, 0)], 10.0, cfg)
     assert (3, 0) not in owner
 
@@ -250,7 +250,7 @@ def test_the_rim_does_not_walk_out_to_sea():
     cfg = WorldConfig()
     hexes = _strip(2)
     for q in range(2, 8):
-        hexes[(q, 0)] = _hex((q, 0), TerrainClass.OCEAN)
+        hexes[(q, 0)] = _hex((q, 0), TerrainClass.OPEN_WATER)
     owner, cost = allocate_catchments(hexes, [(0, 0)], 10.0, cfg)
     owner, _ = fishery_rim(hexes, owner, cost)
     assert (2, 0) in owner
@@ -260,7 +260,7 @@ def test_the_rim_does_not_walk_out_to_sea():
 def test_fishery_rim_does_not_mutate_its_input():
     cfg = WorldConfig()
     hexes = _strip(3)
-    hexes[(2, 0)] = _hex((2, 0), TerrainClass.OCEAN)
+    hexes[(2, 0)] = _hex((2, 0), TerrainClass.OPEN_WATER)
     owner, cost = allocate_catchments(hexes, [(0, 0)], 10.0, cfg)
     before = dict(owner)
     fishery_rim(hexes, owner, cost)
@@ -309,10 +309,10 @@ def test_settleable_excludes_water_mountain_and_bog():
 
     hexes = {
         (0, 0): _hex((0, 0)),
-        (1, 0): _hex((1, 0), TerrainClass.OCEAN),
-        (2, 0): _hex((2, 0), TerrainClass.LAKE),
-        (3, 0): _hex((3, 0), TerrainClass.STEEP),
+        (1, 0): _hex((1, 0), TerrainClass.OPEN_WATER),
+        (2, 0): _hex((2, 0), TerrainClass.INLAND_WATER),
+        (3, 0): _hex((3, 0), slope=WorldConfig().terrain_steep_gradient_m + 1.0),
         (4, 0): _hex((4, 0), biome=Biome.WETLAND),
-        (5, 0): _hex((5, 0), TerrainClass.ROLLING, land_cover=LandCover.OPEN),
+        (5, 0): _hex((5, 0), land_cover=LandCover.OPEN),
     }
     assert settleable(hexes, WorldConfig()) == {(0, 0), (5, 0)}

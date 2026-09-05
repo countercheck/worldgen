@@ -27,6 +27,17 @@ max_elevation_m: 1500.0  # Highest ground above sea level. The map's vertical sc
 seabed_depth_m: 200.0    # How deep the sea floor lies at the map edge. A continental shelf, not an abyss. How much of the map ends up underwater follows from this and max_elevation_m. Default: 200
 coast_max_elevation_m: 100.0 # Land no higher than this beside the sea is coast. Default: 100
 
+# How width x height are laid onto the hex grid.
+#   axial   Hex coordinates run q in [0, width), r in [0, height). The flat-top pixel
+#           transform shears that rhombus, so the drawn map is a leaning parallelogram
+#           with a straight edge on all four sides. Default.
+#   offset  Odd-q offset column/row. The drawn map is a rectangle; odd columns sit half
+#           a hex lower than even ones, so the north and south edges are ragged while
+#           east and west stay straight.
+# Columns are spaced 1.5 hex-sizes apart and rows sqrt(3), so an offset map is square
+# when height is about 0.87 * width — 128 x 111, say.
+grid_layout: axial
+
 # ---------------------------------------------------------------------------
 # Elevation noise (Fractal Brownian Motion)
 # ---------------------------------------------------------------------------
@@ -97,10 +108,11 @@ heightmap_coast_falloff: false # Default: false
 # ---------------------------------------------------------------------------
 # Terrain classification
 # ---------------------------------------------------------------------------
-# Terrain classes are bands of gradient, in metres of rise per kilometre. They describe
-# how the ground lies, not how high it is: a high plateau is level ground and is classed
-# as such. Absolute rather than a fraction of the elevation range, so a band means the
-# same thing whatever the map's vertical scale is.
+# The gradient bands, in metres of rise per kilometre. These no longer classify anything:
+# steepness is carried per hex as a measurement (`Hex.slope`), and these are the
+# thresholds the *map* is banded with for drawing and for legends, plus the one land cover
+# uses to decide bare rock. Widening them changes how the world is drawn, not how the
+# generator reasons about ground.
 #   under 30    FLAT        level going: plough it, cart across it
 #   30 to 100   ROLLING     undulating; farmed, and a laden cart manages
 #   100 to 250  STEEP       pack animals, terraces, no wheels
@@ -127,6 +139,18 @@ erosion_channel_affinity_gain: 0.5     # Affinity gain per deposition event; hig
 erosion_affinity_update_interval: 500  # Update channel affinity every N droplets. Default: 500
 erosion_delta_min_load: 0.15 # Sediment a droplet must still carry when it reaches the sea for it to build anything. Below this the load is treated as carried away along the shore rather than settling. Without it every droplet that trickled off a nearby hillside deposited where it entered the water, silting the shelf evenly instead of building deltas at the river mouths. Default: 0.15
 
+# Valley widening. Droplets only incise — each cuts along its own path — so the model
+# carves narrow V-notches and nothing ever widens them. Real valleys get their width from
+# the channel migrating sideways over geological time, planing the floor flat between
+# bluffs. Carving and drainage decide each other, so this is a short convergence loop
+# rather than one pass.
+valley_carve_passes: 3       # Cut, re-measure the drainage, cut again. Default: 3
+valley_width_max: 6.0        # Cap on valley half-width, in hexes. 0 disables widening entirely. Default: 6.0
+valley_width_exponent: 0.6   # Discharge -> width. 0.5 is the textbook root. Default: 0.6
+valley_floor_slope_m: 2.5    # Rise per hex away from the channel, in metres, so a floodplain drains to its river rather than ponding. Default: 2.5
+valley_max_relief_m: 100.0   # How much height a river can plane away per pass, in metres. What stops a valley eating the landscape: ground standing higher than this above the channel is valley wall and stays. Default: 100.0
+valley_channel_fraction: 0.02 # Fraction of the land counting as channel, by discharge — the cells valleys are planed outward from. Default: 0.02
+
 # ---------------------------------------------------------------------------
 # Hydrology
 # ---------------------------------------------------------------------------
@@ -143,11 +167,47 @@ evapotranspiration_per_c_mm: 30.0 # ...plus this much per degree of mean tempera
 min_runoff_mm: 25.0               # Floor, so even a desert drains its largest valleys. Default: 25
 wetland_min_runoff_mm: 300.0      # Runoff above which flat riverside ground waterlogs. Default: 300
 
+# How much the rain shadow shapes the rivers. Wind drops its moisture climbing a range
+# and arrives dry on the far side; this decides whether the water reflects that. 0 rains
+# evenly on every hex, 1 takes the orographic pattern at its word — so a catchment behind
+# mountains raises a smaller river, and a lake there is likelier to evaporate away than to
+# overflow. The map's total rainfall does not change with this, only where it falls.
+rain_shadow_strength: 0.5   # Default: 0.5
+
+# Rivers that enter from off the map. The grid is a region, not a world, so some of its
+# water was gathered beyond the border. An inlet is a border land hex whose terrain
+# already descends inland; it is seeded with a catchment it did not earn on this map, so
+# it arrives already wide instead of starting as a trickle at the edge. Set the count to
+# 0 for a map that only drains outward.
+river_inflow_count: 2      # Number of rivers entering from beyond the border. 0 disables. Default: 2
+river_inflow_volume: 0.15  # Size of the off-map catchment, as a fraction of this map's land area. Relative rather than absolute so the same value means the same thing on any grid size. Default: 0.15
+river_inflow_min_separation: 6 # Minimum spacing between inlets, in hexes. Without it the best candidates are usually the same valley mouth, and one river gets drawn twice. Default: 6
+# Which edges water may arrive from. Drop an edge and no river enters on that side.
+# Narrowing this places the off-map highlands: ["west"] means every river from beyond the
+# border enters in the west, as though the range that feeds them lay off that corner.
+river_inflow_edges: ["north", "south", "east", "west"] # Default: all four
+# Left to itself the choice of inlet lands on a hex that descends steeply inland and then
+# meets the sea a few hexes later, which is most of what a border offers. These two keep
+# an imported river worth importing: the bias ranks candidates by how far the water then
+# travels, and the floor makes a course shorter than that ineligible outright. A map with
+# nothing longer gets fewer rivers than the count asks for, which beats one that enters
+# and leaves again four hexes later.
+river_inflow_length_bias: 2.0 # Exponent on the length of the course an inlet would take. 0 ignores length. Default: 2.0
+river_inflow_min_length: 0.1  # Shortest course worth a river, as a fraction of the longer map dimension. 0 disables the floor. Default: 0.1
+
 # Lake drainage. Every lake is filled to its spillway and given an outflow, so water
 # that enters a basin has somewhere to go instead of accumulating forever.
 lake_chaining: true             # Allow a lake to spill into a strictly lower lake, not just the sea. Chains of lakes stepping down to the coast are the only outlet on a landlocked map. Default: true
 endorheic_marsh_radius: 1       # Where a basin genuinely has no outlet it is endorheic: water leaves by evaporation. This many hexes of its shore become wetland. 0 disables. Default: 1
 endorheic_marsh_min_precip_mm: 300.0 # A closed basin drier than this is a salt pan, not a marsh, and gets no wetland shore. Default: 300
+
+# Whether a basin is closed at all is a water balance, not a shape: it overflows when the
+# rivers reaching it plus the rain on its surface exceed what evaporates off that surface.
+# The per-hex evaporation comes from regional_climate below (a boreal lake loses half what
+# a temperate one does; an arid lake three and a half times as much), and this scales it.
+# Above 1 closes more basins; 0 makes any basin with inflow overflow. Raise it if your map
+# has large lakes you would rather see as inland seas with no outlet.
+endorheic_evaporation_scale: 1.0 # Multiplier on the potential evapotranspiration a basin loses its water to — the same term the runoff model takes off the top of the rain. Above 1 closes more basins; 0 makes every basin with any inflow overflow. Default: 1.0
 
 # ---------------------------------------------------------------------------
 # Climate
@@ -268,7 +328,8 @@ habitability_agri_weight: 0.40      # Weight on the catchment mean. Default: 0.4
 habitability_river_bonus: 0.25      # Flat bonus if the hex or a neighbour carries a river. Default: 0.25
 habitability_harbour_bonus: 0.60 # Site bonus for access to water that floats a barge — sea, lake, or a river above navigable_min_discharge. Distinct from habitability_coast_bonus, which is amenity; this is about bulk, and it is the largest site bonus because it is the largest thing about a site. Before it, not one of 74 markets on the reference map stood on navigable water: a harbour site loses about a fifth of its catchment to sea, which scores 0.4 against farmland's 1.0. Default: 0.60
 habitability_coast_bonus: 0.25      # Flat bonus if the hex or a neighbour is coast. Default: 0.25
-habitability_hill_bonus: 0.15       # Flat bonus for a hill overlooking a plain. Default: 0.15
+habitability_hill_bonus: 0.15       # Bonus for a site overlooking the ground beside it. Default: 0.15
+habitability_hill_relief_m: 75.0    # Metres of drop a site must command to be paid that bonus in full; below it the bonus scales down, so a knoll and a bluff are not worth the same. Default: 75.0
 habitability_confluence_bonus: 0.10 # Flat bonus on a river junction (this hex only). Default: 0.10
 
 # --- the classic model: counts and spacing are inputs -----------------------
@@ -368,9 +429,9 @@ hex_size_m: 1000.0        # Metres per hex; used for slope cost calculations. De
 # ---------------------------------------------------------------------------
 # Roads: base terrain costs (pathfinding multipliers by terrain type)
 # ---------------------------------------------------------------------------
-road_escarpment_cost: 20.0 # Cost multiplier for escarpment hexes. Default: 20.0
-road_steep_cost: 10.0      # Cost multiplier for steep hexes. Default: 10.0
-road_rolling_cost: 3.0     # Cost multiplier for rolling hexes. Default: 3.0
+# No steepness surcharge per hex: the climb is priced on the edge by
+# road_delta_elevation_per_hex, from the actual metres of rise, and banding the hex and
+# charging again billed the same ascent twice.
 road_flat_cost: 1.0       # Cost multiplier for flat hexes. Default: 1.0
 
 # ---------------------------------------------------------------------------
@@ -457,7 +518,8 @@ export:
   contour_max_stroke: 4.0            # Maximum contour stroke width in pixels. Default: 4.0
 
   # Legend settings — only used when "legend" is in the layers list above.
-  # The hex grid is sheared into a parallelogram, leaving the top-right and
-  # bottom-left of the canvas empty; the legend goes into one of them.
+  # On an axial grid the hexes are sheared into a parallelogram, leaving the top-right
+  # and bottom-left of the canvas empty; the legend goes into one of them. An offset
+  # grid fills its canvas, so there the legend sits in the corner over the map.
   legend_corner: top-right  # Which empty corner to use: top-right | bottom-left. Default: top-right
   legend_scale: 1.0         # Legend size as a multiple of hex_size. Default: 1.0

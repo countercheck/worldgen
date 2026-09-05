@@ -46,7 +46,7 @@ class CityPromotionStage(GeneratorStage):
         if not promoted:
             return state
 
-        self._resize(state, markets, absorbed, promoted, cfg)
+        self._resize(state, markets, absorbed, draw, promoted, cfg)
         return state
 
     # -- what each market already gathers -------------------------------------
@@ -152,13 +152,30 @@ class CityPromotionStage(GeneratorStage):
 
     # -- sizing ---------------------------------------------------------------
 
-    def _resize(self, state, markets, absorbed, promoted, cfg):
+    def _resize(self, state, markets, absorbed, draw, promoted, cfg):
         """Move the absorbed surplus onto the cities and off the markets that sent it.
 
         Conserved, deliberately. A city is not new food; it is the same countryside
         feeding a different place, so the map's total population barely moves while its
         distribution changes completely. A market in a city's shadow shrinks by what it
         sends, which is why a great port has quiet towns around it rather than peers.
+
+        The transfer is expressed as a **share of the population each settlement actually
+        has**, not as the food figure converted afresh. Those are not the same quantity:
+        founding sizes carry a jitter, so a market's population is its draw times
+        `people_per_food` times something either side of one, and charging it the
+        un-jittered `taken * people_per_food` bills a market that jittered *down* for more
+        people than live there. It stayed invisible while no city took more than about
+        four fifths of any market's draw — the shortfall was smaller than the jitter — and
+        appeared the moment bulk reach grew: one market of 511 was charged 517 and landed
+        on -6, which the floor then showed as a town of one person.
+
+        Working in population throughout fixes it by construction rather than by widening
+        the floor. A settlement can never lose more than it has, because the shares taken
+        from any one market sum to at most its whole draw; the jitter survives in
+        proportion, a market that ships half its surplus keeping half of whatever it was
+        founded with; and the books balance exactly, since every city is credited the same
+        figures its sources are debited.
 
         Applied as a *delta* on the population each settlement already has, not a
         recomputation from the draw, for two reasons that are really one. A settlement
@@ -170,21 +187,30 @@ class CityPromotionStage(GeneratorStage):
         counting the overlap twice.
         """
         by_coord = {s.coord: s for s in markets}
+        start = {coord: s.population for coord, s in by_coord.items()}
+
+        def moved(source: tuple, taken: float) -> float:
+            """The people who follow *taken* worth of surplus off *source*."""
+            total = draw.get(source, 0.0)
+            if total <= 0.0 or source not in start:
+                return 0.0
+            return start[source] * min(1.0, taken / total)
+
         lost: dict = {}
-        for take in absorbed.values():
+        gained: dict = {}
+        for seat, take in absorbed.items():
             for other, taken in take.items():
-                lost[other] = lost.get(other, 0.0) + taken
+                people = moved(other, taken)
+                lost[other] = lost.get(other, 0.0) + people
+                gained[seat] = gained.get(seat, 0.0) + people
 
         for coord, settlement in by_coord.items():
-            delta = -lost.get(coord, 0.0)
             if coord in absorbed:
-                delta += sum(absorbed[coord].values())
                 settlement.tier = SettlementTier.CITY
                 settlement.name = settlement.name.replace("_market_", "_city_")
+            delta = gained.get(coord, 0.0) - lost.get(coord, 0.0)
             if delta:
-                settlement.population = max(
-                    1, round(settlement.population + delta * cfg.people_per_food)
-                )
+                settlement.population = max(1, round(settlement.population + delta))
 
         state.metadata["cities"] = sorted(promoted)
 

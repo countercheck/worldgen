@@ -28,7 +28,7 @@ def _small_world() -> WorldState:
     h.moisture = 0.3
     h.temperature = 0.6
     h.biome = Biome.GRASSLAND
-    h.terrain_class = TerrainClass.FLAT
+    h.terrain_class = TerrainClass.LAND
     h.land_cover = LandCover.OPEN
     # Distinct per tier, so a round trip that collapsed them would show up.
     h.habitability_city = 0.7
@@ -81,7 +81,7 @@ def test_hex_fields_preserved(tmp_path):
     assert abs(h.elevation - 0.5) < 1e-9
     assert abs(h.moisture - 0.3) < 1e-9
     assert h.biome == Biome.GRASSLAND
-    assert h.terrain_class == TerrainClass.FLAT
+    assert h.terrain_class == TerrainClass.LAND
     assert h.land_cover == LandCover.OPEN
     assert abs(h.habitability_city - 0.7) < 1e-9
     assert abs(h.habitability_town - 0.5) < 1e-9
@@ -189,7 +189,7 @@ def test_new_saves_carry_the_bumped_version(tmp_path):
 
     path = tmp_path / "world.json"
     json_export.save(_small_world(), path)
-    assert json.loads(path.read_text())["version"] == "1.6"
+    assert json.loads(path.read_text())["version"] == "1.7"
 
 
 def test_an_unknown_version_is_rejected_by_name(tmp_path):
@@ -342,3 +342,37 @@ def test_worlds_without_ferries_still_load(tmp_path):
     del data["ferries"]
     path.write_text(json.dumps(data))
     assert json_export.load(str(path)).ferries == []
+
+
+def test_an_older_world_translates_its_terrain_names(tmp_path):
+    """Files written before 1.4 name water for a chemistry the generator never tracked.
+
+    "ocean" and "lake" meant, and only ever meant, whether the water reaches the map edge.
+    The steepness bands alongside them were thresholds on a slope those files do not
+    record — so the class translates and the slope comes back 0.0, rather than being
+    invented from the band the hex once fell in.
+    """
+    import json as _json
+
+    ws = _small_world()
+    path = tmp_path / "legacy.json"
+    json_export.save(ws, str(path))
+
+    raw = _json.loads(path.read_text())
+    raw["version"] = "1.2"
+    for hd in raw["hexes"]:
+        hd.pop("slope", None)
+        hd.pop("relief", None)
+    raw["hexes"][0]["terrain_class"] = "ocean"
+    raw["hexes"][1]["terrain_class"] = "lake"
+    raw["hexes"][2]["terrain_class"] = "mountain"
+    raw["hexes"][3]["terrain_class"] = "hill"
+    path.write_text(_json.dumps(raw))
+
+    back = json_export.load(str(path))
+    by_coord = [back.hexes[(hd["q"], hd["r"])] for hd in raw["hexes"][:4]]
+    assert by_coord[0].terrain_class is TerrainClass.OPEN_WATER
+    assert by_coord[1].terrain_class is TerrainClass.INLAND_WATER
+    assert by_coord[2].terrain_class is TerrainClass.LAND
+    assert by_coord[3].terrain_class is TerrainClass.LAND
+    assert all(h.slope == 0.0 for h in by_coord)

@@ -1,7 +1,7 @@
 import pytest
 
 from worldgen.core.config import WorldConfig
-from worldgen.core.hex import TerrainClass
+from worldgen.core.hex import TerrainClass, TerrainLabel, terrain_labels
 from worldgen.core.hex_grid import neighbors
 from worldgen.core.pipeline import GeneratorPipeline
 from worldgen.stages.elevation import ElevationStage
@@ -27,7 +27,7 @@ def test_elevations_are_metres_above_sea_level(phase1_state):
 
 def test_land_coverage(phase1_state):
     total = len(phase1_state.hexes)
-    land = sum(1 for h in phase1_state.hexes.values() if h.terrain_class != TerrainClass.OCEAN)
+    land = sum(1 for h in phase1_state.hexes.values() if h.terrain_class != TerrainClass.OPEN_WATER)
     assert land / total >= 0.40, f"Only {land / total:.1%} land, expected >= 40%"
 
 
@@ -38,13 +38,15 @@ def test_coast_borders_ocean(phase1_state):
         neighbor_classes = [
             phase1_state.hexes[n].terrain_class for n in neighbors(coord) if n in phase1_state.hexes
         ]
-        assert TerrainClass.OCEAN in neighbor_classes, f"COAST hex {coord} has no OCEAN neighbor"
+        assert TerrainClass.OPEN_WATER in neighbor_classes, (
+            f"COAST hex {coord} has no OCEAN neighbor"
+        )
 
 
 def test_mountain_not_isolated(phase1_state):
-    mountains = [
-        coord for coord, h in phase1_state.hexes.items() if h.terrain_class == TerrainClass.STEEP
-    ]
+    # "Mountain" is a band on measured slope now, so ask for it the way a map does.
+    labels = terrain_labels(phase1_state)
+    mountains = [c for c in phase1_state.hexes if labels[c] is TerrainLabel.STEEP]
     if not mountains:
         pytest.skip("No mountain hexes generated")
 
@@ -52,8 +54,7 @@ def test_mountain_not_isolated(phase1_state):
         1
         for coord in mountains
         if not any(
-            phase1_state.hexes.get(n, None)
-            and phase1_state.hexes[n].terrain_class == TerrainClass.STEEP
+            phase1_state.hexes.get(n, None) and labels[n] is TerrainLabel.STEEP
             for n in neighbors(coord)
             if n in phase1_state.hexes
         )

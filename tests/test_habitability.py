@@ -179,7 +179,8 @@ def test_unsettleable_terrain_scores_zero(hab_state, field):
     """You cannot found a town on open water, a mountain face, or a bog."""
     for h in hab_state.hexes.values():
         if (
-            h.terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE, TerrainClass.STEEP)
+            h.terrain_class in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
+            or h.slope >= WorldConfig().terrain_steep_gradient_m
             or h.biome == Biome.WETLAND
         ):
             assert getattr(h, field) == 0.0
@@ -187,7 +188,7 @@ def test_unsettleable_terrain_scores_zero(hab_state, field):
 
 @pytest.mark.parametrize("field", TIERS)
 def test_at_least_one_nonzero(hab_state, field):
-    land = [h for h in hab_state.hexes.values() if h.terrain_class != TerrainClass.OCEAN]
+    land = [h for h in hab_state.hexes.values() if h.terrain_class != TerrainClass.OPEN_WATER]
     assert any(getattr(h, field) > 0 for h in land), f"No hex scores on {field}"
 
 
@@ -198,7 +199,10 @@ def test_river_hexes_score_higher(hab_state, field):
     river_scores = []
     plain_scores = []
     for coord, h in hab_state.hexes.items():
-        if h.terrain_class in (TerrainClass.OCEAN, TerrainClass.STEEP):
+        if (
+            h.terrain_class == TerrainClass.OPEN_WATER
+            or h.slope >= WorldConfig().terrain_steep_gradient_m
+        ):
             continue
         if h.biome == Biome.WETLAND:
             continue

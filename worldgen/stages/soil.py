@@ -31,9 +31,8 @@ from ..core.hex import SOIL_RANK, Biome, SoilQuality, TerrainClass
 from ..core.hex_grid import neighbors
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
-from .terrain_class import gradient_m_per_km
 
-WATER = (TerrainClass.OCEAN, TerrainClass.LAKE)
+WATER = (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
 # Neither is ploughland, so neither takes a soil class: the sea is a fishery and a bog is a
 # bog. `potential_food` values them in their own right, as it always has.
 NOT_PLOUGHLAND = (Biome.OCEAN, Biome.WETLAND)
@@ -77,7 +76,7 @@ def is_alluvium(coord, hx, hexes, cfg) -> bool:
     floods and lays down silt. `catchment_km2` is upstream drainage area, a physical
     quantity comparable between maps, so this means the same thing on any of them.
     """
-    if gradient_m_per_km(coord, hx, hexes, cfg) >= cfg.terrain_rolling_gradient_m:
+    if hx.slope >= cfg.terrain_rolling_gradient_m:
         return False
 
     def big(other) -> bool:
@@ -107,7 +106,7 @@ class SoilStage(GeneratorStage):
                 soil = SoilQuality.PRIME
             else:
                 soil = _worse(
-                    slope_soil(gradient_m_per_km(coord, hx, hexes, cfg), cfg),
+                    slope_soil(hx.slope, cfg),
                     rainfall_soil(hx.moisture, cfg),
                 )
 

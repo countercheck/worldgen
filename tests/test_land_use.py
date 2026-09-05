@@ -28,7 +28,7 @@ def used():
 
 
 def _land(state):
-    return [h for h in state.hexes.values() if h.terrain_class is not TerrainClass.OCEAN]
+    return [h for h in state.hexes.values() if h.terrain_class is not TerrainClass.OPEN_WATER]
 
 
 # --- the margin --------------------------------------------------------------
@@ -201,7 +201,7 @@ def test_nobody_lives_on_the_water(used):
     read naively as residents, it put a fifth of the map's people on the open sea, and
     every density figure quietly counted them.
     """
-    water = (TerrainClass.OCEAN, TerrainClass.LAKE)
+    water = (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
     afloat = [
         c for c, h in used.hexes.items() if h.terrain_class in water and h.rural_population > 0
     ]

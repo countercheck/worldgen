@@ -176,6 +176,32 @@ class WorldConfig:
     erosion_affinity_update_interval: int = 500
     erosion_delta_min_load: float = 0.15
 
+    # Valley widening.  Droplets only incise — each cuts along its own path — so the model
+    # carves narrow V-notches and nothing ever widens them.  Real valleys get their width
+    # from the channel migrating sideways over geological time, planing the floor flat
+    # between bluffs: the Mississippi's floor is tens of km across, the Nile's ten to
+    # twenty, and neither was cut by water going straight down.
+    #
+    # Carving and drainage decide each other — widening a valley moves the water into it —
+    # so this runs as a short convergence loop rather than a single pass, recomputing the
+    # flow network after each cut.  `valley_width_max` of 0 disables the whole thing.
+    valley_carve_passes: int = 3
+    valley_width_max: float = 6.0  # Cap on valley half-width, in hexes (1 hex = 1 km)
+    valley_width_exponent: float = 0.6  # Discharge -> width; 0.5 is the textbook root
+    # Rise per hex away from the channel, in metres.  Small but not zero: a floodplain
+    # drains toward its river rather than ponding.
+    valley_floor_slope_m: float = 2.5
+    # How much height the river can plane away per pass, in metres.  This is what stops a
+    # valley eating the landscape: a channel cuts a floodplain out of ground near its own
+    # level but cannot take down a bluff standing well above it, so anything higher is
+    # valley wall and stays.  The fill stops there rather than passing through, which
+    # makes valleys self-limiting — pinched in a gorge, broad where the ground is already
+    # low.
+    valley_max_relief_m: float = 100.0
+    # What fraction of the land counts as channel, by discharge.  These are the cells
+    # valleys are planed outward from.
+    valley_channel_fraction: float = 0.02
+
     # Hydrology
     # A channel forms where enough water passes to keep one open. Discharge is
     # catchment area times runoff depth, so this is in km2 x mm — the product of the
@@ -200,6 +226,44 @@ class WorldConfig:
     # runoff test rather than a rainfall one: peat forms in cold country on modest rain,
     # because so little of it evaporates away again.
     wetland_min_runoff_mm: float = 300.0
+
+    # How much the rain shadow shapes the rivers.  The wind drops its moisture climbing a
+    # range and arrives dry on the far side, and this decides whether the water reflects
+    # that: 0 rains evenly on every hex, 1 takes the orographic pattern at its word, so a
+    # catchment behind mountains raises smaller rivers and a lake there is likelier to
+    # evaporate away than to overflow.  The map's total rainfall does not change with this
+    # — only where it falls.  Below 1 because the pattern only models rain wrung out by
+    # lift, and taken literally it leaves every plain a desert.
+    rain_shadow_strength: float = 0.5
+
+    # Rivers that enter from off the map.  The grid is a region, not a world, so a river
+    # may well have gathered its water beyond the border.  An inlet is a border land hex
+    # whose own terrain already descends inland; it is seeded with a catchment it did not
+    # earn on this map, which makes it arrive already wide instead of starting as a
+    # trickle at the edge.  0 disables, and the map drains outward only.
+    river_inflow_count: int = 2
+    # Size of that off-map catchment, as a fraction of the map's own land area.  Relative
+    # rather than absolute so the same value means the same thing on any grid size: 0.15
+    # is a river carrying half again what the largest wholly-on-map river would.
+    river_inflow_volume: float = 0.15
+    # Minimum spacing between inlets, in hexes.  Without it the best few candidates are
+    # usually the same valley mouth, and the map gets one river drawn three times.
+    river_inflow_min_separation: int = 6
+    # Which edges water may arrive from.  Narrowing it puts the off-map highlands on a
+    # chosen side: ("west",) means every river from beyond the border enters in the west.
+    river_inflow_edges: tuple[str, ...] = ("north", "south", "east", "west")
+    # How strongly to prefer an inlet whose water then crosses the map, over one that
+    # ducks back off it a few hexes later.  Exponent on the length of the course an inlet
+    # would take, so 0 ignores length entirely and higher values concentrate the choice
+    # on the longest course available.
+    river_inflow_length_bias: float = 2.0
+    # Shortest course worth importing a river for, as a fraction of the longer map
+    # dimension.  Weighting alone still leaves stubs, because the separation rule can
+    # leave nothing but stubs to choose from once the first inlet is placed — and a river
+    # that enters the map and leaves it four hexes later reads as a mistake rather than as
+    # geography.  A map that offers nothing longer gets fewer rivers than
+    # `river_inflow_count` asks for, which is the honest outcome; 0 disables the floor.
+    river_inflow_min_length: float = 0.1
     river_flow_continuous: bool = False  # True: river_flow on all draining land hexes
     moisture_bleed_passes: int = 0  # 0 = flat river bonus (default); >0 = elevation-gated bleed
     moisture_bleed_strength: float = 0.3
@@ -210,6 +274,18 @@ class WorldConfig:
     # Below this much annual rainfall a closed basin evaporates to a salt pan rather
     # than holding a marshy shore.
     endorheic_marsh_min_precip_mm: float = 300.0
+    # Whether a basin is closed is a water balance, not a shape: it overflows when the
+    # rivers reaching it plus the rain on its surface exceed what evaporates off that
+    # surface.  Evaporation is the potential evapotranspiration the runoff model already
+    # computes from the region's temperature, which is why no separate per-climate figure
+    # is needed here; this scales it.  Above 1 closes more basins, and 0 makes every basin
+    # with any inflow at all overflow.
+    #
+    # It replaced a test that was not a water balance at all: a basin was called closed
+    # when path-finding happened to fail to route it to the sea, so a dry basin with an
+    # easy saddle drained while a wet one ringed by hills did not — backwards on both
+    # counts.
+    endorheic_evaporation_scale: float = 1.0
 
     def __post_init__(self) -> None:
         if self.grid_layout not in GRID_LAYOUTS:
@@ -220,6 +296,50 @@ class WorldConfig:
             raise ValueError(f"unknown model {self.model!r}; choose from {', '.join(MODELS)}")
         self.wind_direction = _coerce_pair("wind_direction", self.wind_direction)
         self.elevation_gradient_m = _coerce_pair("elevation_gradient_m", self.elevation_gradient_m)
+        if self.valley_carve_passes < 0:
+            raise ValueError(f"valley_carve_passes must be >= 0, got {self.valley_carve_passes}")
+        if self.valley_width_max < 0:
+            raise ValueError(f"valley_width_max must be >= 0, got {self.valley_width_max}")
+        if self.valley_width_exponent < 0:
+            raise ValueError(
+                f"valley_width_exponent must be >= 0, got {self.valley_width_exponent}"
+            )
+        if self.valley_floor_slope_m < 0:
+            raise ValueError(f"valley_floor_slope_m must be >= 0, got {self.valley_floor_slope_m}")
+        if self.valley_max_relief_m < 0:
+            raise ValueError(f"valley_max_relief_m must be >= 0, got {self.valley_max_relief_m}")
+        if not (0.0 < self.valley_channel_fraction <= 1.0):
+            raise ValueError(
+                f"valley_channel_fraction must be in (0, 1], got {self.valley_channel_fraction}"
+            )
+        if not (0.0 <= self.rain_shadow_strength <= 1.0):
+            raise ValueError(
+                f"rain_shadow_strength must be in [0, 1], got {self.rain_shadow_strength}"
+            )
+        if self.river_inflow_count < 0:
+            raise ValueError(f"river_inflow_count must be >= 0, got {self.river_inflow_count}")
+        if self.river_inflow_volume < 0:
+            raise ValueError(f"river_inflow_volume must be >= 0, got {self.river_inflow_volume}")
+        if self.river_inflow_min_separation < 0:
+            raise ValueError(
+                f"river_inflow_min_separation must be >= 0, got {self.river_inflow_min_separation}"
+            )
+        if self.river_inflow_length_bias < 0:
+            raise ValueError(
+                f"river_inflow_length_bias must be >= 0, got {self.river_inflow_length_bias}"
+            )
+        if self.river_inflow_min_length < 0:
+            raise ValueError(
+                f"river_inflow_min_length must be >= 0, got {self.river_inflow_min_length}"
+            )
+        if self.endorheic_evaporation_scale < 0:
+            raise ValueError(
+                f"endorheic_evaporation_scale must be >= 0, got {self.endorheic_evaporation_scale}"
+            )
+        if self.habitability_hill_relief_m <= 0:
+            raise ValueError(
+                f"habitability_hill_relief_m must be > 0, got {self.habitability_hill_relief_m}"
+            )
         if self.channel_min_discharge < 0:
             raise ValueError(
                 f"channel_min_discharge must be >= 0, got {self.channel_min_discharge}"
@@ -249,7 +369,10 @@ class WorldConfig:
             raise ValueError(
                 f"moisture_bleed_passes must be >= 0, got {self.moisture_bleed_passes}"
             )
-        self.continent_falloff_edges = _coerce_edges(self.continent_falloff_edges)
+        self.continent_falloff_edges = _coerce_edges(
+            self.continent_falloff_edges, "continent_falloff_edges"
+        )
+        self.river_inflow_edges = _coerce_edges(self.river_inflow_edges, "river_inflow_edges")
         if not (0.0 <= self.continent_shelf_variance <= 1.0):
             raise ValueError(
                 f"continent_shelf_variance must be in [0, 1], got {self.continent_shelf_variance}"
@@ -440,6 +563,7 @@ class WorldConfig:
             "yield_wood",
             "clearing_margin",
             "habitability_agri_weight",
+            "habitability_hill_relief_m",
             "habitability_river_bonus",
             "habitability_coast_bonus",
             "habitability_hill_bonus",
@@ -872,15 +996,23 @@ class WorldConfig:
     # reference map stood on navigable water.
     habitability_harbour_bonus: float = 0.60
     habitability_hill_bonus: float = 0.15
+    # Relief at which the overlooking bonus is paid in full — how far a site must stand
+    # above the ground beside it to command the view completely, in metres.  Below this
+    # the bonus is scaled down, so a knoll and a bluff are not worth the same.  It used to
+    # be paid flat to anything the terrain classifier called a hill, which is how a level
+    # floodplain beside a bluff collected it.
+    habitability_hill_relief_m: float = 75.0
     habitability_confluence_bonus: float = 0.10
 
     # World scale
     hex_size_m: float = 1000.0  # metres per hex
 
-    # Roads — base terrain costs
-    road_escarpment_cost: float = 20.0
-    road_steep_cost: float = 10.0
-    road_rolling_cost: float = 3.0
+    # Roads — base terrain costs.  There is no steepness surcharge here: grade is priced
+    # per edge by `road_delta_elevation_per_hex`, from the actual climb between the two
+    # hexes, and a per-hex band on top of that billed the same ascent twice — once by how
+    # far the road rose, once by which side of a threshold the ground fell.  The
+    # categorical charge was also wrong where the two disagreed, taxing a level floodplain
+    # beside a bluff at escarpment rates.
     road_flat_cost: float = 1.0
 
     # Roads — traveller simulation
@@ -1013,6 +1145,17 @@ class WorldConfig:
         drop = self.mean_temperature_c - self.biome_treeline_temp_c
         return max(0.0, drop / self.lapse_rate_c_per_km * 1000.0)
 
+    def pet_mm(self, temp_c: float | None = None) -> float:
+        """Potential evapotranspiration: how much water a year's warmth could lift.
+
+        The same term `runoff_mm` takes off the top of the rain, exposed on its own
+        because a basin's water balance needs it directly — what evaporates off open
+        water is the potential itself, there being no shortage of water to evaporate.
+        """
+        if temp_c is None:
+            temp_c = self.mean_temperature_c
+        return self.evapotranspiration_base_mm + self.evapotranspiration_per_c_mm * max(0.0, temp_c)
+
     def runoff_mm(self, precip_mm: float, temp_c: float | None = None) -> float:
         """How much of a year's rain runs off, rather than returning to the air.
 
@@ -1034,7 +1177,7 @@ class WorldConfig:
         """
         if temp_c is None:
             temp_c = self.mean_temperature_c
-        pet = self.evapotranspiration_base_mm + self.evapotranspiration_per_c_mm * max(0.0, temp_c)
+        pet = self.pet_mm(temp_c)
         if pet <= 0.0 or precip_mm <= 0.0:
             return max(self.min_runoff_mm, precip_mm)
         actual_et = precip_mm / math.sqrt(1.0 + (precip_mm / pet) ** 2)
@@ -1197,14 +1340,35 @@ _RETIRED_FIELDS: dict[str, str] = {
         "terrain classes are now bands of absolute gradient; use "
         "terrain_steep_gradient_m, in metres of rise per kilometre"
     ),
+    "road_mountain_cost": (
+        "steepness is charged per edge by its actual grade now, so a per-hex surcharge "
+        "billed the same climb twice; tune road_delta_elevation_per_hex instead"
+    ),
+    "road_hill_cost": (
+        "steepness is charged per edge by its actual grade now, so a per-hex surcharge "
+        "billed the same climb twice; tune road_delta_elevation_per_hex instead"
+    ),
+    "road_rolling_cost": (
+        "steepness is charged per edge by its actual grade now, so a per-hex surcharge "
+        "billed the same climb twice; tune road_delta_elevation_per_hex instead"
+    ),
+    "road_steep_cost": (
+        "steepness is charged per edge by its actual grade now, so a per-hex surcharge "
+        "billed the same climb twice; tune road_delta_elevation_per_hex instead"
+    ),
+    "road_escarpment_cost": (
+        "steepness is charged per edge by its actual grade now, so a per-hex surcharge "
+        "billed the same climb twice; tune road_delta_elevation_per_hex instead"
+    ),
+    "habitability_hill_bonus_flat": (
+        "the overlooking bonus is scaled by measured relief now; use "
+        "habitability_hill_relief_m, the drop a site must command to be paid in full"
+    ),
 }
 
 # Settings that were renamed rather than dropped. The value carries over, so a config
 # written against an older version keeps working and keeps meaning what it meant.
-_RENAMED_FIELDS: dict[str, str] = {
-    "road_hill_cost": "road_rolling_cost",
-    "road_mountain_cost": "road_steep_cost",
-}
+_RENAMED_FIELDS: dict[str, str] = {}
 
 
 def _construct(cls: type, data: dict) -> "WorldConfig":
@@ -1261,25 +1425,21 @@ def _closest(name: str, known: set[str]) -> str | None:
     return matches[0] if matches else None
 
 
-def _coerce_edges(value: Any) -> tuple[str, ...]:
-    """Normalise the falloff-edge list, keeping a stable order and rejecting typos."""
+def _coerce_edges(value: Any, key: str = "continent_falloff_edges") -> tuple[str, ...]:
+    """Normalise an edge list, keeping a stable order and rejecting typos."""
     if isinstance(value, str):
         value = [part.strip() for part in value.split(",") if part.strip()]
     try:
         given = list(value)
     except TypeError as exc:
-        raise ValueError(
-            f"continent_falloff_edges must be a list of edge names, got {value!r}"
-        ) from exc
+        raise ValueError(f"{key} must be a list of edge names, got {value!r}") from exc
     lowered = []
     for edge in given:
         if not isinstance(edge, str):
-            raise ValueError(f"continent_falloff_edges entries must be strings, got {edge!r}")
+            raise ValueError(f"{key} entries must be strings, got {edge!r}")
         name = edge.strip().lower()
         if name not in _EDGES:
-            raise ValueError(
-                f"unknown edge {edge!r} in continent_falloff_edges; choose from {', '.join(_EDGES)}"
-            )
+            raise ValueError(f"unknown edge {edge!r} in {key}; choose from {', '.join(_EDGES)}")
         lowered.append(name)
     # Deduplicate but keep _EDGES order so the value is canonical and comparable.
     return tuple(e for e in _EDGES if e in set(lowered))

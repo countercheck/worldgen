@@ -194,7 +194,7 @@ flowchart TD
 | `roads` | `list[Road]` | PRIMARY / SECONDARY / TRACK paths |
 | `metadata` | `dict` | `{"seed": ..., "config": ...}` snapshot |
 
-Convenience accessors: `all_land()`, `all_ocean()`, `all_lakes()`,
+Convenience accessors: `all_land()`, `all_open_water()`, `all_inland_water()`,
 `all_water()` ([world_state.py:49–79](../worldgen/core/world_state.py#L49)).
 
 ### `Hex` — [worldgen/core/hex.py:66–80](../worldgen/core/hex.py#L66)
@@ -1525,8 +1525,7 @@ with self-reinforcing pheromone trails.
 
 **Config:** `road_travellers_per_pop`, `road_travellers_max`,
 `road_gravity_exponent`, `road_pheromone_factor`,
-`road_escarpment_cost`, `road_steep_cost`, `road_rolling_cost`, `road_flat_cost`,
-`road_water_cost`, `road_embark_cost`, `road_disembark_cost`,
+`road_flat_cost`, `road_water_cost`, `road_embark_cost`, `road_disembark_cost`,
 `road_river_crossing_base`, `road_river_crossing_flow`,
 `road_river_hex_cost`, `road_ferry_max_hop`,
 `road_slope_cost`, `road_slope_free_pct`, `road_slope_cap_pct`,
@@ -1544,11 +1543,13 @@ function (cost of the transition between two hexes).
 combined in [interurban_roads.py:35–39](../worldgen/stages/interurban_roads.py#L35)):
 ```
 base_cost = match terrain_class:
-    OCEAN | LAKE → road_water_cost          (default 0.05)
-    ESCARPMENT   → road_escarpment_cost     (20.0)
-    STEEP        → road_steep_cost          (10.0)
-    ROLLING      → road_rolling_cost        (3.0)
-    COAST | FLAT → road_flat_cost           (1.0)
+    OPEN_WATER | INLAND_WATER → road_water_cost  (default 0.05)
+    COAST | LAND              → road_flat_cost   (1.0)
+
+# No steepness term. The climb is priced on the *edge* by
+# road_delta_elevation_per_hex, from the actual metres of rise between the
+# two hexes; a per-hex surcharge on top billed the same ascent twice, and
+# billed it wrongly wherever the band and the grade disagreed.
 
 river_hex_cost = road_river_hex_cost if on a river else 0
 
@@ -2032,6 +2033,24 @@ The erosion constants are shares of the map's relief rather than physical quanti
 the stage converts to a normalised copy at its boundary and back to metres on the way out
 — against the **known** span, so it is a fixed change of units and not a per-map stretch.
 
+#### Valley widening
+
+Droplets only incise: each cuts along its own path, so the model carves narrow V-notches
+and nothing ever widens them. Real valleys get their width from the channel migrating
+sideways over geological time, planing the floor flat between bluffs — the Mississippi's
+floor is tens of kilometres across, the Nile's ten to twenty, and neither was cut by water
+going straight down. Carving and drainage decide each other, so this runs as a short
+convergence loop rather than a single pass. Floodplains come out 79% wider.
+
+| Param | Type | Default | Range | Effect |
+|---|---|---|---|---|
+| `valley_carve_passes` | `int` | `3` | `≥ 0` (validated) | Cut, re-measure the drainage, cut again. One pass does not do it: widening a valley moves the water into it, so the network measured before the first cut is not the one that exists after |
+| `valley_width_max` | `float` | `6.0` | `≥ 0` (validated) | Cap on valley half-width, in hexes. `0` disables widening entirely |
+| `valley_width_exponent` | `float` | `0.6` | `≥ 0` (validated) | Discharge → width. `0.5` is the textbook root |
+| `valley_floor_slope_m` | `float` | `2.5` | `≥ 0` (validated) | Rise per hex away from the channel, in metres. Small but not zero, so a floodplain drains toward its river rather than ponding |
+| `valley_max_relief_m` | `float` | `100.0` | `≥ 0` (validated) | How much height a river may plane away per pass, in metres. What stops a valley eating the landscape: a channel cuts a floodplain out of ground near its own level but cannot take down a bluff standing well above it, so anything higher is valley wall and stays. This is what makes valleys self-limiting — pinched in a gorge, broad where the ground is already low |
+| `valley_channel_fraction` | `float` | `0.02` | `(0, 1]` (validated) | What fraction of the land counts as channel, by discharge — the cells valleys are planed outward from |
+
 ### 4.5 Hydrology — § [3.5](#35-hydrology)
 
 A channel forms where enough water passes to keep one open: **discharge = catchment area
@@ -2052,6 +2071,27 @@ no navigable river at all, and tropical 12.6%.
 | `lake_chaining` | `bool` | `True` | — | Allow a lake to spill into a strictly lower lake, not just the sea. Chains of lakes stepping down to the coast are the only outlet on a landlocked map |
 | `endorheic_marsh_radius` | `int` | `1` | `≥ 0` | Where a basin genuinely has no outlet, water leaves by evaporation; this many hexes of its shore become wetland. `0` disables |
 | `endorheic_marsh_min_precip_mm` | `float` | `300.0` | `≥ 0` | A closed basin drier than this is a salt pan, not a marsh, and gets no wetland shore |
+| `endorheic_evaporation_scale` | `float` | `1.0` | `≥ 0` (validated) | Multiplier on the potential evapotranspiration a basin loses its water to. Whether a basin is closed is a **water balance**, not a shape: it overflows when the rivers reaching it plus the rain on its surface exceed what evaporates off that surface. Above `1` closes more basins; `0` makes every basin with any inflow overflow. It replaced a test the routing was making by accident — a basin came out closed when path-finding happened to fail on it, so a dry basin with an easy saddle drained while a wet one ringed by hills did not, backwards on both counts. On one map 5,234 of 7,089 lake hexes came out endorheic |
+| `rain_shadow_strength` | `float` | `0.5` | `[0, 1]` (validated) | How much the rain shadow shapes the **rivers**, not only the biomes. `0` rains evenly on every hex; `1` takes the orographic pattern at its word, so a catchment behind mountains raises a smaller river and a lake there is likelier to evaporate away than to overflow. The map's total rainfall does not change with this — only where it falls. Below `1` because the pattern models only rain wrung out by lift, and taken literally it leaves every plain a desert |
+
+#### Rivers from off the map
+
+The grid is a region, not a world, so a river may well have gathered its water beyond the
+border. An **inlet** is a border land hex whose own terrain already descends inland; it is
+seeded with a catchment it did not earn on this map, which makes it arrive already wide
+instead of starting as a trickle at the edge. Off-map inlet *erosion* by droplets was
+tried twice, measured worse than not doing it, and reverted — a droplet is one raindrop
+wherever it starts, so seeding them at a mouth digs a pit that inverts the inland fall and
+disqualifies the very cell it was meant to serve. Discharge seeding does the job instead.
+
+| Param | Type | Default | Range | Effect |
+|---|---|---|---|---|
+| `river_inflow_count` | `int` | `2` | `≥ 0` (validated) | How many rivers enter from beyond the border. `0` disables, and the map drains outward only |
+| `river_inflow_volume` | `float` | `0.15` | `≥ 0` (validated) | Size of that off-map catchment, as a fraction of this map's own land area. Relative rather than absolute so the same value means the same thing on any grid size: `0.15` is a river carrying half again what the largest wholly-on-map river would |
+| `river_inflow_min_separation` | `int` | `6` | `≥ 0` (validated) | Minimum spacing between inlets, in hexes. Without it the best few candidates are usually the same valley mouth, and the map gets one river drawn three times |
+| `river_inflow_edges` | `tuple[str, ...]` | all four | edge names (validated) | Which edges water may arrive from. Narrowing it puts the off-map highlands on a chosen side: `["west"]` means every river from beyond the border enters in the west. Normalised like `continent_falloff_edges` — any case, any order, deduplicated |
+| `river_inflow_length_bias` | `float` | `2.0` | `≥ 0` (validated) | Exponent on the length of the course an inlet would take, preferring water that crosses the map over water that ducks back off it. `0` ignores length entirely |
+| `river_inflow_min_length` | `float` | `0.1` | `≥ 0` (validated) | Shortest course worth importing a river for, as a fraction of the longer map dimension. Weighting alone still leaves stubs, because the separation rule can leave nothing but stubs to choose from once the first inlet is placed — and a river that enters the map and leaves it four hexes later reads as a mistake rather than as geography. A map offering nothing longer gets fewer rivers than `river_inflow_count` asks for, which is the honest outcome; `0` disables the floor |
 
 ### 4.6 Climate — § [3.6](#36-climate)
 
@@ -2121,7 +2161,8 @@ desert, too wet is `food_drowned_precip_mm`. Water and wetland ignore it.
 | `habitability_river_bonus` | `float` | `0.25` | ≥ 0 | Flat, if the hex or a neighbour carries a river |
 | `habitability_harbour_bonus` | `float` | `0.60` | Site bonus for access to water that will float a barge — sea, lake, or a river above `navigable_min_discharge`. Distinct from `habitability_coast_bonus`, which is amenity: a beach to land a boat on. This one is about **bulk**, and it is the largest site bonus there is because it is the largest thing about a site — a town on navigable water can be provisioned from fifteen times the distance, which is the whole reason cities exist in this model. It has to be this big to be visible: a harbour site loses about a fifth of its day-range catchment to sea, which scores `food_water_value` (0.4) against arable's 1.0, so on agriculture alone it is worth ~22% less than an inland site and inland sites outnumber it nine to one. Before this term **not one of 74 markets stood on navigable water**, and no city could be maritime |
 | `habitability_coast_bonus` | `float` | `0.25` | ≥ 0 | Flat, if the hex or a neighbour is `COAST` |
-| `habitability_hill_bonus` | `float` | `0.15` | ≥ 0 | Flat, for a rise overlooking a plain |
+| `habitability_hill_bonus` | `float` | `0.15` | ≥ 0 | For a site overlooking the ground beside it, scaled by `habitability_hill_relief_m` |
+| `habitability_hill_relief_m` | `float` | `75.0` | `> 0` (validated) | Metres of drop a site must command to be paid that bonus in full; below it the bonus scales down. It used to be paid flat to any ROLLING hex with a FLAT neighbour, which asked two band questions and got the wrong answer to both — a knoll and a bluff were worth the same, and a level floodplain beside a bluff collected the bonus for standing *under* the drop that commands it |
 | `habitability_confluence_bonus` | `float` | `0.10` | ≥ 0 | Flat, on a river junction (this hex only) |
 
 Bonuses are binary within each term: a hex with one river neighbour scores the same as one
@@ -2221,16 +2262,19 @@ converting from a `[0, 1]` range: a grade is `(Δelevation_m / hex_size_m) × 10
 ### 4.14 Roads — Terrain Costs — § [3.11](#311-interurban-roads)
 
 Node cost (cost to *enter* a hex) by `terrain_class`. See
-[road_cost.py](../worldgen/stages/road_cost.py). Renamed with the gradient bands: what was
-`road_mountain_cost` is now `road_steep_cost`, and `road_hill_cost` is `road_rolling_cost`.
+[road_cost.py](../worldgen/stages/road_cost.py).
+
+There is no steepness surcharge, and the settings that were one — `road_mountain_cost`,
+`road_hill_cost`, and the `road_rolling_cost` / `road_steep_cost` / `road_escarpment_cost`
+that briefly replaced them — are all retired. Grade is priced per edge from the metres of
+rise between two hexes, so a per-hex band charged the same climb a second time, and
+charged it wrongly wherever the band and the grade disagreed: a level valley floor was
+taxed at escarpment rates because the bluff above it fell inside the averaging window.
 
 | Param | Type | Default | Effect |
 |---|---|---|---|
-| `road_escarpment_cost` | `float` | `20.0` | Node cost for ESCARPMENT — a break of slope |
-| `road_steep_cost` | `float` | `10.0` | Node cost for STEEP — pack animals, no wheels |
-| `road_rolling_cost` | `float` | `3.0` | Node cost for ROLLING |
-| `road_flat_cost` | `float` | `1.0` | Node cost for FLAT and COAST |
-| `road_water_cost` | `float` | `0.05` | Node cost for OCEAN/LAKE. Validated `≥ 0`. Low to allow short over-water hops; the heavy lifting is in the embark/disembark edge cost |
+| `road_flat_cost` | `float` | `1.0` | Node cost for any land hex, coast included |
+| `road_water_cost` | `float` | `0.05` | Node cost for open or inland water. Validated `≥ 0`. Low to allow short over-water hops; the heavy lifting is in the embark/disembark edge cost |
 
 ### 4.15 Roads — Traveller Simulation
 

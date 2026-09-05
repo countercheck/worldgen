@@ -10,7 +10,7 @@ hex gets three scores, one per cultivation radius.  Each tier's placement stage 
 on its own.
 """
 
-from ..core.hex import STEEP_LAND, Biome, LandCover, LandUse, SoilQuality, TerrainClass
+from ..core.hex import Biome, LandCover, LandUse, SoilQuality, TerrainClass, is_steep
 from ..core.hex_grid import neighbors, ring
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
@@ -100,10 +100,14 @@ def site_bonus(coord, hx, hexes, cfg) -> float:
     ):
         bonus += cfg.habitability_coast_bonus
 
-    if hx.terrain_class == TerrainClass.ROLLING and any(
-        n.terrain_class == TerrainClass.FLAT for n in nbrs
-    ):
-        bonus += cfg.habitability_hill_bonus
+    # A site that overlooks the ground beside it, scaled by the drop it actually
+    # commands.  This used to be paid flat to any ROLLING hex with a FLAT neighbour,
+    # which asked two band questions and got the wrong answer to both: a knoll and a
+    # bluff were worth the same, and a level floodplain beside a bluff collected the
+    # bonus for standing under the very drop that commands it.  `relief` is the drop
+    # itself, so the bonus is now proportional to what a wall on this hex would see.
+    if hx.relief > 0.0:
+        bonus += cfg.habitability_hill_bonus * min(1.0, hx.relief / cfg.habitability_hill_relief_m)
 
     if "confluence" in hx.tags:
         bonus += cfg.habitability_confluence_bonus
@@ -169,8 +173,8 @@ class HabitabilityStage(GeneratorStage):
         raw: dict[str, dict] = {tier: {} for tier in radii}
         for coord, hx in hexes.items():
             if (
-                hx.terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE)
-                or hx.terrain_class in STEEP_LAND
+                hx.terrain_class in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
+                or is_steep(hx, cfg.terrain_steep_gradient_m)
                 or hx.biome == Biome.WETLAND
             ):
                 for tier in radii:

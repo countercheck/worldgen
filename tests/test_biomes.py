@@ -38,7 +38,7 @@ def test_all_hexes_have_biome(biome_state):
 
 def test_ocean_hexes_have_ocean_biome(biome_state):
     for h in biome_state.hexes.values():
-        if h.terrain_class == TerrainClass.OCEAN:
+        if h.terrain_class == TerrainClass.OPEN_WATER:
             assert h.biome == Biome.OCEAN, f"Ocean hex has biome {h.biome}"
 
 
@@ -64,7 +64,7 @@ def _cold_country(climate: str = "boreal", max_elevation_m: float = 3500.0, size
     ):
         p.add_stage(stage)
     state = p.run()
-    land = [h for h in state.hexes.values() if h.terrain_class != TerrainClass.OCEAN]
+    land = [h for h in state.hexes.values() if h.terrain_class != TerrainClass.OPEN_WATER]
     return cfg, state, land
 
 
@@ -167,7 +167,7 @@ def test_a_boreal_region_grows_boreal_forest():
         p.add_stage(stage)
     boreal = p.run()
 
-    land = [h for h in boreal.hexes.values() if h.terrain_class != TerrainClass.OCEAN]
+    land = [h for h in boreal.hexes.values() if h.terrain_class != TerrainClass.OPEN_WATER]
     wooded = sum(1 for h in land if h.biome in (Biome.BOREAL, Biome.TUNDRA))
     assert wooded / len(land) > 0.1, (
         f"Only {wooded / len(land):.1%} of a boreal region is taiga or tundra; "
@@ -212,7 +212,7 @@ def test_rainfall_does_not_decide_where_trees_stop():
         cold = {
             c: h.biome
             for c, h in state.hexes.items()
-            if h.temperature < cfg.biome_cold_temp_c and h.terrain_class != TerrainClass.OCEAN
+            if h.temperature < cfg.biome_cold_temp_c and h.terrain_class != TerrainClass.OPEN_WATER
         }
         assert cold, "the fixture has no cold ground to test"
         if baseline is None:

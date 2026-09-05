@@ -61,7 +61,7 @@ def test_road_edges_are_stored_under_one_canonical_key(road_state):
 def test_the_drawn_network_never_starts_or_ends_on_water(road_state):
     """Roads may traverse water — oceans and lakes are one piece of terrain to the
     router — but a drawn leg is land only, so no polyline may begin or end wet."""
-    water = (TerrainClass.OCEAN, TerrainClass.LAKE)
+    water = (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
     for _, leg in road_polylines(road_state.road_edges, road_state.hexes):
         assert len(leg) >= 2
         for end in (leg[0], leg[-1]):
@@ -78,7 +78,7 @@ def test_road_edges_and_sea_edges_split_the_water_between_them(road_state):
     with a wet endpoint is a cart in the sea; a sea edge with two dry endpoints is a road
     filed under boats, invisible to every "is there a land route" question.
     """
-    water = (TerrainClass.OCEAN, TerrainClass.LAKE)
+    water = (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
     for a, b in road_state.road_edges:
         for end in (a, b):
             assert road_state.hexes[end].terrain_class not in water, (
@@ -198,12 +198,22 @@ def test_river_corridor_preference_in_roads(road_state):
     The pull used to sit on river hexes themselves, so this measured how often roads
     landed *on* a river. Roads now take the bank instead, so the corridor (a river hex
     or a hex beside one) is what they should over-represent.
+
+    This was `xfail` until the two halves of this branch met. It was failing because the
+    slope measure underneath it was wrong: taking the mean absolute difference to all six
+    neighbours reports how rough the *surroundings* are, so a valley floor read as steep —
+    both flanks stand above it, and their height went into the mean whatever the floor was
+    doing. Roads were therefore priced *away* from the banks they should follow. Measuring
+    slope as tilt cancels symmetric surroundings and reads a valley floor level, and
+    lateral planation gives the road a floodplain to run along at all. Across seeds 42, 1,
+    2, 3, 5 and 8 the margin went from a mean of -0.048, positive on one seed, to +0.109,
+    positive on all six.
     """
     from worldgen.core.hex_grid import neighbors
 
     hexes = road_state.hexes
     road_hexes = {c for edge in road_state.road_edges for c in edge if c in hexes}
-    all_land = {c for c, h in hexes.items() if h.terrain_class != TerrainClass.OCEAN}
+    all_land = {c for c, h in hexes.items() if h.terrain_class != TerrainClass.OPEN_WATER}
 
     if not road_hexes or not all_land:
         return
@@ -714,7 +724,7 @@ def test_the_road_network_is_all_one_piece(connected_state):
     dry = {
         c
         for c, hx in connected_state.hexes.items()
-        if hx.terrain_class not in (TerrainClass.OCEAN, TerrainClass.LAKE)
+        if hx.terrain_class not in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
     }
     landmass: dict = {}
     for seat in seats & dry:

@@ -4,7 +4,7 @@ from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
 
 
-def gradient_m_per_km(coord, hx, hexes, cfg) -> float:
+def gradient_m_per_km(coord, hx, hexes) -> float:
     """How steeply the ground lies at this hex, in metres of rise per kilometre.
 
     Measured as *tilt*: the steepest fall across the hex, taken over the three pairs of
@@ -24,9 +24,10 @@ def gradient_m_per_km(coord, hx, hexes, cfg) -> float:
     hillside reads steep, because uphill and downhill neighbours genuinely differ.
 
     Elevation is already metres above sea level, so at 1 hex = 1 km this is a gradient in
-    the ordinary sense with nothing to convert.  The thresholds it is compared against
-    used to be fractions of the elevation range, which meant a mountain was 120 m/km on
-    one map and 20 m/km on another.
+    the ordinary sense with nothing to convert.  It is recorded on the hex as `slope`
+    rather than banded into a class here, because steepness is a continuum: thresholding
+    it made six downstream stages read a label in place of the terrain, and a hex fell
+    either side of a cutoff for reasons unrelated to the question being asked of it.
     """
     ring = neighbors(coord)
     tilt = 0.0
@@ -43,47 +44,59 @@ def gradient_m_per_km(coord, hx, hexes, cfg) -> float:
     return tilt
 
 
-def classify(gradient: float, cfg) -> TerrainClass:
-    """Which slope band a gradient falls in."""
-    if gradient >= cfg.terrain_escarpment_gradient_m:
-        return TerrainClass.ESCARPMENT
-    if gradient >= cfg.terrain_steep_gradient_m:
-        return TerrainClass.STEEP
-    if gradient >= cfg.terrain_rolling_gradient_m:
-        return TerrainClass.ROLLING
-    return TerrainClass.FLAT
+def relief_m(hx, nbrs) -> float:
+    """How far this hex stands above the lowest ground touching it, in metres.
+
+    Steepness alone cannot express a site "overlooking a plain": what makes that site good
+    is the drop it commands, not the gradient it sits on.  A bluff at the edge of a
+    floodplain and a knoll in rolling country can lie at the same angle and be worth quite
+    different things to put a town on.
+    """
+    if not nbrs:
+        return 0.0
+    return hx.elevation - min(n.elevation for n in nbrs)
 
 
 class TerrainClassificationStage(GeneratorStage):
     def run(self, state: WorldState) -> WorldState:
-        cfg = self.config
-        coast_threshold = cfg.coast_max_elevation_m
+        coast_threshold = self.config.coast_max_elevation_m
 
-        # Pass 1: assign OCEAN
+        # Pass 1: everything below sea level is water that reaches the map edge until
+        # `WaterBodyStage` finds the bodies that do not.
         for h in state.hexes.values():
             if h.elevation < 0.0:
-                h.terrain_class = TerrainClass.OCEAN
+                h.terrain_class = TerrainClass.OPEN_WATER
 
-        # Pass 2: classify land hexes by how steeply they lie.
+        # Pass 2: measure the ground, then classify only what is genuinely categorical.
         #
-        # There is deliberately no altitude term. The old rule made anything above 0.8 of
-        # the elevation range a mountain regardless of slope, which put nearly a third of
-        # a 128x128 map's "mountain" hexes on ground gentler than 75 m/km — high plateaus
-        # and upland basins that are perfectly walkable and farmable, but were priced at
-        # ten times flat ground for roads and refused settlement outright. Where altitude
-        # genuinely matters it is read directly: the treeline from `biome_alpine_elev_m`,
-        # and mine workings from a settlement's own elevation test.
+        # Water is not steep land with the water turned up, and a shore is a fact about
+        # what a hex adjoins — those are kinds.  Steepness is not, so it is measured and
+        # recorded rather than banded: `slope` for how the ground lies, `relief` for what
+        # it stands over.  `terrain_label` bands them for maps and legends, and nothing in
+        # the pipeline branches on the result.
+        #
+        # There is deliberately no altitude term in either.  The old rule made anything
+        # above 0.8 of the elevation range a mountain regardless of slope, which put
+        # nearly a third of a 128x128 map's "mountain" hexes on ground gentler than
+        # 75 m/km — high plateaus and upland basins that are perfectly walkable and
+        # farmable, but were priced at ten times flat ground for roads and refused
+        # settlement outright.  Where altitude genuinely matters it is read directly: the
+        # treeline from `biome_alpine_elev_m`, and mine workings from a settlement's own
+        # elevation test.
         for coord, h in state.hexes.items():
-            if h.terrain_class == TerrainClass.OCEAN:
+            nbrs = [state.hexes[n] for n in neighbors(coord) if n in state.hexes]
+            h.slope = gradient_m_per_km(coord, h, state.hexes)
+            h.relief = relief_m(h, nbrs)
+
+            if h.terrain_class is TerrainClass.OPEN_WATER:
                 continue
 
-            nbrs = [state.hexes[n] for n in neighbors(coord) if n in state.hexes]
             if h.elevation < coast_threshold and any(
-                n.terrain_class == TerrainClass.OCEAN for n in nbrs
+                n.terrain_class is TerrainClass.OPEN_WATER for n in nbrs
             ):
                 h.terrain_class = TerrainClass.COAST
                 continue
 
-            h.terrain_class = classify(gradient_m_per_km(coord, h, state.hexes, cfg), cfg)
+            h.terrain_class = TerrainClass.LAND
 
         return state

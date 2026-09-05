@@ -109,7 +109,7 @@ def lay_road(ws, path, tier):
     from worldgen.core.hex import TerrainClass
     from worldgen.core.world_state import ROAD_TIER_RANK, RoadEdge, road_edge_key
 
-    water = (TerrainClass.OCEAN, TerrainClass.LAKE)
+    water = (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
     for a, b in zip(path, path[1:], strict=False):
         a, b = tuple(a), tuple(b)
         key = road_edge_key(a, b)

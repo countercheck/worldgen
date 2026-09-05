@@ -76,11 +76,14 @@ def _river_pair(catchment_km2, gradient_drop_m=0.0):
     here = (0, 0)
     there = neighbors(here)[0]
     hexes = {
-        here: Hex(coord=here, elevation=100.0),
+        # `slope` is measured by TerrainClassificationStage and read from the hex, so a
+        # hand-built pair has to state it rather than leave it to be re-derived.
+        here: Hex(coord=here, elevation=100.0, slope=gradient_drop_m),
         there: Hex(
             coord=there,
             elevation=100.0 - gradient_drop_m,
             catchment_km2=catchment_km2,
+            slope=gradient_drop_m,
             tags={"river"},
         ),
     }
@@ -132,7 +135,7 @@ def _soiled(**over):
 
 
 def _shares(state):
-    land = [h for h in state.hexes.values() if h.terrain_class is not TerrainClass.OCEAN]
+    land = [h for h in state.hexes.values() if h.terrain_class is not TerrainClass.OPEN_WATER]
     counts = collections.Counter(h.soil for h in land)
     return {k: v / len(land) for k, v in counts.items()}, land
 
@@ -161,7 +164,7 @@ def test_water_and_wetland_take_no_soil_class():
     model contradicting itself.
     """
     for hx in _soiled(regional_climate="temperate").hexes.values():
-        if hx.terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE) or hx.biome in (
+        if hx.terrain_class in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER) or hx.biome in (
             Biome.OCEAN,
             Biome.WETLAND,
         ):
@@ -245,7 +248,7 @@ def test_good_soil_carries_wildwood():
         h
         for h in state.hexes.values()
         if h.soil in (SoilQuality.PRIME, SoilQuality.ARABLE)
-        and h.terrain_class is not TerrainClass.OCEAN
+        and h.terrain_class is not TerrainClass.OPEN_WATER
     ]
     assert good
     under_trees = sum(1 for h in good if h.land_cover in wooded)

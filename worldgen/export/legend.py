@@ -9,7 +9,7 @@ the two can gain a legend row or change placement without drifting apart.
 import math
 from dataclasses import dataclass
 
-from ..core.hex import SettlementTier
+from ..core.hex import DEFAULT_TERRAIN_BANDS, SettlementTier, terrain_bands, terrain_label
 from ..core.hex_grid import road_polylines, road_water_transitions
 from ..core.world_state import RoadTier, WorldState
 
@@ -101,14 +101,14 @@ def _enum_sort_key(member) -> tuple[str, int]:
     return (cls.__name__, list(cls).index(member))
 
 
-def _fill_category(h, color_mode: str):
+def _fill_category(h, color_mode: str, bands=DEFAULT_TERRAIN_BANDS):
     """The enum member that decides a hex's fill — mirrors each exporter's `_get_hex_fill`."""
     if color_mode == "terrain":
-        return h.terrain_class
+        return terrain_label(h, *bands)
     if color_mode == "land_cover":
         return h.land_cover
     if color_mode == "biome":
-        return h.biome if h.biome is not None else h.terrain_class
+        return h.biome if h.biome is not None else terrain_label(h, *bands)
     if color_mode == "soil":
         return h.soil
     if color_mode == "land_use":
@@ -178,8 +178,9 @@ def rows(ws: WorldState, color_mode: str, layers: set[str]) -> list[LegendRow]:
         else:
             # One representative hex per category, so exporters can reuse their fill lookup.
             samples: dict = {}
+            bands = terrain_bands(ws)
             for hex_item in ws.hexes.values():
-                category = _fill_category(hex_item, color_mode)
+                category = _fill_category(hex_item, color_mode, bands)
                 if category is not None:
                     samples.setdefault(category, hex_item)
             for category in sorted(samples, key=_enum_sort_key):
