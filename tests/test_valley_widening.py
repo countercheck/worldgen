@@ -91,7 +91,7 @@ def test_sink_filling_lets_drainage_cross_a_pit():
     hydrology found: a pitted surface gives a scatter of short segments, not a network.
     """
     from worldgen.core.world_state import WorldState
-    from worldgen.stages.erosion import _grid_flow_accumulation
+    from worldgen.stages.erosion import _grid_flow_accumulation, _neighbour_table
 
     w = h = 9
     state = WorldState.empty(seed=1, width=w, height=h)
@@ -101,7 +101,7 @@ def test_sink_filling_lets_drainage_cross_a_pit():
             arr[i, j] = 1.0 - 0.05 * j  # drains toward high j
     arr[4, 4] = 0.2  # a pit partway down
 
-    acc = _grid_flow_accumulation(arr, 0.0, state)
+    acc = _grid_flow_accumulation(arr, 0.0, _neighbour_table(state, w, h))
     # Water reaching the pit must carry on past it rather than stopping there.
     assert acc[:, 8].sum() > acc[4, 4], "drainage never left the pit"
 
@@ -124,3 +124,31 @@ def test_widening_produces_flat_ground_beside_the_channel():
     before = flat_beside(arr)
     _widen_valleys(arr, discharge, 0.0, 4.0, 0.4, 0.001, 0.5, 0.05)
     assert flat_beside(arr) > before
+
+
+def test_an_off_map_catchment_makes_the_channel_below_it_a_trunk():
+    """Seeding a mouth is what gives an imported river a river's valley.
+
+    Widening scales its reach by discharge, and accumulation starts every cell at one hex
+    of rain, so without this an off-map trunk is measured as the trickle its first few
+    on-map hexes would raise — and gets a trickle's valley, however much water hydrology
+    later says crosses the border there.
+    """
+    from worldgen.core.world_state import WorldState
+    from worldgen.stages.erosion import _grid_flow_accumulation, _neighbour_table
+
+    w = h = 9
+    state = WorldState.empty(seed=1, width=w, height=h)
+    arr = np.zeros((w, h))
+    for i in range(w):
+        for j in range(h):
+            arr[i, j] = 1.0 - 0.05 * j  # drains toward high j
+    table = _neighbour_table(state, w, h)
+    mouth = (4, 0)
+
+    plain = _grid_flow_accumulation(arr, 0.0, table)
+    seeded = _grid_flow_accumulation(arr, 0.0, table, {mouth: 500.0})
+
+    assert seeded[mouth] > plain[mouth] * 10
+    # And it travels: the catchment has to reach the sea, not stop at the border hex.
+    assert seeded[:, 8].sum() > plain[:, 8].sum() + 400

@@ -4,6 +4,7 @@ from collections import deque
 import numpy as np
 from scipy.ndimage import gaussian_filter
 
+from ..core.hex_grid import distance as hex_distance
 from ..core.hex_grid import neighbors as hex_neighbors
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
@@ -164,7 +165,32 @@ def _drop_particle(
         px, py = new_px, new_py
 
 
-def _fill_sinks(arr: np.ndarray, sea_level: float, state: WorldState) -> np.ndarray:
+def _neighbour_table(state: WorldState, w: int, h: int) -> list[list[tuple[int, int]]]:
+    """Each grid cell's in-bounds hex neighbours, as flat-indexed (col, row) pairs.
+
+    Built once and shared by the sink fill and the accumulation across every carve pass.
+    Those walk every cell six ways several times over, and resolving the neighbourhood
+    through `coord_at`, `neighbors` and `grid_index` each time made the widening cost more
+    than the droplet simulation it follows — about four times the test suite's runtime.
+    The mapping is the same on every pass, so it is worth computing once.
+    """
+    table: list[list[tuple[int, int]]] = []
+    for i in range(w):
+        for j in range(h):
+            cell = []
+            for n in hex_neighbors(state.coord_at(i, j)):
+                if n not in state.hexes:
+                    continue
+                ni, nj = state.grid_index(n)
+                if 0 <= ni < w and 0 <= nj < h:
+                    cell.append((ni, nj))
+            table.append(cell)
+    return table
+
+
+def _fill_sinks(
+    arr: np.ndarray, sea_level: float, neighbours: list[list[tuple[int, int]]]
+) -> np.ndarray:
     """A copy of *arr* with its depressions filled to their spill level (Barnes et al).
 
     Accumulation needs this and the droplets guarantee it will be needed: they leave the
@@ -192,11 +218,8 @@ def _fill_sinks(arr: np.ndarray, sea_level: float, state: WorldState) -> np.ndar
 
     while heap:
         elev, i, j = heapq.heappop(heap)
-        for n in hex_neighbors(state.coord_at(i, j)):
-            if n not in state.hexes:
-                continue
-            ni, nj = state.grid_index(n)
-            if not (0 <= ni < w and 0 <= nj < h) or visited[ni, nj]:
+        for ni, nj in neighbours[i * h + j]:
+            if visited[ni, nj]:
                 continue
             visited[ni, nj] = True
             filled[ni, nj] = max(filled[ni, nj], elev)
@@ -204,7 +227,12 @@ def _fill_sinks(arr: np.ndarray, sea_level: float, state: WorldState) -> np.ndar
     return filled
 
 
-def _grid_flow_accumulation(arr: np.ndarray, sea_level: float, state: WorldState) -> np.ndarray:
+def _grid_flow_accumulation(
+    arr: np.ndarray,
+    sea_level: float,
+    neighbours: list[list[tuple[int, int]]],
+    inflow: dict[tuple[int, int], float] | None = None,
+) -> np.ndarray:
     """How much land drains through each cell, by steepest descent over the hex grid.
 
     Valleys have to be widened where the rivers will be, and the droplet affinity does not
@@ -221,22 +249,26 @@ def _grid_flow_accumulation(arr: np.ndarray, sea_level: float, state: WorldState
     w, h = arr.shape
     land = arr >= sea_level
     acc = np.where(land, 1.0, 0.0)
+    # A river entering from off the map brings a catchment this map never had.  Seeding it
+    # here is what makes the valley match the water: widening scales its reach by
+    # discharge, so without this an imported trunk is measured as the trickle its first
+    # few on-map hexes would raise, and gets a trickle's valley.
+    for cell, volume in (inflow or {}).items():
+        if land[cell]:
+            acc[cell] = max(acc[cell], volume)
 
     # Route over the filled surface, so water crosses a depression instead of vanishing
     # into it — the same thing hydrology does, and the reason the two agree on where the
     # rivers are.
-    routing = _fill_sinks(arr, sea_level, state)
+    routing = _fill_sinks(arr, sea_level, neighbours)
     order = [(int(i), int(j)) for i, j in np.argwhere(land)]
     order.sort(key=lambda c: -routing[c])
 
     for i, j in order:
         lowest = None
         lowest_elev = routing[i, j]
-        for n in hex_neighbors(state.coord_at(i, j)):
-            if n not in state.hexes:
-                continue
-            ni, nj = state.grid_index(n)
-            if not (0 <= ni < w and 0 <= nj < h) or not land[ni, nj]:
+        for ni, nj in neighbours[i * h + j]:
+            if not land[ni, nj]:
                 continue
             if routing[ni, nj] < lowest_elev:
                 lowest_elev = routing[ni, nj]
@@ -244,6 +276,65 @@ def _grid_flow_accumulation(arr: np.ndarray, sea_level: float, state: WorldState
         if lowest is not None:
             acc[lowest] += acc[i, j]
     return acc
+
+
+def _inflow_mouths(
+    arr: np.ndarray,
+    sea_level: float,
+    state: WorldState,
+    neighbours: list[list[tuple[int, int]]],
+    edges: tuple,
+    count: int,
+    separation: int,
+) -> list[tuple[int, int]]:
+    """Border cells where a river from beyond the map would enter, best first.
+
+    The criterion is hydrology's: land on a chosen edge whose ground falls away inland.
+    Erosion cannot ask which hexes hydrology will pick — that runs three stages later and
+    needs a priority-flood this stage has no reason to do — but it does not have to.
+    Carving these deepens the very descent hydrology ranks on, so the mouths chosen here
+    are the ones it goes on to choose, and the two agree by construction.
+
+    Ranked by drop and thinned by `separation`, so two inlets do not land in one valley.
+    """
+    if count <= 0:
+        return []
+    w, h = arr.shape
+    wanted = set(edges)
+    candidates: list[tuple[float, tuple[int, int]]] = []
+
+    for i in range(w):
+        for j in range(h):
+            on_edge = set()
+            if i == 0:
+                on_edge.add("west")
+            if i == w - 1:
+                on_edge.add("east")
+            if j == 0:
+                on_edge.add("north")
+            if j == h - 1:
+                on_edge.add("south")
+            if not (on_edge & wanted) or arr[i, j] < sea_level:
+                continue
+            best = 0.0
+            for ni, nj in neighbours[i * h + j]:
+                if arr[ni, nj] < sea_level:
+                    continue
+                if ni in (0, w - 1) or nj in (0, h - 1):
+                    continue  # still on the border: along the edge, not into the map
+                best = max(best, arr[i, j] - arr[ni, nj])
+            if best > 0.0:
+                candidates.append((best, (i, j)))
+
+    candidates.sort(key=lambda c: (-c[0], c[1]))
+    chosen: list[tuple[int, int]] = []
+    for _drop, cell in candidates:
+        if len(chosen) >= count:
+            break
+        coord = state.coord_at(*cell)
+        if all(hex_distance(coord, state.coord_at(*c)) >= separation for c in chosen):
+            chosen.append(cell)
+    return chosen
 
 
 def _widen_valleys(
@@ -415,10 +506,31 @@ class ErosionStage(GeneratorStage):
         # is the coastline the import was asked to preserve. Cutting afterwards changes
         # the valleys and leaves the rest of the map where it was.
         if land_coords:
+            # Rivers that enter from off the map bring a catchment this map never had, and
+            # nothing here knew about it: accumulation starts every cell at one hex of
+            # rain, so an imported trunk was measured as the trickle its first few on-map
+            # hexes raise, and widening gave it a trickle's valley.  Seed the mouths with
+            # what they actually carry — the same quantity hydrology seeds them with — and
+            # the valley follows the water without any special case for it.
+            neighbours = _neighbour_table(state, w, h)
+            inflow_volume = max(1.0, cfg.river_inflow_volume * len(land_coords))
+            inflow = {
+                mouth: inflow_volume
+                for mouth in _inflow_mouths(
+                    arr,
+                    cfg.sea_level,
+                    state,
+                    neighbours,
+                    tuple(cfg.river_inflow_edges),
+                    cfg.river_inflow_count,
+                    cfg.river_inflow_min_separation,
+                )
+            }
+
             for _ in range(cfg.valley_carve_passes):
                 _widen_valleys(
                     arr,
-                    _grid_flow_accumulation(arr, cfg.sea_level, state),
+                    _grid_flow_accumulation(arr, cfg.sea_level, neighbours, inflow),
                     cfg.sea_level,
                     cfg.valley_width_max,
                     cfg.valley_width_exponent,
