@@ -25,21 +25,30 @@ ROAD_TIER_RANK = {RoadTier.TRACK: 0, RoadTier.SECONDARY: 1, RoadTier.PRIMARY: 2}
 # and stops recording a steepness class: "flat", "hill" and "mountain" were thresholds on
 # the slope now stored, and an earlier file's band reads back as plain land, with the
 # slope recomputed by whoever needs it.
-SCHEMA_VERSION = "1.3"
-SUPPORTED_SCHEMA_VERSIONS = frozenset({"1.0", "1.1", "1.2", "1.3"})
+SCHEMA_VERSION = "1.4"
+SUPPORTED_SCHEMA_VERSIONS = frozenset({"1.0", "1.1", "1.2", "1.3", "1.4"})
 
-# Steepness bands a pre-1.3 file may carry in "terrain_class".  Land is land; how steep it
-# was is a number that file never wrote down, so it comes back as 0.0 rather than being
-# guessed from the band it fell in.
-_LEGACY_TERRAIN_BANDS = frozenset({"flat", "hill", "mountain"})
+# Terrain class names an older file may carry.  The steepness bands were thresholds on the
+# slope now stored, so land is land and how steep it was is a number that file never wrote
+# down — it comes back 0.0 rather than guessed from the band.  "ocean" and "lake" are the
+# same two things under their old names, which claimed a salinity nothing here tracks;
+# what was ever meant was whether the water reaches the map edge.
+_LEGACY_TERRAIN_CLASSES = {
+    "flat": "LAND",
+    "hill": "LAND",
+    "mountain": "LAND",
+    "ocean": "OPEN_WATER",
+    "lake": "INLAND_WATER",
+}
 
 
 def _terrain_class_from(value: str):
-    """Read a hex's class, translating the steepness bands a pre-1.3 file may carry."""
+    """Read a hex's class, translating the names an older file may carry."""
     from .hex import TerrainClass
 
-    if value in _LEGACY_TERRAIN_BANDS:
-        return TerrainClass.LAND
+    legacy = _LEGACY_TERRAIN_CLASSES.get(value)
+    if legacy is not None:
+        return TerrainClass[legacy]
     return TerrainClass(value)
 
 
@@ -124,20 +133,20 @@ class WorldState:
         return [
             h
             for h in self.hexes.values()
-            if h.terrain_class not in (TerrainClass.OCEAN, TerrainClass.LAKE)
+            if h.terrain_class not in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
         ]
 
-    def all_ocean(self) -> list[Hex]:
-        """All ocean hexes (map-edge-connected water bodies)."""
+    def all_open_water(self) -> list[Hex]:
+        """Every hex of water that reaches the map edge, and so drains away."""
         from .hex import TerrainClass
 
-        return [h for h in self.hexes.values() if h.terrain_class == TerrainClass.OCEAN]
+        return [h for h in self.hexes.values() if h.terrain_class == TerrainClass.OPEN_WATER]
 
-    def all_lakes(self) -> list[Hex]:
-        """All lake hexes (inland water bodies)."""
+    def all_inland_water(self) -> list[Hex]:
+        """Every hex of water with no way off the map — a basin, fresh or salt."""
         from .hex import TerrainClass
 
-        return [h for h in self.hexes.values() if h.terrain_class == TerrainClass.LAKE]
+        return [h for h in self.hexes.values() if h.terrain_class == TerrainClass.INLAND_WATER]
 
     def all_water(self) -> list[Hex]:
         """All water hexes (ocean and lakes)."""
@@ -146,7 +155,7 @@ class WorldState:
         return [
             h
             for h in self.hexes.values()
-            if h.terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE)
+            if h.terrain_class in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
         ]
 
     def to_dict(self) -> dict:

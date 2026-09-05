@@ -488,7 +488,7 @@ def _water_crossing_world() -> WorldState:
     """A road that puts to sea mid-route: two land legs, two shore points."""
     ws = WorldState.empty(seed=99, width=6, height=3)
     for r in range(3):
-        ws.hexes[(3, r)].terrain_class = TerrainClass.OCEAN
+        ws.hexes[(3, r)].terrain_class = TerrainClass.OPEN_WATER
     ws.roads = [Road(path=[(1, 1), (2, 1), (3, 1), (4, 1), (5, 1)], tier=RoadTier.PRIMARY)]
     return ws
 
@@ -678,7 +678,7 @@ def test_anchorage_not_drawn_for_an_undrawable_land_leg():
     """
     ws = WorldState.empty(seed=3, width=5, height=3)
     for r in range(3):
-        ws.hexes[(2, r)].terrain_class = TerrainClass.OCEAN
+        ws.hexes[(2, r)].terrain_class = TerrainClass.OPEN_WATER
     # (1,1) is a single land hex before the water: no polyline, so no anchorage.
     ws.roads = [Road(path=[(1, 1), (2, 1), (3, 1), (4, 1)], tier=RoadTier.PRIMARY)]
     svg = render(ws, SVGConfig(layers={"roads", "anchorages"}))

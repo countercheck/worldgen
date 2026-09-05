@@ -18,7 +18,9 @@ def test_has_each_tier(settle_state):
 def test_settlements_on_land(settle_state):
     for s in settle_state.settlements:
         hx = settle_state.hexes[s.coord]
-        assert hx.terrain_class != TerrainClass.OCEAN, f"Settlement {s.name} placed on ocean hex"
+        assert hx.terrain_class != TerrainClass.OPEN_WATER, (
+            f"Settlement {s.name} placed on ocean hex"
+        )
 
 
 def test_city_separation(settle_state):

@@ -126,7 +126,7 @@ class HabitabilityStage(GeneratorStage):
         raw: dict[str, dict] = {tier: {} for tier in radii}
         for coord, hx in hexes.items():
             if (
-                hx.terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE)
+                hx.terrain_class in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
                 or hx.slope > cfg.terrain_mountain_gradient
                 or hx.biome == Biome.WETLAND
             ):

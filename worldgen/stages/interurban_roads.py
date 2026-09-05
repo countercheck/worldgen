@@ -151,7 +151,7 @@ class InterurbanRoadStage(GeneratorStage):
         for coord, hx in hexes.items():
             if hx.settlement is not None:
                 continue
-            if hx.terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE):
+            if hx.terrain_class in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER):
                 continue
             if any(n in road_hex_set for n in neighbors(coord)):
                 hx.habitability_village = min(1.0, hx.habitability_village + 0.2)

@@ -37,13 +37,17 @@ def test_all_hexes_have_land_cover(lc_state):
 
 def test_ocean_terrain_is_open_water(lc_state):
     for h in lc_state.hexes.values():
-        if h.terrain_class == TerrainClass.OCEAN:
+        if h.terrain_class == TerrainClass.OPEN_WATER:
             assert h.land_cover == LandCover.OPEN_WATER, f"Ocean hex has land_cover {h.land_cover}"
 
 
 def test_mountain_terrain_is_bare_rock(lc_state):
     for h in lc_state.hexes.values():
-        if h.terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE, TerrainClass.COAST):
+        if h.terrain_class in (
+            TerrainClass.OPEN_WATER,
+            TerrainClass.INLAND_WATER,
+            TerrainClass.COAST,
+        ):
             continue
         if h.slope > WorldConfig().terrain_mountain_gradient:
             assert h.land_cover == LandCover.BARE_ROCK, (

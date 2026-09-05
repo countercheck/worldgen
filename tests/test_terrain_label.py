@@ -35,8 +35,8 @@ def test_slope_bands_into_the_expected_word(slope, expected):
 @pytest.mark.parametrize(
     "terrain_class,expected",
     [
-        (TerrainClass.OCEAN, TerrainLabel.OCEAN),
-        (TerrainClass.LAKE, TerrainLabel.LAKE),
+        (TerrainClass.OPEN_WATER, TerrainLabel.OCEAN),
+        (TerrainClass.INLAND_WATER, TerrainLabel.LAKE),
         (TerrainClass.COAST, TerrainLabel.COAST),
     ],
 )

@@ -5,7 +5,7 @@ from ..core.hex import TerrainClass
 from ..core.hex_grid import astar, distance, neighbors
 from ..core.world_state import Ferry
 
-WATER = (TerrainClass.OCEAN, TerrainClass.LAKE)
+WATER = (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
 
 
 def edge_grade_pct(from_hx, to_hx, cfg) -> float:

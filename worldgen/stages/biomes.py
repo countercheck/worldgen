@@ -30,7 +30,7 @@ class BiomeStage(GeneratorStage):
             return candidates[-1]
 
         for h in state.hexes.values():
-            if h.terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE):
+            if h.terrain_class in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER):
                 h.biome = Biome.OCEAN
             elif h.elevation > alpine_elev:
                 h.biome = Biome.ALPINE

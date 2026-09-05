@@ -51,7 +51,7 @@ class ClimateStage(GeneratorStage):
             state.hexes[coord].moisture = precip
 
         # River-adjacency and coastal moisture bonuses
-        water = (TerrainClass.OCEAN, TerrainClass.LAKE)
+        water = (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
         for coord, h in state.hexes.items():
             if h.terrain_class in water:
                 continue

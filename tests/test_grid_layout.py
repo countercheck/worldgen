@@ -178,7 +178,7 @@ def test_pipeline_fills_every_column_and_row(offset_world):
 
 
 def test_offset_world_has_sea_land_rivers_and_settlements(offset_world):
-    assert offset_world.all_ocean()
+    assert offset_world.all_open_water()
     assert offset_world.all_land()
     assert offset_world.rivers
     assert offset_world.settlements
@@ -189,7 +189,7 @@ def test_offset_rivers_run_downhill_to_water_or_the_border(offset_world):
     water = {
         c
         for c, h in offset_world.hexes.items()
-        if h.terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE)
+        if h.terrain_class in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
     }
     river_hexes = {c for r in offset_world.rivers for c in r.hexes}
     for river in offset_world.rivers:

@@ -12,7 +12,7 @@ class TerrainClassificationStage(GeneratorStage):
         # Pass 1: assign OCEAN
         for h in state.hexes.values():
             if h.elevation < sea:
-                h.terrain_class = TerrainClass.OCEAN
+                h.terrain_class = TerrainClass.OPEN_WATER
 
         # Pass 2: measure the ground, then classify what is genuinely categorical.
         #
@@ -32,11 +32,13 @@ class TerrainClassificationStage(GeneratorStage):
                 h.relief = 0.0
             h.slope = gradient
 
-            if h.terrain_class == TerrainClass.OCEAN:
+            if h.terrain_class == TerrainClass.OPEN_WATER:
                 continue
 
             # COAST: low-elevation land adjacent to ocean
-            if elev < coast_threshold and any(n.terrain_class == TerrainClass.OCEAN for n in nbrs):
+            if elev < coast_threshold and any(
+                n.terrain_class == TerrainClass.OPEN_WATER for n in nbrs
+            ):
                 h.terrain_class = TerrainClass.COAST
                 continue
 

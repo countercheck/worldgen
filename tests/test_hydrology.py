@@ -58,7 +58,7 @@ def test_rivers_reach_ocean(hydro_state):
     water_set = {
         coord
         for coord, h in hydro_state.hexes.items()
-        if h.terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE)
+        if h.terrain_class in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
     }
     # Build a set of all hexes that appear in any river so we can detect confluences.
     all_river_hexes: set[tuple[int, int]] = set()
@@ -122,7 +122,7 @@ def test_tags_assigned(hydro_state):
 
 def test_river_tag_on_river_paths(hydro_state):
     # Every hex in a River path that is a land hex must carry the "river" tag.
-    water_classes = {TerrainClass.OCEAN, TerrainClass.LAKE}
+    water_classes = {TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER}
     for river in hydro_state.rivers:
         for coord in river.hexes:
             if coord not in hydro_state.hexes:
@@ -207,7 +207,7 @@ def test_lake_drainage_merges_without_rewiring_existing_river():
         hex_item.terrain_class = TerrainClass.LAND
         hex_item.elevation = 10.0
         hex_item.river_flow = 0.0
-    ws.hexes[lake].terrain_class = TerrainClass.LAKE
+    ws.hexes[lake].terrain_class = TerrainClass.INLAND_WATER
     ws.hexes[lake].elevation = 0.0
     ws.hexes[spillway].elevation = 1.0
 
@@ -258,7 +258,7 @@ def test_no_shared_hexes_between_rivers(hydro_state):
     land_terrain = {
         coord
         for coord, hx in hydro_state.hexes.items()
-        if hx.terrain_class not in (TerrainClass.OCEAN, TerrainClass.LAKE)
+        if hx.terrain_class not in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
     }
     for i, river in enumerate(hydro_state.rivers):
         for coord in river.hexes:
@@ -375,7 +375,7 @@ def test_inflow_sources_are_never_water(inflow_state):
     # A river may not rise out of the sea or a lake.  Guarded in three places: candidates
     # are drawn from land, an inlet's downstream hex must be land too, and the source tag
     # is dropped if lake drainage later submerges the hex.
-    water = (TerrainClass.OCEAN, TerrainClass.LAKE)
+    water = (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
     for coord in _sources(inflow_state):
         assert inflow_state.hexes[coord].terrain_class not in water
 
@@ -417,7 +417,7 @@ def test_inflow_arrives_already_large(inflow_state):
         if r.hexes[0] not in sources
         and "headwater" in inflow_state.hexes[r.hexes[0]].tags
         and not any(
-            inflow_state.hexes[n].terrain_class == TerrainClass.LAKE
+            inflow_state.hexes[n].terrain_class == TerrainClass.INLAND_WATER
             for n in neighbors(r.hexes[0])
             if n in inflow_state.hexes
         )
@@ -577,7 +577,7 @@ def test_a_coastal_map_drains_to_the_sea():
         continent_shelf_variance=0.8,
         elevation_gradient=[0.0, -0.5],
     )
-    lake = [h for h in state.hexes.values() if h.terrain_class == TerrainClass.LAKE]
+    lake = [h for h in state.hexes.values() if h.terrain_class == TerrainClass.INLAND_WATER]
     endorheic = [h for h in lake if "endorheic" in h.tags]
     assert lake, "expected this config to produce lakes"
     assert len(endorheic) / len(lake) < 0.5, (
@@ -604,7 +604,7 @@ def test_a_lake_outflow_is_seeded_with_the_whole_basin_inflow():
     for hex_item in ws.hexes.values():
         hex_item.terrain_class = TerrainClass.LAND
         hex_item.elevation = 10.0
-    ws.hexes[lake].terrain_class = TerrainClass.LAKE
+    ws.hexes[lake].terrain_class = TerrainClass.INLAND_WATER
     ws.hexes[lake].elevation = 0.0
     ws.hexes[spillway].elevation = 1.0
 
@@ -649,7 +649,7 @@ def _balance_world(**cfg_kw):
     for hex_item in ws.hexes.values():
         hex_item.terrain_class = TerrainClass.LAND
         hex_item.elevation = 10.0
-    ws.hexes[lake].terrain_class = TerrainClass.LAKE
+    ws.hexes[lake].terrain_class = TerrainClass.INLAND_WATER
     ws.hexes[lake].elevation = 0.0
     ws.hexes[spillway].elevation = 1.0
 
@@ -703,7 +703,7 @@ def test_rain_shadow_does_not_change_how_much_rain_falls():
     land = {
         c
         for c, h in state.hexes.items()
-        if h.terrain_class not in (TerrainClass.OCEAN, TerrainClass.LAKE)
+        if h.terrain_class not in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
     }
     for strength in (0.0, 0.25, 0.5, 1.0):
         cfg = WorldConfig(width=48, height=48, rain_shadow_strength=strength)
@@ -719,7 +719,7 @@ def test_rain_shadow_off_gives_every_hex_the_same_rain():
     land = {
         c
         for c, h in state.hexes.items()
-        if h.terrain_class not in (TerrainClass.OCEAN, TerrainClass.LAKE)
+        if h.terrain_class not in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
     }
     rain = rain_per_hex(state, WorldConfig(rain_shadow_strength=0.0), land)
     assert set(rain.values()) == {1.0}
@@ -733,7 +733,7 @@ def test_rain_shadow_makes_rain_uneven():
     land = {
         c
         for c, h in state.hexes.items()
-        if h.terrain_class not in (TerrainClass.OCEAN, TerrainClass.LAKE)
+        if h.terrain_class not in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
     }
     flat = rain_per_hex(state, WorldConfig(rain_shadow_strength=0.0), land)
     shaped = rain_per_hex(state, WorldConfig(rain_shadow_strength=1.0), land)

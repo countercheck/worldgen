@@ -35,7 +35,7 @@ def test_all_hexes_have_biome(biome_state):
 
 def test_ocean_hexes_have_ocean_biome(biome_state):
     for h in biome_state.hexes.values():
-        if h.terrain_class == TerrainClass.OCEAN:
+        if h.terrain_class == TerrainClass.OPEN_WATER:
             assert h.biome == Biome.OCEAN, f"Ocean hex has biome {h.biome}"
 
 
@@ -44,7 +44,7 @@ def test_alpine_hexes_assigned(biome_state):
     high_land = [
         h
         for h in biome_state.hexes.values()
-        if h.elevation > alpine_elev and h.terrain_class != TerrainClass.OCEAN
+        if h.elevation > alpine_elev and h.terrain_class != TerrainClass.OPEN_WATER
     ]
     for h in high_land:
         assert h.biome == Biome.ALPINE, (

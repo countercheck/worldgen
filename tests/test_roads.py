@@ -68,7 +68,7 @@ def test_road_water_segments_are_bracketed(road_state):
     """Roads may now traverse water (oceans + lakes are traversable as a single piece
     of terrain), but every water segment must be bracketed by land hexes — a road
     cannot start, end, or consist entirely of water hexes."""
-    water = (TerrainClass.OCEAN, TerrainClass.LAKE)
+    water = (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
     for road in road_state.roads:
         first = road_state.hexes[road.path[0]]
         last = road_state.hexes[road.path[-1]]
@@ -205,7 +205,7 @@ def test_river_corridor_preference_in_roads(road_state):
 
     hexes = road_state.hexes
     road_hexes = {c for road in road_state.roads for c in road.path if c in hexes}
-    all_land = {c for c, h in hexes.items() if h.terrain_class != TerrainClass.OCEAN}
+    all_land = {c for c, h in hexes.items() if h.terrain_class != TerrainClass.OPEN_WATER}
 
     if not road_hexes or not all_land:
         return

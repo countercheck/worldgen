@@ -51,7 +51,7 @@ class CityTownStage(GeneratorStage):
         land = [
             (coord, hx)
             for coord, hx in hexes.items()
-            if hx.terrain_class not in (TerrainClass.OCEAN, TerrainClass.LAKE)
+            if hx.terrain_class not in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
         ]
         # Cities are sorted on the widest catchment: a capital is chosen for the
         # hinterland it can draw on, not for the hex it stands on.

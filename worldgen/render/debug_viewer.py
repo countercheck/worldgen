@@ -105,7 +105,7 @@ def _color_getter(attribute: str, labels: dict):
         cmap = mpl.colormaps["Blues"]
 
         def get_color(h):
-            if h.terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE):
+            if h.terrain_class in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER):
                 return TERRAIN_COLORS[labels[h.coord]]
             return cmap(min(h.river_flow * 3, 1.0))
 

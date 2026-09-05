@@ -22,7 +22,7 @@ def _derive(h, wet_moist: float, bare_slope: float, bare_elevation: float) -> La
     tc = h.terrain_class
     b = h.biome
 
-    if tc in (TerrainClass.OCEAN, TerrainClass.LAKE):
+    if tc in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER):
         return LandCover.OPEN_WATER
     # Broken ground carries no soil — but a shore is a shore however steep it is, which
     # the terrain classes said by making COAST win over the steepness bands.  Reading the

@@ -39,7 +39,7 @@ def test_moisture_in_range(climate_state):
 
 def test_ocean_moisture_is_one(climate_state):
     for h in climate_state.hexes.values():
-        if h.terrain_class == TerrainClass.OCEAN:
+        if h.terrain_class == TerrainClass.OPEN_WATER:
             assert h.moisture == 1.0, f"ocean hex moisture {h.moisture} != 1.0"
 
 
@@ -79,8 +79,8 @@ def test_rain_shadow_present(climate_state):
         if (
             windward
             and leeward
-            and windward.terrain_class != TerrainClass.OCEAN
-            and leeward.terrain_class != TerrainClass.OCEAN
+            and windward.terrain_class != TerrainClass.OPEN_WATER
+            and leeward.terrain_class != TerrainClass.OPEN_WATER
         ):
             windward_avg.append(windward.moisture)
             leeward_avg.append(leeward.moisture)
@@ -104,7 +104,9 @@ def test_reproducibility():
 
 
 def _mean_land_temperature(state) -> float:
-    temps = [h.temperature for h in state.hexes.values() if h.terrain_class != TerrainClass.OCEAN]
+    temps = [
+        h.temperature for h in state.hexes.values() if h.terrain_class != TerrainClass.OPEN_WATER
+    ]
     return sum(temps) / len(temps) if temps else 0.0
 
 
@@ -154,12 +156,12 @@ def test_base_temperature_preserves_latitude_shape():
         polar_temps = [
             h.temperature
             for (_, r), h in state.hexes.items()
-            if h.terrain_class != TerrainClass.OCEAN and r < height * 0.15
+            if h.terrain_class != TerrainClass.OPEN_WATER and r < height * 0.15
         ]
         equatorial_temps = [
             h.temperature
             for (_, r), h in state.hexes.items()
-            if h.terrain_class != TerrainClass.OCEAN and height * 0.4 < r < height * 0.6
+            if h.terrain_class != TerrainClass.OPEN_WATER and height * 0.4 < r < height * 0.6
         ]
         if polar_temps and equatorial_temps:
             assert sum(equatorial_temps) / len(equatorial_temps) > sum(polar_temps) / len(
@@ -181,7 +183,7 @@ def _mean_land_moisture(state) -> float:
     vals = [
         h.moisture
         for h in state.hexes.values()
-        if h.terrain_class not in (TerrainClass.OCEAN, TerrainClass.LAKE)
+        if h.terrain_class not in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
     ]
     return sum(vals) / len(vals) if vals else 0.0
 

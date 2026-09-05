@@ -36,15 +36,15 @@ class HydrologyStage(GeneratorStage):
         # Build elevation array and valid coord set
         elev: dict[HexCoord, float] = {c: hx.elevation for c, hx in hexes.items()}
         ocean: set[HexCoord] = {
-            c for c, hx in hexes.items() if hx.terrain_class == TerrainClass.OCEAN
+            c for c, hx in hexes.items() if hx.terrain_class == TerrainClass.OPEN_WATER
         }
         lakes: set[HexCoord] = {
-            c for c, hx in hexes.items() if hx.terrain_class == TerrainClass.LAKE
+            c for c, hx in hexes.items() if hx.terrain_class == TerrainClass.INLAND_WATER
         }
         land: set[HexCoord] = {
             c
             for c, hx in hexes.items()
-            if hx.terrain_class not in (TerrainClass.OCEAN, TerrainClass.LAKE)
+            if hx.terrain_class not in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
         }
 
         # A — Priority-Flood sink filling
@@ -169,7 +169,7 @@ class HydrologyStage(GeneratorStage):
         # H — Tag every non-water hex in any River path with "river".
         # Done after all rivers (including drainage) are finalized, so drainage tail
         # hexes that aren't in river_set (but are genuine river-path members) are covered.
-        water_classes = {TerrainClass.OCEAN, TerrainClass.LAKE}
+        water_classes = {TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER}
         for river in state.rivers:
             for coord in river.hexes:
                 if coord in hexes and hexes[coord].terrain_class not in water_classes:
@@ -885,7 +885,7 @@ class HydrologyStage(GeneratorStage):
 
             # Convert submerged land hexes to lake
             for c in newly_submerged:
-                hexes[c].terrain_class = TerrainClass.LAKE
+                hexes[c].terrain_class = TerrainClass.INLAND_WATER
                 hexes[c].elevation = water_level
                 hexes[c].river_flow = 0.0
                 filled[c] = routing_level
@@ -911,7 +911,7 @@ class HydrologyStage(GeneratorStage):
             # If the expanded body now touches the map edge it is ocean, not a lake
             if any(on_border(c) for c in component):
                 for c in component:
-                    hexes[c].terrain_class = TerrainClass.OCEAN
+                    hexes[c].terrain_class = TerrainClass.OPEN_WATER
                     ocean.add(c)
                     lakes.discard(c)
                 continue

@@ -8,7 +8,8 @@ class TerrainClass(Enum):
     """What kind of place a hex is, where the kinds are genuinely different kinds.
 
     Water is not steep land with the water turned up, and a shore is a fact about what a
-    hex adjoins — those are categories.  Steepness is not: it is a continuum, and the
+    hex adjoins — those are categories.  So is whether a body of water drains off the map,
+    which is the whole of what OPEN_WATER and INLAND_WATER distinguish.  Steepness is not: it is a continuum, and the
     FLAT/HILL/MOUNTAIN bands that used to live here were thresholds on `Hex.slope` that
     six stages read in place of the terrain.  A hex fell either side of a cutoff for
     reasons unrelated to the question being asked of it, which is how a level floodplain
@@ -18,8 +19,17 @@ class TerrainClass(Enum):
     legends, which is a presentation concern, so nothing in the pipeline branches on them.
     """
 
-    OCEAN = "ocean"
-    LAKE = "lake"
+    # Water that reaches the map edge, and so carries what enters it away.  Called
+    # "ocean" once, which claimed a salinity nothing tracks; what the generator actually
+    # knows is that this body drains off the map, and that is what every use of it means
+    # — the outlet priority-flood seeds from, the terminal a river may end at, the thing a
+    # basin is *not*.
+    OPEN_WATER = "open_water"
+    # Water with no way off the map.  A basin, in other words: it fills to its spillway
+    # and overflows, or evaporates what reaches it and is closed.  Fresh or salt is not
+    # the question — the Caspian is the second of these and salt, Baikal the second and
+    # fresh.
+    INLAND_WATER = "inland_water"
     COAST = "coast"
     LAND = "land"
 
@@ -30,6 +40,10 @@ class TerrainLabel(Enum):
     A GM wants to see mountains and hills, and a wargame's movement rules are written in
     those words, so the bands are worth keeping at the edge.  Deriving them here rather
     than storing them on the hex is what stops them becoming load-bearing again.
+
+    Ocean and lake stay in this vocabulary for the same reason: they are the words an
+    atlas uses, and a reader wants them.  It is only the *generator* that has no business
+    claiming a chemistry it does not model.
     """
 
     OCEAN = "ocean"
@@ -42,9 +56,9 @@ class TerrainLabel(Enum):
 
 def terrain_label(hx, hill_gradient: float, mountain_gradient: float) -> TerrainLabel:
     """Band a hex's steepness into the word a reader expects to see on the map."""
-    if hx.terrain_class is TerrainClass.OCEAN:
+    if hx.terrain_class is TerrainClass.OPEN_WATER:
         return TerrainLabel.OCEAN
-    if hx.terrain_class is TerrainClass.LAKE:
+    if hx.terrain_class is TerrainClass.INLAND_WATER:
         return TerrainLabel.LAKE
     if hx.terrain_class is TerrainClass.COAST:
         return TerrainLabel.COAST

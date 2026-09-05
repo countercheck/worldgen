@@ -56,16 +56,16 @@ def orographic_pattern(state: WorldState, config) -> dict[HexCoord, float]:
     atm: dict[HexCoord, float] = {}
     precip: dict[HexCoord, float] = {}
     for coord, h in state.hexes.items():
-        if h.terrain_class == TerrainClass.OCEAN:
+        if h.terrain_class == TerrainClass.OPEN_WATER:
             atm[coord] = 1.0
-        elif h.terrain_class == TerrainClass.LAKE:
+        elif h.terrain_class == TerrainClass.INLAND_WATER:
             precip[coord] = 1.0
 
     for coord in sorted_coords:
         h = state.hexes[coord]
-        if h.terrain_class in (TerrainClass.OCEAN, TerrainClass.LAKE):
+        if h.terrain_class in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER):
             precip[coord] = 1.0
-            if h.terrain_class == TerrainClass.OCEAN:
+            if h.terrain_class == TerrainClass.OPEN_WATER:
                 atm[coord] = 1.0
             continue
 
@@ -123,7 +123,7 @@ def rain_per_hex(state: WorldState, config, land: set[HexCoord]) -> dict[HexCoor
     rain = {c: max(0.0, 1.0 + strength * (pattern.get(c, 0.0) / mean - 1.0)) for c in land}
 
     for coord, hx in state.hexes.items():
-        if hx.terrain_class != TerrainClass.LAKE:
+        if hx.terrain_class != TerrainClass.INLAND_WATER:
             continue
         nearby = [rain[n] for n in neighbors(coord) if n in rain]
         rain[coord] = sum(nearby) / len(nearby) if nearby else 1.0

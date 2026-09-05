@@ -24,7 +24,7 @@ def test_elevations_normalized(phase1_state):
 
 def test_land_coverage(phase1_state):
     total = len(phase1_state.hexes)
-    land = sum(1 for h in phase1_state.hexes.values() if h.terrain_class != TerrainClass.OCEAN)
+    land = sum(1 for h in phase1_state.hexes.values() if h.terrain_class != TerrainClass.OPEN_WATER)
     assert land / total >= 0.40, f"Only {land / total:.1%} land, expected >= 40%"
 
 
@@ -35,7 +35,9 @@ def test_coast_borders_ocean(phase1_state):
         neighbor_classes = [
             phase1_state.hexes[n].terrain_class for n in neighbors(coord) if n in phase1_state.hexes
         ]
-        assert TerrainClass.OCEAN in neighbor_classes, f"COAST hex {coord} has no OCEAN neighbor"
+        assert TerrainClass.OPEN_WATER in neighbor_classes, (
+            f"COAST hex {coord} has no OCEAN neighbor"
+        )
 
 
 def test_mountain_not_isolated(phase1_state):
