@@ -52,8 +52,17 @@ ROAD_TIER_RANK = {RoadTier.TRACK: 0, RoadTier.SECONDARY: 1, RoadTier.PRIMARY: 2}
 # steepness bands translate to LAND and its water classes to the two new names, but the
 # numbers cannot be recovered from the words, so both default to zero.  A world written
 # before this re-renders flat.  Regenerate rather than re-render.
-SCHEMA_VERSION = "1.7"
-SUPPORTED_SCHEMA_VERSIONS = frozenset({"1.0", "1.1", "1.2", "1.3", "1.4", "1.5", "1.6", "1.7"})
+#
+# 1.8 records "alluvium": the loose river-laid sediment the erosion model moves, as a
+# depth against the map's own richest ground.  An earlier file reads back as 0.0, which is
+# the honest answer — it was never measured, and unlike "slope" it cannot be recovered
+# from the elevations, because it records where sediment *travelled* rather than what
+# shape the ground ended up in.  Re-render an old world and its alluvium map is blank;
+# regenerate to get one.
+SCHEMA_VERSION = "1.8"
+SUPPORTED_SCHEMA_VERSIONS = frozenset(
+    {"1.0", "1.1", "1.2", "1.3", "1.4", "1.5", "1.6", "1.7", "1.8"}
+)
 
 
 # Terrain classes from before steepness stopped being a class at all.  "hill" and
@@ -263,6 +272,7 @@ class WorldState:
                     "terrain_class": h.terrain_class.value,
                     "slope": h.slope,
                     "relief": h.relief,
+                    "alluvium": h.alluvium,
                     "land_cover": h.land_cover.value if h.land_cover is not None else None,
                     "soil": h.soil.value if h.soil is not None else None,
                     "land_use": h.land_use.value if h.land_use is not None else None,
@@ -377,6 +387,7 @@ class WorldState:
                 # replaced them: a world written earlier draws flat until regenerated.
                 slope=hd.get("slope", 0.0),
                 relief=hd.get("relief", 0.0),
+                alluvium=hd.get("alluvium", 0.0),
                 land_cover=LandCover(hd["land_cover"])
                 if hd.get("land_cover") is not None
                 else None,

@@ -185,6 +185,15 @@ valley_floor_slope_m: 2.5    # Rise per hex away from the channel, in metres, so
 valley_max_relief_m: 100.0   # How much height a river can plane away per pass, in metres. Ground standing higher than this above the channel is valley wall and stays. Default: 100.0
 valley_channel_fraction: 0.02 # Fraction of the land counting as channel, by discharge. Default: 0.02
 
+# Alluvium — the loose river-laid sediment the erosion model moves.  Recorded per hex as
+# a depth in [0, 1] against the map's own richest ground, from two sources: what droplets
+# net deposit, and the ground a channel has planed flat by wandering across it.  The
+# second is the larger, because a meander belt is built sideways and can change the mean
+# elevation across itself hardly at all.  Shows up in `render --attribute alluvium`.
+alluvium_floodplain_gain: 1.0 # How much a floodplain belt counts as alluvial, at its channel. 0 leaves only droplet deposition, which finds deltas and valley bottoms but not meander belts. Default: 1.0
+alluvium_smoothing: 1.0       # Blur in cells before normalising. Droplets deposit at points and soil does not. 0 disables. Default: 1.0
+alluvium_quantile: 0.98       # Depth treated as full, for the droplet term only. A quantile rather than the maximum, which is one cell at the front of one delta and would flatten every floodplain on the map against it. Default: 0.98
+
 # ---------------------------------------------------------------------------
 # Hydrology
 # ---------------------------------------------------------------------------
@@ -325,6 +334,7 @@ food_drowned_precip_mm: 3000.0 # Annual rainfall at which ground is leached and 
 # Water and wetland keep values of their own instead of a soil class, because neither is
 # ploughland: the sea is a fishery and a bog is a bog.
 food_prime_value: 1.4      # Alluvium: the floodplain of a river too big to wade. Default: 1.4
+food_alluvium_bonus: 0.5            # What deep alluvium adds, as a multiple of the soil's base value. Multiplicative on purpose: silt is a soil, not a climate — it renews what cropping strips, but it does not water a desert or hold a crop on bare rock. Default: 0.5
 food_arable_value: 1.0     # Ordinary farmland. Default: 1.0
 food_marginal_value: 0.55  # Ploughable and poor: leached, waterlogged, or podzol. Default: 0.55
 food_grazing_value: 0.35   # Too steep to plough or too dry to crop; run stock on it. Default: 0.35

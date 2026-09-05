@@ -145,6 +145,7 @@ def generate(
     render_debug(state, "elevation", str(output_path / "elevation.svg"))
     render_debug(state, "terrain_class", str(output_path / "terrain_class.svg"))
     render_debug(state, "river_flow", str(output_path / "river_flow.svg"))
+    render_debug(state, "alluvium", str(output_path / "alluvium.svg"))
     render_debug(state, "temperature", str(output_path / "temperature.svg"))
     render_debug(state, "moisture", str(output_path / "moisture.svg"))
     render_debug(state, "biome", str(output_path / "biome.svg"))
@@ -170,6 +171,7 @@ _ATTRIBUTES = [
     "elevation",
     "terrain_class",
     "river_flow",
+    "alluvium",
     "temperature",
     "moisture",
     "biome",
