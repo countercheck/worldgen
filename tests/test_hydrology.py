@@ -407,10 +407,20 @@ def test_inflow_arrives_already_large(inflow_state):
     sources = set(_sources(inflow_state))
     assert sources
 
+    # Springs only.  A lake's outflow has no upstream *river* hex either, so it is tagged
+    # a headwater too, and since it carries the whole basin's discharge it is often the
+    # largest one on the map — which says nothing about whether an off-map river arrives
+    # large, the thing being measured here.
     local_headwaters = [
         r.hexes[0]
         for r in inflow_state.rivers
-        if r.hexes[0] not in sources and "headwater" in inflow_state.hexes[r.hexes[0]].tags
+        if r.hexes[0] not in sources
+        and "headwater" in inflow_state.hexes[r.hexes[0]].tags
+        and not any(
+            inflow_state.hexes[n].terrain_class == TerrainClass.LAKE
+            for n in neighbors(r.hexes[0])
+            if n in inflow_state.hexes
+        )
     ]
     assert local_headwaters
 
