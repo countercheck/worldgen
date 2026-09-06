@@ -1,10 +1,16 @@
 /**
  * A demonstration campaign, so the console has something in it on first load.
  *
- * Built through the real engine rather than by hand: every unit here is added by an
- * `add_unit` command that goes through `check` and `apply` like any other, so if the
- * rules would refuse one of these placements the console says so rather than showing a
- * unit the engine does not believe in.
+ * This is a list of **commands**, not a state. That is the whole point of it living here
+ * rather than in the client: the browser posts these to the server exactly as a referee
+ * would type them, so the demo goes in through the same door as everything else and is
+ * masked on the way back out. A demo assembled in the browser would be the one campaign
+ * in the system whose fog was never enforced, which is precisely the wrong thing to put
+ * on the front page.
+ *
+ * Every unit is added by an `add_unit` command that goes through `check` and `apply` like
+ * any other, so if the rules would refuse one of these placements the console says so
+ * rather than showing a unit the engine does not believe in.
  *
  * The units are chosen to show the things worth seeing. A guards cavalry division with
  * scouts is eighteen kilometres of column sweeping a two-hex corridor; a line infantry
@@ -12,30 +18,14 @@
  * way to understand why column length matters.
  */
 
-import {
-  advanceColumn,
-  applyAll,
-  distance,
-  key,
-  neighbors,
-  unkey,
-  DEFAULT_CONFIG,
-  EMPTY_STATE,
-  KIND_DEFAULTS,
-  parseWorld,
-  planMarch,
-  type CampaignState,
-  type Command,
-  type Faction,
-  type Hex,
-  type Trait,
-  type Unit,
-  type UnitKind,
-  type World,
-  type WorldRef,
-} from '@campaign/shared';
-
-import worldDoc from '../../shared/test/fixtures/world-32x32.json';
+import { advanceColumn } from './column.js';
+import { DEFAULT_CONFIG } from './config.js';
+import { type Command } from './engine.js';
+import { distance, key, neighbors, unkey, type Hex } from './hex.js';
+import { planMarch } from './movement.js';
+import type { Faction } from './events.js';
+import { KIND_DEFAULTS, type Trait, type Unit, type UnitKind } from './unit.js';
+import type { World } from './world.js';
 
 export const RED: Faction = { id: 'red', name: 'Armée du Nord', color: '#d1495b' };
 export const BLUE: Faction = { id: 'blue', name: 'Coalition', color: '#3d6fd1' };
@@ -51,14 +41,13 @@ interface Spec {
   spacingMultiplier: number;
   guns: number;
   corps: string | null;
-  /** How far to march it from its start, so it has a column rather than a point. */
-  marchTo?: (world: World, from: Hex) => Hex | null;
 }
 
 function makeUnit(spec: Spec, at: Hex): Unit {
   const defaults = KIND_DEFAULTS[spec.kind];
   return {
     id: spec.id,
+    name: spec.name,
     faction: spec.faction,
     kind: spec.kind,
     effectives: spec.effectives,
@@ -80,9 +69,6 @@ function makeUnit(spec: Spec, at: Hex): Unit {
     corps: spec.corps,
   };
 }
-
-/** Human-readable names, kept beside the units rather than inside them. */
-export const UNIT_NAMES: Record<string, string> = {};
 
 const SPECS: Spec[] = [
   {
@@ -244,56 +230,29 @@ function objectiveFor(land: readonly Hex[], from: Hex, taken: readonly Hex[]): H
   return best;
 }
 
-export interface Demo {
-  readonly world: World;
-  readonly worldDoc: unknown;
-  readonly state: CampaignState;
-  readonly names: Record<string, string>;
-}
+export const DEMO_FACTIONS: readonly Faction[] = [RED, BLUE];
 
-export function buildDemo(): Demo {
-  const world = parseWorld(worldDoc);
-
-  const ref: WorldRef = {
-    seed: world.seed,
-    width: world.width,
-    height: world.height,
-    layout: world.layout,
-    schemaVersion: world.schemaVersion,
-    hash: 'sha256:demo',
-  };
-
+/**
+ * The commands that populate a freshly created campaign.
+ *
+ * Creation and the factions are the caller's job — the store issues those itself when a
+ * campaign is made — so this is the part that goes over the wire afterwards: each unit
+ * added where it starts, then teleported onto the path it is meant to have marched.
+ *
+ * The march is a `teleport_unit` rather than a real march because the demo wants a column
+ * that already exists, not a campaign that has to be played for eight hours before it
+ * looks like anything. The path is still produced by the real router, so every hex of
+ * every tail is ground the unit could genuinely have crossed.
+ */
+export function demoCommands(world: World): Command[] {
   const land = mainland(world);
   const starts = landStarts(world, SPECS.length);
-  const names: Record<string, string> = {};
 
-  const commands: Command[] = [
-    { kind: 'create_campaign', name: 'Demonstration', world: ref, seed: 20260906 },
-    { kind: 'add_faction', faction: RED },
-    { kind: 'add_faction', faction: BLUE },
-  ];
+  const units = SPECS.map((spec, i) => makeUnit(spec, starts[i] ?? starts[0]!));
+  const commands: Command[] = units.map((unit) => ({ kind: 'add_unit', unit }));
 
-  SPECS.forEach((spec, i) => {
-    const at = starts[i] ?? starts[0]!;
-    names[spec.id] = spec.name;
-    commands.push({ kind: 'add_unit', unit: makeUnit(spec, at) });
-  });
-
-  const out = applyAll(commands, EMPTY_STATE, world, 'strict');
-  if (!out.ok) {
-    throw new Error(
-      `the demo scenario is not legal: ${out.violations.map((v) => v.message).join('; ')}`,
-    );
-  }
-
-  // Give each unit a marched path, so its column is a line of ground rather than a dot.
-  // Done through the real router, so the tail follows a route the unit could actually
-  // have taken — including going round water and preferring roads.
-  let state = out.state;
-  const units = new Map(state.units);
   const objectives: Hex[] = [];
-
-  for (const unit of [...state.units.values()].sort((a, b) => (a.id < b.id ? -1 : 1))) {
+  for (const unit of [...units].sort((a, b) => (a.id < b.id ? -1 : 1))) {
     const start = unit.column[0]!;
     const goal = objectiveFor(land, start, objectives);
     if (goal === null) continue;
@@ -306,9 +265,8 @@ export function buildDemo(): Demo {
     for (const step of path.slice(1, 26)) {
       marched = { ...marched, column: advanceColumn(marched, step) };
     }
-    units.set(unit.id, marched);
+    commands.push({ kind: 'teleport_unit', unitId: unit.id, column: marched.column });
   }
-  state = { ...state, units };
 
-  return { world, worldDoc, state, names };
+  return commands;
 }

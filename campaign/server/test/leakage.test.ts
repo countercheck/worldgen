@@ -71,9 +71,13 @@ const [RED_HEX, BLUE_HEX] = farApartLand();
 const RED_STRENGTH = 5000;
 const BLUE_STRENGTH = 7777;
 
+/** Blue's name, which red must never read. Distinctive so a byte search discriminates. */
+const BLUE_NAME = 'Erzherzog Karl Grenadiers';
+
 function division(id: string, faction: string, at: Hex, corps: string): Unit {
   return {
     id,
+    name: faction === 'blue' ? BLUE_NAME : 'Division Morand',
     faction,
     kind: 'infantry',
     effectives: faction === 'blue' ? BLUE_STRENGTH : RED_STRENGTH,
@@ -146,6 +150,30 @@ async function setUp(): Promise<Fixture> {
   };
 }
 
+/**
+ * Move blue next to red, so red actually spots it.
+ *
+ * Every other test here has the two sides at opposite ends of the map, which exercises
+ * only the easy half of the problem: nothing has been observed, so nothing may be sent.
+ * The interesting half is what a sighting is allowed to carry, and that only happens when
+ * somebody is looking at somebody.
+ */
+async function bringTogether(f: Fixture): Promise<void> {
+  const res = await f.app.inject({
+    method: 'POST',
+    url: `/api/campaigns/${f.id}/commands`,
+    headers: { 'x-campaign-token': f.referee },
+    payload: {
+      command: {
+        kind: 'teleport_unit',
+        unitId: 'blue-1',
+        column: [RED_HEX],
+      } satisfies Command,
+    },
+  });
+  expect(res.statusCode, res.body).toBe(200);
+}
+
 const viewAs = (f: Fixture, token: string) =>
   f.app.inject({
     method: 'GET',
@@ -181,6 +209,7 @@ describe('the view endpoint', () => {
     const raw = (await viewAs(f, f.red)).body;
 
     expect(raw).not.toContain('blue-1');
+    expect(raw).not.toContain(BLUE_NAME);
     expect(raw).not.toContain('Grand Army of the Danube');
     expect(raw).not.toContain(`"effectives":${BLUE_STRENGTH}`);
   });
@@ -296,6 +325,7 @@ describe('once an enemy is actually spotted', () => {
 
     const raw = (await viewAs(f, f.red)).body;
     expect(raw).not.toContain('II Corps');
+    expect(raw).not.toContain(BLUE_NAME);
     // Its strength is not on the wire either.
     expect(raw).not.toContain(`"effectives":${BLUE_STRENGTH}`);
   });
@@ -395,5 +425,49 @@ describe('authorisation', () => {
   it('refuses an invalid join link', async () => {
     const res = await f.app.inject({ method: 'GET', url: `/j/${f.id}/nonsense` });
     expect(res.statusCode).toBe(401);
+  });
+});
+
+describe('what a sighting is allowed to carry', () => {
+  // Found by running the console rather than by any assertion here: with the two sides
+  // apart, every leak test passes trivially because there is nothing to leak. These cover
+  // the case where red is looking straight at blue.
+  let f: Fixture;
+  beforeEach(async () => {
+    f = await setUp();
+    await bringTogether(f);
+  });
+
+  it('reports the enemy as a contact rather than a unit', async () => {
+    const view = (await viewAs(f, f.red)).json();
+    expect(view.units.map((u: Unit) => u.id)).toEqual(['red-1']);
+    expect(view.contacts.length).toBe(1);
+  });
+
+  it('carries none of the enemy record a sighting does not earn', async () => {
+    // A sighting is a presence and a position. Strength, name and corps are patrol work,
+    // and none of them may be on the wire merely because the formation was seen.
+    const raw = (await viewAs(f, f.red)).body;
+
+    expect(raw).not.toContain(BLUE_NAME);
+    expect(raw).not.toContain('Grand Army of the Danube');
+    expect(raw).not.toContain(`"effectives":${BLUE_STRENGTH}`);
+
+    // Not `raw.includes('"morale"')`: red's own division has a morale, so searching the
+    // whole payload for the field name would pass while proving nothing. The question is
+    // what the contact itself carries.
+    const contact = (await viewAs(f, f.red)).json().contacts[0];
+    expect(Object.keys(contact).sort()).toEqual(
+      ['corps', 'coord', 'faction', 'intelLevel', 'kind', 'seenAtHours', 'unitId'].sort(),
+    );
+  });
+
+  it('does not report the enemy column, only where it was seen', async () => {
+    // Knowing an enemy was in a village is not knowing how far back its baggage was
+    // strung out. A contact is one coordinate and must stay one.
+    const view = (await viewAs(f, f.red)).json();
+    const contact = view.contacts[0];
+    expect(contact.coord).toBeDefined();
+    expect(contact.column).toBeUndefined();
   });
 });

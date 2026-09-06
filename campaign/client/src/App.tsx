@@ -1,231 +1,347 @@
 /**
  * The console.
  *
- * A referee's view of the whole campaign, with a role switch that shows what any one
- * commander can see. Hovering the map reports the ground and, over a column, the unit
- * standing on it; clicking selects a unit so its reach and its crossing costs can be read
- * against the hex under the cursor.
+ * Everything on this page came out of one HTTP response. There is no world bundled in the
+ * client, no state assembled locally and no second path with more in it: the browser is
+ * handed a `ClientView` and draws it. That is the difference between fog as a display
+ * convention and fog as a rule — a commander who opens the developer tools finds only
+ * what their own troops have seen, because that is all that was ever sent.
  *
- * **Fog here is drawn, not enforced.** The role switch filters what this page renders,
- * and the whole world is in the browser. That is right for a referee's own machine and
- * wrong for a commander's: a player given this page could read the entire map out of
- * memory. The masking that a player will actually receive happens on the server, which is
- * not built yet — until it is, this is a referee tool and says so on screen.
+ * The role switch is the clearest case. It used to filter what this page rendered from a
+ * world it already held, which made it a toggle on a lie. It now swaps the token the
+ * client is using and refetches, so switching to a commander means genuinely asking the
+ * server as that commander and receiving genuinely less. A referee can do it because they
+ * were handed every side's link when they created the campaign; nobody else has the
+ * tokens to try.
  */
 
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import {
   DEFAULT_CONFIG,
   DEFAULT_THEME,
-  factionVisible,
   key,
-  maskWorld,
   occupied,
-  parseWorld,
   reachable,
-  reconZone,
-  spotted,
-  type Hex,
-  type HexKey,
-  type Unit,
+  type ClientView,
 } from '@campaign/shared';
 
-import { HexMap, type DrawableUnit } from './map/HexMap.js';
+import { advanceClock, fetchView, subscribe, type Session } from './api.js';
+import { boardFrom } from './board.js';
+import { Join, type Joined } from './Join.jsx';
+import { HexMap } from './map/HexMap.js';
+import { ContactPanel } from './panels/ContactPanel.jsx';
 import { HexPanel } from './panels/HexPanel.js';
 import { UnitPanel } from './panels/UnitPanel.js';
-import { buildDemo } from './scenario.js';
+import { clearSession, joinLink, loadSession, saveSession } from './session.js';
 
-const demo = buildDemo();
 const cfg = DEFAULT_CONFIG;
 
-type Role = 'referee' | 'red' | 'blue';
-
 export default function App() {
-  const [role, setRole] = useState<Role>('referee');
-  const [hovered, setHovered] = useState<Hex | null>(null);
-  const [hoveredUnit, setHoveredUnit] = useState<Unit | null>(null);
-  const [selected, setSelected] = useState<Unit | null>(null);
+  const [joined, setJoined] = useState<Joined | null>(() => {
+    const stored = loadSession();
+    return stored === null
+      ? null
+      : { session: stored.session, held: stored.held, ownToken: stored.ownToken };
+  });
+
+  if (joined === null) {
+    return (
+      <Join
+        onJoined={(j) => {
+          saveSession(j);
+          setJoined(j);
+        }}
+      />
+    );
+  }
+
+  return (
+    <Console
+      joined={joined}
+      onSwitch={(session) => {
+        const next = { ...joined, session };
+        saveSession(next);
+        setJoined(next);
+      }}
+      onLeave={() => {
+        clearSession();
+        setJoined(null);
+      }}
+    />
+  );
+}
+
+function Console({
+  joined,
+  onSwitch,
+  onLeave,
+}: {
+  joined: Joined;
+  onSwitch: (session: Session) => void;
+  onLeave: () => void;
+}) {
+  const { session } = joined;
+
+  const [view, setView] = useState<ClientView | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [live, setLive] = useState<'open' | 'closed' | 'error'>('closed');
+
+  const [hovered, setHovered] = useState<{ q: number; r: number } | null>(null);
+  const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showReach, setShowReach] = useState(false);
 
-  const state = demo.state;
+  // Fetched once so the page has something immediately, then kept current by the socket.
+  // The socket sends a full view on connect too, so this is only about the gap: a first
+  // paint that waits on a WebSocket handshake looks like a broken page.
+  useEffect(() => {
+    let cancelled = false;
+    setView(null);
+    fetchView(session)
+      .then((v) => {
+        if (!cancelled) setView(v);
+      })
+      .catch((err: Error) => {
+        if (!cancelled) setError(err.message);
+      });
 
-  /** What this role can see. The referee sees everything. */
-  const seen: ReadonlySet<HexKey> | null = useMemo(() => {
-    if (role === 'referee') return null;
-    // Everywhere any of this faction's units has been, plus what they see now — the
-    // demo has no event history, so memory is approximated by the marched columns.
-    const memory = new Set<HexKey>(factionVisible(state, demo.world, cfg, role));
-    for (const unit of state.units.values()) {
-      if (unit.faction !== role) continue;
-      for (const k of reconZone(demo.world, cfg, unit)) memory.add(k);
-      for (const c of unit.column) memory.add(key(c));
-    }
-    return memory;
-  }, [role, state]);
+    const stop = subscribe(session, {
+      onView: (v) => {
+        if (!cancelled) setView(v);
+      },
+      onStatus: (s) => {
+        if (!cancelled) setLive(s);
+      },
+    });
 
-  const visible: ReadonlySet<HexKey> = useMemo(
-    () => (role === 'referee' ? new Set() : factionVisible(state, demo.world, cfg, role)),
-    [role, state],
+    return () => {
+      cancelled = true;
+      stop();
+    };
+  }, [session.campaignId, session.token]);
+
+  const board = useMemo(
+    () => (view === null ? null : boardFrom(view, DEFAULT_THEME)),
+    [view],
   );
 
-  /** The world as this role knows it. */
-  const world = useMemo(() => {
-    if (seen === null) return demo.world;
-    return parseWorld(
-      maskWorld(demo.worldDoc as Record<string, unknown>, {
-        seen,
-        visible,
-        faction: role,
-        clockHours: state.clockHours,
-      }),
-    );
-  }, [seen, visible, role, state.clockHours]);
-
-  /** Own units in full; enemies only where they have actually been spotted. */
-  const units: DrawableUnit[] = useMemo(() => {
-    const colour = (f: string): string =>
-      state.factions.get(f)?.color ?? DEFAULT_THEME.fallback;
-
-    if (role === 'referee') {
-      return [...state.units.values()].map((unit) => ({
-        unit,
-        color: colour(unit.faction),
-        visible: true,
-      }));
-    }
-
-    const contacts = spotted(state, demo.world, cfg, role);
-    return [...state.units.values()]
-      .filter((u) => u.faction === role || contacts.has(u.id))
-      .map((unit) => ({
-        unit:
-          unit.faction === role
-            ? unit
-            : // An enemy is drawn only where it was seen, not along its whole column:
-              // knowing where a formation was is not knowing how it is strung out.
-              { ...unit, column: [contacts.get(unit.id)!.coord] },
-        color: colour(unit.faction),
-        visible: unit.faction === role,
-      }));
-  }, [role, state]);
+  const selectedUnit = board?.units.get(selectedId ?? '') ?? null;
 
   const reach = useMemo(() => {
-    if (!showReach || selected === null) return undefined;
-    const live = state.units.get(selected.id);
-    if (live === undefined) return undefined;
-    return reachable(world, cfg, live, 10).hours;
-  }, [showReach, selected, world, state]);
+    if (!showReach || board === null || selectedUnit === null) return undefined;
+    // Computed over the world this role was sent, which for a commander is their own
+    // masked map. A plan is only as good as the country you know about.
+    return reachable(board.world, cfg, selectedUnit, 10).hours;
+  }, [showReach, selectedUnit, board]);
 
-  const hoveredHex = hovered === null ? undefined : world.hexes.get(key(hovered));
-  const shown = hoveredUnit ?? selected;
-  const shownIsOwn = shown === null || role === 'referee' || shown.faction === role;
+  const advance = useCallback(
+    (hours: number) => {
+      advanceClock(session, hours).catch((err: Error) => setError(err.message));
+    },
+    [session],
+  );
+
+  if (error !== null) {
+    return (
+      <div className="join">
+        <h1>Cannot read that campaign</h1>
+        <p className="error">{error}</p>
+        <button onClick={onLeave}>Use a different link</button>
+      </div>
+    );
+  }
+
+  if (view === null || board === null) {
+    return (
+      <div className="join">
+        <h1>Campaign</h1>
+        <p className="busy">Fetching your map…</p>
+      </div>
+    );
+  }
+
+  const isReferee = view.role === 'referee';
+  const shownId = hoveredId ?? selectedId;
+  const shownUnit = shownId === null ? null : (board.units.get(shownId) ?? null);
+  const shownContact = shownId === null ? null : (board.contacts.get(shownId) ?? null);
+  const hoveredHex = hovered === null ? undefined : board.world.hexes.get(key(hovered));
+
+  /**
+   * Every identity this browser actually holds a token for.
+   *
+   * Only a referee who created the campaign has the faction tokens, so only they get a
+   * switcher — and it is a real one. A commander sent a single link has exactly one
+   * identity and no way to ask for another, which is not an interface decision.
+   */
+  const identities: { id: string; label: string; token: string; color: string | undefined }[] =
+    Object.keys(joined.held).length === 0
+      ? []
+      : [
+          { id: 'referee', label: 'Referee', token: joined.ownToken, color: undefined },
+          ...Object.entries(joined.held).map(([faction, token]) => ({
+            id: faction,
+            label: board.factions.get(faction)?.name ?? faction,
+            token,
+            color: board.factions.get(faction)?.color,
+          })),
+        ];
 
   return (
     <div className="app">
       <header>
-        <h1>Campaign</h1>
-        <div className="roles">
-          {(['referee', 'red', 'blue'] as const).map((r) => (
-            <button
-              key={r}
-              className={role === r ? 'active' : ''}
-              onClick={() => setRole(r)}
-              style={
-                r === 'referee'
-                  ? undefined
-                  : { borderColor: state.factions.get(r)?.color ?? undefined }
-              }
-            >
-              {r === 'referee' ? 'Referee' : (state.factions.get(r)?.name ?? r)}
-            </button>
-          ))}
-        </div>
+        <h1>{view.campaign.name}</h1>
+
+        {identities.length > 0 && (
+          <div className="roles">
+            {identities.map((identity) => (
+              <button
+                key={identity.id}
+                className={session.token === identity.token ? 'active' : ''}
+                onClick={() => onSwitch({ campaignId: session.campaignId, token: identity.token })}
+                style={identity.color === undefined ? undefined : { borderColor: identity.color }}
+              >
+                {identity.label}
+              </button>
+            ))}
+          </div>
+        )}
+
         <label className="toggle">
           <input
             type="checkbox"
             checked={showReach}
             onChange={(e) => setShowReach(e.target.checked)}
-            disabled={selected === null}
+            disabled={selectedUnit === null}
           />
           Reach of selected, 10 h
         </label>
-        <div className="clock">Hour {state.clockHours}</div>
+
+        <div className="clock">
+          Hour {view.campaign.clockHours}
+          {isReferee && (
+            <span className="clock-controls">
+              <button onClick={() => advance(1)}>+1 h</button>
+              <button onClick={() => advance(6)}>+6 h</button>
+            </span>
+          )}
+        </div>
+
+        <span className={`live live-${live}`} title={`Live updates ${live}`}>
+          {live === 'open' ? 'live' : 'reconnecting'}
+        </span>
       </header>
 
-      {role !== 'referee' && (
-        <div className="warning">
-          Fog is drawn here, not enforced — the whole world is in this page. A commander’s
-          map will be masked on the server before it is sent.
+      {!isReferee && (
+        <div className="notice">
+          You are {board.factions.get(view.faction ?? '')?.name ?? view.faction}. This map
+          is the one the server sent: {board.seen.size} hexes of{' '}
+          {board.world.hexes.size} have ever been observed, and the rest is not in this
+          page at all.
         </div>
       )}
 
       <div className="body">
         <HexMap
-          world={world}
-          units={units}
+          world={board.world}
+          marks={board.marks}
           theme={DEFAULT_THEME}
           hovered={hovered}
-          onHover={(hex, unit) => {
+          onHover={(hex, id) => {
             setHovered(hex);
-            setHoveredUnit(unit);
+            setHoveredId(id);
           }}
-          selectedId={selected?.id ?? null}
-          onSelect={setSelected}
+          selectedId={selectedId}
+          onSelect={setSelectedId}
           reach={reach}
         />
 
         <aside className="sidebar">
-          {shown !== null && shownIsOwn && (
+          {shownUnit !== null && (
             <UnitPanel
-              unit={shown}
-              name={demo.names[shown.id] ?? shown.id}
-              factionName={state.factions.get(shown.faction)?.name ?? shown.faction}
-              color={state.factions.get(shown.faction)?.color ?? '#888'}
+              unit={shownUnit}
+              name={shownUnit.name}
+              factionName={board.factions.get(shownUnit.faction)?.name ?? shownUnit.faction}
+              color={board.factions.get(shownUnit.faction)?.color ?? '#888'}
             />
           )}
 
-          {shown !== null && !shownIsOwn && (
-            <section className="panel-section">
-              <h3>Enemy contact</h3>
-              <p className="muted">
-                Last seen here. Strength, arm and formation are not known from a sighting
-                alone — a patrol has to close before any of that is reported.
-              </p>
-            </section>
+          {shownUnit === null && shownContact !== null && (
+            <ContactPanel
+              contact={shownContact}
+              factionName={
+                board.factions.get(shownContact.faction)?.name ?? shownContact.faction
+              }
+              color={board.factions.get(shownContact.faction)?.color ?? '#888'}
+              clockHours={view.campaign.clockHours}
+            />
           )}
 
           {hovered !== null && hoveredHex !== undefined && (
-            <HexPanel world={world} hex={hoveredHex} coord={hovered} selected={selected} />
+            <HexPanel
+              world={board.world}
+              hex={hoveredHex}
+              coord={hovered}
+              selected={selectedUnit}
+            />
           )}
 
-          {hovered === null && shown === null && (
+          {hovered === null && shownId === null && (
             <section className="panel-section">
               <h3>Nothing under the cursor</h3>
               <p className="muted">
                 Move over the map to read the ground, or over a column to read the unit
                 standing on it. Click a unit to keep it in view.
               </p>
+
               <h3>Units</h3>
               <ul className="unit-list">
-                {[...state.units.values()]
-                  .filter((u) => role === 'referee' || u.faction === role)
-                  .map((u) => (
-                    <li key={u.id}>
-                      <button onClick={() => setSelected(u)}>
-                        <span
-                          className="swatch small"
-                          style={{ background: state.factions.get(u.faction)?.color }}
-                        />
-                        {demo.names[u.id] ?? u.id}
-                        <span className="muted">
-                          {' '}
-                          · {occupied(u).length} {occupied(u).length === 1 ? 'hex' : 'hexes'}
-                        </span>
-                      </button>
-                    </li>
-                  ))}
+                {[...board.units.values()].map((u) => (
+                  <li key={u.id}>
+                    <button onClick={() => setSelectedId(u.id)}>
+                      <span
+                        className="swatch small"
+                        style={{ background: board.factions.get(u.faction)?.color }}
+                      />
+                      {u.name}
+                      <span className="muted">
+                        {' '}
+                        · {occupied(u).length} {occupied(u).length === 1 ? 'hex' : 'hexes'}
+                      </span>
+                    </button>
+                  </li>
+                ))}
               </ul>
+
+              {board.contacts.size > 0 && (
+                <>
+                  <h3>Contacts</h3>
+                  <ul className="unit-list">
+                    {[...board.contacts.values()].map((c) => (
+                      <li key={c.unitId}>
+                        <button onClick={() => setSelectedId(c.unitId)}>
+                          <span
+                            className="swatch small ghost"
+                            style={{ background: board.factions.get(c.faction)?.color }}
+                          />
+                          {c.corps ?? 'Unidentified'}
+                          <span className="muted">
+                            {' '}
+                            · seen at hour {c.seenAtHours}
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+
+              <h3>This campaign</h3>
+              <p className="muted">
+                Your link:{' '}
+                <code className="link">{joinLink(session)}</code>
+              </p>
+              <button onClick={onLeave}>Leave</button>
             </section>
           )}
         </aside>

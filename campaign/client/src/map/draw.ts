@@ -19,7 +19,6 @@ import {
   key,
   type Hex,
   type Theme,
-  type Unit,
   type World,
   type WorldHex,
 } from '@campaign/shared';
@@ -172,12 +171,28 @@ function drawSettlements(ctx: CanvasRenderingContext2D, world: World, view: View
   }
 }
 
+/**
+ * Something to draw on the map: an id, the ground it covers, and how solid it looks.
+ *
+ * Deliberately not a unit. A commander's own division and an enemy contact both end up
+ * here, and the difference between them — that one is a full record and the other is a
+ * sighting with almost nothing in it — must not be something the drawing code can lose
+ * track of. `visible` is the distinction, drawn as a ghost.
+ */
+export interface Mark {
+  readonly id: string;
+  readonly column: readonly Hex[];
+  readonly color: string;
+  /** False for ground where something was seen, rather than where it is known to be. */
+  readonly visible: boolean;
+}
+
 /** Everything that follows the cursor. Redrawn every frame; must stay cheap. */
 export function drawOverlay(
   ctx: CanvasRenderingContext2D,
   view: View,
   opts: {
-    units: readonly { unit: Unit; column: readonly Hex[]; color: string; visible: boolean }[];
+    marks: readonly Mark[];
     hovered: Hex | null;
     hoveredUnitId: string | null;
     selectedUnitId: string | null;
@@ -195,8 +210,8 @@ export function drawOverlay(
     }
   }
 
-  for (const { unit, column, color, visible } of opts.units) {
-    const emphasised = unit.id === opts.hoveredUnitId || unit.id === opts.selectedUnitId;
+  for (const { id, column, color, visible } of opts.marks) {
+    const emphasised = id === opts.hoveredUnitId || id === opts.selectedUnitId;
     drawColumn(ctx, view, column, color, { emphasised, ghost: !visible });
   }
 
@@ -256,14 +271,19 @@ function drawColumn(
   ctx.globalAlpha = 1;
 }
 
-/** Hexes a set of units cover, for hit-testing the cursor against a column. */
-export function unitAtHex(
-  units: readonly { unit: Unit; column: readonly Hex[] }[],
-  c: Hex,
-): Unit | null {
+/**
+ * What is on this hex, for hit-testing the cursor against a column.
+ *
+ * Returns an id rather than a record. The map draws marks and knows nothing about what
+ * they stand for — one of them is a division whose every statistic this browser holds,
+ * and another is a smudge on the horizon that was an enemy an hour ago. Resolving the id
+ * is the console's job, and keeping that out of here is what stops the two being
+ * conflated in the one place where conflating them would leak.
+ */
+export function markAtHex(marks: readonly Mark[], c: Hex): string | null {
   const k = key(c);
-  for (const { unit, column } of units) {
-    if (column.some((h) => key(h) === k)) return unit;
+  for (const { id, column } of marks) {
+    if (column.some((h) => key(h) === k)) return id;
   }
   return null;
 }

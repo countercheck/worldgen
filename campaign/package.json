@@ -13,6 +13,7 @@
   },
   "scripts": {
     "build": "npm run build --workspaces --if-present",
+    "dev": "npm run dev -w @campaign/server & npm run dev -w @campaign/client & wait",
     "test": "npm run test --workspaces --if-present",
     "lint": "eslint .",
     "typecheck": "tsc --build"

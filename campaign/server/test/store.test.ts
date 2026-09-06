@@ -11,11 +11,18 @@ import { describe, expect, it } from 'vitest';
 
 import worldDoc from '../../shared/test/fixtures/world-32x32.json';
 
-import { key, KIND_DEFAULTS, parseWorld, type Command, type Hex, type Unit } from '@campaign/shared';
+import {
+  key,
+  KIND_DEFAULTS,
+  parseWorld,
+  REFEREE_ROLE,
+  type Command,
+  type Hex,
+  type Unit,
+} from '@campaign/shared';
 
 import { openDb } from '../src/db.js';
 import { CampaignStore, deserialise, hashToken, newToken, serialise } from '../src/store.js';
-import { REFEREE_ROLE } from '../src/view.js';
 
 const world = parseWorld(worldDoc);
 const land = [...world.hexes.values()]
@@ -25,6 +32,7 @@ const land = [...world.hexes.values()]
 function division(id: string, faction: string, at: Hex): Unit {
   return {
     id,
+    name: `${id} Division`,
     faction,
     kind: 'infantry',
     effectives: 5000,
