@@ -9,12 +9,17 @@
  * go through `theme.ts` so a campaign can override how it is drawn.
  */
 
+export * from './column.js';
+export * from './config.js';
+export * from './crossing.js';
 export * from './engine.js';
 export * from './events.js';
 export * from './hex.js';
+export * from './movement.js';
 export * from './rng.js';
 export * from './ruling.js';
 export * from './state.js';
+export * from './terrain.js';
 export * from './theme.js';
 export * from './unit.js';
 export * from './world.js';

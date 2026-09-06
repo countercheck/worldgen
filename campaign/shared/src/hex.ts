@@ -229,6 +229,12 @@ class Frontier {
  * A* over a hex grid. `nodeCost` is the cost of entering a hex (Infinity = impassable);
  * `edgeCost` adds an optional per-edge term.
  *
+ * `heuristic` estimates the remaining cost and defaults to hex distance, which is what
+ * the Python does and what the conformance fixture pins. **It must never overestimate**,
+ * or the path returned is not the cheapest one. The default is only admissible when no
+ * step can cost less than 1.0 — callers working in other units (hours, say, where a
+ * courier on a highway crosses a hex in a tenth of one) must scale it down accordingly.
+ *
  * Returns the path including both endpoints, or null if the goal cannot be reached.
  */
 export function astar<T>(
@@ -237,6 +243,7 @@ export function astar<T>(
   goal: Hex,
   nodeCost: (hex: T, coord: Hex) => number,
   edgeCost?: (from: T, to: T, fromCoord: Hex, toCoord: Hex) => number,
+  heuristic: (from: Hex, to: Hex) => number = distance,
 ): Hex[] | null {
   const startKey = key(start);
   const goalKey = key(goal);
@@ -283,7 +290,7 @@ export function astar<T>(
       if (known === undefined || tentative < known) {
         cameFrom.set(nextKey, currentKey);
         gScore.set(nextKey, tentative);
-        frontier.push(tentative + distance(next, goal), next);
+        frontier.push(tentative + heuristic(next, goal), next);
       }
     }
   }
