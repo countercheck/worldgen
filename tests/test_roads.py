@@ -833,8 +833,11 @@ def test_an_island_beyond_ferry_range_does_not_break_generation():
     def no_ferry(*_a, **_k):
         raise RoutingError("no plausible ferry")
 
-    real_astar, real_ferry = ir.astar, ir.ferry_link
-    ir.astar, ir.ferry_link = no_land_route, no_ferry
+    # `astar_to_any`, because that is what the connectivity guarantee routes with now:
+    # it asks the whole main component in one search rather than each settlement in turn.
+    # The stub's job is unchanged — say there is no land route and let the ferry fall over.
+    real_astar, real_ferry = ir.astar_to_any, ir.ferry_link
+    ir.astar_to_any, ir.ferry_link = no_land_route, no_ferry
     try:
         edges, ferries, unreachable = stage._guarantee_connectivity(
             state.hexes,
@@ -845,7 +848,7 @@ def test_an_island_beyond_ferry_range_does_not_break_generation():
             {s.coord for s in state.settlements},
         )
     finally:
-        ir.astar, ir.ferry_link = real_astar, real_ferry
+        ir.astar_to_any, ir.ferry_link = real_astar, real_ferry
 
     # It came back rather than raising, and it said what it could not reach.
     assert ferries == []
@@ -893,3 +896,50 @@ def test_the_adjacency_index_matches_the_edges(road_state):
             f"adjacency at {coord} disagrees with the edge set: "
             f"index {sorted(hx.road_connections)} vs edges {sorted(want.get(coord, set()))}"
         )
+
+
+def test_connectivity_joins_an_isolated_settlement_to_the_nearest_of_the_network():
+    """The multi-target search must pick the same target the exhaustive one did.
+
+    `_guarantee_connectivity` used to run a full A* from an isolated settlement to every
+    settlement already on the network and keep the cheapest path. It now runs one
+    `astar_to_any` against the whole component, which is the same argmin — the frontier is
+    ordered by true cost, so the first goal reached is the cheapest goal — at a fraction of
+    the work. This asserts the equivalence on the property that matters: the isolated place
+    ends up joined, and joined to a member of the component it was routed at.
+    """
+    from worldgen.core.hex_grid import astar_to_any
+    from worldgen.stages import interurban_roads as ir
+    from worldgen.stages.road_cost import make_road_edge_cost, river_hex_cost, terrain_base_cost
+
+    state = _build_pipeline(seed=42, width=48, height=48).run()
+    cfg = WorldConfig(**state.metadata["config"])
+    hexes = state.hexes
+    places = [s for s in state.settlements if s.tier in (SettlementTier.CITY, SettlementTier.TOWN)]
+    if len(places) < 3:
+        pytest.skip("needs at least three cities or towns to have something to join")
+
+    settled = {s.coord for s in state.settlements}
+
+    def plain_cost(hx):
+        return terrain_base_cost(hx, cfg) + river_hex_cost(hx, cfg)
+
+    plain_edge = make_road_edge_cost(cfg, frozenset(), settled)
+
+    # Every settlement its own component: nothing is joined yet.
+    edges, _ferries, unreachable = ir.InterurbanRoadStage(cfg, None)._guarantee_connectivity(
+        hexes, places, {}, cfg, frozenset(), settled
+    )
+    joined = {c for key in edges for c in key}
+    unreachable_coords = {tuple(u[0]) for u in unreachable}
+    for s in places:
+        if s.coord in unreachable_coords:
+            continue
+        assert s.coord in joined, f"{s.name} at {s.coord} was left off the network"
+
+    # And the search it now relies on really does reach a goal when one is reachable.
+    a, b = places[0].coord, {p.coord for p in places[1:]}
+    path = astar_to_any(hexes, a, b, plain_cost, plain_edge)
+    if path is not None:
+        assert path[0] == a
+        assert path[-1] in b, "astar_to_any ended somewhere that was not a goal"
