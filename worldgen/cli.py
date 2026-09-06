@@ -521,13 +521,25 @@ def init_config(output: str, force: bool) -> None:
 
 @cli.command()
 def presets():
-    """List available presets."""
-    presets_dir = Path(__file__).parent.parent / "presets"
-    if presets_dir.exists():
-        for preset in sorted(presets_dir.glob("*.json")):
-            click.echo(f"  {preset.stem}")
-    else:
-        click.echo("No presets found")
+    """List the presets in ./presets."""
+    # `./presets`, not a directory beside the installed package. The README tells users to
+    # "place them in a `presets/` directory" and loads them as `--config presets/foo.json`,
+    # which is a path relative to where the command is run; looking next to `__file__`
+    # searched the source tree in an editable install and site-packages in a real one, so
+    # a user following the README saw nothing whatever they did.
+    #
+    # An empty result is not an error — no presets ship with the project by design, and
+    # having none is the normal state — but it has to say so. It used to print nothing at
+    # all when the directory existed and was empty, which read as a hang or a bug.
+    presets_dir = Path.cwd() / "presets"
+    found = sorted(presets_dir.glob("*.json")) if presets_dir.is_dir() else []
+    if not found:
+        click.echo(f"No presets found in {presets_dir}")
+        click.echo("A preset is a JSON file overriding any subset of WorldConfig fields;")
+        click.echo("write one there and load it with: worldgen generate --config <path>")
+        return
+    for preset in found:
+        click.echo(f"  {preset.stem}")
 
 
 if __name__ == "__main__":

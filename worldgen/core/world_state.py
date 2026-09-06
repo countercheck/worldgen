@@ -445,9 +445,3 @@ class WorldState:
         ws.ferries = [Ferry(a=tuple(fd["a"]), b=tuple(fd["b"])) for fd in data.get("ferries", [])]
 
         return ws
-
-    @classmethod
-    def from_json(cls, path: str) -> "WorldState":
-        from worldgen.export.json_export import load
-
-        return load(path)
