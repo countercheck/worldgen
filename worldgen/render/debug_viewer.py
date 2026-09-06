@@ -25,6 +25,19 @@ TEMPERATURE_RAMP_C = (-20.0, 35.0)
 # Fixed for the same reason as the temperature ramp: so two maps can be compared.
 PRECIP_RAMP_MM = (0.0, 2500.0)
 
+# Ground nobody has observed, on a partial map exported by the campaign layer.
+#
+# A masked world keeps every hex — dropping them would break `WorldState.from_dict`, which
+# requires six fields on each, and would resize the canvas differently for every faction —
+# so an unseen hex is present but blank, carrying `elevation: 0`, no biome, and the `fog`
+# tag. Without a branch for that tag it draws as flat land at sea level, which is a lie
+# that looks exactly like a map: green plains where there might be a mountain range.
+#
+# Near-black rather than grey. It has to read as absent rather than as another kind of
+# terrain, and grey is a colour this palette already uses for steep ground and alpine.
+FOG_TAG = "fog"
+FOG_COLOR = (0.09, 0.09, 0.11)
+
 # Keyed on the map *label* rather than on the terrain class, because the class no longer
 # carries steepness — the bands are derived from measured slope at draw time.
 TERRAIN_COLORS = {
@@ -126,6 +139,20 @@ def _star_points(cx: float, cy: float, outer: float, inner: float, n: int = 5) -
         angle = math.radians(i * 180 / n - 90)
         pts.append((cx + r * math.cos(angle), cy + r * math.sin(angle)))
     return _points_str(pts)
+
+
+def is_fog(h) -> bool:
+    """Whether a hex is unobserved ground on a partial map rather than real terrain."""
+    return FOG_TAG in h.tags
+
+
+def _with_fog(get_color):
+    """Wrap a colour function so unseen ground draws as fog whatever the attribute."""
+
+    def coloured(h):
+        return FOG_COLOR if is_fog(h) else get_color(h)
+
+    return coloured
 
 
 def _color_getter(attribute: str):
@@ -244,6 +271,11 @@ def _color_getter(attribute: str):
 def render_svg(state: WorldState, attribute: str, hex_size: float = 20) -> str:
     """Render hex map colored by attribute as an SVG string."""
     get_color, settlement_overlay, road_overlay = _color_getter(attribute)
+
+    # Fog wins over every attribute. A hex nobody has seen has no elevation, no biome and
+    # no soil to draw — its stored values are defaults standing in for the unknown — so
+    # every ramp and palette below would be reading noise as measurement.
+    get_color = _with_fog(get_color)
 
     hex_items = list(state.hexes.values())
     if not hex_items:

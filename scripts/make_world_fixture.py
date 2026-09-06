@@ -22,6 +22,18 @@ A diff here means the generator's output changed, which is worth looking at rath
 committing blind.
 """
 
+import sys
+from pathlib import Path
+
+# Put the repository root ahead of anything else on the path.
+#
+# `python scripts/foo.py` sets sys.path[0] to `scripts/`, not to the repo root, so an
+# editable install of `worldgen` elsewhere on the machine wins the import — which in a
+# git worktree means this script silently runs against the *main* checkout's code while
+# the tests run against the worktree's. That divergence is invisible until output stops
+# matching what the tests say it should.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
 import json
 from pathlib import Path
 

@@ -8,10 +8,12 @@ from ..core.hex_grid import axial_to_pixel, neighbors, road_polylines
 from ..core.world_state import RoadTier, WorldState
 from ..render.debug_viewer import (
     BIOME_COLORS,
+    FOG_COLOR,
     LAND_COVER_COLORS,
     LAND_USE_COLORS,
     SOIL_COLORS,
     TERRAIN_COLORS,
+    is_fog,
 )
 from . import legend, rivers
 
@@ -86,6 +88,11 @@ def _get_hex_fill(
     color_mode: str,
     bands: tuple[float, float, float] = DEFAULT_TERRAIN_BANDS,
 ) -> tuple[int, int, int]:
+    # Fog first, and before any palette lookup. On a partial map an unseen hex carries
+    # defaults rather than measurements, so every branch below would be drawing noise as
+    # if it were terrain — flat green land where there might be a mountain range.
+    if is_fog(h):
+        return _rgb_int(*FOG_COLOR)
     if color_mode == "terrain":
         rgb = TERRAIN_COLORS.get(terrain_label(h, *bands), (0.5, 0.5, 0.5))
     elif color_mode == "land_cover":
