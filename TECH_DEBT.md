@@ -5,10 +5,11 @@
 **Scoring:** Priority = (Impact + Risk) × (6 − Effort), 1–5 scale each
 
 At re-verification the suite was green — ~760 tests passing, `ruff check` clean, **93%
-coverage**. Seven of the original twenty-one items are now closed — six by the work that landed
-between the two dates, and item 17 by the removal of `MINING` and `FORTRESS` on the day of
-the re-audit. Two more had premises that the same work invalidated and have been re-scoped
-rather than deleted; one has grown materially worse. Every remaining item below
+coverage**. Twelve of the original twenty-one items are now closed — six by the work that landed
+between the two dates, item 17 by the removal of `MINING` and `FORTRESS`, and items 3, 5,
+8, 9 and 11 by the Phase A sweep, all on the day of the re-audit. Two more had premises
+that the same work invalidated and have been re-scoped rather than deleted; one has grown
+materially worse. Every remaining item below
 was checked against the file and line it names.
 
 ---
@@ -17,17 +18,12 @@ was checked against the file and line it names.
 
 | # | Item | Category | Priority | Effort | Since audit |
 |---|------|----------|----------|--------|-------------|
-| 3 | CI coverage check silently passes | Test | **25** | XS | premise stale, hole real |
 | 1 | `erosion.py` valley-widening and droplet paths untested | Test | **24** | S | re-scoped from "6 stages untested" |
 | 19 | One off-map river strips the floodplain off half the map's channels | Model | **21** | M | unchanged |
-| 5 | `networkx` listed as dependency but never imported | Dependency | **20** | XS | unchanged |
-| 8 | `WorldState.from_json` violates layer rule | Architecture | **20** | XS | now one caller — cheaper |
 | 18 | Market siting scores a plain hex disc, not the day-reach the catchment walks | Model | **20** | L | unchanged |
 | 13 | `hydrology.py` is 1,402 lines — prime split candidate | Code | **18** | M | **worse**: was 781 |
 | 20 | An off-map river imports discharge but no sediment | Model | **18** | M | unchanged |
 | 21 | Runoff is linearised at the map's mean rainfall | Model | **18** | M | unchanged |
-| 9 | `WorldConfig.__post_init__` references field before declaration | Code | **15** | XS | unchanged |
-| 11 | `presets/` is empty — documented feature is still broken | Docs | **12** | S | dir now exists, still empty |
 | 16 | Moisture smear blends the ocean's carrier value into coastal rainfall | Model | **12** | M | unchanged |
 | 8a | `ImageElevationStage` imports a reader from `export/` | Architecture | **8** | S | unchanged |
 | 14 | Bare `dict`/`list` type annotations throughout stages | Code | **8** | S | 58 occurrences |
@@ -47,6 +43,11 @@ Recorded so they are not raised again. Each was verified absent from master.
 | 7 | Magic numbers not in `WorldConfig` | City shadow radius and multiplier gone entirely (`town_min_separation` does the spreading); village thresholds moved to `habitability_village`. The one survivor was the `0.70` in `_assign_role`, closed in turn as item 17 below |
 | 10 | Pipeline assembly buried in the CLI | Extracted to `stages/__init__.py` as `default_stages(model)` / `stages_for(config, model)`; `cli.py:129` and the test fixtures both consume it |
 | 12 | `_get_lake_components` dead code | No longer dead — called at `hydrology.py:946` and `:1342` |
+| 3 | CI coverage check silently passes | Closed 2026-09-05. `|| true` removed and the floor raised 50 → 85, against an actual 92.86%. Both halves were needed: a floor of 50 passes at half the suite's real coverage |
+| 5 | `networkx` never imported | Closed 2026-09-05. Removed from `pyproject.toml` |
+| 8 | `WorldState.from_json` violates layer rule | Closed 2026-09-05. Method deleted; its one remaining caller, a test, now imports `json_export.load` directly |
+| 9 | `__post_init__` references fields before declaration | Closed 2026-09-05, and it was larger than recorded: **89 of the 150 fields** were declared after the method, not just `wind_direction`. Fixed by moving the *method* below every field rather than reordering any field — a pure method move, so dataclass field order, positional arguments and `asdict` output are untouched |
+| 11 | `presets/` empty, `worldgen presets` shows nothing | Closed 2026-09-05, and the root cause was not the empty directory. The command globbed a `presets/` beside the installed package — the source tree in an editable install, site-packages in a real one — while the README documents `--config presets/foo.json`, a path relative to the working directory. It now reads `./presets` and says so when it finds nothing. No presets are shipped: the README says none do by design, so an empty result is the normal state and exits 0 |
 | 17 | `_assign_role` compares metre elevation against 0.70 | Closed 2026-09-05 by removing `MINING` and `FORTRESS` from `SettlementRole` outright. The threshold existed only to split those two roles, nothing has ever read `Settlement.role`, and defining a fortress was the blocker — so the roles went rather than the number being guessed at. Ground with steep neighbours now falls through to the fertility test |
 
 ---
@@ -74,65 +75,6 @@ that runs 48×48 alone will keep passing through the bug — which is how it got
 
 ---
 
-### 3 — CI coverage check silently passes regardless of result
-**Category:** Test debt | **Priority: 25** | **Effort: XS (5 minutes)**
-
-In `.github/workflows/ci.yml`, unchanged since the audit:
-
-```yaml
-- name: Check test coverage
-  run: python -m pytest --cov=worldgen --cov-fail-under=50 --quiet || true
-```
-
-The `|| true` still makes this step always succeed, so the floor is still unenforced.
-What has changed is the consequence. The audit reasoned that actual coverage was
-"likely well below 50%"; it is **93%**, so nothing is being hidden today. The item is
-now purely about the ratchet: there is no mechanism stopping the next change from
-dropping coverage by forty points without CI noticing.
-
-**Fix:** Remove `|| true` and raise `--cov-fail-under` to 85. Both halves matter — the
-50 floor would pass at half the current coverage, so removing `|| true` alone buys
-almost nothing. This is the highest value-per-minute item on the list.
-
----
-
-### 5 — `networkx` listed as a hard dependency but never imported
-**Category:** Dependency debt | **Priority: 20** | **Effort: XS (5 minutes)**
-
-Unchanged. `pyproject.toml:13` still lists `networkx>=3.2`; a search across `worldgen/`
-still finds zero imports. All graph algorithms remain implemented directly in
-`hex_grid.py` (A*, BFS, topological sort).
-
-**Fix:** Remove the line.
-
----
-
-### 8 — `WorldState.from_json` imports from `export/` in violation of layer rules
-**Category:** Architecture debt | **Priority: 20** | **Effort: XS**
-
-```python
-# worldgen/core/world_state.py:450
-@classmethod
-def from_json(cls, path: str) -> "WorldState":
-    from worldgen.export.json_export import load
-
-    return load(path)
-```
-
-`core/` must not import from `export/`. Still present, and the latent circular-import
-risk is unchanged — but the *cost of fixing it* has collapsed since the audit, which
-said "callers (there is one in `cli.py`)". There is no longer a caller in `cli.py`. The
-only call site left in the repo is `tests/test_json_export.py:307`.
-
-**Fix:** Delete the method; change that one test to
-`from worldgen.export.json_export import load`. Priority is raised from 16 not because
-it matters more but because it is now a five-minute change.
-
-*(Note: `WorldConfig.from_json` at `config.py:1223` is a different method and is fine —
-it does not reach into `export/`.)*
-
----
-
 ### 8a — `ImageElevationStage` imports a reader from `export/`
 **Category:** Architecture debt | **Priority: 8** | **Effort: S**
 
@@ -153,34 +95,6 @@ and forcing every pipeline assembler to remember to pre-load. Stashing the array
 matplotlib cost and leaves only the layering question. Only revive `stage_config` if a
 second stage needs injected data too; otherwise the honest cleanup is to *delete* the
 dead parameter.
-
----
-
-### 9 — `WorldConfig.__post_init__` references `wind_direction` before it is declared
-**Category:** Code debt | **Priority: 15** | **Effort: XS (5 minutes)**
-
-Unchanged, and the line numbers have only drifted apart: `__post_init__` is at
-`config.py:312` and uses `self.wind_direction` at line 319; the field is not declared
-until line 668. This works because dataclass machinery sets all fields before
-`__post_init__` runs, but it is semantically misleading, and the gap is now 350 lines
-rather than 70.
-
-**Fix:** Move `wind_direction` and its related climate fields above `__post_init__`.
-
----
-
-### 11 — `presets/` is empty; `worldgen presets` silently shows nothing
-**Category:** Documentation debt | **Priority: 12** | **Effort: S (half-day)**
-
-The directory now exists but contains no files, so `cli.py:526` finds it, globs no
-`*.json`, and falls through to `click.echo("No presets found")`. The user-visible
-behaviour is identical to the audit's: a documented feature that silently does nothing.
-The three presets `worldgen_plan.md` specifies (`temperate_continent.json`,
-`arid_archipelago.json`, `river_delta.json`) do not exist.
-
-**Fix:** Add the three presets with representative `WorldConfig` values. Alternatively,
-if presets are not yet ready, say so in the README and CLI help and make the command
-exit non-zero when it finds nothing.
 
 ---
 
@@ -559,28 +473,24 @@ is that arid and tropical should move in *opposite* directions.
 
 ## Phased Remediation Plan
 
-Rewritten 2026-09-05. Phases C, D and E of the original plan are done or moot; what
-remains is one hour of hygiene, one real test gap, and a queue of model decisions that
-share a single blocker.
+Rewritten 2026-09-05, and Phase A struck the same day. Phases C, D and E of the original
+plan were already done or moot; what remains is one real test gap, one file that needs
+dividing before it can be worked in, and a queue of model decisions blocked on a
+calibration table rather than on effort.
 
-### Phase A — Quick wins (about an hour, zero risk)
-Five entries closed in one sitting:
+### Phase A — Quick wins — **done 2026-09-05**
+Items 3, 5, 8, 9 and 11, in one sitting as scoped. Two ran deeper than the audit recorded
+and both are written up in the closed table: `__post_init__` sat ahead of 89 fields rather
+than one, and `worldgen presets` was looking in the wrong directory entirely rather than
+merely at an empty one. The coverage ratchet from item 3 now guards everything below.
 
-1. Remove `|| true` from the CI coverage check **and raise the floor to 85** (**item 3**)
-2. Remove `networkx` from `pyproject.toml` (**item 5**)
-3. Delete `WorldState.from_json`; point `tests/test_json_export.py:307` at
-   `json_export.load` (**item 8**)
-4. Move `wind_direction` above `__post_init__` in `config.py` (**item 9**)
-5. Either add the three preset files or make `worldgen presets` admit it has none
-   (**item 11**)
-
-### Phase B — Close the one remaining test gap (1–2 days)
-6. Cover `_widen_valleys` and `_drop_particle` in `erosion.py`, **at two map sizes**
+### Phase B — Close the one remaining test gap (1–2 days) — **next**
+1. Cover `_widen_valleys` and `_drop_particle` in `erosion.py`, **at two map sizes**
    (**item 1**). This is a prerequisite for Phase D, not a parallel track: items 19 and
    20 live in this code, and a 48×48-only fixture passes straight through both.
 
 ### Phase C — Make the water model navigable (2 days)
-7. Split `hydrology.py` (**item 13**). Promoted ahead of the model work rather than
+2. Split `hydrology.py` (**item 13**). Promoted ahead of the model work rather than
    filed as optional: the file doubled while items 19–21 accumulated inside it and
    `erosion.py`, and every remaining model change has to be made in there.
 
@@ -588,19 +498,19 @@ Five entries closed in one sitting:
 These do not queue behind effort, they queue behind a calibration decision. Order is
 load-bearing where noted:
 
-8. Off-map river vs. `max_flow` in `_widen_valleys` (**item 19**) — do first. It is the
+3. Off-map river vs. `max_flow` in `_widen_valleys` (**item 19**) — do first. It is the
    only one of the five whose defect is silently shipping on every map above ~64×64.
-9. Pre-loaded droplets at the inlets (**item 20**) — explicitly after 19, which changes
+4. Pre-loaded droplets at the inlets (**item 20**) — explicitly after 19, which changes
    how much floodplain any river gets in the first place.
-10. Per-hex runoff instead of runoff at the mean (**item 21**) — smallest diff, largest
-    recalibration; arid and tropical must move in opposite directions or it is wrong.
-11. Day-reach market siting (**item 18**) — the rewrite exists and works; what it needs
-    is the density decision and a re-tune of `city_min_draw` and the chokepoint gates
-    together.
-12. Land-only moisture smear (**item 16**) — blocked on deciding what makes a 550 mm
-    climate pastoral once the artifact is gone.
+5. Per-hex runoff instead of runoff at the mean (**item 21**) — smallest diff, largest
+   recalibration; arid and tropical must move in opposite directions or it is wrong.
+6. Day-reach market siting (**item 18**) — the rewrite exists and works; what it needs
+   is the density decision and a re-tune of `city_min_draw` and the chokepoint gates
+   together.
+7. Land-only moisture smear (**item 16**) — blocked on deciding what makes a 550 mm
+   climate pastoral once the artifact is gone.
 
 ### Phase E — Low priority
-13. Parameterise `dict` / `list` annotations and turn on `ruff`'s `ANN` rules
-    (**item 14**)
-14. `export/__init__.py` lazy imports, if the matplotlib cost ever bites (**item 8a**)
+8. Parameterise `dict` / `list` annotations and turn on `ruff`'s `ANN` rules
+   (**item 14**)
+9. `export/__init__.py` lazy imports, if the matplotlib cost ever bites (**item 8a**)
