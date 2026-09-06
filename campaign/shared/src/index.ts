@@ -17,6 +17,7 @@ export * from './events.js';
 export * from './hex.js';
 export * from './mask.js';
 export * from './movement.js';
+export * from './observe.js';
 export * from './recon.js';
 export * from './rng.js';
 export * from './ruling.js';
