@@ -98,12 +98,60 @@ header h1 {
   font-variant-numeric: tabular-nums;
 }
 
-.warning {
+.notice {
   padding: 7px 16px;
-  background: #3a2f14;
-  border-bottom: 1px solid #55471f;
-  color: #e8d9a8;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
   flex: none;
+}
+
+/* Whether the live stream is attached. Quiet when it is, because it always should be. */
+.live {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.live::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  vertical-align: middle;
+}
+
+.live-open {
+  color: #5f9e6a;
+}
+
+.live-closed,
+.live-error {
+  color: var(--accent);
+}
+
+.clock-controls {
+  margin-left: 8px;
+  display: inline-flex;
+  gap: 4px;
+}
+
+.clock-controls button {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font: inherit;
+  padding: 1px 7px;
+  cursor: pointer;
+}
+
+.clock-controls button:hover {
+  border-color: var(--accent);
 }
 
 .body {
@@ -303,4 +351,102 @@ table.grid td:first-child {
 
 .unit-list button:hover {
   background: var(--panel-2);
+}
+
+/* ---- getting in ------------------------------------------------------- */
+
+/* The join screen. Narrow and centred: it asks one question and should look like it. */
+.join {
+  max-width: 620px;
+  margin: 0 auto;
+  padding: 48px 24px;
+}
+
+.join h1 {
+  font-size: 22px;
+  font-weight: 600;
+  margin: 0 0 12px;
+}
+
+.join h3 {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin: 28px 0 10px;
+}
+
+.join button {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  font: inherit;
+  padding: 7px 14px;
+  cursor: pointer;
+}
+
+.join button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.join button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.join button.primary {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.join .file {
+  display: inline-block;
+  margin-bottom: 8px;
+}
+
+.busy {
+  color: var(--accent);
+}
+
+.error {
+  color: #d1495b;
+}
+
+/* Join links. Shown once, so they are given room to be selected and copied whole. */
+.links {
+  list-style: none;
+  margin: 0 0 20px;
+  padding: 0;
+}
+
+.links li {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.links strong {
+  min-width: 72px;
+  text-transform: capitalize;
+}
+
+.links code,
+code.link {
+  font-size: 11px;
+  color: var(--muted);
+  word-break: break-all;
+  user-select: all;
+}
+
+/* A contact is a sighting, not a unit, and its swatch says so before the panel does. */
+.swatch.ghost {
+  opacity: 0.5;
+  border-style: dashed;
+}
+
+.unit-name {
+  font-weight: 600;
 }

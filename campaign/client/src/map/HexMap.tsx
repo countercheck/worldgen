@@ -15,28 +15,15 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import {
-  key,
-  occupied,
-  pixelToAxial,
-  type Hex,
-  type Theme,
-  type Unit,
-  type World,
-} from '@campaign/shared';
+import { key, pixelToAxial, type Hex, type Theme, type World } from '@campaign/shared';
 
-import { drawOverlay, drawTerrain, unitAtHex, worldExtent, type View } from './draw.js';
+import { drawOverlay, drawTerrain, markAtHex, worldExtent, type Mark, type View } from './draw.js';
 
-export interface DrawableUnit {
-  readonly unit: Unit;
-  readonly color: string;
-  /** False for an enemy known only by an old sighting. */
-  readonly visible: boolean;
-}
+export type { Mark } from './draw.js';
 
 export function HexMap({
   world,
-  units,
+  marks,
   theme,
   hovered,
   onHover,
@@ -45,12 +32,13 @@ export function HexMap({
   reach,
 }: {
   world: World;
-  units: readonly DrawableUnit[];
+  marks: readonly Mark[];
   theme: Theme;
   hovered: Hex | null;
-  onHover: (hex: Hex | null, unit: Unit | null) => void;
+  /** The hex under the cursor and what stands on it, by id. */
+  onHover: (hex: Hex | null, markId: string | null) => void;
   selectedId: string | null;
-  onSelect: (unit: Unit | null) => void;
+  onSelect: (markId: string | null) => void;
   reach?: ReadonlyMap<string, number> | undefined;
 }) {
   const wrap = useRef<HTMLDivElement>(null);
@@ -83,11 +71,6 @@ export function HexMap({
       offsetY: base.offsetY * zoom + pan.y + (box.h * (1 - zoom)) / 2,
     }),
     [base, zoom, pan, box.w, box.h],
-  );
-
-  const drawable = useMemo(
-    () => units.map((u) => ({ ...u, column: occupied(u.unit) })),
-    [units],
   );
 
   useEffect(() => {
@@ -123,13 +106,13 @@ export function HexMap({
     if (ctx === null) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     drawOverlay(ctx, view, {
-      units: drawable,
+      marks,
       hovered,
       hoveredUnitId,
       selectedUnitId: selectedId,
       reach,
     });
-  }, [drawable, hovered, hoveredUnitId, selectedId, view, box, reach]);
+  }, [marks, hovered, hoveredUnitId, selectedId, view, box, reach]);
 
   const hexAtPointer = useCallback(
     (e: React.PointerEvent): Hex | null => {
@@ -157,11 +140,11 @@ export function HexMap({
         return;
       }
       const hex = hexAtPointer(e);
-      const unit = hex === null ? null : unitAtHex(drawable, hex);
-      setHoveredUnitId(unit?.id ?? null);
-      onHover(hex, unit);
+      const id = hex === null ? null : markAtHex(marks, hex);
+      setHoveredUnitId(id);
+      onHover(hex, id);
     },
-    [hexAtPointer, drawable, onHover],
+    [hexAtPointer, marks, onHover],
   );
 
   return (
@@ -171,7 +154,7 @@ export function HexMap({
       onPointerDown={(e) => {
         if (e.button === 0) {
           const hex = hexAtPointer(e);
-          onSelect(hex === null ? null : unitAtHex(drawable, hex));
+          onSelect(hex === null ? null : markAtHex(marks, hex));
         }
         dragging.current = { x: e.clientX, y: e.clientY };
         (e.target as HTMLElement).setPointerCapture(e.pointerId);

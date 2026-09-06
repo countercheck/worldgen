@@ -25,13 +25,15 @@ import {
   type CampaignState,
   type Command,
   type LoggedEvent,
+  factionRole,
+  REFEREE_ROLE,
+  type Role,
   type Strictness,
   type Violation,
   type World,
 } from '@campaign/shared';
 
 import type { Db } from './db.js';
-import { factionRole, REFEREE_ROLE, type Role } from './view.js';
 
 /** How many events between snapshots. Small enough to matter, large enough not to churn. */
 const SNAPSHOT_EVERY = 50;

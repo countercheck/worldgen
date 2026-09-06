@@ -18,15 +18,17 @@ import websocket from '@fastify/websocket';
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 
 import {
+  assertMasked,
   DEFAULT_CONFIG,
+  viewFor,
   type CampaignConfig,
   type Command,
+  type Role,
   type Strictness,
 } from '@campaign/shared';
 
 import { openDb, type Db } from './db.js';
 import { CampaignStore, type CampaignRow } from './store.js';
-import { assertMasked, viewFor, type Role } from './view.js';
 
 export const TOKEN_COOKIE = 'campaign_token';
 

@@ -58,6 +58,14 @@ export const MIN_DIVISION_EFFECTIVES = 4000;
 
 export interface Unit {
   readonly id: string;
+  /**
+   * What the unit is called: "1re Division", "Light Brigade".
+   *
+   * On the unit rather than in a lookup beside it, because it has to survive the trip to
+   * a client. A commander who is shown "red-1" is being shown the engine's bookkeeping,
+   * and a name kept in a side map is a name the server never sends.
+   */
+  readonly name: string;
   readonly faction: string;
   readonly kind: UnitKind;
 

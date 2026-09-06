@@ -1,6 +1,12 @@
 /**
  * The one place campaign state is turned into something a client may see.
  *
+ * It lives in the shared engine rather than in the server because it is pure — state in,
+ * a plain object out — and because the client has to name what it receives. A client that
+ * declared its own copy of `ClientView` would be free to drift from what is actually
+ * sent, and the shape of a fog boundary is the last thing that should be described twice.
+ * Only the server ever calls it: nothing in the browser has ground truth to mask.
+ *
  * This game is about incomplete information, so the fog is not a display convention — it
  * is the product. If a commander's browser receives the whole world and hides part of it,
  * anyone who opens the developer tools has the entire map and every enemy position, and
@@ -19,21 +25,14 @@
  *    so a low-quality sighting never carries the corps identity in the first place.
  */
 
-import {
-  DEFAULT_CONFIG,
-  factionVisible,
-  key,
-  maskWorld,
-  parseWorld,
-  spotted,
-  type CampaignConfig,
-  type CampaignState,
-  type Contact,
-  type Faction,
-  type HexKey,
-  type Unit,
-  type World,
-} from '@campaign/shared';
+import { DEFAULT_CONFIG, type CampaignConfig } from './config.js';
+import { key, type HexKey } from './hex.js';
+import { maskWorld } from './mask.js';
+import { factionVisible, spotted, type Contact } from './recon.js';
+import type { Faction } from './events.js';
+import type { CampaignState } from './state.js';
+import type { Unit } from './unit.js';
+import { parseWorld, type World } from './world.js';
 
 /** Who is asking. */
 export type Role = { readonly kind: 'referee' } | { readonly kind: 'faction'; readonly id: string };
