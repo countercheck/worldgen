@@ -48,15 +48,16 @@ jobs:
       # rather than passing quietly. Raise it when the real figure rises; never lower it
       # to make a red build green.
       #
-      # NUMBA_DISABLE_JIT makes the figure honest. coverage.py cannot instrument a
-      # jitted function, so with numba active the whole droplet loop in `erosion.py`
-      # reads as dead — the file scores 72% against a real 98%, and none of that code is
-      # ratcheted at all. Disabling the JIT for this run costs about 50 seconds and puts
-      # `erosion.py` back under the floor's protection. The tests are run for real, with
-      # numba, in the step above; this one exists to measure.
+      # `erosion.py` will read about 72% here and that is expected — do not chase it.
+      # coverage.py cannot instrument a `@numba.njit` function, so the whole droplet loop
+      # scores as dead however hard it is exercised; run the suite with
+      # `NUMBA_DISABLE_JIT=1` and the file is at 98%. The code is tested, not counted.
+      #
+      # Measuring it here was tried and reverted: on this runner the JIT-disabled pass
+      # took 20m15s against 6m26s with numba, turning a 13-minute job into a 27-minute
+      # one on every push. Fourteen minutes a run is not worth making a number look
+      # right about code that was never actually untested. See TECH_DEBT.md item 1.
       - name: Check test coverage
-        env:
-          NUMBA_DISABLE_JIT: "1"
         run: python -m pytest --cov=worldgen --cov-fail-under=85 --quiet
 
   # The gate branch protection points at. Its name is load-bearing: a required status
