@@ -1,0 +1,22 @@
+{
+  "name": "@campaign/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc --build",
+    "dev": "node --watch src/index.ts",
+    "start": "node dist/index.js",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@campaign/shared": "*",
+    "@fastify/cookie": "^11.0.2",
+    "@fastify/websocket": "^11.0.2",
+    "fastify": "^5.2.1"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.8"
+  }
+}
