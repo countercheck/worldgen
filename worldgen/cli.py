@@ -1,3 +1,4 @@
+import time
 from pathlib import Path
 
 import click
@@ -6,6 +7,40 @@ from .core.config import HEIGHTMAP_MODES, WorldConfig
 from .core.hex_grid import GRID_LAYOUTS
 from .core.pipeline import GeneratorPipeline
 from .stages import MODELS, stages_for
+
+# The debug plates every model can fill, in the order they are drawn. `generate` adds the
+# haulage-only plates to this when the organic model ran.
+_DEBUG_LAYERS = (
+    "elevation",
+    "terrain_class",
+    "river_flow",
+    "alluvium",
+    "temperature",
+    "moisture",
+    "biome",
+    "habitability_city",
+    "habitability_town",
+    "habitability_village",
+    "settlements",
+    "roads",
+    "land_cover",
+    "cultivation",
+    "territory",
+)
+
+
+def _report_stage(index: int, total: int, name: str, elapsed: float | None) -> None:
+    """Print one line per stage, filling in the time when the stage returns.
+
+    The name goes out before the work starts and the duration is appended after, so a
+    slow stage shows what is running rather than appearing after the fact. A 96x96
+    organic run spends most of its time in two stages, and without this it looks wedged.
+    """
+    if elapsed is None:
+        label = name.removesuffix("Stage")
+        click.echo(f"  [{index:>2}/{total}] {label:<26}", nl=False)
+    else:
+        click.echo(f"{elapsed:7.1f}s")
 
 
 @click.group()
@@ -127,8 +162,9 @@ def generate(
     pipeline = GeneratorPipeline(seed, cfg)
     for stage in stages_for(cfg, cfg.model):
         pipeline.add_stage(stage)
+    started = time.perf_counter()
     try:
-        state = pipeline.run()
+        state = pipeline.run(on_stage=_report_stage)
     except HeightmapError as exc:
         # Only the user-input failures; a plain ValueError from a downstream stage is a
         # bug and keeps its traceback.
@@ -142,29 +178,19 @@ def generate(
 
     save_json(state, str(output_path / "world.json"))
 
-    render_debug(state, "elevation", str(output_path / "elevation.svg"))
-    render_debug(state, "terrain_class", str(output_path / "terrain_class.svg"))
-    render_debug(state, "river_flow", str(output_path / "river_flow.svg"))
-    render_debug(state, "alluvium", str(output_path / "alluvium.svg"))
-    render_debug(state, "temperature", str(output_path / "temperature.svg"))
-    render_debug(state, "moisture", str(output_path / "moisture.svg"))
-    render_debug(state, "biome", str(output_path / "biome.svg"))
-    render_debug(state, "habitability_city", str(output_path / "habitability_city.svg"))
-    render_debug(state, "habitability_town", str(output_path / "habitability_town.svg"))
-    render_debug(state, "habitability_village", str(output_path / "habitability_village.svg"))
-    render_debug(state, "settlements", str(output_path / "settlements.svg"))
-    render_debug(state, "roads", str(output_path / "roads.svg"))
-    render_debug(state, "land_cover", str(output_path / "land_cover.svg"))
-    render_debug(state, "cultivation", str(output_path / "cultivation.svg"))
-    render_debug(state, "territory", str(output_path / "territory.svg"))
+    layers = list(_DEBUG_LAYERS)
     if cfg.model == "organic":
         # The plates only the haulage model can fill. Under classic every hex would come
         # out the fallback grey, which reads as a bug rather than as an empty layer.
-        render_debug(state, "soil", str(output_path / "soil.svg"))
-        render_debug(state, "land_use", str(output_path / "land_use.svg"))
-        render_debug(state, "rural_population", str(output_path / "rural_population.svg"))
+        layers += ["soil", "land_use", "rural_population"]
 
-    click.echo("✓ Done")
+    for index, layer in enumerate(layers, start=1):
+        _report_stage(index, len(layers), layer, None)
+        drawing = time.perf_counter()
+        render_debug(state, layer, str(output_path / f"{layer}.svg"))
+        _report_stage(index, len(layers), layer, time.perf_counter() - drawing)
+
+    click.echo(f"✓ Done in {time.perf_counter() - started:.1f}s → {output_dir}")
 
 
 _ATTRIBUTES = [
