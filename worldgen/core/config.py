@@ -309,354 +309,6 @@ class WorldConfig:
     # counts.
     endorheic_evaporation_scale: float = 1.0
 
-    def __post_init__(self) -> None:
-        if self.grid_layout not in GRID_LAYOUTS:
-            raise ValueError(
-                f"unknown grid_layout {self.grid_layout!r}; choose from {', '.join(GRID_LAYOUTS)}"
-            )
-        if self.model not in MODELS:
-            raise ValueError(f"unknown model {self.model!r}; choose from {', '.join(MODELS)}")
-        self.wind_direction = _coerce_pair("wind_direction", self.wind_direction)
-        self.elevation_gradient_m = _coerce_pair("elevation_gradient_m", self.elevation_gradient_m)
-        if self.valley_carve_passes < 0:
-            raise ValueError(f"valley_carve_passes must be >= 0, got {self.valley_carve_passes}")
-        if self.valley_width_max < 0:
-            raise ValueError(f"valley_width_max must be >= 0, got {self.valley_width_max}")
-        if self.valley_width_exponent < 0:
-            raise ValueError(
-                f"valley_width_exponent must be >= 0, got {self.valley_width_exponent}"
-            )
-        if self.valley_floor_slope_m < 0:
-            raise ValueError(f"valley_floor_slope_m must be >= 0, got {self.valley_floor_slope_m}")
-        if self.valley_max_relief_m < 0:
-            raise ValueError(f"valley_max_relief_m must be >= 0, got {self.valley_max_relief_m}")
-        for name in ("alluvium_floodplain_gain", "alluvium_smoothing"):
-            if getattr(self, name) < 0:
-                raise ValueError(f"{name} must be >= 0, got {getattr(self, name)}")
-        if not (0.0 < self.alluvium_quantile <= 1.0):
-            raise ValueError(f"alluvium_quantile must be in (0, 1], got {self.alluvium_quantile}")
-        if not (0.0 < self.valley_channel_fraction <= 1.0):
-            raise ValueError(
-                f"valley_channel_fraction must be in (0, 1], got {self.valley_channel_fraction}"
-            )
-        if not (0.0 <= self.rain_shadow_strength <= 1.0):
-            raise ValueError(
-                f"rain_shadow_strength must be in [0, 1], got {self.rain_shadow_strength}"
-            )
-        if self.river_inflow_count < 0:
-            raise ValueError(f"river_inflow_count must be >= 0, got {self.river_inflow_count}")
-        if self.river_inflow_volume < 0:
-            raise ValueError(f"river_inflow_volume must be >= 0, got {self.river_inflow_volume}")
-        if self.river_inflow_min_separation < 0:
-            raise ValueError(
-                f"river_inflow_min_separation must be >= 0, got {self.river_inflow_min_separation}"
-            )
-        if self.river_inflow_length_bias < 0:
-            raise ValueError(
-                f"river_inflow_length_bias must be >= 0, got {self.river_inflow_length_bias}"
-            )
-        if self.river_inflow_min_length < 0:
-            raise ValueError(
-                f"river_inflow_min_length must be >= 0, got {self.river_inflow_min_length}"
-            )
-        if self.endorheic_evaporation_scale < 0:
-            raise ValueError(
-                f"endorheic_evaporation_scale must be >= 0, got {self.endorheic_evaporation_scale}"
-            )
-        if self.habitability_hill_relief_m <= 0:
-            raise ValueError(
-                f"habitability_hill_relief_m must be > 0, got {self.habitability_hill_relief_m}"
-            )
-        if self.channel_min_discharge < 0:
-            raise ValueError(
-                f"channel_min_discharge must be >= 0, got {self.channel_min_discharge}"
-            )
-        if self.evapotranspiration_base_mm < 0 or self.evapotranspiration_per_c_mm < 0:
-            raise ValueError(
-                "evapotranspiration terms must be >= 0, got "
-                f"{self.evapotranspiration_base_mm} and {self.evapotranspiration_per_c_mm}"
-            )
-        if self.wetland_min_runoff_mm < 0:
-            raise ValueError(
-                f"wetland_min_runoff_mm must be >= 0, got {self.wetland_min_runoff_mm}"
-            )
-        if self.min_runoff_mm < 0:
-            raise ValueError(f"min_runoff_mm must be >= 0, got {self.min_runoff_mm}")
-        if self.navigable_min_discharge < self.channel_min_discharge:
-            raise ValueError(
-                "navigable_min_discharge must be at least channel_min_discharge — a river "
-                "cannot float a boat where there is not enough water for a channel, got "
-                f"{self.navigable_min_discharge} and {self.channel_min_discharge}"
-            )
-        if not (0.0 <= self.moisture_resupply_per_hex <= 1.0):
-            raise ValueError(
-                f"moisture_resupply_per_hex must be in [0, 1], got {self.moisture_resupply_per_hex}"
-            )
-        if self.moisture_bleed_passes < 0:
-            raise ValueError(
-                f"moisture_bleed_passes must be >= 0, got {self.moisture_bleed_passes}"
-            )
-        self.continent_falloff_edges = _coerce_edges(
-            self.continent_falloff_edges, "continent_falloff_edges"
-        )
-        self.river_inflow_edges = _coerce_edges(self.river_inflow_edges, "river_inflow_edges")
-        if not (0.0 <= self.continent_shelf_variance <= 1.0):
-            raise ValueError(
-                f"continent_shelf_variance must be in [0, 1], got {self.continent_shelf_variance}"
-            )
-        if self.continent_shelf_hexes < 1:
-            raise ValueError(
-                f"continent_shelf_hexes must be >= 1, got {self.continent_shelf_hexes}"
-            )
-        if self.max_elevation_m <= 0.0:
-            raise ValueError(f"max_elevation_m must be above sea level, got {self.max_elevation_m}")
-        if self.coast_max_elevation_m < 0.0:
-            raise ValueError(
-                f"coast_max_elevation_m must be >= 0, got {self.coast_max_elevation_m}"
-            )
-        if self.seabed_depth_m <= 0.0:
-            raise ValueError(
-                "seabed_depth_m is a depth below sea level and must be positive, got "
-                f"{self.seabed_depth_m}"
-            )
-        if self.heightmap_path is not None:
-            # A programmatic caller reaches for a Path; everything downstream, including
-            # the JSON and YAML dumps, wants a plain string.
-            if isinstance(self.heightmap_path, os.PathLike):
-                self.heightmap_path = os.fspath(self.heightmap_path)
-            if not isinstance(self.heightmap_path, str):
-                raise ValueError(
-                    f"heightmap_path must be a path or None, got {type(self.heightmap_path).__name__}"
-                )
-            if not self.heightmap_path:
-                raise ValueError("heightmap_path must not be empty; use null to disable it")
-        if self.heightmap_mode not in HEIGHTMAP_MODES:
-            raise ValueError(
-                f"unknown heightmap_mode {self.heightmap_mode!r}; "
-                f"choose from {', '.join(HEIGHTMAP_MODES)}"
-            )
-        if not (0.0 <= self.heightmap_land_threshold <= 1.0):
-            raise ValueError(
-                f"heightmap_land_threshold must be in [0, 1], got {self.heightmap_land_threshold}"
-            )
-        if self.endorheic_marsh_radius < 0:
-            raise ValueError(
-                f"endorheic_marsh_radius must be >= 0, got {self.endorheic_marsh_radius}"
-            )
-        if self.endorheic_marsh_min_precip_mm < 0.0:
-            raise ValueError(
-                "endorheic_marsh_min_precip_mm must be >= 0, "
-                f"got {self.endorheic_marsh_min_precip_mm}"
-            )
-        if not (0.0 <= self.moisture_bleed_strength <= 1.0):
-            raise ValueError(
-                f"moisture_bleed_strength must be in [0, 1], got {self.moisture_bleed_strength}"
-            )
-        if self.regional_climate not in CLIMATE_CONTEXTS:
-            raise ValueError(
-                f"unknown regional_climate {self.regional_climate!r}; "
-                f"choose from {', '.join(sorted(CLIMATE_CONTEXTS))}"
-            )
-        context = CLIMATE_CONTEXTS[self.regional_climate]
-        if self.mean_temperature_c is None:
-            self.mean_temperature_c = context.mean_temperature_c
-        if self.mean_precip_mm is None:
-            self.mean_precip_mm = context.mean_precip_mm
-        if not (0.0 < self.mean_precip_mm <= 12000.0):
-            raise ValueError(
-                "mean_precip_mm must be a plausible annual rainfall in millimetres, "
-                f"got {self.mean_precip_mm}"
-            )
-        if self.food_drowned_precip_mm <= self.biome_wet_precip_mm:
-            raise ValueError(
-                "food_drowned_precip_mm must be above biome_wet_precip_mm, got "
-                f"{self.food_drowned_precip_mm} and {self.biome_wet_precip_mm}"
-            )
-        if self.biome_dry_precip_mm >= self.biome_wet_precip_mm:
-            raise ValueError(
-                "biome_dry_precip_mm must be below biome_wet_precip_mm, got "
-                f"{self.biome_dry_precip_mm} and {self.biome_wet_precip_mm}"
-            )
-        if not (-60.0 <= self.mean_temperature_c <= 50.0):
-            raise ValueError(
-                "mean_temperature_c must be a plausible mean annual temperature in "
-                f"Celsius, got {self.mean_temperature_c}"
-            )
-        if self.latitude_temp_range_c < 0.0:
-            raise ValueError(
-                f"latitude_temp_range_c must be >= 0, got {self.latitude_temp_range_c}"
-            )
-        if self.lapse_rate_c_per_km < 0.0:
-            raise ValueError(f"lapse_rate_c_per_km must be >= 0, got {self.lapse_rate_c_per_km}")
-        if self.chokepoint_min_separation < 0:
-            raise ValueError(
-                f"chokepoint_min_separation must be >= 0, got {self.chokepoint_min_separation}"
-            )
-        if self.chokepoint_min_draw < 0.0:
-            raise ValueError(f"chokepoint_min_draw must be >= 0, got {self.chokepoint_min_draw}")
-        _road_tiers = ("primary", "secondary", "track")
-        if self.chokepoint_min_road_tier not in _road_tiers:
-            raise ValueError(
-                "chokepoint_min_road_tier must be one of "
-                f"{', '.join(_road_tiers)}, got {self.chokepoint_min_road_tier!r}"
-            )
-        if self.biome_snowline_temp_c >= self.biome_treeline_temp_c:
-            raise ValueError(
-                "biome_snowline_temp_c must be below biome_treeline_temp_c — the ground "
-                "goes bare above the treeline, not below it, got "
-                f"{self.biome_snowline_temp_c} and {self.biome_treeline_temp_c}"
-            )
-        if self.biome_treeline_temp_c > self.biome_cold_temp_c:
-            raise ValueError(
-                "biome_treeline_temp_c must be at or below biome_cold_temp_c — trees stop "
-                "above the treeline, so it cannot be warmer than the cold band, got "
-                f"{self.biome_treeline_temp_c} and {self.biome_cold_temp_c}"
-            )
-        if self.biome_cold_temp_c >= self.biome_warm_temp_c:
-            raise ValueError(
-                "biome_cold_temp_c must be below biome_warm_temp_c, got "
-                f"{self.biome_cold_temp_c} and {self.biome_warm_temp_c}"
-            )
-        if self.erosion_delta_min_load < 0:
-            raise ValueError(
-                f"erosion_delta_min_load must be >= 0, got {self.erosion_delta_min_load}"
-            )
-        if self.erosion_affinity_update_interval < 1:
-            raise ValueError(
-                "erosion_affinity_update_interval must be >= 1, "
-                f"got {self.erosion_affinity_update_interval}"
-            )
-        if self.erosion_channel_affinity_gain < 0:
-            raise ValueError(
-                f"erosion_channel_affinity_gain must be >= 0, "
-                f"got {self.erosion_channel_affinity_gain}"
-            )
-        if self.hex_size_m <= 0:
-            raise ValueError(f"hex_size_m must be > 0, got {self.hex_size_m}")
-
-        if self.road_delta_elevation_per_hex <= 0:
-            raise ValueError(
-                f"road_delta_elevation_per_hex must be > 0, got {self.road_delta_elevation_per_hex}"
-            )
-        if not 0 < self.road_switchback_grade_pct <= self.road_slope_cap_pct:
-            raise ValueError(
-                "road_switchback_grade_pct must be above 0 and no more than "
-                f"road_slope_cap_pct ({self.road_slope_cap_pct}), got "
-                f"{self.road_switchback_grade_pct}"
-            )
-        if self.haulage_transship_cost < 0:
-            raise ValueError(
-                f"haulage_transship_cost must be >= 0, got {self.haulage_transship_cost}"
-            )
-        if self.city_min_draw <= 0:
-            raise ValueError(f"city_min_draw must be > 0, got {self.city_min_draw}")
-        if self.road_settlement_skirt_cost < 0:
-            raise ValueError(
-                f"road_settlement_skirt_cost must be >= 0, got {self.road_settlement_skirt_cost}"
-            )
-        if self.road_travellers_per_pop <= 0:
-            raise ValueError(
-                f"road_travellers_per_pop must be > 0, got {self.road_travellers_per_pop}"
-            )
-        if self.road_travellers_max < 1:
-            raise ValueError(f"road_travellers_max must be >= 1, got {self.road_travellers_max}")
-        # Below 2.0 the rule can never fire: a detour is two legs where there was one.
-        if self.road_settlement_detour_max_mult < 2.0:
-            raise ValueError(
-                "road_settlement_detour_max_mult must be >= 2.0 (a detour is two legs "
-                f"where there was one), got {self.road_settlement_detour_max_mult}"
-            )
-        if self.settlement_min_reachable < 1:
-            raise ValueError(
-                f"settlement_min_reachable must be >= 1, got {self.settlement_min_reachable}"
-            )
-        for name in (
-            "cultivation_city_radius",
-            "cultivation_town_radius",
-            "cultivation_village_radius",
-        ):
-            if getattr(self, name) < 0:
-                raise ValueError(f"{name} must be >= 0, got {getattr(self, name)}")
-        for name in (
-            "food_prime_value",
-            "food_arable_value",
-            "food_marginal_value",
-            "food_grazing_value",
-            "food_wetland_value",
-            "food_water_value",
-            "food_alluvium_bonus",
-            "soil_dry_farming_min_precip_mm",
-            "yield_arable",
-            "yield_pasture",
-            "yield_wood",
-            "clearing_margin",
-            "habitability_agri_weight",
-            "habitability_hill_relief_m",
-            "habitability_river_bonus",
-            "habitability_coast_bonus",
-            "habitability_hill_bonus",
-            "habitability_confluence_bonus",
-        ):
-            if getattr(self, name) < 0:
-                raise ValueError(f"{name} must be >= 0, got {getattr(self, name)}")
-        for name in (
-            "terrain_rolling_gradient_m",
-            "terrain_steep_gradient_m",
-            "terrain_escarpment_gradient_m",
-            "haulage_range_land",
-            "rural_field_radius",
-            "market_day_radius",
-            "travel_ascent_per_hex",
-            # Divisors, both of them. At zero these did not degrade — they crashed the
-            # run mid-pipeline with a bare ZeroDivisionError from deep inside a stage.
-            "market_kernel_decay",
-            "crossing_relief_m",
-        ):
-            if getattr(self, name) <= 0:
-                raise ValueError(f"{name} must be > 0, got {getattr(self, name)}")
-        # The regime ordering is the model's central claim: a farmer's daily walk is
-        # shorter than a day's return to market, which is shorter than the distance bulk
-        # grain survives overland. Invert any of these and the hierarchy stops meaning
-        # anything, so it is checked rather than assumed.
-        if not (self.rural_field_radius < self.market_day_radius < self.haulage_range_land):
-            raise ValueError(
-                "haulage ranges must increase: rural_field_radius < market_day_radius < "
-                f"haulage_range_land, got {self.rural_field_radius} < "
-                f"{self.market_day_radius} < {self.haulage_range_land}"
-            )
-        if self.haulage_range_water_mult < 1.0:
-            raise ValueError(
-                "haulage_range_water_mult must be >= 1 (water cannot carry bulk less far "
-                f"than land), got {self.haulage_range_water_mult}"
-            )
-        if not (0.0 < self.marketable_surplus_fraction <= 1.0):
-            raise ValueError(
-                "marketable_surplus_fraction must be in (0, 1], got "
-                f"{self.marketable_surplus_fraction}"
-            )
-        if self.road_river_hex_cost < 0:
-            raise ValueError(f"road_river_hex_cost must be >= 0, got {self.road_river_hex_cost}")
-        if self.road_ferry_max_hop < 1:
-            raise ValueError(f"road_ferry_max_hop must be >= 1, got {self.road_ferry_max_hop}")
-        if self.road_water_cost < 0:
-            raise ValueError(f"road_water_cost must be >= 0, got {self.road_water_cost}")
-        if self.road_embark_cost < 0:
-            raise ValueError(f"road_embark_cost must be >= 0, got {self.road_embark_cost}")
-        if self.road_disembark_cost < 0:
-            raise ValueError(f"road_disembark_cost must be >= 0, got {self.road_disembark_cost}")
-        if self.road_river_crossing_base < 0:
-            raise ValueError(
-                f"road_river_crossing_base must be >= 0, got {self.road_river_crossing_base}"
-            )
-        if self.road_river_crossing_flow < 0:
-            raise ValueError(
-                f"road_river_crossing_flow must be >= 0, got {self.road_river_crossing_flow}"
-            )
-        if self.road_river_traffic_min < 0:
-            raise ValueError(
-                f"road_river_traffic_min must be >= 0, got {self.road_river_traffic_min}"
-            )
-
     # Climate
     # The map is a region, not a world: 500 km at 1 hex = 1 km is about 4.5 degrees of
     # latitude, some 3 C of mean annual temperature.  Altitude does far more than that
@@ -1162,6 +814,359 @@ class WorldConfig:
 
     # Settlement placement
     settlement_min_reachable: int = 100  # min hexes reachable below cap grade
+
+    # Validation last, after every field it validates.  It used to sit in the middle
+    # of the field list, ahead of 89 of the settings it checks — legal, because the
+    # dataclass machinery assigns every field before calling this, but it read as
+    # though those settings did not exist yet and it put a 350-line method between
+    # two halves of one list.
+    def __post_init__(self) -> None:
+        if self.grid_layout not in GRID_LAYOUTS:
+            raise ValueError(
+                f"unknown grid_layout {self.grid_layout!r}; choose from {', '.join(GRID_LAYOUTS)}"
+            )
+        if self.model not in MODELS:
+            raise ValueError(f"unknown model {self.model!r}; choose from {', '.join(MODELS)}")
+        self.wind_direction = _coerce_pair("wind_direction", self.wind_direction)
+        self.elevation_gradient_m = _coerce_pair("elevation_gradient_m", self.elevation_gradient_m)
+        if self.valley_carve_passes < 0:
+            raise ValueError(f"valley_carve_passes must be >= 0, got {self.valley_carve_passes}")
+        if self.valley_width_max < 0:
+            raise ValueError(f"valley_width_max must be >= 0, got {self.valley_width_max}")
+        if self.valley_width_exponent < 0:
+            raise ValueError(
+                f"valley_width_exponent must be >= 0, got {self.valley_width_exponent}"
+            )
+        if self.valley_floor_slope_m < 0:
+            raise ValueError(f"valley_floor_slope_m must be >= 0, got {self.valley_floor_slope_m}")
+        if self.valley_max_relief_m < 0:
+            raise ValueError(f"valley_max_relief_m must be >= 0, got {self.valley_max_relief_m}")
+        for name in ("alluvium_floodplain_gain", "alluvium_smoothing"):
+            if getattr(self, name) < 0:
+                raise ValueError(f"{name} must be >= 0, got {getattr(self, name)}")
+        if not (0.0 < self.alluvium_quantile <= 1.0):
+            raise ValueError(f"alluvium_quantile must be in (0, 1], got {self.alluvium_quantile}")
+        if not (0.0 < self.valley_channel_fraction <= 1.0):
+            raise ValueError(
+                f"valley_channel_fraction must be in (0, 1], got {self.valley_channel_fraction}"
+            )
+        if not (0.0 <= self.rain_shadow_strength <= 1.0):
+            raise ValueError(
+                f"rain_shadow_strength must be in [0, 1], got {self.rain_shadow_strength}"
+            )
+        if self.river_inflow_count < 0:
+            raise ValueError(f"river_inflow_count must be >= 0, got {self.river_inflow_count}")
+        if self.river_inflow_volume < 0:
+            raise ValueError(f"river_inflow_volume must be >= 0, got {self.river_inflow_volume}")
+        if self.river_inflow_min_separation < 0:
+            raise ValueError(
+                f"river_inflow_min_separation must be >= 0, got {self.river_inflow_min_separation}"
+            )
+        if self.river_inflow_length_bias < 0:
+            raise ValueError(
+                f"river_inflow_length_bias must be >= 0, got {self.river_inflow_length_bias}"
+            )
+        if self.river_inflow_min_length < 0:
+            raise ValueError(
+                f"river_inflow_min_length must be >= 0, got {self.river_inflow_min_length}"
+            )
+        if self.endorheic_evaporation_scale < 0:
+            raise ValueError(
+                f"endorheic_evaporation_scale must be >= 0, got {self.endorheic_evaporation_scale}"
+            )
+        if self.habitability_hill_relief_m <= 0:
+            raise ValueError(
+                f"habitability_hill_relief_m must be > 0, got {self.habitability_hill_relief_m}"
+            )
+        if self.channel_min_discharge < 0:
+            raise ValueError(
+                f"channel_min_discharge must be >= 0, got {self.channel_min_discharge}"
+            )
+        if self.evapotranspiration_base_mm < 0 or self.evapotranspiration_per_c_mm < 0:
+            raise ValueError(
+                "evapotranspiration terms must be >= 0, got "
+                f"{self.evapotranspiration_base_mm} and {self.evapotranspiration_per_c_mm}"
+            )
+        if self.wetland_min_runoff_mm < 0:
+            raise ValueError(
+                f"wetland_min_runoff_mm must be >= 0, got {self.wetland_min_runoff_mm}"
+            )
+        if self.min_runoff_mm < 0:
+            raise ValueError(f"min_runoff_mm must be >= 0, got {self.min_runoff_mm}")
+        if self.navigable_min_discharge < self.channel_min_discharge:
+            raise ValueError(
+                "navigable_min_discharge must be at least channel_min_discharge — a river "
+                "cannot float a boat where there is not enough water for a channel, got "
+                f"{self.navigable_min_discharge} and {self.channel_min_discharge}"
+            )
+        if not (0.0 <= self.moisture_resupply_per_hex <= 1.0):
+            raise ValueError(
+                f"moisture_resupply_per_hex must be in [0, 1], got {self.moisture_resupply_per_hex}"
+            )
+        if self.moisture_bleed_passes < 0:
+            raise ValueError(
+                f"moisture_bleed_passes must be >= 0, got {self.moisture_bleed_passes}"
+            )
+        self.continent_falloff_edges = _coerce_edges(
+            self.continent_falloff_edges, "continent_falloff_edges"
+        )
+        self.river_inflow_edges = _coerce_edges(self.river_inflow_edges, "river_inflow_edges")
+        if not (0.0 <= self.continent_shelf_variance <= 1.0):
+            raise ValueError(
+                f"continent_shelf_variance must be in [0, 1], got {self.continent_shelf_variance}"
+            )
+        if self.continent_shelf_hexes < 1:
+            raise ValueError(
+                f"continent_shelf_hexes must be >= 1, got {self.continent_shelf_hexes}"
+            )
+        if self.max_elevation_m <= 0.0:
+            raise ValueError(f"max_elevation_m must be above sea level, got {self.max_elevation_m}")
+        if self.coast_max_elevation_m < 0.0:
+            raise ValueError(
+                f"coast_max_elevation_m must be >= 0, got {self.coast_max_elevation_m}"
+            )
+        if self.seabed_depth_m <= 0.0:
+            raise ValueError(
+                "seabed_depth_m is a depth below sea level and must be positive, got "
+                f"{self.seabed_depth_m}"
+            )
+        if self.heightmap_path is not None:
+            # A programmatic caller reaches for a Path; everything downstream, including
+            # the JSON and YAML dumps, wants a plain string.
+            if isinstance(self.heightmap_path, os.PathLike):
+                self.heightmap_path = os.fspath(self.heightmap_path)
+            if not isinstance(self.heightmap_path, str):
+                raise ValueError(
+                    f"heightmap_path must be a path or None, got {type(self.heightmap_path).__name__}"
+                )
+            if not self.heightmap_path:
+                raise ValueError("heightmap_path must not be empty; use null to disable it")
+        if self.heightmap_mode not in HEIGHTMAP_MODES:
+            raise ValueError(
+                f"unknown heightmap_mode {self.heightmap_mode!r}; "
+                f"choose from {', '.join(HEIGHTMAP_MODES)}"
+            )
+        if not (0.0 <= self.heightmap_land_threshold <= 1.0):
+            raise ValueError(
+                f"heightmap_land_threshold must be in [0, 1], got {self.heightmap_land_threshold}"
+            )
+        if self.endorheic_marsh_radius < 0:
+            raise ValueError(
+                f"endorheic_marsh_radius must be >= 0, got {self.endorheic_marsh_radius}"
+            )
+        if self.endorheic_marsh_min_precip_mm < 0.0:
+            raise ValueError(
+                "endorheic_marsh_min_precip_mm must be >= 0, "
+                f"got {self.endorheic_marsh_min_precip_mm}"
+            )
+        if not (0.0 <= self.moisture_bleed_strength <= 1.0):
+            raise ValueError(
+                f"moisture_bleed_strength must be in [0, 1], got {self.moisture_bleed_strength}"
+            )
+        if self.regional_climate not in CLIMATE_CONTEXTS:
+            raise ValueError(
+                f"unknown regional_climate {self.regional_climate!r}; "
+                f"choose from {', '.join(sorted(CLIMATE_CONTEXTS))}"
+            )
+        context = CLIMATE_CONTEXTS[self.regional_climate]
+        if self.mean_temperature_c is None:
+            self.mean_temperature_c = context.mean_temperature_c
+        if self.mean_precip_mm is None:
+            self.mean_precip_mm = context.mean_precip_mm
+        if not (0.0 < self.mean_precip_mm <= 12000.0):
+            raise ValueError(
+                "mean_precip_mm must be a plausible annual rainfall in millimetres, "
+                f"got {self.mean_precip_mm}"
+            )
+        if self.food_drowned_precip_mm <= self.biome_wet_precip_mm:
+            raise ValueError(
+                "food_drowned_precip_mm must be above biome_wet_precip_mm, got "
+                f"{self.food_drowned_precip_mm} and {self.biome_wet_precip_mm}"
+            )
+        if self.biome_dry_precip_mm >= self.biome_wet_precip_mm:
+            raise ValueError(
+                "biome_dry_precip_mm must be below biome_wet_precip_mm, got "
+                f"{self.biome_dry_precip_mm} and {self.biome_wet_precip_mm}"
+            )
+        if not (-60.0 <= self.mean_temperature_c <= 50.0):
+            raise ValueError(
+                "mean_temperature_c must be a plausible mean annual temperature in "
+                f"Celsius, got {self.mean_temperature_c}"
+            )
+        if self.latitude_temp_range_c < 0.0:
+            raise ValueError(
+                f"latitude_temp_range_c must be >= 0, got {self.latitude_temp_range_c}"
+            )
+        if self.lapse_rate_c_per_km < 0.0:
+            raise ValueError(f"lapse_rate_c_per_km must be >= 0, got {self.lapse_rate_c_per_km}")
+        if self.chokepoint_min_separation < 0:
+            raise ValueError(
+                f"chokepoint_min_separation must be >= 0, got {self.chokepoint_min_separation}"
+            )
+        if self.chokepoint_min_draw < 0.0:
+            raise ValueError(f"chokepoint_min_draw must be >= 0, got {self.chokepoint_min_draw}")
+        _road_tiers = ("primary", "secondary", "track")
+        if self.chokepoint_min_road_tier not in _road_tiers:
+            raise ValueError(
+                "chokepoint_min_road_tier must be one of "
+                f"{', '.join(_road_tiers)}, got {self.chokepoint_min_road_tier!r}"
+            )
+        if self.biome_snowline_temp_c >= self.biome_treeline_temp_c:
+            raise ValueError(
+                "biome_snowline_temp_c must be below biome_treeline_temp_c — the ground "
+                "goes bare above the treeline, not below it, got "
+                f"{self.biome_snowline_temp_c} and {self.biome_treeline_temp_c}"
+            )
+        if self.biome_treeline_temp_c > self.biome_cold_temp_c:
+            raise ValueError(
+                "biome_treeline_temp_c must be at or below biome_cold_temp_c — trees stop "
+                "above the treeline, so it cannot be warmer than the cold band, got "
+                f"{self.biome_treeline_temp_c} and {self.biome_cold_temp_c}"
+            )
+        if self.biome_cold_temp_c >= self.biome_warm_temp_c:
+            raise ValueError(
+                "biome_cold_temp_c must be below biome_warm_temp_c, got "
+                f"{self.biome_cold_temp_c} and {self.biome_warm_temp_c}"
+            )
+        if self.erosion_delta_min_load < 0:
+            raise ValueError(
+                f"erosion_delta_min_load must be >= 0, got {self.erosion_delta_min_load}"
+            )
+        if self.erosion_affinity_update_interval < 1:
+            raise ValueError(
+                "erosion_affinity_update_interval must be >= 1, "
+                f"got {self.erosion_affinity_update_interval}"
+            )
+        if self.erosion_channel_affinity_gain < 0:
+            raise ValueError(
+                f"erosion_channel_affinity_gain must be >= 0, "
+                f"got {self.erosion_channel_affinity_gain}"
+            )
+        if self.hex_size_m <= 0:
+            raise ValueError(f"hex_size_m must be > 0, got {self.hex_size_m}")
+
+        if self.road_delta_elevation_per_hex <= 0:
+            raise ValueError(
+                f"road_delta_elevation_per_hex must be > 0, got {self.road_delta_elevation_per_hex}"
+            )
+        if not 0 < self.road_switchback_grade_pct <= self.road_slope_cap_pct:
+            raise ValueError(
+                "road_switchback_grade_pct must be above 0 and no more than "
+                f"road_slope_cap_pct ({self.road_slope_cap_pct}), got "
+                f"{self.road_switchback_grade_pct}"
+            )
+        if self.haulage_transship_cost < 0:
+            raise ValueError(
+                f"haulage_transship_cost must be >= 0, got {self.haulage_transship_cost}"
+            )
+        if self.city_min_draw <= 0:
+            raise ValueError(f"city_min_draw must be > 0, got {self.city_min_draw}")
+        if self.road_settlement_skirt_cost < 0:
+            raise ValueError(
+                f"road_settlement_skirt_cost must be >= 0, got {self.road_settlement_skirt_cost}"
+            )
+        if self.road_travellers_per_pop <= 0:
+            raise ValueError(
+                f"road_travellers_per_pop must be > 0, got {self.road_travellers_per_pop}"
+            )
+        if self.road_travellers_max < 1:
+            raise ValueError(f"road_travellers_max must be >= 1, got {self.road_travellers_max}")
+        # Below 2.0 the rule can never fire: a detour is two legs where there was one.
+        if self.road_settlement_detour_max_mult < 2.0:
+            raise ValueError(
+                "road_settlement_detour_max_mult must be >= 2.0 (a detour is two legs "
+                f"where there was one), got {self.road_settlement_detour_max_mult}"
+            )
+        if self.settlement_min_reachable < 1:
+            raise ValueError(
+                f"settlement_min_reachable must be >= 1, got {self.settlement_min_reachable}"
+            )
+        for name in (
+            "cultivation_city_radius",
+            "cultivation_town_radius",
+            "cultivation_village_radius",
+        ):
+            if getattr(self, name) < 0:
+                raise ValueError(f"{name} must be >= 0, got {getattr(self, name)}")
+        for name in (
+            "food_prime_value",
+            "food_arable_value",
+            "food_marginal_value",
+            "food_grazing_value",
+            "food_wetland_value",
+            "food_water_value",
+            "food_alluvium_bonus",
+            "soil_dry_farming_min_precip_mm",
+            "yield_arable",
+            "yield_pasture",
+            "yield_wood",
+            "clearing_margin",
+            "habitability_agri_weight",
+            "habitability_hill_relief_m",
+            "habitability_river_bonus",
+            "habitability_coast_bonus",
+            "habitability_hill_bonus",
+            "habitability_confluence_bonus",
+        ):
+            if getattr(self, name) < 0:
+                raise ValueError(f"{name} must be >= 0, got {getattr(self, name)}")
+        for name in (
+            "terrain_rolling_gradient_m",
+            "terrain_steep_gradient_m",
+            "terrain_escarpment_gradient_m",
+            "haulage_range_land",
+            "rural_field_radius",
+            "market_day_radius",
+            "travel_ascent_per_hex",
+            # Divisors, both of them. At zero these did not degrade — they crashed the
+            # run mid-pipeline with a bare ZeroDivisionError from deep inside a stage.
+            "market_kernel_decay",
+            "crossing_relief_m",
+        ):
+            if getattr(self, name) <= 0:
+                raise ValueError(f"{name} must be > 0, got {getattr(self, name)}")
+        # The regime ordering is the model's central claim: a farmer's daily walk is
+        # shorter than a day's return to market, which is shorter than the distance bulk
+        # grain survives overland. Invert any of these and the hierarchy stops meaning
+        # anything, so it is checked rather than assumed.
+        if not (self.rural_field_radius < self.market_day_radius < self.haulage_range_land):
+            raise ValueError(
+                "haulage ranges must increase: rural_field_radius < market_day_radius < "
+                f"haulage_range_land, got {self.rural_field_radius} < "
+                f"{self.market_day_radius} < {self.haulage_range_land}"
+            )
+        if self.haulage_range_water_mult < 1.0:
+            raise ValueError(
+                "haulage_range_water_mult must be >= 1 (water cannot carry bulk less far "
+                f"than land), got {self.haulage_range_water_mult}"
+            )
+        if not (0.0 < self.marketable_surplus_fraction <= 1.0):
+            raise ValueError(
+                "marketable_surplus_fraction must be in (0, 1], got "
+                f"{self.marketable_surplus_fraction}"
+            )
+        if self.road_river_hex_cost < 0:
+            raise ValueError(f"road_river_hex_cost must be >= 0, got {self.road_river_hex_cost}")
+        if self.road_ferry_max_hop < 1:
+            raise ValueError(f"road_ferry_max_hop must be >= 1, got {self.road_ferry_max_hop}")
+        if self.road_water_cost < 0:
+            raise ValueError(f"road_water_cost must be >= 0, got {self.road_water_cost}")
+        if self.road_embark_cost < 0:
+            raise ValueError(f"road_embark_cost must be >= 0, got {self.road_embark_cost}")
+        if self.road_disembark_cost < 0:
+            raise ValueError(f"road_disembark_cost must be >= 0, got {self.road_disembark_cost}")
+        if self.road_river_crossing_base < 0:
+            raise ValueError(
+                f"road_river_crossing_base must be >= 0, got {self.road_river_crossing_base}"
+            )
+        if self.road_river_crossing_flow < 0:
+            raise ValueError(
+                f"road_river_crossing_flow must be >= 0, got {self.road_river_crossing_flow}"
+            )
+        if self.road_river_traffic_min < 0:
+            raise ValueError(
+                f"road_river_traffic_min must be >= 0, got {self.road_river_traffic_min}"
+            )
 
     def treeline_m(self) -> float:
         """The altitude the treeline falls at, in metres above sea level.
