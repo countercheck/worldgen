@@ -43,8 +43,12 @@ jobs:
       - name: Run tests
         run: python -m pytest -v --tb=short
 
+      # No `|| true`. The floor is a ratchet: it is set just under the coverage the
+      # suite actually carries, so a change that drops coverage materially fails here
+      # rather than passing quietly. Raise it when the real figure rises; never lower it
+      # to make a red build green.
       - name: Check test coverage
-        run: python -m pytest --cov=worldgen --cov-fail-under=50 --quiet || true
+        run: python -m pytest --cov=worldgen --cov-fail-under=85 --quiet
 
   required:
     name: name: CIExpected

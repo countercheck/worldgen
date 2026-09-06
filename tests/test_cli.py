@@ -460,3 +460,38 @@ def test_generate_reports_a_bad_heightmap_cleanly(tmp_path):
     )
     assert result.exit_code != 0
     assert "absent.png" in result.output
+
+
+def test_presets_lists_json_files_in_the_working_directory(tmp_path, monkeypatch):
+    (tmp_path / "presets").mkdir()
+    (tmp_path / "presets" / "island.json").write_text('{"width": 32}')
+    (tmp_path / "presets" / "delta.json").write_text('{"width": 48}')
+    (tmp_path / "presets" / "notes.txt").write_text("not a preset")
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(cli, ["presets"])
+
+    assert result.exit_code == 0
+    assert "delta" in result.output and "island" in result.output
+    assert "notes" not in result.output
+
+
+def test_presets_says_so_when_there_are_none(tmp_path, monkeypatch):
+    """An empty `presets/` used to print nothing at all, which reads as a broken command."""
+    (tmp_path / "presets").mkdir()
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(cli, ["presets"])
+
+    assert result.exit_code == 0
+    assert "No presets found" in result.output
+    assert "--config" in result.output
+
+
+def test_presets_says_so_when_the_directory_is_missing(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    result = CliRunner().invoke(cli, ["presets"])
+
+    assert result.exit_code == 0
+    assert "No presets found" in result.output

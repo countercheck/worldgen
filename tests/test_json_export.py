@@ -300,11 +300,17 @@ def test_empty_world(tmp_path):
     assert len(ws2.settlements) == 0
 
 
-def test_from_json_classmethod(tmp_path):
+def test_load_reads_back_what_save_wrote(tmp_path):
+    """`json_export.load` is the way in.
+
+    `WorldState.from_json` used to wrap it and was removed: `core/` must not import from
+    `export/`, and a data type reaching into the I/O layer to construct itself is the
+    circular import waiting to happen.
+    """
     ws = _small_world()
     path = tmp_path / "world.json"
     json_export.save(ws, path)
-    ws2 = WorldState.from_json(str(path))
+    ws2 = json_export.load(str(path))
     assert ws2.seed == ws.seed
     assert len(ws2.hexes) == len(ws.hexes)
 
