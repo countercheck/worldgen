@@ -148,7 +148,7 @@ class River:
 class Settlement:
     coord: HexCoord
     tier: SettlementTier  # CITY, TOWN, VILLAGE
-    role: SettlementRole  # AGRICULTURAL, PORT, MINING, FORTRESS, MARKET
+    role: SettlementRole  # AGRICULTURAL, PORT, MARKET
     population: int
     name: str
 
@@ -398,7 +398,6 @@ Normalize final scores to [0, 1] across all land hexes.
 **Assign roles** from geography:
 - Adjacent to major river → `PORT`
 - Adjacent to coast → `PORT`
-- On or adjacent to MOUNTAIN → `FORTRESS` or `MINING`
 - Surrounded by GRASSLAND/TEMPERATE_FOREST → `AGRICULTURAL`
 - Otherwise → `MARKET`
 

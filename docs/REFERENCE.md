@@ -229,8 +229,8 @@ Convenience accessors: `all_land()`, `all_open_water()`, `all_inland_water()`,
   ([hex.py:16–27](../worldgen/core/hex.py#L16)).
 - **`SettlementTier`** — `CITY, TOWN, VILLAGE`
   ([hex.py:52–55](../worldgen/core/hex.py#L52)).
-- **`SettlementRole`** — `AGRICULTURAL, PORT, MINING, FORTRESS, MARKET`
-  ([hex.py:58–63](../worldgen/core/hex.py#L58)).
+- **`SettlementRole`** — `AGRICULTURAL, PORT, MARKET` (`MINING` and `FORTRESS` retired)
+  ([hex.py:205–216](../worldgen/core/hex.py#L205)).
 - **`RoadTier`** — `PRIMARY, SECONDARY, TRACK`
   ([world_state.py:7–10](../worldgen/core/world_state.py#L7)).
 
@@ -1228,14 +1228,14 @@ neighbours where the connecting edge satisfies
 candidate is rejected. This keeps cities off geographically isolated
 peaks and tiny islands.
 
-**Cities** ([city_town.py:62–82](../worldgen/stages/city_town.py#L62)):
+**Cities** ([city_town.py:70–91](../worldgen/stages/city_town.py#L70)):
 sort all land hexes by `habitability_city` descending — the widest catchment,
 because a capital is chosen for the hinterland it can draw on; greedily accept each
 one whose distance from every prior city is `>= city_min_separation`.
 Each city gets a uniform-random population in `[10_000, 50_000]` and a
 role from `_assign_role` (below).
 
-**Towns** ([city_town.py:84–128](../worldgen/stages/city_town.py#L84)):
+**Towns** ([city_town.py:93–138](../worldgen/stages/city_town.py#L93)):
 
 1. Sort on `habitability_town` — a different surface from the city score,
    with its own peaks, because a market town lives off the fields in
@@ -1248,26 +1248,52 @@ role from `_assign_role` (below).
    uniform random in `[1_000, 10_000]`. Towns on `"confluence"` hexes
    also get the `"confluence_town"` tag.
 
-**Role assignment** ([city_town.py:8–29](../worldgen/stages/city_town.py#L8)):
+**Role assignment** ([city_town.py:8–33](../worldgen/stages/city_town.py#L8)):
 
 ```
-PORT         if "river" tag, COAST terrain, or any neighbour matches either
-MINING       elif any STEEP/ESCARPMENT neighbour has elevation > 0.70
-FORTRESS     elif any STEEP/ESCARPMENT neighbour (but lower)
+PORT         if navigable(hx) or any neighbour is navigable
 AGRICULTURAL elif >= 3 neighbours are GRASSLAND or TEMPERATE_FOREST
 MARKET       otherwise
 ```
 
+`navigable` is `haulage.navigable` — open water, or a river whose discharge clears
+`navigable_min_discharge` — the same predicate `habitability.site_bonus` uses to award
+`habitability_harbour_bonus`. Sharing it is the point: the site scored as a harbour is the
+settlement labelled a port.
+
 `_assign_role` is shared by all three placement stages — classic cities and towns,
 villages, and organic markets — so the roles mean the same thing whichever model ran.
 
-> **Known stale: the `0.70` cutoff.** It dates from when elevation ran `0` to `1`. In
-> metres it is seventy centimetres, so in practice every settlement with a steep
-> neighbour is classed `MINING` and `FORTRESS` is unreachable — a 96×96 temperate map
-> yields 71 mining settlements and no fortresses. Left as-is deliberately: what a fortress
-> or a mine *is* has not been defined, so there is no basis yet for choosing a real
-> altitude. Both roles are currently decorative — nothing downstream reads
-> `Settlement.role` except the renderer's glyph choice.
+> **`PORT` means water a boat can use, not water in sight.** Almost every settlement this
+> generator places stands on water — 36 of 36 cities and 143 of 144 towns across six 64×64
+> reference maps — because that is what pre-industrial siting does and `habitability`
+> rewards it. So a port test that fired on any water would be nearly constant. The rule
+> used to read "any `river` tag or COAST hex within one step", which **43%** of all land
+> satisfies against **22%** for navigable water; on the seed-42 reference only 20 of 105
+> river hexes float a boat. A hamlet on a headwater brook was labelled the same as a
+> coastal harbour. On that map the change takes 127 ports down to 86, and the classic
+> temperate maps now spread across all three roles instead of piling into one.
+>
+> Two distributions are worth knowing before reading a map. **Arid maps stay near-total
+> ports** (74 of 75 on seed 42) because settlement in a dry country clusters on the few
+> watercourses that exist — which is the Nile answer, and correct. **The organic model is
+> 100% port at every seed tried**, because it places 3–18 settlements at the very best
+> sites and every one of those is on navigable water. Both are now true statements about
+> the map rather than artifacts of a loose test.
+
+> **`MINING` and `FORTRESS` were retired.** There used to be a branch between `PORT` and
+> `AGRICULTURAL` splitting settlements with a steep neighbour on `elevation > 0.70`. That
+> threshold dated from the retired [0, 1] elevation axis and read as seventy centimetres
+> once the axis became metres, so every settlement beside steep ground came out `MINING`
+> and `FORTRESS` was unreachable — a 96×96 temperate map yielded 71 mining settlements and
+> no fortresses. Rather than invent an altitude for two roles nothing consumed, both were
+> removed from `SettlementRole`. Ground that used to be classed on its steep neighbours
+> now falls through to the fertility test, so those settlements come out `AGRICULTURAL` or
+> `MARKET`. Nothing downstream reads `Settlement.role` at all — not the stages, not the
+> exporters, not the renderers — so the change is invisible outside `world.json`.
+>
+> A `world.json` written before this change records `"mining"` or `"fortress"` and will
+> not load; regenerate it from its seed.
 
 **Pass tagging:** after settlements are placed, every empty ROLLING hex that is the
 local-max `habitability_town` within 3-hex range gets the `"prominent_site"` tag. Nothing reads it. Used for rendering
@@ -2388,7 +2414,6 @@ shape map output. Change these by editing the source file.
 | `_MAX_STEPS` | `64` | [erosion.py:18](../worldgen/stages/erosion.py#L18) | Max steps per erosion particle. Larger = longer-running particles, deeper channels |
 | `_EVAPORATION` | `0.99` | [erosion.py:19](../worldgen/stages/erosion.py#L19) | Per-step water evaporation. Lower = particles die faster, less erosion downstream |
 | Erosion delta fan weights | `0.6 / 0.3 / 0.1` | [erosion.py](../worldgen/stages/erosion.py) | Radial falloff over three rings when a droplet unloads at the sea |
-| Role: MINING elevation cutoff | `> 0.70` | [city_town.py:21](../worldgen/stages/city_town.py#L21) | **Stale.** A leftover from normalised elevation; 0.70 m in the current units, so `FORTRESS` is never assigned. See § [3.10](#310-city--town-placement) |
 | Hydrology epsilon (BFS) | `1e-6` | [hydrology.py:35](../worldgen/stages/hydrology.py#L35) | Per-step plateau tilt magnitude |
 | Hydrology epsilon (coord) | `1e-4 * eps` | [hydrology.py:38](../worldgen/stages/hydrology.py#L38) | Coordinate-based tiebreak (≈`1e-10`) |
 | Elevation Dijkstra penalty | `× 1000` | [hydrology.py:435](../worldgen/stages/hydrology.py#L435) | Cost multiplier for uphill movement during stalled-river extension |

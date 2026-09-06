@@ -1,26 +1,40 @@
-from ..core.hex import Biome, Settlement, SettlementRole, SettlementTier, TerrainClass, is_steep
+from ..core.hex import Biome, Settlement, SettlementRole, SettlementTier, TerrainClass
 from ..core.hex_grid import distance, grade_reachable_count, hex_range, neighbors
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
+from .haulage import navigable
 from .road_cost import grade_is_under_cap
 
 
 def _assign_role(coord, hx, hexes, cfg) -> SettlementRole:
+    """What a settlement at *coord* is for.
+
+    `PORT` asks whether a boat can load here, not whether there is water in sight. Almost
+    every settlement this generator places stands on water — 36 of 36 cities and 143 of
+    144 towns across six reference maps — because that is what pre-industrial siting does,
+    and `habitability` already rewards it. A role that fired on any water would therefore
+    be nearly constant and carry no information.
+
+    It used to fire on any "river" tag or COAST hex within one step, which 43% of all land
+    satisfies while only 22% lies near water a boat can use; on the seed-42 reference only
+    20 of 105 river hexes float one at all. So a hamlet on a headwater brook was labelled
+    the same as a coastal harbour. The test is now `navigable` — discharge, or open water —
+    which is the same predicate `habitability.site_bonus` uses to award the harbour bonus.
+    Sharing it means the site that was *scored* as a harbour is the settlement *labelled* a
+    port; before this they could and did disagree.
+
+    There used to be a steep-neighbour branch here too, returning `MINING` or `FORTRESS`
+    on `n.elevation > 0.70`. That threshold dated from the retired [0, 1] elevation axis
+    and read as seventy centimetres once the axis became metres, so every settlement beside
+    steep ground came out `MINING` and `FORTRESS` was unreachable. Rather than pick a new
+    altitude for two roles nothing consumed, both were retired; that ground now falls
+    through to the fertility test below, which is the same question every other non-port
+    settlement is asked.
+    """
     nbrs = [hexes[n] for n in neighbors(coord) if n in hexes]
 
-    if (
-        "river" in hx.tags
-        or hx.terrain_class == TerrainClass.COAST
-        or any("river" in n.tags for n in nbrs)
-        or any(n.terrain_class == TerrainClass.COAST for n in nbrs)
-    ):
+    if navigable(hx, cfg) or any(navigable(n, cfg) for n in nbrs):
         return SettlementRole.PORT
-
-    steep_nbrs = [n for n in nbrs if is_steep(n, cfg.terrain_steep_gradient_m)]
-    if steep_nbrs:
-        if any(n.elevation > 0.70 for n in steep_nbrs):
-            return SettlementRole.MINING
-        return SettlementRole.FORTRESS
 
     fertile = sum(1 for n in nbrs if n.biome in (Biome.GRASSLAND, Biome.TEMPERATE_FOREST))
     if fertile >= 3:

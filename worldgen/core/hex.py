@@ -203,10 +203,16 @@ class SettlementTier(Enum):
 
 
 class SettlementRole(Enum):
+    """What a settlement is for.
+
+    `MINING` and `FORTRESS` were removed once it was clear they served nothing: the only
+    rule that produced them read a retired elevation axis, and no stage, exporter or
+    renderer has ever read `Settlement.role` at all. They are recoverable from history if
+    a purpose is found for them — the branch to restore is in `_assign_role`.
+    """
+
     AGRICULTURAL = "agricultural"
     PORT = "port"
-    MINING = "mining"
-    FORTRESS = "fortress"
     MARKET = "market"
 
 
