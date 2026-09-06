@@ -10,6 +10,13 @@ build/
 .coverage
 htmlcov/
 
+# The campaign/ TypeScript workspace. `dist/` is already covered above; these are the
+# rest of what npm and tsc leave behind. package-lock.json is deliberately NOT ignored —
+# it is the only record of what the server actually ran with.
+node_modules/
+*.tsbuildinfo
+coverage/
+
 # Generated worlds and map exports. `output/` is the default --output-dir;
 # my_world/ is a hand-named one. The root-only patterns catch stray exports
 # without blocking images committed under docs/ or assets/.
