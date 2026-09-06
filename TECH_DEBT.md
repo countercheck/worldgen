@@ -5,9 +5,10 @@
 **Scoring:** Priority = (Impact + Risk) × (6 − Effort), 1–5 scale each
 
 At re-verification the suite was green — ~760 tests passing, `ruff check` clean, **93%
-coverage**. Twelve of the original twenty-one items are now closed — six by the work that landed
-between the two dates, item 17 by the removal of `MINING` and `FORTRESS`, and items 3, 5,
-8, 9 and 11 by the Phase A sweep, all on the day of the re-audit. Two more had premises
+coverage**. Thirteen of the original twenty-one items are now closed — six by the work that landed
+between the two dates, item 17 by the removal of `MINING` and `FORTRESS`, items 3, 5, 8, 9
+and 11 by the Phase A sweep, and item 1 by Phase B. A twenty-second item was found on the
+way and closed with it: **CI had not run at all since 2026-05-04**. Two more had premises
 that the same work invalidated and have been re-scoped rather than deleted; one has grown
 materially worse. Every remaining item below
 was checked against the file and line it names.
@@ -18,7 +19,6 @@ was checked against the file and line it names.
 
 | # | Item | Category | Priority | Effort | Since audit |
 |---|------|----------|----------|--------|-------------|
-| 1 | `erosion.py` valley-widening and droplet paths untested | Test | **24** | S | re-scoped from "6 stages untested" |
 | 19 | One off-map river strips the floodplain off half the map's channels | Model | **21** | M | unchanged |
 | 18 | Market siting scores a plain hex disc, not the day-reach the catchment walks | Model | **20** | L | unchanged |
 | 13 | `hydrology.py` is 1,402 lines — prime split candidate | Code | **18** | M | **worse**: was 781 |
@@ -48,55 +48,13 @@ Recorded so they are not raised again. Each was verified absent from master.
 | 8 | `WorldState.from_json` violates layer rule | Closed 2026-09-05. Method deleted; its one remaining caller, a test, now imports `json_export.load` directly |
 | 9 | `__post_init__` references fields before declaration | Closed 2026-09-05, and it was larger than recorded: **89 of the 150 fields** were declared after the method, not just `wind_direction`. Fixed by moving the *method* below every field rather than reordering any field — a pure method move, so dataclass field order, positional arguments and `asdict` output are untouched |
 | 11 | `presets/` empty, `worldgen presets` shows nothing | Closed 2026-09-05, and the root cause was not the empty directory. The command globbed a `presets/` beside the installed package — the source tree in an editable install, site-packages in a real one — while the README documents `--config presets/foo.json`, a path relative to the working directory. It now reads `./presets` and says so when it finds nothing. No presets are shipped: the README says none do by design, so an empty result is the normal state and exits 0 |
+| 1 | Erosion paths untested | Closed 2026-09-06, and **the premise was an instrumentation artifact**. `erosion.py` reads 72% because `coverage.py` cannot instrument a `@numba.njit` function — the whole droplet loop scores as dead. Under `NUMBA_DISABLE_JIT=1` the same suite puts the file at 96%: that code was always exercised. What was genuinely untested was the plain-Python scaffolding around it, now covered by `tests/test_erosion.py` (98%). The CI coverage step now sets `NUMBA_DISABLE_JIT=1` so the figure is honest and the droplet code is under the floor — it costs ~50 s, not the 75× the numba speedup note implies, because the suite's maps are small |
+| 22 | **CI had not run since 2026-05-04** | Found and closed 2026-09-06. `f9cf552` edited `name: Status Check` to `name: name: CIExpected`, which is not valid YAML. GitHub cannot report a parse error against a step, so every run failed in **0 s** before reaching one, and neither `ruff` nor `pytest` ran in CI for four months. Nothing noticed: a workflow that never starts never fails visibly, and no branch protection required it. Item 3's `\|\| true` was therefore moot in a deeper way than the audit knew — the step it disarmed was never reached. `tests/test_ci_workflow.py` now parses the file the way GitHub does and asserts lint runs, pytest runs, no step swallows its failure, and the gate still needs both |
 | 17 | `_assign_role` compares metre elevation against 0.70 | Closed 2026-09-05 by removing `MINING` and `FORTRESS` from `SettlementRole` outright. The threshold existed only to split those two roles, nothing has ever read `Settlement.role`, and defining a fortress was the blocker — so the roles went rather than the number being guessed at. Ground with steep neighbours now falls through to the fertility test |
 
 ---
 
 ## Item Details
-
-### 1 — `erosion.py`'s valley-widening and droplet paths are untested
-**Category:** Test debt | **Priority: 24** | **Effort: S (1–2 days)**
-
-*Re-scoped 2026-09-05.* The original entry read "six stages have no test file at all"
-and named `city_town`, `interurban_roads`, `village_placement`, `village_tracks`,
-`terrain_class` and `erosion`. That is no longer true: every stage is now exercised, the
-six named files run 96–98% except `erosion.py`, and total coverage is 93%.
-
-What survives is one file. `worldgen/stages/erosion.py` is at **72% — 83 uncovered lines
-of 296**, the lowest in the project by 18 points, and the uncovered region is not
-incidental: it is `_widen_valleys` and the droplet loop, which is exactly where items 19
-and 20 record live, shipping defects. The two facts are the same fact. A defect that
-"is invisible to the test suite, which exercises alluvium only at 48×48" is invisible
-because that code path has no test standing on it.
-
-**Fix:** Cover `_widen_valleys` and `_drop_particle` directly, at two map sizes rather
-than one. The size dependence in item 19 is only detectable across sizes, so a fixture
-that runs 48×48 alone will keep passing through the bug — which is how it got shipped.
-
----
-
-### 8a — `ImageElevationStage` imports a reader from `export/`
-**Category:** Architecture debt | **Priority: 8** | **Effort: S**
-
-Unchanged, including the reasoning for leaving it. `worldgen/stages/image_elevation.py:167`
-still does `from ..export.heightmap_import import load_luminance` inside `run()`, and
-`worldgen/export/__init__.py` still eagerly imports `png_export` and `svg_export` — so the
-one concrete cost the entry names, pulling matplotlib into any programmatic pipeline that
-uses the stage, is still being paid.
-
-The alternative was rejected on balance and the reasoning is worth keeping:
-`GeneratorPipeline` registers stage *classes* and discards the `stage_config` dict
-`add_stage` accepts, so injecting a pre-loaded array would mean reviving that parameter,
-giving two sources of truth (config names the file, the injected array holds the pixels)
-and forcing every pipeline assembler to remember to pre-load. Stashing the array on
-`state.metadata` is worse still, since that dict is serialised verbatim into `world.json`.
-
-**Fix (if it becomes a problem):** make `export/__init__.py` lazy, which removes the
-matplotlib cost and leaves only the layering question. Only revive `stage_config` if a
-second stage needs injected data too; otherwise the honest cleanup is to *delete* the
-dead parameter.
-
----
 
 ### 13 — `hydrology.py` is 1,402 lines and a candidate for splitting
 **Category:** Code debt | **Priority: 18** | **Effort: M (2 days)**
@@ -252,6 +210,11 @@ numbers in the same change. The diff is small; the decision is not.
 
 ### 19 — One off-map river strips the floodplain off half the map's channels
 **Category:** Model | **Priority: 21** | **Effort: M**
+
+**Pinned by a test as of 2026-09-06:** `tests/test_erosion.py::test_an_imported_trunk_river_
+does_not_strip_the_other_channels` is a strict `xfail` reproducing this in eight lines —
+five equal channels beside one carrying 100×, and the five lose their belts. It flips to a
+failure the day this is fixed, so it is the acceptance test; do not update it, make it pass.
 
 **Re-verified 2026-09-05:** live. `erosion.py:412` still takes `max_flow = float(flow.max())`
 and line 433 still disqualifies a channel outright on `reach < 1.0`. See item 1: the code
@@ -484,13 +447,21 @@ and both are written up in the closed table: `__post_init__` sat ahead of 89 fie
 than one, and `worldgen presets` was looking in the wrong directory entirely rather than
 merely at an empty one. The coverage ratchet from item 3 now guards everything below.
 
-### Phase B — Close the one remaining test gap (1–2 days) — **next**
-1. Cover `_widen_valleys` and `_drop_particle` in `erosion.py`, **at two map sizes**
-   (**item 1**). This is a prerequisite for Phase D, not a parallel track: items 19 and
-   20 live in this code, and a 48×48-only fixture passes straight through both.
+### Phase B — Close the one remaining test gap — **done 2026-09-06**
+Item 1, and it dissolved on inspection: the droplet code was never untested, only
+uninstrumentable. What the pass actually produced is `tests/test_erosion.py` covering the
+guards around the hot loops, an honest coverage figure in CI, and — the part that matters
+for Phase D — **a strict `xfail` pinning item 19**. `test_an_imported_trunk_river_does_not_
+strip_the_other_channels` builds one channel with 100× the discharge of five ordinary ones
+and asserts the ordinary ones keep their floodplains; they do not. Making it pass is the
+acceptance test for item 19, and being `strict` it will fail the day the bug is fixed
+without the test being updated.
 
-### Phase C — Make the water model navigable (2 days)
-2. Split `hydrology.py` (**item 13**). Promoted ahead of the model work rather than
+Finding 22 came out of the same pass, and is the reason to distrust a green tick that was
+never green.
+
+### Phase C — Make the water model navigable (2 days) — **next**
+1. Split `hydrology.py` (**item 13**). Promoted ahead of the model work rather than
    filed as optional: the file doubled while items 19–21 accumulated inside it and
    `erosion.py`, and every remaining model change has to be made in there.
 
@@ -498,19 +469,19 @@ merely at an empty one. The coverage ratchet from item 3 now guards everything b
 These do not queue behind effort, they queue behind a calibration decision. Order is
 load-bearing where noted:
 
-3. Off-map river vs. `max_flow` in `_widen_valleys` (**item 19**) — do first. It is the
+2. Off-map river vs. `max_flow` in `_widen_valleys` (**item 19**) — do first. It is the
    only one of the five whose defect is silently shipping on every map above ~64×64.
-4. Pre-loaded droplets at the inlets (**item 20**) — explicitly after 19, which changes
+3. Pre-loaded droplets at the inlets (**item 20**) — explicitly after 19, which changes
    how much floodplain any river gets in the first place.
-5. Per-hex runoff instead of runoff at the mean (**item 21**) — smallest diff, largest
+4. Per-hex runoff instead of runoff at the mean (**item 21**) — smallest diff, largest
    recalibration; arid and tropical must move in opposite directions or it is wrong.
-6. Day-reach market siting (**item 18**) — the rewrite exists and works; what it needs
+5. Day-reach market siting (**item 18**) — the rewrite exists and works; what it needs
    is the density decision and a re-tune of `city_min_draw` and the chokepoint gates
    together.
-7. Land-only moisture smear (**item 16**) — blocked on deciding what makes a 550 mm
+6. Land-only moisture smear (**item 16**) — blocked on deciding what makes a 550 mm
    climate pastoral once the artifact is gone.
 
 ### Phase E — Low priority
-8. Parameterise `dict` / `list` annotations and turn on `ruff`'s `ANN` rules
+7. Parameterise `dict` / `list` annotations and turn on `ruff`'s `ANN` rules
    (**item 14**)
-9. `export/__init__.py` lazy imports, if the matplotlib cost ever bites (**item 8a**)
+8. `export/__init__.py` lazy imports, if the matplotlib cost ever bites (**item 8a**)
