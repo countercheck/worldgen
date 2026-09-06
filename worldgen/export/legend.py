@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from ..core.hex import DEFAULT_TERRAIN_BANDS, SettlementTier, terrain_bands, terrain_label
 from ..core.hex_grid import road_polylines, road_water_transitions
 from ..core.world_state import RoadTier, WorldState
+from ..render.debug_viewer import is_fog
 
 # Stand-in steps for the continuous greyscale used by color_mode="elevation".
 ELEVATION_RAMP = (0.1, 0.3, 0.5, 0.7, 0.9)
@@ -103,6 +104,11 @@ def _enum_sort_key(member) -> tuple[str, int]:
 
 def _fill_category(h, color_mode: str, bands=DEFAULT_TERRAIN_BANDS):
     """The enum member that decides a hex's fill — mirrors each exporter's `_get_hex_fill`."""
+    # Unseen ground on a partial map is not a terrain category. Its stored values are
+    # defaults, so left to the branches below it would enter the key as whatever those
+    # defaults happen to label — "Flat", on a map that is mostly unexplored.
+    if is_fog(h):
+        return None
     if color_mode == "terrain":
         return terrain_label(h, *bands)
     if color_mode == "land_cover":
@@ -185,6 +191,12 @@ def rows(ws: WorldState, color_mode: str, layers: set[str]) -> list[LegendRow]:
                     samples.setdefault(category, hex_item)
             for category in sorted(samples, key=_enum_sort_key):
                 out.append(LegendRow("fill", _label(category), samples[category]))
+
+            # Named last, because it is the absence of the categories above rather than
+            # another one of them.
+            fog = next((h for h in ws.hexes.values() if is_fog(h)), None)
+            if fog is not None:
+                out.append(LegendRow("fill", "Unseen", fog))
 
     if "rivers" in layers and ws.rivers:
         out.append(LegendRow("river", "River"))
