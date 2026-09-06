@@ -15,6 +15,7 @@ htmlcov/
 # it is the only record of what the server actually ran with.
 node_modules/
 *.tsbuildinfo
+dist-tsc/
 coverage/
 
 # Generated worlds and map exports. `output/` is the default --output-dir;

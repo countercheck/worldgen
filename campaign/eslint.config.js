@@ -3,7 +3,13 @@ import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
   {
-    ignores: ['**/dist/**', '**/node_modules/**', '**/src/palette.ts'],
+    ignores: [
+      '**/dist/**',
+      '**/dist-tsc/**',
+      '**/node_modules/**',
+      // Generated from the Python; regenerate rather than lint-fix.
+      '**/src/palette.ts',
+    ],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
