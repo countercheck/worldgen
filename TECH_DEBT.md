@@ -7,8 +7,10 @@
 At re-verification the suite was green — ~760 tests passing, `ruff check` clean, **93%
 coverage**. Thirteen of the original twenty-one items are now closed — six by the work that landed
 between the two dates, item 17 by the removal of `MINING` and `FORTRESS`, items 3, 5, 8, 9
-and 11 by the Phase A sweep, and item 1 by Phase B. A twenty-second item was found on the
-way and closed with it: **CI had not run at all since 2026-05-04**. Two more had premises
+and 11 by the Phase A sweep, and item 1 by Phase B. Two further items were found on the way and
+closed with them: **CI had not run at all since 2026-05-04**, and — caught by that outage's
+first green run — **`ruff` was unpinned**, so CI and local checked different files with
+different versions. Two more had premises
 that the same work invalidated and have been re-scoped rather than deleted; one has grown
 materially worse. Every remaining item below
 was checked against the file and line it names.
@@ -50,6 +52,7 @@ Recorded so they are not raised again. Each was verified absent from master.
 | 11 | `presets/` empty, `worldgen presets` shows nothing | Closed 2026-09-05, and the root cause was not the empty directory. The command globbed a `presets/` beside the installed package — the source tree in an editable install, site-packages in a real one — while the README documents `--config presets/foo.json`, a path relative to the working directory. It now reads `./presets` and says so when it finds nothing. No presets are shipped: the README says none do by design, so an empty result is the normal state and exits 0 |
 | 1 | Erosion paths untested | Closed 2026-09-06, and **the premise was an instrumentation artifact**. `erosion.py` reads 72% because `coverage.py` cannot instrument a `@numba.njit` function — the whole droplet loop scores as dead. Under `NUMBA_DISABLE_JIT=1` the same suite puts the file at 96%: that code was always exercised. What was genuinely untested was the plain-Python scaffolding around it, now covered by `tests/test_erosion.py` (98%). The CI coverage step now sets `NUMBA_DISABLE_JIT=1` so the figure is honest and the droplet code is under the floor — it costs ~50 s, not the 75× the numba speedup note implies, because the suite's maps are small |
 | 22 | **CI had not run since 2026-05-04** | Found and closed 2026-09-06. `f9cf552` edited `name: Status Check` to `name: name: CIExpected`, which is not valid YAML. GitHub cannot report a parse error against a step, so every run failed in **0 s** before reaching one, and neither `ruff` nor `pytest` ran in CI for four months. Nothing noticed: a workflow that never starts never fails visibly, and no branch protection required it. Item 3's `\|\| true` was therefore moot in a deeper way than the audit knew — the step it disarmed was never reached. `tests/test_ci_workflow.py` now parses the file the way GitHub does and asserts lint runs, pytest runs, no step swallows its failure, and the gate still needs both |
+| 23 | **`ruff` was unpinned, so CI and local disagreed** | Found and closed 2026-09-06, by finding 22's first green run. `pyproject.toml` asked for `ruff>=0.4`, so CI installed 0.16.6 at build time while the venv held 0.15.12. Ruff 0.16 formats Python inside Markdown fences, so CI checked 87 files to local's 81 and `ruff format --check` failed on `TECH_DEBT.md` alone — a build broken by a release nobody chose. Pinned exactly (`ruff==0.16.6`), and `*.md` added to `extend-exclude`: the reformat collapsed the aligned `file:line` annotation columns in this file and `docs/REFERENCE.md` into ragged comments, and those excerpts are elided and annotated rather than runnable |
 | 17 | `_assign_role` compares metre elevation against 0.70 | Closed 2026-09-05 by removing `MINING` and `FORTRESS` from `SettlementRole` outright. The threshold existed only to split those two roles, nothing has ever read `Settlement.role`, and defining a fortress was the blocker — so the roles went rather than the number being guessed at. Ground with steep neighbours now falls through to the fertility test |
 
 ---
