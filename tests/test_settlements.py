@@ -91,13 +91,62 @@ def _make_port_role_test_hexes():
     return center, river_neighbor, hexes
 
 
-def test_city_town_port_role_requires_river_tag():
-    """Adjacency to water alone is not a port — the neighbour must carry the river tag."""
-    center, river_neighbor, hexes = _make_port_role_test_hexes()
+def _navigable_catchment(cfg):
+    """The catchment a river hex needs before a boat floats on it, plus a margin."""
+    return cfg.navigable_min_discharge / cfg.runoff_mm(cfg.mean_precip_mm) * 1.1
 
-    assert (
-        assign_city_town_role(center.coord, center, hexes, WorldConfig()) is not SettlementRole.PORT
-    )
+
+def test_city_town_port_role_requires_a_river_tag():
+    """Adjacency to water alone is not a port — the neighbour must carry the river tag.
+
+    `river_flow` is set on the neighbour throughout: with `river_flow_continuous` the
+    hydrology stage writes a flow value onto every draining land hex, so flow alone says
+    nothing about whether a hex is a channel.
+    """
+    cfg = WorldConfig()
+    center, river_neighbor, hexes = _make_port_role_test_hexes()
+    river_neighbor.catchment_km2 = _navigable_catchment(cfg)
+
+    assert assign_city_town_role(center.coord, center, hexes, cfg) is not SettlementRole.PORT
 
     river_neighbor.tags.add("river")
-    assert assign_city_town_role(center.coord, center, hexes, WorldConfig()) is SettlementRole.PORT
+    assert assign_city_town_role(center.coord, center, hexes, cfg) is SettlementRole.PORT
+
+
+def test_city_town_port_role_requires_water_a_boat_can_use():
+    """A headwater brook is not a port, however tagged.
+
+    This is the claim that separates a port from a riverside town. Nearly every settlement
+    on a generated map stands on water of some kind, so a role that fired on any river tag
+    labelled 43% of the land a port and told nobody anything. The discharge test is what
+    makes the role rare enough to mean something.
+    """
+    cfg = WorldConfig()
+    center, brook, hexes = _make_port_role_test_hexes()
+    brook.tags.add("river")
+
+    brook.catchment_km2 = 1.0
+    assert assign_city_town_role(center.coord, center, hexes, cfg) is not SettlementRole.PORT
+
+    brook.catchment_km2 = _navigable_catchment(cfg)
+    assert assign_city_town_role(center.coord, center, hexes, cfg) is SettlementRole.PORT
+
+
+def test_city_town_port_role_agrees_with_the_harbour_bonus():
+    """The site scored as a harbour is the settlement labelled a port.
+
+    Both now read `haulage.navigable`. They used to answer differently — habitability on
+    discharge, the role on adjacency — so a hamlet could be a `PORT` on water the site
+    score gave no harbour credit for.
+    """
+    from worldgen.stages.haulage import navigable
+
+    cfg = WorldConfig()
+    for catchment in (1.0, _navigable_catchment(cfg)):
+        center, river_neighbor, hexes = _make_port_role_test_hexes()
+        river_neighbor.tags.add("river")
+        river_neighbor.catchment_km2 = catchment
+        nbrs = [river_neighbor]
+        scored_harbour = navigable(center, cfg) or any(navigable(n, cfg) for n in nbrs)
+        is_port = assign_city_town_role(center.coord, center, hexes, cfg) is SettlementRole.PORT
+        assert scored_harbour == is_port, f"disagreement at catchment {catchment}"
