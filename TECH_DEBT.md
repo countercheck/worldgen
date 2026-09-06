@@ -50,7 +50,7 @@ Recorded so they are not raised again. Each was verified absent from master.
 | 8 | `WorldState.from_json` violates layer rule | Closed 2026-09-05. Method deleted; its one remaining caller, a test, now imports `json_export.load` directly |
 | 9 | `__post_init__` references fields before declaration | Closed 2026-09-05, and it was larger than recorded: **89 of the 150 fields** were declared after the method, not just `wind_direction`. Fixed by moving the *method* below every field rather than reordering any field — a pure method move, so dataclass field order, positional arguments and `asdict` output are untouched |
 | 11 | `presets/` empty, `worldgen presets` shows nothing | Closed 2026-09-05, and the root cause was not the empty directory. The command globbed a `presets/` beside the installed package — the source tree in an editable install, site-packages in a real one — while the README documents `--config presets/foo.json`, a path relative to the working directory. It now reads `./presets` and says so when it finds nothing. No presets are shipped: the README says none do by design, so an empty result is the normal state and exits 0 |
-| 1 | Erosion paths untested | Closed 2026-09-06, and **the premise was an instrumentation artifact**. `erosion.py` reads 72% because `coverage.py` cannot instrument a `@numba.njit` function — the whole droplet loop scores as dead. Under `NUMBA_DISABLE_JIT=1` the same suite puts the file at 96%: that code was always exercised. What was genuinely untested was the plain-Python scaffolding around it, now covered by `tests/test_erosion.py` (98%). The CI coverage step now sets `NUMBA_DISABLE_JIT=1` so the figure is honest and the droplet code is under the floor — it costs ~50 s, not the 75× the numba speedup note implies, because the suite's maps are small |
+| 1 | Erosion paths untested | Closed 2026-09-06, and **the premise was an instrumentation artifact**. `erosion.py` reads 72% because `coverage.py` cannot instrument a `@numba.njit` function — the whole droplet loop scores as dead. Under `NUMBA_DISABLE_JIT=1` the same suite puts the file at 96%: that code was always exercised, just not counted. What was genuinely untested was the plain-Python scaffolding around it, now covered by `tests/test_erosion.py`, taking the file to 98% measured that way. **Do not chase the 72%** — see the note below |
 | 22 | **CI had not run since 2026-05-04** | Found and closed 2026-09-06. `f9cf552` edited `name: Status Check` to `name: name: CIExpected`, which is not valid YAML. GitHub cannot report a parse error against a step, so every run failed in **0 s** before reaching one, and neither `ruff` nor `pytest` ran in CI for four months. Nothing noticed: a workflow that never starts never fails visibly, and no branch protection required it. Item 3's `\|\| true` was therefore moot in a deeper way than the audit knew — the step it disarmed was never reached. `tests/test_ci_workflow.py` now parses the file the way GitHub does and asserts lint runs, pytest runs, no step swallows its failure, and the gate still needs both |
 | 23 | **`ruff` was unpinned, so CI and local disagreed** | Found and closed 2026-09-06, by finding 22's first green run. `pyproject.toml` asked for `ruff>=0.4`, so CI installed 0.16.6 at build time while the venv held 0.15.12. Ruff 0.16 formats Python inside Markdown fences, so CI checked 87 files to local's 81 and `ruff format --check` failed on `TECH_DEBT.md` alone — a build broken by a release nobody chose. Pinned exactly (`ruff==0.16.6`), and `*.md` added to `extend-exclude`: the reformat collapsed the aligned `file:line` annotation columns in this file and `docs/REFERENCE.md` into ragged comments, and those excerpts are elided and annotated rather than runnable |
 | 17 | `_assign_role` compares metre elevation against 0.70 | Closed 2026-09-05 by removing `MINING` and `FORTRESS` from `SettlementRole` outright. The threshold existed only to split those two roles, nothing has ever read `Settlement.role`, and defining a fortress was the blocker — so the roles went rather than the number being guessed at. Ground with steep neighbours now falls through to the fertility test |
@@ -58,6 +58,35 @@ Recorded so they are not raised again. Each was verified absent from master.
 ---
 
 ## Item Details
+
+### `erosion.py` reads ~72% covered, and that is correct
+**Category:** Note | *not a task*
+
+Recorded so nobody opens it as debt a third time. The audit called six stages untested; the
+re-verification narrowed that to `erosion.py` and read its 72% as a real gap; both were
+reading an instrumentation artifact.
+
+`_drop_particle`, `_deposit_delta` and the rest of the hot loop are `@numba.njit`.
+coverage.py traces Python frames, and a JIT-compiled function does not produce any, so that
+code scores as dead however hard the suite drives it. Run the same suite with
+`NUMBA_DISABLE_JIT=1` and the file is at **98%**.
+
+Making CI measure it that way was tried on 2026-09-06 and reverted the same day. It works,
+but on a GitHub runner the JIT-disabled pass took **20m15s against 6m26s** with numba —
+a 13-minute job became a 27-minute one, on every push. Locally the gap is only 398 s
+against 346 s, which is what made it look cheap; the runner is about three times slower and
+numba's absence falls hardest on exactly this code. Fourteen minutes a push is not worth
+making a number look right about code that was never untested.
+
+**If you want the real figure**, run it by hand:
+
+```
+NUMBA_DISABLE_JIT=1 python -m pytest --cov=worldgen --cov-report=term-missing
+```
+
+The consequence to accept knowingly: the droplet loop is not under the coverage floor, so
+a change that gutted its tests would not show up as a coverage drop. The tests themselves
+would still fail, which is the protection that matters.
 
 ### 13 — `hydrology.py` is 1,402 lines and a candidate for splitting
 **Category:** Code debt | **Priority: 18** | **Effort: M (2 days)**
