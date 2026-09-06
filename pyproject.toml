@@ -20,7 +20,13 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
-    "ruff>=0.4",
+    # Pinned exactly, not floored. A linter is a gate, and an unpinned gate moves on its
+    # own: CI installs the newest release at build time while a contributor keeps whatever
+    # they installed months ago, so the build breaks on a version bump nobody made. That
+    # is exactly what happened the first time CI ran after the 2026-05 outage — local
+    # 0.15.12 against CI 0.16.6, which added formatting of Python inside Markdown. Bump
+    # this deliberately, in a commit that says so.
+    "ruff==0.16.6",
 ]
 perf = [
     "numba>=0.59",
@@ -38,6 +44,13 @@ worldgen = ["*.yaml"]
 [tool.ruff]
 target-version = "py311"
 line-length = 100
+# Documentation is prose, not source. Ruff 0.16 began formatting Python inside Markdown
+# fences, which collapses the aligned `file:line` annotation columns in TECH_DEBT.md and
+# docs/REFERENCE.md into ragged single-space comments — the alignment is what makes those
+# excerpts readable as a table of pointers into the code. The snippets are also elided and
+# annotated rather than runnable, so formatting them as if they compiled is the wrong
+# default. `tests/test_docs.py` governs the docs by content instead.
+extend-exclude = ["*.md"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
