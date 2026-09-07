@@ -26,15 +26,28 @@ import {
   type ClientView,
 } from '@campaign/shared';
 
-import { advanceClock, fetchView, subscribe, type Session } from './api.js';
+import { advanceClock, fetchView, sendDespatch, subscribe, type Session } from './api.js';
 import { ageLabel, boardFrom } from './board.js';
+import {
+  correspondents as correspondentsOf,
+  estimateRide,
+  forwardOf,
+  inbox,
+  isAcknowledged,
+  outbox,
+} from './despatch.js';
 import { Join, type Joined } from './Join.jsx';
 import { HexMap } from './map/HexMap.js';
+import { Command } from './panels/Command.jsx';
+import { Composer, type Draft } from './panels/Composer.jsx';
 import { ContactPanel } from './panels/ContactPanel.jsx';
 import { HexPanel } from './panels/HexPanel.js';
+import { Post } from './panels/Post.jsx';
 import { ReportPanel } from './panels/ReportPanel.jsx';
 import { UnitPanel } from './panels/UnitPanel.js';
 import { clearSession, joinLink, loadSession, saveSession } from './session.js';
+
+import type { ReceivedDespatch } from '@campaign/shared';
 
 const cfg = DEFAULT_CONFIG;
 
@@ -98,6 +111,14 @@ function Console({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showReach, setShowReach] = useState(false);
 
+  // The composer, and whichever despatch is currently waiting on the server. Kept here
+  // rather than in the panels so that a view arriving over the socket mid-write does not
+  // throw away what somebody was typing.
+  const [writing, setWriting] = useState<Partial<Draft> | null>(null);
+  const [sending, setSending] = useState(false);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [postError, setPostError] = useState<string | null>(null);
+
   // Fetched once so the page has something immediately, then kept current by the socket.
   // The socket sends a full view on connect too, so this is only about the gap: a first
   // paint that waits on a WebSocket handshake looks like a broken page.
@@ -148,6 +169,41 @@ function Console({
     [session],
   );
 
+  /**
+   * Put a despatch on the road.
+   *
+   * A refusal comes back as violations rather than as a thrown error — "he does not
+   * answer to you, so that is a message rather than an order" is the game working — so it
+   * is shown in the form the commander is still looking at.
+   */
+  const write = useCallback(
+    async (
+      to: string,
+      despatchKind: 'order' | 'report' | 'acknowledgement',
+      body: { text?: string; contacts?: readonly unknown[] },
+      extra: { inReplyTo?: string; forwardedFrom?: string } = {},
+    ): Promise<boolean> => {
+      setPostError(null);
+      const result = await sendDespatch(session, {
+        to,
+        despatchKind,
+        body: body as { text?: string },
+        ...extra,
+      }).catch((err: Error) => {
+        setPostError(err.message);
+        return null;
+      });
+
+      if (result === null) return false;
+      if (!result.ok) {
+        setPostError(result.violations?.map((v) => v.message).join('; ') ?? 'refused');
+        return false;
+      }
+      return true;
+    },
+    [session],
+  );
+
   if (error !== null) {
     return (
       <div className="join">
@@ -176,6 +232,25 @@ function Console({
   const shownReport = shownId === null ? null : (board.reports.get(shownId) ?? null);
   const shownContact = shownId === null ? null : (board.contacts.get(shownId) ?? null);
   const hoveredHex = hovered === null ? undefined : board.world.hexes.get(key(hovered));
+
+  const correspondents = correspondentsOf(view);
+  const nameOf = (id: string): string => board.commanders.get(id)?.name ?? id;
+  const ownFormation =
+    view.commander === null ? null : (board.units.get(view.commander.unitId) ?? null);
+
+  /**
+   * What the formation he rides with is doing.
+   *
+   * His own task and nobody else's. A referee's task list is the referee's; a commander
+   * learns what his subordinates were told to do only from the copies of his own orders
+   * — and from whether they turn up where he asked.
+   */
+  const taskLine =
+    view.task === null
+      ? null
+      : view.task.complete
+        ? `Halted at ${view.task.destination.q}, ${view.task.destination.r} — the march is done.`
+        : `Marching on ${view.task.destination.q}, ${view.task.destination.r}, ordered at hour ${view.task.setAtHours}.`;
 
   /**
    * Every identity this browser actually holds a token for.
@@ -252,8 +327,9 @@ function Console({
         <div className="notice">
           You are {view.commander.name}, riding with{' '}
           {board.units.get(view.commander.unitId)?.name ?? view.commander.unitId}. You can
-          see {board.visible.size} hexes from where you stand. Everything else below is as
-          it was last reported, and the enemy is where somebody says they saw them.
+          see {board.visible.size} hexes from where you stand, and the enemy only within
+          them. Every other formation below — your own corps included — is where it was
+          when you last had word, which is not where it is now.
         </div>
       )}
 
@@ -273,6 +349,68 @@ function Console({
         />
 
         <aside className="sidebar">
+          {!isReferee && view.commander !== null && (
+            <>
+              {writing !== null && (
+                <Composer
+                  correspondents={correspondents}
+                  estimateFor={(id) => estimateRide(view, board.world, cfg, id)}
+                  clockHours={clock}
+                  busy={sending}
+                  error={postError}
+                  initial={writing}
+                  onCancel={() => {
+                    setWriting(null);
+                    setPostError(null);
+                  }}
+                  onSend={(draft) => {
+                    setSending(true);
+                    void write(draft.to, draft.despatchKind, { text: draft.text })
+                      .then((ok) => {
+                        if (ok) setWriting(null);
+                      })
+                      .finally(() => setSending(false));
+                  }}
+                />
+              )}
+
+              <Post
+                received={inbox(view)}
+                sent={outbox(view)}
+                clockHours={clock}
+                nameOf={nameOf}
+                acknowledged={(id) => isAcknowledged(view, id)}
+                busyId={busyId}
+                onWrite={() => setWriting({})}
+                onAcknowledge={(d: ReceivedDespatch) => {
+                  setBusyId(d.id);
+                  // An acknowledgement is itself a despatch, so it takes a rider and can
+                  // itself be lost. That recursion is the whole of the feedback channel.
+                  void write(
+                    d.from,
+                    'acknowledgement',
+                    { text: `Received your despatch of hour ${d.sentAtHours}.` },
+                    { inReplyTo: d.id },
+                  ).finally(() => setBusyId(null));
+                }}
+                onForward={(d: ReceivedDespatch) => {
+                  // Opens the composer rather than sending: forwarding is a choice of
+                  // addressee, and the man he wants is rarely the first in the list.
+                  setWriting({ despatchKind: 'report', text: forwardOf(d).text ?? '' });
+                }}
+              />
+
+              <Command
+                own={ownFormation}
+                reports={view.reports}
+                clockHours={clock}
+                colorOf={(f) => board.factions.get(f)?.color ?? '#888'}
+                onSelect={setSelectedId}
+                taskLine={taskLine}
+              />
+            </>
+          )}
+
           {shownUnit !== null && (
             <UnitPanel
               unit={shownUnit}
@@ -318,9 +456,12 @@ function Console({
                 standing on it. Click a unit to keep it in view.
               </p>
 
-              <h3>{isReferee ? 'Formations' : 'With me'}</h3>
+              {/* A commander has his formations above, in the panel that also carries
+                  their hours. Repeating them here would be the same list twice, once
+                  without the thing that makes it mean anything. */}
+              {isReferee && <h3>Formations</h3>}
               <ul className="unit-list">
-                {[...board.units.values()].map((u) => (
+                {(isReferee ? [...board.units.values()] : []).map((u) => (
                   <li key={u.id}>
                     <button onClick={() => setSelectedId(u.id)}>
                       <span
@@ -336,26 +477,6 @@ function Console({
                   </li>
                 ))}
               </ul>
-
-              {board.reports.size > 0 && (
-                <>
-                  <h3>Under my command</h3>
-                  <ul className="unit-list">
-                    {[...board.reports.values()].map((r) => (
-                      <li key={r.unitId}>
-                        <button onClick={() => setSelectedId(r.unitId)}>
-                          <span
-                            className="swatch small ghost"
-                            style={{ background: board.factions.get(r.faction)?.color }}
-                          />
-                          {r.name}
-                          <span className="muted"> · {ageLabel(r.atHours, clock)}</span>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                </>
-              )}
 
               {board.contacts.size > 0 && (
                 <>

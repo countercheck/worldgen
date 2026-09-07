@@ -192,6 +192,50 @@ export function echelonOf(u: Unit): Echelon {
   return 'battalion';
 }
 
+/**
+ * A formation as somebody last heard of it.
+ *
+ * Deliberately not a `Unit`. A dated snapshot and a live record are different things, and
+ * anything handed a `Unit` will draw it as though it were true now — which is exactly the
+ * belief this design exists to deny. Everything here is what a despatch would carry.
+ *
+ * It lives beside `Unit` rather than beside `viewFor` because a commander's *knowledge*
+ * holds these: what he last heard is state, folded from the log like anything else, not
+ * something computed when a client happens to ask.
+ */
+export interface UnitReport {
+  readonly unitId: string;
+  readonly name: string;
+  readonly faction: string;
+  /** Your own formation, so its arm and size are not in doubt — only its position is. */
+  readonly kind: UnitKind;
+  readonly echelon: Echelon;
+  /** The hour the report describes, which is not the hour it arrived. */
+  readonly atHours: number;
+  readonly head: Hex;
+  readonly effectives: number;
+  readonly fatigue: number;
+  readonly formation: Formation;
+  readonly provisions: number;
+  readonly corps: string | null;
+}
+
+/** Snapshot a formation as of a given hour. What a rider would carry away with him. */
+export const reportOf = (unit: Unit, atHours: number): UnitReport => ({
+  unitId: unit.id,
+  name: unit.name,
+  faction: unit.faction,
+  kind: unit.kind,
+  echelon: echelonOf(unit),
+  atHours,
+  head: unit.column[0] ?? { q: 0, r: 0 },
+  effectives: unit.effectives,
+  fatigue: unit.fatigue,
+  formation: unit.formation,
+  provisions: unit.provisions,
+  corps: unit.corps,
+});
+
 /** Sensible starting values by kind, from the rules' worked examples. */
 export const KIND_DEFAULTS: Readonly<
   Record<UnitKind, { marchSpeedKmh: number; spacingM: number }>

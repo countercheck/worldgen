@@ -396,9 +396,18 @@ describe('riders', () => {
       body: order,
     });
 
-    expect(kinds(sent)).toEqual(['despatch_sent', 'despatch_delivered', 'decision_raised']);
+    // The report is not an extra: every despatch carries word of where its sender stood
+    // when he sealed it, so arriving paper refreshes the recipient's picture of the man
+    // who wrote it as well as delivering what he wrote.
+    expect(kinds(sent)).toEqual([
+      'despatch_sent',
+      'despatch_delivered',
+      'report_filed',
+      'decision_raised',
+    ]);
     const d = (sent[0] as { despatch: Despatch }).despatch;
     expect(d.handed).toBe(true);
+    expect(d.body.unitReport?.unitId).toBe('red-1');
     // No ride at all, so nothing to intercept and nothing to betray a position.
     expect(d.route).toHaveLength(1);
   });

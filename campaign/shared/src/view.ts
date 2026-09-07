@@ -44,9 +44,9 @@ import {
   type SentDespatch,
 } from './despatch.js';
 import type { Faction } from './events.js';
-import { key, type Hex, type HexKey } from './hex.js';
+import { key, type HexKey } from './hex.js';
 import { maskWorld } from './mask.js';
-import { commanderVisible, spottedUnder, type Contact } from './recon.js';
+import { commanderVisible, spottedBy, type Contact } from './recon.js';
 import {
   capturedBy,
   despatchesFrom,
@@ -54,7 +54,7 @@ import {
   type CampaignState,
 } from './state.js';
 import type { PendingDecision, Task } from './task.js';
-import { echelonOf, type Echelon, type Formation, type Unit, type UnitKind } from './unit.js';
+import type { Unit, UnitReport } from './unit.js';
 import { parseWorld, type World } from './world.js';
 
 /** Who is asking. */
@@ -79,30 +79,6 @@ export interface PublicCommander {
   readonly faction: string;
   readonly unitId: string;
   readonly superiorId: string | null;
-}
-
-/**
- * A formation as its commander last heard of it.
- *
- * Deliberately not a `Unit`. A dated snapshot and a live record are different things, and
- * a client handed a `Unit` will draw it as though it were true now — which is exactly the
- * belief this design exists to deny. Everything here is what a despatch would carry.
- */
-export interface UnitReport {
-  readonly unitId: string;
-  readonly name: string;
-  readonly faction: string;
-  /** Your own formation, so its arm and size are not in doubt — only its position is. */
-  readonly kind: UnitKind;
-  readonly echelon: Echelon;
-  /** The hour the report describes, which is not the hour it arrived. */
-  readonly atHours: number;
-  readonly head: Hex;
-  readonly effectives: number;
-  readonly fatigue: number;
-  readonly formation: Formation;
-  readonly provisions: number;
-  readonly corps: string | null;
 }
 
 export interface ClientView {
@@ -173,28 +149,6 @@ const publicCommander = (c: Commander): PublicCommander => ({
   faction: c.faction,
   unitId: c.unitId,
   superiorId: c.superiorId,
-});
-
-/**
- * Snapshot a formation as of a given hour.
- *
- * Until riders exist this is taken at the current hour, which makes reports instantaneous
- * — the interim rule stated in `observe.ts`. The type and the plumbing are the finished
- * ones, so step 2 changes when the snapshot is captured and nothing else.
- */
-export const reportOf = (unit: Unit, atHours: number): UnitReport => ({
-  unitId: unit.id,
-  name: unit.name,
-  faction: unit.faction,
-  kind: unit.kind,
-  echelon: echelonOf(unit),
-  atHours,
-  head: unit.column[0] ?? { q: 0, r: 0 },
-  effectives: unit.effectives,
-  fatigue: unit.fatigue,
-  formation: unit.formation,
-  provisions: unit.provisions,
-  corps: unit.corps,
 });
 
 export interface ViewInput {
@@ -289,18 +243,34 @@ export function viewFor(input: ViewInput, role: Role): ClientView {
   const visible = commanderVisible(state, world, cfg, role.id);
   const own = state.units.get(me.unitId);
 
-  // Everything under him except his own formation, which he has in full. `formationsUnder`
-  // includes it, so it is filtered out rather than sent twice in two different shapes.
-  const reports = formationsUnder(state, role.id)
-    .filter((u) => u.id !== me.unitId)
-    .map((u) => reportOf(u, state.clockHours))
+  // What he actually holds, not what is true. Taken from his knowledge rather than
+  // snapshotted from the units, which is the difference between a design about not
+  // knowing where your own corps is and a list of exactly where it is.
+  //
+  // Filtered to formations under him: knowledge accumulates reports of anyone who has
+  // written to him, and a peer's position is his own business.
+  const under = new Set(formationsUnder(state, role.id).map((u) => u.id));
+  const filed = state.knowledge.get(role.id)?.reports ?? new Map<string, UnitReport>();
+  const reports = [...filed.values()]
+    .filter((r) => under.has(r.unitId) && r.unitId !== me.unitId)
     .sort((a, b) => (a.unitId < b.unitId ? -1 : 1));
 
-  // Contacts are built by `spottedUnder`, which constructs each one already stripped to
-  // what the sighting earned. Nothing here has to remember to redact.
-  const contacts = [...spottedUnder(state, world, cfg, role.id).values()].sort((a, b) =>
-    a.unitId < b.unitId ? -1 : 1,
-  );
+  // What the formation he rides with can see from where it stands, and nothing else.
+  //
+  // Emphatically not `spottedUnder`, which merges every formation beneath him: that would
+  // hand him whatever a division forty kilometres away is looking at, this instant, with
+  // no rider involved — the same telepathy that made his own corps' positions read "now"
+  // before reports were held rather than computed. What his subordinates see reaches him
+  // as sightings attached to a report despatch, hours later, or not at all.
+  //
+  // Each contact is built by `contactFrom` already stripped to what the sighting earned,
+  // so nothing here has to remember to redact.
+  const contacts =
+    own === undefined
+      ? []
+      : [...spottedBy(state, world, cfg, own).values()].sort((a, b) =>
+          a.unitId < b.unitId ? -1 : 1,
+        );
 
   // His outbox, stripped by construction. An acknowledgement that has come back is the
   // one and only thing he ever learns about a despatch's fate, so it is computed from

@@ -450,3 +450,211 @@ code.link {
 .unit-name {
   font-weight: 600;
 }
+
+/* ---- the post ----
+
+   The whole of the design is in the type hierarchy here. The hour a despatch describes
+   is the headline; the hour it arrived is a footnote in muted grey. Reversing those —
+   which is what an inbox normally does — would make a six-hour-old report look like news
+   at exactly the moment somebody was about to act on it. */
+
+.post {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+}
+
+.despatch {
+  padding: 9px 10px;
+  margin-bottom: 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 5px;
+}
+
+/* A message is not an order, and the left edge says which before the words do. */
+.despatch.kind-report {
+  border-left-color: #4c7fbf;
+}
+
+.despatch.kind-acknowledgement {
+  border-left-color: #4f9d69;
+}
+
+/* Sent paper is quieter than received paper: it is a record, not news. */
+.despatch.sent {
+  border-left-color: var(--line);
+  background: transparent;
+}
+
+/* Disregarded, not hidden. Seeing an order arrive too late is half of understanding
+   why the corps did what it did. */
+.despatch.superseded {
+  opacity: 0.6;
+}
+
+.despatch-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.despatch-from {
+  font-weight: 600;
+}
+
+.despatch-kind {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.despatch-when {
+  margin-top: 2px;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.small {
+  font-size: 11px;
+}
+
+.flag {
+  margin: 6px 0 0;
+  padding: 4px 7px;
+  font-size: 11px;
+  color: #e0b341;
+  background: rgb(203 161 53 / 12%);
+  border-radius: 4px;
+}
+
+/* Prose, read as prose: the line length and the whitespace are the content. */
+.prose-read {
+  margin: 7px 0 6px;
+  white-space: pre-wrap;
+}
+
+.despatch-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 7px;
+}
+
+.despatch-actions button {
+  padding: 3px 8px;
+  font: inherit;
+  font-size: 11px;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.despatch-actions button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.despatch-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ---- the composer ---- */
+
+.composer select,
+.composer textarea {
+  width: 100%;
+  padding: 6px 8px;
+  font: inherit;
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+.composer textarea.prose {
+  margin-top: 8px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.composer .guess {
+  padding: 6px 8px;
+  background: var(--panel-2);
+  border-radius: 4px;
+}
+
+.composer-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.composer-actions button,
+button.wide {
+  padding: 6px 12px;
+  font: inherit;
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+button.primary {
+  color: #17181f;
+  background: var(--accent);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+button.wide {
+  width: 100%;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* ---- formations ----
+
+   The age lives on the right, in the column an eye runs down. It is the only number on
+   the row that changes the reading of every other one. */
+
+button.formation {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 6px;
+  font: inherit;
+  color: var(--text);
+  text-align: left;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+button.formation:hover {
+  background: var(--panel-2);
+  border-color: var(--line);
+}
+
+.formation-name {
+  flex: 1;
+}
+
+.formation-age {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.formation-age.now {
+  color: var(--accent);
+}

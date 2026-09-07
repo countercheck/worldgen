@@ -50,7 +50,7 @@ import { ones, type Rng } from './rng.js';
 import { reduce, type CampaignState } from './state.js';
 import type { DecisionTrigger, PendingDecision, Task } from './task.js';
 import { gradeOf } from './terrain.js';
-import type { Unit } from './unit.js';
+import { reportOf, type Unit } from './unit.js';
 import type { World } from './world.js';
 
 export interface AdvanceOptions {
@@ -189,6 +189,13 @@ function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: 
     emit({ kind: 'despatch_delivered', despatchId: d.id, atHours });
     riding.delete(d.id);
 
+    // The rider came from somewhere and knows where that was. Every despatch refreshes
+    // the recipient's picture of the man who sent it — dated when it was written, not
+    // when it arrived, which is exactly the lag the design is about.
+    if (d.body.unitReport !== undefined) {
+      emit({ kind: 'report_filed', commanderId: d.to, report: d.body.unitReport });
+    }
+
     const to = s.commanders.get(d.to);
     if (to === undefined) return;
 
@@ -243,7 +250,8 @@ function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: 
       to: spec.to,
       faction: sender.faction,
       sentAtHours: atHours,
-      body: spec.body,
+      // Where he stood when he sealed it, attached whether or not he thought to say so.
+      body: { unitReport: reportOf(fromUnit, atHours), ...spec.body },
       via,
       forwardedFrom: spec.forwardedFrom ?? null,
       inReplyTo: spec.inReplyTo ?? null,
