@@ -19,8 +19,9 @@
  * the first place. Both routes are logged.
  */
 
+import { type Commander, wouldCycle } from './commander.js';
 import type { EventPayload, Faction, LoggedEvent, UnitStatChanges, WorldRef } from './events.js';
-import { byFaction, REFEREE, type Actor } from './events.js';
+import { byCommander, REFEREE, type Actor } from './events.js';
 import { key, type Hex } from './hex.js';
 import { rngFor, type Rng } from './rng.js';
 import {
@@ -46,12 +47,20 @@ export type Command =
       readonly startHours?: number;
     }
   | { readonly kind: 'add_faction'; readonly faction: Faction }
+  | { readonly kind: 'add_commander'; readonly commander: Commander }
+  | { readonly kind: 'remove_commander'; readonly commanderId: string }
+  | {
+      readonly kind: 'reassign_commander';
+      readonly commanderId: string;
+      readonly unitId?: string;
+      readonly superiorId?: string | null;
+    }
   | { readonly kind: 'add_unit'; readonly unit: Unit }
   | { readonly kind: 'remove_unit'; readonly unitId: string }
   | { readonly kind: 'advance_clock'; readonly hours: number }
   | { readonly kind: 'teleport_unit'; readonly unitId: string; readonly column: readonly Hex[] }
-  | { readonly kind: 'reveal'; readonly faction: string; readonly coords: readonly Hex[] }
-  | { readonly kind: 'conceal'; readonly faction: string; readonly coords: readonly Hex[] }
+  | { readonly kind: 'reveal'; readonly commanderId: string; readonly coords: readonly Hex[] }
+  | { readonly kind: 'conceal'; readonly commanderId: string; readonly coords: readonly Hex[] }
   | { readonly kind: 'set_unit_stats'; readonly unitId: string; readonly changes: UnitStatChanges };
 
 export type CommandKind = Command['kind'];
@@ -65,6 +74,9 @@ export type CommandKind = Command['kind'];
 const REFEREE_ONLY: ReadonlySet<CommandKind> = new Set([
   'create_campaign',
   'add_faction',
+  'add_commander',
+  'remove_commander',
+  'reassign_commander',
   'add_unit',
   'remove_unit',
   'advance_clock',
@@ -117,6 +129,14 @@ export function check(cmd: Command, state: CampaignState, world: World): Violati
     }
   };
 
+  const requireCommander = (id: string): Commander | undefined => {
+    const c = state.commanders.get(id);
+    if (c === undefined) {
+      v.push(hard(CODES.NO_SUCH_COMMANDER, `there is no commander ${id}`));
+    }
+    return c;
+  };
+
   const requireOnMap = (coords: readonly Hex[], what: string): void => {
     for (const c of coords) {
       if (!onMap(world, c)) {
@@ -151,6 +171,73 @@ export function check(cmd: Command, state: CampaignState, world: World): Violati
         v.push(hard(CODES.DUPLICATE_ID, `faction ${cmd.faction.id} already exists`));
       }
       break;
+
+    case 'add_commander': {
+      const c = cmd.commander;
+      if (state.commanders.has(c.id)) {
+        v.push(hard(CODES.DUPLICATE_ID, `commander ${c.id} already exists`));
+      }
+      requireFaction(c.faction);
+      if (!state.units.has(c.unitId)) {
+        v.push(hard(CODES.NO_SUCH_UNIT, `there is no unit ${c.unitId} for ${c.id} to ride with`));
+      } else if (state.units.get(c.unitId)!.faction !== c.faction) {
+        // A man cannot ride with the enemy's baggage. This one is hard because the state
+        // it would produce is not merely irregular, it is unreadable: every question
+        // about what he can see would have two contradictory answers.
+        v.push(
+          hard(
+            CODES.WRONG_FACTION,
+            `${c.id} is ${c.faction} but ${c.unitId} is not`,
+          ),
+        );
+      }
+      if (c.superiorId !== null) {
+        const superior = state.commanders.get(c.superiorId);
+        if (superior === undefined) {
+          v.push(hard(CODES.NO_SUCH_COMMANDER, `there is no commander ${c.superiorId}`));
+        } else if (superior.faction !== c.faction) {
+          v.push(hard(CODES.WRONG_FACTION, `${c.id} cannot answer to the other side`));
+        }
+      }
+      break;
+    }
+
+    case 'remove_commander':
+      requireCommander(cmd.commanderId);
+      break;
+
+    case 'reassign_commander': {
+      const c = requireCommander(cmd.commanderId);
+      if (c !== undefined) {
+        if (cmd.unitId !== undefined) {
+          const unit = state.units.get(cmd.unitId);
+          if (unit === undefined) {
+            v.push(hard(CODES.NO_SUCH_UNIT, `there is no unit ${cmd.unitId}`));
+          } else if (unit.faction !== c.faction) {
+            v.push(hard(CODES.WRONG_FACTION, `${c.id} cannot ride with ${cmd.unitId}`));
+          }
+        }
+        if (cmd.superiorId !== undefined && cmd.superiorId !== null) {
+          const superior = state.commanders.get(cmd.superiorId);
+          if (superior === undefined) {
+            v.push(hard(CODES.NO_SUCH_COMMANDER, `there is no commander ${cmd.superiorId}`));
+          } else if (superior.faction !== c.faction) {
+            v.push(hard(CODES.WRONG_FACTION, `${c.id} cannot answer to the other side`));
+          } else if (wouldCycle(state, cmd.commanderId, cmd.superiorId)) {
+            // Hard, and worth its own code: a loop in the chain of command makes every
+            // tree walk in the engine non-terminating, and the state that produced it
+            // cannot be drawn, ordered through, or reasoned about at all.
+            v.push(
+              hard(
+                CODES.COMMAND_CYCLE,
+                `${cmd.superiorId} already answers to ${cmd.commanderId}`,
+              ),
+            );
+          }
+        }
+      }
+      break;
+    }
 
     case 'add_unit': {
       if (state.units.has(cmd.unit.id)) {
@@ -200,7 +287,7 @@ export function check(cmd: Command, state: CampaignState, world: World): Violati
 
     case 'reveal':
     case 'conceal':
-      requireFaction(cmd.faction);
+      requireCommander(cmd.commanderId);
       requireOnMap(cmd.coords, 'hex');
       break;
 
@@ -253,6 +340,22 @@ export function decide(
     case 'add_faction':
       return [{ kind: 'faction_added', faction: cmd.faction }];
 
+    case 'add_commander':
+      return [{ kind: 'commander_added', commander: cmd.commander }];
+
+    case 'remove_commander':
+      return [{ kind: 'commander_removed', commanderId: cmd.commanderId }];
+
+    case 'reassign_commander':
+      return [
+        {
+          kind: 'commander_reassigned',
+          commanderId: cmd.commanderId,
+          ...(cmd.unitId !== undefined ? { unitId: cmd.unitId } : {}),
+          ...(cmd.superiorId !== undefined ? { superiorId: cmd.superiorId } : {}),
+        },
+      ];
+
     case 'add_unit':
       return [{ kind: 'unit_added', unit: cmd.unit }];
 
@@ -266,10 +369,10 @@ export function decide(
       return [{ kind: 'unit_teleported', unitId: cmd.unitId, column: cmd.column }];
 
     case 'reveal':
-      return [{ kind: 'hexes_revealed', faction: cmd.faction, coords: cmd.coords }];
+      return [{ kind: 'hexes_surveyed', commanderId: cmd.commanderId, coords: cmd.coords }];
 
     case 'conceal':
-      return [{ kind: 'hexes_concealed', faction: cmd.faction, coords: cmd.coords }];
+      return [{ kind: 'hexes_forgotten', commanderId: cmd.commanderId, coords: cmd.coords }];
 
     case 'set_unit_stats':
       return [{ kind: 'unit_stat_set', unitId: cmd.unitId, changes: cmd.changes }];
@@ -357,4 +460,4 @@ export function applyAll(
   return { ok: true, state: s, events, violations: [] };
 }
 
-export { EMPTY_STATE, byFaction, REFEREE };
+export { EMPTY_STATE, byCommander, REFEREE };

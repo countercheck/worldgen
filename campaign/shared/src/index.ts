@@ -10,6 +10,7 @@
  */
 
 export * from './column.js';
+export * from './commander.js';
 export * from './config.js';
 export * from './crossing.js';
 export * from './engine.js';

@@ -82,14 +82,19 @@ CREATE TABLE IF NOT EXISTS snapshots (
   PRIMARY KEY (campaign_id, seq)
 );
 
--- The join token is stored hashed. A database that leaks should not hand out the ability
--- to play, and nothing ever needs the token back: it arrives in a request and is hashed
--- to be compared.
+-- One row per join link. A token is stored hashed: a database that leaks should not hand
+-- out the ability to play, and nothing ever needs the token back — it arrives in a request
+-- and is hashed to be compared.
+--
+-- A link names a commander, not a side. Two men on the same side see different wars, which
+-- is the point of the whole design, so a per-faction token could not express who is asking.
+-- Commanders cannot exist until there are units for them to ride with, so these rows are
+-- written after creation rather than during it.
 CREATE TABLE IF NOT EXISTS roles (
   campaign_id   TEXT NOT NULL,
   token_hash    TEXT NOT NULL,
   role_kind     TEXT NOT NULL,
-  faction_id    TEXT,
+  commander_id  TEXT,
   PRIMARY KEY (campaign_id, token_hash)
 );
 

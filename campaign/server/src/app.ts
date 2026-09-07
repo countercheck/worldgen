@@ -112,16 +112,12 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
         ...(body.strictness !== undefined ? { strictness: body.strictness } : {}),
       });
 
-      // The only time the tokens exist in plaintext anywhere. They are not stored and
+      // The only time this token exists in plaintext anywhere. It is not stored and
       // cannot be recovered — a lost link is reissued, not looked up.
-      return reply.code(201).send({
-        id,
-        refereeToken: created.refereeToken,
-        factionTokens: created.tokens,
-        joinLinks: Object.fromEntries(
-          Object.entries(created.tokens).map(([f, t]) => [f, `/j/${id}/${t}`]),
-        ),
-      });
+      //
+      // No commander links yet: a link names a seat, and there are no seats until the
+      // referee has put formations on the map and appointed men to them.
+      return reply.code(201).send({ id, refereeToken: created.refereeToken });
     } catch (err) {
       return reply.code(400).send({ error: String((err as Error).message ?? err) });
     }
@@ -146,7 +142,7 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
 
     // Checked at the boundary as well as guaranteed by construction. A masking bug is
     // exactly the kind that ships quietly, so it fails the request rather than the game.
-    assertMasked(view);
+    assertMasked(view, cfg);
     return reply.send(view);
   });
 
@@ -155,11 +151,11 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
     const auth = authorise(req, reply);
     if (auth === null) return;
 
-    const asFaction = (req.query as { faction?: string }).faction;
-    // A referee may ask for any faction's map; a commander may only have their own.
+    const asCommander = (req.query as { commander?: string }).commander;
+    // A referee may look through any commander's eyes; a commander only through his own.
     const role: Role =
-      auth.role.kind === 'referee' && asFaction !== undefined
-        ? { kind: 'faction', id: asFaction }
+      auth.role.kind === 'referee' && asCommander !== undefined
+        ? { kind: 'commander', id: asCommander }
         : auth.role;
 
     const view = viewFor(
@@ -172,15 +168,56 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
       },
       role,
     );
-    assertMasked(view);
+    assertMasked(view, cfg);
 
     return reply
       .header('content-type', 'application/json')
       .header(
         'content-disposition',
-        `attachment; filename="${auth.campaign.id}-${view.faction ?? 'truth'}.json"`,
+        `attachment; filename="${auth.campaign.id}-${view.commander?.id ?? 'truth'}.json"`,
       )
       .send(view.world);
+  });
+
+  // ---- seats ------------------------------------------------------------
+
+  /**
+   * Mint a join link for a commander's seat. Referee only, obviously.
+   *
+   * Returned once. The token is stored only as a hash, so a link that is lost is reissued
+   * rather than recovered, and issuing a second one for the same seat is the supported
+   * way to replace a link that went to the wrong person — followed by a revoke.
+   */
+  app.post('/api/campaigns/:id/commanders/:commanderId/token', async (req, reply) => {
+    const auth = authorise(req, reply);
+    if (auth === null) return;
+    if (auth.role.kind !== 'referee') {
+      return reply.code(403).send({ error: 'only the referee issues join links' });
+    }
+
+    const { commanderId } = req.params as { commanderId: string };
+    if (!store.state(auth.campaign.id).commanders.has(commanderId)) {
+      return reply.code(404).send({ error: `there is no commander ${commanderId}` });
+    }
+
+    const token = store.issueToken(auth.campaign.id, commanderId);
+    return reply.code(201).send({
+      commanderId,
+      token,
+      joinLink: `/j/${auth.campaign.id}/${token}`,
+    });
+  });
+
+  /** Invalidate every link to a seat. */
+  app.delete('/api/campaigns/:id/commanders/:commanderId/token', async (req, reply) => {
+    const auth = authorise(req, reply);
+    if (auth === null) return;
+    if (auth.role.kind !== 'referee') {
+      return reply.code(403).send({ error: 'only the referee revokes join links' });
+    }
+    const { commanderId } = req.params as { commanderId: string };
+    store.revokeTokens(auth.campaign.id, commanderId);
+    return reply.send({ ok: true });
   });
 
   // ---- commands ---------------------------------------------------------
@@ -198,9 +235,9 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
       return reply.code(400).send({ error: 'a command is required' });
     }
 
-    // Every command in this build is a referee command — the player-issued orders arrive
-    // with the courier system. Rejecting here rather than in `check` keeps the engine
-    // free of any notion of who is connected.
+    // Every command in this build is a referee command — a commander's despatches arrive
+    // with the courier system, and are not engine commands at all. Rejecting here rather
+    // than in `check` keeps the engine free of any notion of who is connected.
     if (auth.role.kind !== 'referee') {
       return reply.code(403).send({ error: 'only the referee may issue commands' });
     }
@@ -246,12 +283,12 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
     const events = store.events(auth.campaign.id);
     if (auth.role.kind === 'referee') return reply.send(events);
 
-    // A commander sees their own actions and nothing else. The log is a rich source of
+    // A commander sees his own actions and nothing else. The log is a rich source of
     // exactly the information the fog exists to withhold — an enemy's marches are all in
-    // there — so it is filtered rather than trimmed.
+    // there, and so are his own subordinates' — so it is filtered rather than trimmed.
     const mine = auth.role.id;
     return reply.send(
-      events.filter((e) => e.actor.kind === 'faction' && e.actor.id === mine),
+      events.filter((e) => e.actor.kind === 'commander' && e.actor.id === mine),
     );
   });
 
@@ -273,7 +310,7 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
         { campaignId, state, worldDoc: campaign.worldDoc, world: campaign.world, cfg },
         listener.role,
       );
-      assertMasked(view);
+      assertMasked(view, cfg);
       listener.send(JSON.stringify({ type: 'view', view }));
     }
   }
@@ -305,7 +342,7 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
         },
         role,
       );
-      assertMasked(view);
+      assertMasked(view, cfg);
       socket.send(JSON.stringify({ type: 'view', view }));
 
       socket.on('close', () => {

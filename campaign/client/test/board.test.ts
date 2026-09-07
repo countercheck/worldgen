@@ -23,7 +23,7 @@ import {
   DEMO_FACTIONS,
   demoCommands,
   EMPTY_STATE,
-  factionRole,
+  commanderRole,
   key,
   observationEvents,
   occupied,
@@ -110,18 +110,40 @@ describe('a referee board', () => {
       const mark = board.marks.find((m) => m.id === unit.id);
       expect(mark, `${unit.id} is not drawn`).toBeDefined();
       expect(mark!.column.map(key)).toEqual(occupied(unit).map(key));
-      expect(mark!.visible).toBe(true);
+      expect(mark!.kind).toBe('live');
     }
   });
 });
 
 describe('a commander board', () => {
-  const raw = view(factionRole('red'));
+  // Ney: the army commander, riding with red-1 and answering to nobody.
+  const raw = view(commanderRole('ney'));
   const board = boardFrom(raw, DEFAULT_THEME);
 
-  it('holds only its own units', () => {
-    expect(board.units.size).toBeGreaterThan(0);
-    for (const unit of board.units.values()) expect(unit.faction).toBe('red');
+  it('holds exactly one live formation: the one he rides with', () => {
+    expect(board.units.size).toBe(1);
+    const [only] = [...board.units.values()];
+    expect(only!.id).toBe(raw.commander!.unitId);
+    expect(only!.faction).toBe('red');
+  });
+
+  it('holds his subordinates as dated reports rather than units', () => {
+    expect(board.reports.size).toBeGreaterThan(0);
+    for (const report of board.reports.values()) {
+      expect(report.faction).toBe('red');
+      expect(board.units.has(report.unitId), `${report.unitId} arrived live`).toBe(false);
+      expect(typeof report.atHours).toBe('number');
+    }
+  });
+
+  it('draws a reported formation as one hex, not a column', () => {
+    // A despatch says where a formation stood, not how it was strung out along the road.
+    for (const report of board.reports.values()) {
+      const mark = board.marks.find((m) => m.id === report.unitId)!;
+      expect(mark.column).toHaveLength(1);
+      expect(key(mark.column[0]!)).toBe(key(report.head));
+      expect(mark.kind, 'a report was drawn as a live formation').toBe('reported');
+    }
   });
 
   it('never turns a contact into a unit', () => {
@@ -138,28 +160,24 @@ describe('a commander board', () => {
       const mark = board.marks.find((m) => m.id === contact.unitId)!;
       expect(mark.column).toHaveLength(1);
       expect(key(mark.column[0]!)).toBe(key(contact.coord));
-      expect(mark.visible).toBe(false);
+      expect(mark.kind).toBe('contact');
     }
   });
 
-  it('receives a world with the same number of hexes as the referee sees', () => {
-    // Bounds are preserved by masking, so every player's canvas is the same size and the
-    // maps overlay. A shorter hex list would re-centre this commander's map on its own.
+  it('receives the whole accurate map, because terrain fog is off', () => {
+    // A stated decision rather than a leak: the tension is where the enemy is, not what
+    // the country looks like, and a two-hex sight radius over darkness is unplayable.
     expect(board.world.hexes.size).toBe(world.hexes.size);
-  });
-
-  it('knows less ground than there is', () => {
-    // If this ever equalled the map, the masking has stopped happening and every other
-    // assertion here would still pass.
-    expect(board.seen.size).toBeGreaterThan(0);
-    expect(board.seen.size).toBeLessThan(world.hexes.size);
-  });
-
-  it('tags every unseen hex as fog rather than dropping it', () => {
-    for (const [k, hex] of board.world.hexes) {
-      if (board.seen.has(k)) continue;
-      expect(hex.tags.has('fog'), `${k} is not fogged`).toBe(true);
+    for (const hex of board.world.hexes.values()) {
+      expect(hex.tags.has('fog')).toBe(false);
     }
+  });
+
+  it('sees far less ground than it has covered', () => {
+    // What he can see from where he stands, against everywhere his command has been. If
+    // these ever converged, sight has stopped being limited to his own formation.
+    expect(board.visible.size).toBeGreaterThan(0);
+    expect(board.visible.size).toBeLessThan(board.surveyed.size);
   });
 
   it('carries a name for every unit it can see', () => {

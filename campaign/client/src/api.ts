@@ -22,10 +22,14 @@ export interface Session {
 
 export interface CreateResult {
   readonly id: string;
+  /**
+   * The referee's own link, and the only one that exists yet.
+   *
+   * A join link names a commander's seat, and there are no seats until formations are on
+   * the map and men appointed to them. The referee sets up the order of battle and then
+   * calls `issueSeatToken` for each seat somebody is to play.
+   */
   readonly refereeToken: string;
-  /** One per faction. The referee keeps these to hand out; nobody else ever sees them. */
-  readonly factionTokens: Record<string, string>;
-  readonly joinLinks: Record<string, string>;
 }
 
 export class ApiError extends Error {
@@ -39,7 +43,11 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init: RequestInit = {}, token?: string): Promise<T> {
-  const headers: Record<string, string> = { 'content-type': 'application/json' };
+  const headers: Record<string, string> = {};
+  // Declared only when there is actually a body. Fastify parses by content-type, so
+  // announcing JSON and sending nothing is a 400 — which is how issuing a join link
+  // failed, the request having neither a body nor any reason to want one.
+  if (init.body !== undefined) headers['content-type'] = 'application/json';
   // The token travels in a header rather than the query string: a URL ends up in browser
   // history, in a screenshot and in any log the request passes through, and this one is
   // the whole of a player's identity.
@@ -68,6 +76,19 @@ export function createCampaign(opts: {
     method: 'POST',
     body: JSON.stringify(opts),
   });
+}
+
+/** Mint a join link for one commander's seat. Referee only; returned once. */
+export function issueSeatToken(
+  session: Session,
+  commanderId: string,
+): Promise<{ commanderId: string; token: string }> {
+  return request<{ commanderId: string; token: string }>(
+    `/api/campaigns/${encodeURIComponent(session.campaignId)}` +
+      `/commanders/${encodeURIComponent(commanderId)}/token`,
+    { method: 'POST' },
+    session.token,
+  );
 }
 
 export function fetchView(session: Session): Promise<ClientView> {

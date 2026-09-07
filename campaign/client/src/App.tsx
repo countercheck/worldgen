@@ -27,11 +27,12 @@ import {
 } from '@campaign/shared';
 
 import { advanceClock, fetchView, subscribe, type Session } from './api.js';
-import { boardFrom } from './board.js';
+import { ageLabel, boardFrom } from './board.js';
 import { Join, type Joined } from './Join.jsx';
 import { HexMap } from './map/HexMap.js';
 import { ContactPanel } from './panels/ContactPanel.jsx';
 import { HexPanel } from './panels/HexPanel.js';
+import { ReportPanel } from './panels/ReportPanel.jsx';
 import { UnitPanel } from './panels/UnitPanel.js';
 import { clearSession, joinLink, loadSession, saveSession } from './session.js';
 
@@ -42,7 +43,12 @@ export default function App() {
     const stored = loadSession();
     return stored === null
       ? null
-      : { session: stored.session, held: stored.held, ownToken: stored.ownToken };
+      : {
+          session: stored.session,
+          held: stored.held,
+          ownToken: stored.ownToken,
+          seats: stored.seats ?? {},
+        };
   });
 
   if (joined === null) {
@@ -162,8 +168,12 @@ function Console({
   }
 
   const isReferee = view.role === 'referee';
+  const clock = view.campaign.clockHours;
   const shownId = hoveredId ?? selectedId;
+  // Three lookups, in the order of how much they claim to know. A mark is a unit, or a
+  // dated report of one of ours, or a sighting of somebody else's — never more than one.
   const shownUnit = shownId === null ? null : (board.units.get(shownId) ?? null);
+  const shownReport = shownId === null ? null : (board.reports.get(shownId) ?? null);
   const shownContact = shownId === null ? null : (board.contacts.get(shownId) ?? null);
   const hoveredHex = hovered === null ? undefined : board.world.hexes.get(key(hovered));
 
@@ -179,12 +189,18 @@ function Console({
       ? []
       : [
           { id: 'referee', label: 'Referee', token: joined.ownToken, color: undefined },
-          ...Object.entries(joined.held).map(([faction, token]) => ({
-            id: faction,
-            label: board.factions.get(faction)?.name ?? faction,
-            token,
-            color: board.factions.get(faction)?.color,
-          })),
+          ...Object.entries(joined.held).map(([commanderId, token]) => {
+            // The man's name, not his id. A referee switching seats is choosing a person
+            // to be, and "kellermann" is the engine's bookkeeping.
+            const seat = joined.seats[commanderId];
+            const faction = seat?.faction ?? board.commanders.get(commanderId)?.faction;
+            return {
+              id: commanderId,
+              label: seat?.name ?? board.commanders.get(commanderId)?.name ?? commanderId,
+              token,
+              color: faction === undefined ? undefined : board.factions.get(faction)?.color,
+            };
+          }),
         ];
 
   return (
@@ -232,12 +248,12 @@ function Console({
         </span>
       </header>
 
-      {!isReferee && (
+      {!isReferee && view.commander !== null && (
         <div className="notice">
-          You are {board.factions.get(view.faction ?? '')?.name ?? view.faction}. This map
-          is the one the server sent: {board.seen.size} hexes of{' '}
-          {board.world.hexes.size} have ever been observed, and the rest is not in this
-          page at all.
+          You are {view.commander.name}, riding with{' '}
+          {board.units.get(view.commander.unitId)?.name ?? view.commander.unitId}. You can
+          see {board.visible.size} hexes from where you stand. Everything else below is as
+          it was last reported, and the enemy is where somebody says they saw them.
         </div>
       )}
 
@@ -266,14 +282,22 @@ function Console({
             />
           )}
 
-          {shownUnit === null && shownContact !== null && (
+          {shownUnit === null && shownReport !== null && (
+            <ReportPanel
+              report={shownReport}
+              faction={board.factions.get(shownReport.faction)}
+              clockHours={clock}
+            />
+          )}
+
+          {shownUnit === null && shownReport === null && shownContact !== null && (
             <ContactPanel
               contact={shownContact}
               factionName={
                 board.factions.get(shownContact.faction)?.name ?? shownContact.faction
               }
               color={board.factions.get(shownContact.faction)?.color ?? '#888'}
-              clockHours={view.campaign.clockHours}
+              clockHours={clock}
             />
           )}
 
@@ -294,7 +318,7 @@ function Console({
                 standing on it. Click a unit to keep it in view.
               </p>
 
-              <h3>Units</h3>
+              <h3>{isReferee ? 'Formations' : 'With me'}</h3>
               <ul className="unit-list">
                 {[...board.units.values()].map((u) => (
                   <li key={u.id}>
@@ -313,6 +337,26 @@ function Console({
                 ))}
               </ul>
 
+              {board.reports.size > 0 && (
+                <>
+                  <h3>Under my command</h3>
+                  <ul className="unit-list">
+                    {[...board.reports.values()].map((r) => (
+                      <li key={r.unitId}>
+                        <button onClick={() => setSelectedId(r.unitId)}>
+                          <span
+                            className="swatch small ghost"
+                            style={{ background: board.factions.get(r.faction)?.color }}
+                          />
+                          {r.name}
+                          <span className="muted"> · {ageLabel(r.atHours, clock)}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
+
               {board.contacts.size > 0 && (
                 <>
                   <h3>Contacts</h3>
@@ -327,7 +371,7 @@ function Console({
                           {c.corps ?? 'Unidentified'}
                           <span className="muted">
                             {' '}
-                            · seen at hour {c.seenAtHours}
+                            · {ageLabel(c.seenAtHours, clock)}
                           </span>
                         </button>
                       </li>

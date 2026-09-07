@@ -17,6 +17,7 @@
  * could refuse a change has already happened in `check`, before the event existed.
  */
 
+import type { Commander } from './commander.js';
 import type { Hex } from './hex.js';
 import type { Strictness, Violation } from './ruling.js';
 import type { Experience, Formation, Trait, Unit, UnitKind } from './unit.js';
@@ -24,11 +25,19 @@ import type { Experience, Formation, Trait, Unit, UnitKind } from './unit.js';
 export const CAMPAIGN_SCHEMA_VERSION = '1.0';
 export const SUPPORTED_CAMPAIGN_VERSIONS = new Set([CAMPAIGN_SCHEMA_VERSION]);
 
-/** Who caused an event. Players are named by faction; the referee is unnamed. */
-export type Actor = { readonly kind: 'referee' } | { readonly kind: 'faction'; readonly id: string };
+/**
+ * Who caused an event.
+ *
+ * A commander, not a faction. A side does not decide anything; a man does, and when a
+ * campaign is reviewed afterwards the question is always which of them gave the order.
+ * The referee is unnamed because he is not in the war.
+ */
+export type Actor =
+  | { readonly kind: 'referee' }
+  | { readonly kind: 'commander'; readonly id: string };
 
 export const REFEREE: Actor = { kind: 'referee' };
-export const byFaction = (id: string): Actor => ({ kind: 'faction', id });
+export const byCommander = (id: string): Actor => ({ kind: 'commander', id });
 
 /** Identifies the world a campaign is played on, and detects one swapped underneath it. */
 export interface WorldRef {
@@ -63,15 +72,32 @@ export type EventPayload =
       readonly startHours: number;
     }
   | { readonly kind: 'faction_added'; readonly faction: Faction }
+  | { readonly kind: 'commander_added'; readonly commander: Commander }
+  | { readonly kind: 'commander_removed'; readonly commanderId: string }
+  /** A commander moves to another formation, or is given a new superior. */
+  | {
+      readonly kind: 'commander_reassigned';
+      readonly commanderId: string;
+      readonly unitId?: string;
+      readonly superiorId?: string | null;
+    }
   | { readonly kind: 'unit_added'; readonly unit: Unit }
   | { readonly kind: 'unit_removed'; readonly unitId: string }
   | { readonly kind: 'clock_advanced'; readonly toHours: number }
   /** Referee: put a unit somewhere, no movement rule applying. */
   | { readonly kind: 'unit_teleported'; readonly unitId: string; readonly column: readonly Hex[] }
-  /** Referee: hand a faction knowledge it did not earn. */
-  | { readonly kind: 'hexes_revealed'; readonly faction: string; readonly coords: readonly Hex[] }
-  /** Referee: take knowledge away, the one thing that shrinks `seen`. */
-  | { readonly kind: 'hexes_concealed'; readonly faction: string; readonly coords: readonly Hex[] }
+  /** Ground a commander's formations have surveyed, or a referee has simply given him. */
+  | {
+      readonly kind: 'hexes_surveyed';
+      readonly commanderId: string;
+      readonly coords: readonly Hex[];
+    }
+  /** Referee: take knowledge away, the one thing that shrinks what a man has surveyed. */
+  | {
+      readonly kind: 'hexes_forgotten';
+      readonly commanderId: string;
+      readonly coords: readonly Hex[];
+    }
   | {
       readonly kind: 'unit_stat_set';
       readonly unitId: string;

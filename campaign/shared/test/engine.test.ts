@@ -14,7 +14,7 @@ import {
   apply,
   applyAll,
   applyOrThrow,
-  byFaction,
+  byCommander,
   check,
   decide,
   EMPTY_STATE,
@@ -25,8 +25,9 @@ import type { Faction, LoggedEvent, WorldRef } from '../src/events.js';
 import { key, type Hex } from '../src/hex.js';
 import { makeRng, rngFor } from '../src/rng.js';
 import { CODES, RuleViolation } from '../src/ruling.js';
-import { hasSeen, replay, type CampaignState } from '../src/state.js';
+import { hasSurveyed, replay, type CampaignState } from '../src/state.js';
 import { KIND_DEFAULTS, type Unit } from '../src/unit.js';
+import type { Commander } from '../src/commander.js';
 import { parseWorld, type World } from '../src/world.js';
 
 const world: World = parseWorld(world32);
@@ -53,9 +54,28 @@ const landHex = (): Hex => {
 
 const LAND = landHex();
 
+const NEY: Commander = {
+  id: 'ney',
+  name: 'Marshal Ney',
+  faction: 'red',
+  unitId: 'red-1',
+  superiorId: null,
+  autoCascade: true,
+};
+
+const WELLINGTON: Commander = {
+  id: 'wellington',
+  name: 'The Duke of Wellington',
+  faction: 'blue',
+  unitId: 'blue-1',
+  superiorId: null,
+  autoCascade: true,
+};
+
 function division(id: string, faction: string, at: Hex = LAND, effectives = 5000): Unit {
   return {
     id,
+    name: `${id} Division`,
     faction,
     kind: 'infantry',
     effectives,
@@ -93,12 +113,15 @@ function setUp(): CampaignState {
       { kind: 'add_faction', faction: RED },
       { kind: 'add_faction', faction: BLUE },
       { kind: 'add_unit', unit: division('red-1', 'red') },
+      { kind: 'add_unit', unit: division('blue-1', 'blue') },
+      { kind: 'add_commander', commander: NEY },
+      { kind: 'add_commander', commander: WELLINGTON },
     ],
     EMPTY_STATE,
     world,
     'strict',
   );
-  expect(out.ok).toBe(true);
+  expect(out.ok, out.violations.map((v) => v.message).join('; ')).toBe(true);
   return out.state;
 }
 
@@ -116,7 +139,7 @@ describe('check', () => {
       { kind: 'remove_unit', unitId: 'red-1' },
       { kind: 'advance_clock', hours: 6 },
       { kind: 'teleport_unit', unitId: 'red-1', column: [LAND] },
-      { kind: 'reveal', faction: 'red', coords: [LAND] },
+      { kind: 'reveal', commanderId: 'ney', coords: [LAND] },
       { kind: 'set_unit_stats', unitId: 'red-1', changes: { morale: 10 } },
     ];
     for (const cmd of commands) {
@@ -296,9 +319,9 @@ describe('apply', () => {
   it('names the actor', () => {
     const state = setUp();
     const asRed = apply({ kind: 'advance_clock', hours: 1 }, state, world, 'strict', {
-      actor: byFaction('red'),
+      actor: byCommander('ney'),
     });
-    expect(asRed.events[0]!.actor).toEqual({ kind: 'faction', id: 'red' });
+    expect(asRed.events[0]!.actor).toEqual({ kind: 'commander', id: 'ney' });
 
     const asRef = apply({ kind: 'advance_clock', hours: 1 }, state, world, 'strict');
     expect(asRef.events[0]!.actor).toEqual(REFEREE);
@@ -356,27 +379,27 @@ describe('referee overrides', () => {
     const state = setUp();
     const coords = [...world.hexes.values()].slice(0, 5).map((h) => h.coord);
 
-    const out = apply({ kind: 'reveal', faction: 'red', coords }, state, world, 'strict');
+    const out = apply({ kind: 'reveal', commanderId: 'ney', coords }, state, world, 'strict');
 
     expect(out.ok).toBe(true);
-    for (const c of coords) expect(hasSeen(out.state, 'red', c)).toBe(true);
-    for (const c of coords) expect(hasSeen(out.state, 'blue', c)).toBe(false);
+    for (const c of coords) expect(hasSurveyed(out.state, 'ney', c)).toBe(true);
+    for (const c of coords) expect(hasSurveyed(out.state, 'wellington', c)).toBe(false);
   });
 
   it('conceals ground, the one thing that shrinks what a faction knows', () => {
     const state = setUp();
     const coords = [...world.hexes.values()].slice(0, 5).map((h) => h.coord);
 
-    const revealed = apply({ kind: 'reveal', faction: 'red', coords }, state, world, 'strict').state;
+    const revealed = apply({ kind: 'reveal', commanderId: 'ney', coords }, state, world, 'strict').state;
     const concealed = apply(
-      { kind: 'conceal', faction: 'red', coords: coords.slice(0, 2) },
+      { kind: 'conceal', commanderId: 'ney', coords: coords.slice(0, 2) },
       revealed,
       world,
       'strict',
     ).state;
 
-    expect(hasSeen(concealed, 'red', coords[0]!)).toBe(false);
-    expect(hasSeen(concealed, 'red', coords[4]!)).toBe(true);
+    expect(hasSurveyed(concealed, 'ney', coords[0]!)).toBe(false);
+    expect(hasSurveyed(concealed, 'ney', coords[4]!)).toBe(true);
   });
 
   it('sets a stat without touching the others', () => {
@@ -429,8 +452,9 @@ describe('replay', () => {
       { kind: 'add_faction', faction: BLUE },
       { kind: 'add_unit', unit: division('red-1', 'red') },
       { kind: 'add_unit', unit: division('blue-1', 'blue') },
+      { kind: 'add_commander', commander: NEY },
       { kind: 'advance_clock', hours: 6 },
-      { kind: 'reveal', faction: 'red', coords: [LAND] },
+      { kind: 'reveal', commanderId: 'ney', coords: [LAND] },
       { kind: 'set_unit_stats', unitId: 'red-1', changes: { fatigue: 12 } },
       { kind: 'remove_unit', unitId: 'blue-1' },
     ];
@@ -525,9 +549,10 @@ function snapshot(s: CampaignState) {
     units: [...s.units.values()]
       .map((u) => ({ ...u, traits: [...u.traits].sort() }))
       .sort((a, b) => (a.id < b.id ? -1 : 1)),
+    commanders: [...s.commanders.values()].sort((a, b) => (a.id < b.id ? -1 : 1)),
     knowledge: [...s.knowledge.values()]
-      .map((k) => ({ faction: k.faction, seen: [...k.seen].sort() }))
-      .sort((a, b) => (a.faction < b.faction ? -1 : 1)),
+      .map((k) => ({ commanderId: k.commanderId, surveyed: [...k.surveyed].sort() }))
+      .sort((a, b) => (a.commanderId < b.commanderId ? -1 : 1)),
   };
 }
 
@@ -536,6 +561,7 @@ function structuredCloneState(s: CampaignState): CampaignState {
   return {
     ...s,
     factions: new Map(s.factions),
+    commanders: new Map(s.commanders),
     units: new Map(s.units),
     knowledge: new Map(s.knowledge),
   };
@@ -551,6 +577,9 @@ function structuredCloneState(s: CampaignState): CampaignState {
  */
 function deepFreeze<T>(o: T): T {
   if (o === null || typeof o !== 'object') return o;
+  // Reachable twice over: two commanders can share a superior, and the walk would then
+  // try to redefine an already-stubbed mutator, which throws.
+  if (Object.isFrozen(o)) return o;
 
   if (o instanceof Map || o instanceof Set) {
     for (const v of o.values()) deepFreeze(v);

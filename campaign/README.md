@@ -17,8 +17,8 @@ npm run dev          # server on :3000, client on :5173
 
 Open <http://localhost:5173>. Upload a `world.json`, or click through to the
 demonstration, which creates a campaign and posts the scenario's commands through the
-same API a referee uses. The referee is handed one join link per side; send each
-commander theirs.
+same API a referee uses. The referee is then handed **one join link per seat** — a link
+names a man, not a side — and sends each commander his own.
 
 ```bash
 npm run build
@@ -43,7 +43,14 @@ client/    Browser: a canvas map and a sidebar, and nothing the server did not s
 same code over the masked world it was given, so a commander's reach preview is computed
 from the country they actually know about.
 
-## The two things worth knowing
+## The three things worth knowing
+
+**Every formation has a commander, and he sees through the one he rides with.** A role is
+a seat, not a side: two men on the same side see different wars. His own formation is
+live; everything else beneath him is a dated report, and the enemy is wherever somebody
+last said they saw them. `superiorId` carries the whole chain of command, and writing past
+a subordinate leaves that man with a confidently wrong picture of his own corps — which
+nothing had to be built to achieve.
 
 **The fog is enforced, not drawn.** Exactly one function — `viewFor` in
 `shared/src/view.ts` — turns campaign state into something a client may see, and no route
@@ -51,8 +58,14 @@ serialises state any other way. The WebSocket rebuilds a payload per socket rath
 broadcasting one, `assertMasked` re-checks at the boundary, and the leakage tests assert
 against the serialised response body rather than the object graph, because a `toJSON` or
 a field added later can put data on the wire that a structural assertion never looks at.
-The role switcher in the console is not a filter: it swaps the token and refetches, so
+The seat switcher in the console is not a filter: it swaps the token and refetches, so
 looking at a commander's map means genuinely asking the server as that commander.
+
+Terrain fog is **off** by default (`terrainFog` in config). The ground is public and
+accurate, because the tension the period turns on is where the enemy is and where one's
+own III Corps is, not what the country looks like — and with sight limited to one
+formation, a blacked-out map is unplayable. The masking machinery is unchanged and still
+tested in both positions; it returns with the issued map. See `PLAN.md`.
 
 **The log is the campaign; everything else is cache.** State is the fold of an append-only
 event log. Snapshots exist only so folding does not get slower forever, and a test deletes
@@ -63,13 +76,18 @@ what happened.
 
 ## Known
 
-A commander who has seen seven hexes still receives a 395 KB payload, because a masked
-world keeps every hex — that is what holds the canvas the same size for every player, so
-the maps overlay. The fix is to send the world once and patch it from the observation
-events, which the log already makes straightforward.
+**Reports are instantaneous.** Every formation reports to its superior the moment it sees
+anything, because there are no despatch riders yet. That is a stated interim rule rather
+than a leak — the reports are real, dated and attributed; they simply travel at infinite
+speed. Riders and delay are the next step, and nothing else about the model changes.
 
-A contact carries the observed unit's real id. Nothing else about the unit goes with it —
-not its name, strength, arm or corps below the intelligence grade that earns them — but
-the id is stable, so two sightings hours apart can be correlated as the same formation,
-which the rules grade as top-level intelligence. Deciding what identity a sighting should
-carry is a rules question rather than a plumbing one.
+**The whole world is sent to everybody**, which is now correct rather than wasteful, since
+the ground is public. It becomes a real cost again if terrain fog is ever turned on, and
+the fix is the same one: send the world once and patch it from the survey events.
+
+**A contact carries the observed unit's real id.** Nothing else goes with it — not its
+name, strength, arm or corps below the intelligence grade that earns them — but the id is
+stable, so two sightings hours apart can be correlated as the same formation, which the
+rules grade as top-level intelligence. Moving contacts from computed to reported, in the
+next step, is where that gets fixed: an id becomes the observer's label rather than the
+observed unit's.

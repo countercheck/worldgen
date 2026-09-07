@@ -15,6 +15,7 @@ import type { Session } from './api.js';
 
 const SESSION_KEY = 'campaign.session';
 const TOKENS_KEY = 'campaign.tokens';
+const SEATS_KEY = 'campaign.seats';
 
 /** Tokens a referee holds for the other sides, so they can look through those eyes. */
 export type HeldTokens = Record<string, string>;
@@ -25,6 +26,14 @@ interface Stored {
   readonly held: HeldTokens;
   /** The token this browser was issued, whatever it is currently viewing as. */
   readonly ownToken: string;
+  /**
+   * Who each held seat belongs to.
+   *
+   * Kept beside the tokens so the switcher can name a man before the first view has
+   * arrived, and so it still can while sitting in a seat whose own view — correctly —
+   * does not list the enemy's commanders.
+   */
+  readonly seats?: Record<string, { name: string; faction: string }>;
 }
 
 const read = <T>(key: string): T | null => {
@@ -69,7 +78,12 @@ export function loadSession(): Stored | null {
   if (fromLink !== null) {
     history.replaceState(null, '', location.pathname + location.search);
     const held = read<Record<string, HeldTokens>>(TOKENS_KEY)?.[fromLink.campaignId] ?? {};
-    const stored: Stored = { session: fromLink, held, ownToken: fromLink.token };
+    const stored: Stored = {
+      session: fromLink,
+      held,
+      ownToken: fromLink.token,
+      seats: read<Record<string, Stored['seats']>>(SEATS_KEY)?.[fromLink.campaignId] ?? {},
+    };
     write(SESSION_KEY, stored);
     return stored;
   }
@@ -82,6 +96,10 @@ export function saveSession(stored: Stored): void {
     const all = read<Record<string, HeldTokens>>(TOKENS_KEY) ?? {};
     all[stored.session.campaignId] = stored.held;
     write(TOKENS_KEY, all);
+
+    const seats = read<Record<string, Stored['seats']>>(SEATS_KEY) ?? {};
+    seats[stored.session.campaignId] = stored.seats ?? {};
+    write(SEATS_KEY, seats);
   }
 }
 

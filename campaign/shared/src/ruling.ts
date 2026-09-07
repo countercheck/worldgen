@@ -64,6 +64,11 @@ export const CODES = {
   // Hard — never overridable.
   NO_SUCH_UNIT: 'no_such_unit',
   NO_SUCH_FACTION: 'no_such_faction',
+  NO_SUCH_COMMANDER: 'no_such_commander',
+  /** A man riding with the other side's baggage, or answering to their headquarters. */
+  WRONG_FACTION: 'wrong_faction',
+  /** A loop in the chain of command: every tree walk in the engine would hang. */
+  COMMAND_CYCLE: 'command_cycle',
   DUPLICATE_ID: 'duplicate_id',
   OFF_MAP: 'off_map',
   WORLD_MISMATCH: 'world_mismatch',
