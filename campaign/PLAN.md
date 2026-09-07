@@ -14,27 +14,31 @@ despatch rider.
 | Chain of command | A tree of commanders, not a list of units |
 | Terrain fog | **Off.** The ground is fully and accurately visible to everyone |
 | What is hidden | Enemy positions, your own detached formations, despatches in transit |
+| What an order is | **Prose.** The referee reads it and sets the march |
 | A despatch's fate | **Never known to the sender.** Only an acknowledgement tells him |
 | A despatch's route | **Referee only.** See below — this one is load-bearing |
+| A despatch's delivery estimate | **Never shown.** An ETA is a distance is a position |
 | A commander's inbox | **Delivered only.** Nothing in transit toward him is visible |
 | Rider routing | Least-time path to the target's **actual** position |
 | Rider routing, overridden | The sender may insist on waypoints — around pickets, say |
 | Couriers available | **Unlimited.** Time and interception are the whole cost |
+| Contradictory orders | Despatches are dated; a later one already held wins |
 | An NPC commander's orders | **Cascade to subordinates immediately**, referee may override |
-| A unit with no new orders | Continues its last one, until it discovers something |
+| A unit with no new orders | Continues its current task, until it discovers something |
 | On discovery | Stops and asks. The referee decides |
 | Reports on contact | Automatic, and free between formations whose columns touch |
+| Who may be written to | Anyone in your own faction. **Orders only downward** |
 
 ### Why terrain fog is off
 
-It is the least interesting fog in the design. The tension the period turns on is *where
-is the enemy* and *where is my own III Corps*, not *what does the ground look like* — a
-commander in 1815 had a map. And with sight limited to the formation a commander rides
-with, terrain fog would leave him a two-hex bubble of ground and black everywhere else,
-unable to plan a march at all.
+It is the least interesting fog here. The tension the period turns on is *where is the
+enemy* and *where is my own III Corps*, not *what does the ground look like* — a commander
+in 1815 had a map. And with sight limited to the formation he rides with, terrain fog
+would leave him a two-hex bubble of ground and black everywhere else, unable to plan a
+march at all.
 
 **The machinery stays, switched off.** `terrainFog` is campaign config defaulting to
-false; `maskWorld`, the fog tags, and the Python renderers' fog handling are unchanged and
+false; `maskWorld`, the fog tags and the Python renderers' fog handling are unchanged and
 still tested in both positions. It returns with the issued map (deferred, below), as a
 switch rather than a rebuild.
 
@@ -42,6 +46,38 @@ switch rather than a rebuild.
 events keep flowing into the log. They cost almost nothing, and when the issued map
 arrives it will want the history of who surveyed what — which an event-sourced system gets
 for free if the events were written all along, and cannot reconstruct if they were not.
+
+---
+
+## The separation that everything else rests on
+
+**An order is a message. A march is a command. The referee is the bridge.**
+
+Orders are prose, so the engine executes nothing on its own. That makes the information
+layer and the physics layer two different objects, and keeping them apart is what stops
+either one distorting the other:
+
+| | **Despatch** | **Task** |
+|---|---|---|
+| What it is | Prose a commander wrote | A march the engine is running |
+| Who makes it | A commander | The referee, having read a despatch |
+| Travels by | Rider, at courier speeds | Nothing — it is not a thing in the world |
+| Can be | Intercepted, captured, lost, ignored | Interrupted by a decision point |
+| Validated by | Nobody. It is a piece of paper | `check`, like every other command |
+
+A player writes *"Move on Quatre Bras with all speed; the Emperor expects you astride the
+crossroads by noon."* The referee reads it, decides what III Corps' commander makes of it,
+and issues a march. The clock then runs that march hour by hour and halts when something
+needs a human.
+
+This is what a refereed game actually is, and it resolves several things at once. Order
+validation moves to where movement already lives, rather than existing twice. Interception
+becomes maximally interesting, because a captured despatch is *intelligence* rather than a
+coordinate dump. And "a unit with no new orders continues its last one" needs no special
+case: the task continues, and the prose is only the paper trail.
+
+The cost is real and lands on the referee, who must read every NPC commander's post and
+translate it. The console has to make that one motion rather than two — see §Step 3.
 
 ---
 
@@ -60,23 +96,24 @@ interface Commander {
   readonly unitId: string
   /** Who he answers to. The chain of command is this relation and no other. */
   readonly superiorId: string | null
-  /** Passes an arriving order straight down. True for referee-run, false for players. */
+  /** Passes an arriving despatch straight down. True for referee-run, false for players. */
   readonly autoCascade: boolean
 }
 ```
 
-Two fields carry the whole hierarchy. A commander may order anyone beneath him in the
-tree. "A human who also commands the corps" needs no special case: he is the commander of
-1re Division — `unitId` points at it — and the other divisional commanders have him as
-their `superiorId`. One man, two appointments, one record.
+Two fields carry the whole hierarchy. "A human who also commands the corps" needs no
+special case: he is the commander of 1re Division — `unitId` points at it — and the other
+divisional commanders have him as their `superiorId`. One man, two appointments, one
+record. `Unit.corps` becomes a label; the chain is derived from the tree.
 
-`Unit.corps` becomes a label rather than a structure; the chain is derived from the tree.
+He may send a message to anyone in his own faction — lateral coordination between corps
+commanders was real, and mattered enormously — but an **order** only travels downward.
 
 ### Units observe; commanders know
 
-What is seen is a property of the formation — its column, its scouts, the ground it
-covers. What is *known* is a property of the man. So observation is computed from the unit
-and recorded against its commander:
+What is seen is a property of the formation: its column, its scouts, the ground it covers.
+What is *known* is a property of the man. So observation is computed from the unit and
+recorded against its commander:
 
 ```ts
 interface CommanderKnowledge {
@@ -115,9 +152,8 @@ With terrain fog gone this is *the* fog of the game rather than one layer of thr
 ### What the tree gives away for free
 
 A commander may write past a subordinate — Napoleon did it constantly — and when he does,
-**the skipped commander does not know.** A corps commander whose division has been ordered
-away by the army commander has a stale, confidently wrong picture of his own corps, and
-nothing had to be built to make that happen.
+**the skipped commander does not know.** He holds a stale and confidently wrong picture of
+his own corps, and nothing had to be built to make that happen.
 
 The referee gains something too. Every NPC formation has a commander with a real, limited
 view, so adjudicating what III Corps does on contact is done **from III Corps' own
@@ -127,8 +163,8 @@ information** rather than from omniscience exercised with restraint.
 
 ## Step 1 — Despatches
 
-**One entity, four ledgers.** A despatch is an order, a report or an acknowledgement.
-Every one runs commander to commander; the unit is only the address.
+**One entity, four ledgers.** Every despatch runs commander to commander; the unit is only
+the address.
 
 ```ts
 interface Despatch {
@@ -137,9 +173,12 @@ interface Despatch {
   readonly from: string                  // commander id
   readonly to: string                    // commander id
   readonly sentAtHours: number
-  readonly body: Order | Report
+  readonly body: DespatchBody
   /** Waypoints the sender insists on — around a wood he thinks holds enemy pickets. */
   readonly via?: readonly Hex[]
+  /** A report being passed on. Two lags stack, which is very much the period. */
+  readonly forwardedFrom?: string
+  readonly inReplyTo?: string
   /**
    * The rider's path, least-time through `via` to the addressee's ACTUAL position.
    *
@@ -147,16 +186,26 @@ interface Despatch {
    * would be invisible and total.
    */
   readonly route: readonly Hex[]
-  readonly inReplyTo?: string
+}
+
+interface DespatchBody {
+  /** What the commander wrote. Orders are prose and nothing but. */
+  readonly text?: string
+  /** Attached by an automatic report; a hand-written one may carry them too. */
+  readonly contacts?: readonly Contact[]
+  readonly unitReport?: UnitReport
 }
 ```
 
+An order is text only. An automatic contact report is data only. A commander writing up a
+sighting himself may send both.
+
 | Ledger | Derived from | Visible to |
 |---|---|---|
-| Orders I have sent | despatches from me, kind `order` | me — never their fate or route |
-| Orders I have received | despatches to me, kind `order`, **delivered** | me |
-| Reports I have sent | despatches from me, kind `report` | me — never their fate or route |
-| Reports I have received | despatches to me, kind `report`, **delivered** | me |
+| Orders I have sent | from me, kind `order` | me — never their fate or route |
+| Orders I have received | to me, kind `order`, **delivered** | me |
+| Reports I have sent | from me, kind `report` | me — never their fate or route |
+| Reports I have received | to me, kind `report`, **delivered** | me |
 
 A commander sees his own outbox in full, because he wrote it. What he never learns is
 whether any of it arrived.
@@ -164,18 +213,27 @@ whether any of it arrived.
 ### The route is the leak
 
 Riders take the least-time path to the target's **actual** position, so the route is
-computed from ground truth. Which means **the route betrays the target's location**. Show
-a commander where his rider went and you have told him exactly where his detached corps
-is, destroying the one thing this whole design exists to model.
+computed from ground truth — which means **the route betrays where the target is.** Show a
+commander where his rider went and you have told him exactly where his detached corps is,
+destroying the one thing this design exists to model: he would never need a report again,
+he would read his own outbox.
 
-So `route` is referee-only, absolutely. A commander sees *sent 0400, to Ney, via the
-Charleroi road* — his own `via`, which he chose — and never a hex of what the rider
-actually did. The route exists server-side to resolve interception and arrival, and for no
-other purpose.
+So `route` is referee-only, absolutely. He sees *sent 0400, to Ney, via the Charleroi
+road* — his own `via`, which he chose — and never a hex of what the rider actually did.
+The route exists server-side to resolve interception and arrival, and for nothing else.
+
+**The same reasoning bans a delivery estimate.** "Expected 0700" is a distance, and a
+distance is a position. No despatch ever carries an ETA.
+
+What the *client* may do instead is compute the commander's own guess from his last report
+of that formation and label it as such: *"if they stand where they did at 0400, this
+reaches them about 0700."* Stale, possibly wrong, and honest about it. This is the first
+time the shared-engine decision from the original plan earns its keep — the client running
+the same routing code over data the commander actually holds.
 
 This is the same class of mistake as fabricating a `Unit` for an enemy contact so the map
-had something to draw: a field that has to exist for the mechanic to work, sitting one
-careless `send` away from ending the game. It gets a leakage test of its own.
+had something to draw: a field that has to exist for the mechanic to work, one careless
+`send` away from ending the game. Route and ETA each get a leakage test.
 
 ### The rule that makes it a fog-of-war mechanic
 
@@ -202,15 +260,26 @@ sees it only once delivered. A **captor** sees the body and that he took it. The
 
 With terrain fog off this is the primary thing the fog architecture protects, and the
 leakage tests move with it: assert against the serialised body that a commander's payload
-carries no undelivered despatch's fate, no despatch route, no enemy unit record, and no
-other commander's traffic.
+carries no undelivered despatch's fate, no despatch route, no ETA, no enemy unit record,
+and no other commander's traffic.
+
+### Dated orders, and arriving out of turn
+
+Every despatch carries the hour it was written. A commander who already holds a later
+order **disregards an earlier one that turns up afterwards** — correct staff practice, and
+it means a second order reliably supersedes a first even when the riders overtake each
+other.
+
+The comparison is on the date alone, which is all the engine can do with prose, and all it
+needs to do. The interesting case is not a stale order but the one that arrives with
+nothing to compare it against.
 
 ### Interception now carries the whole weight
 
 Riders are unlimited, they always find their man, and NPC orders cascade without delay.
 Travel time and interception are therefore the *only* things that make command imperfect —
-so if the game turns out to feel too reliable, the interception rules are the dial, not
-the courier economy. Worth knowing before it is tuned in the wrong place.
+so if the game feels too reliable, the interception rules are the dial, not the courier
+economy. Worth knowing before it is tuned in the wrong place.
 
 ### Contacts become reported, not computed
 
@@ -228,24 +297,26 @@ unit's engine id, so two sightings can no longer be correlated for free.
 Orders and reports between two commanders whose **formations touch** are instantaneous and
 cannot be intercepted. Touching means any hex of one `occupied()` set is adjacent to any
 hex of the other — generous, and right, because a rider covers intermingled baggage in
-minutes.
-
-It gives concentration a mechanical reward, which is the tension the period turns on:
-concentrate and command well, disperse and forage well.
+minutes. It gives concentration a mechanical reward, which is the tension the period turns
+on: concentrate and command well, disperse and forage well.
 
 ### Cascading
 
-An NPC commander passes an arriving order straight down to his subordinates, immediately,
-as fresh despatches with fresh riders — so the copies can still be intercepted
-individually even though the decision cost nothing. The order passes down verbatim; a
-referee who wants his divisions doing different things writes them himself.
-
+An NPC commander passes an arriving despatch straight down to his subordinates,
+immediately, as fresh despatches with fresh riders — so the copies can still be
+intercepted individually even though the decision cost nothing. The text passes down
+verbatim; a referee who wants his divisions doing different things writes them himself.
 `autoCascade` is false for player-held commanders, who write their own.
 
-### Decision points
+### Tasks and decision points
 
-A unit with no new orders continues its last one. But on **discovering something** it
-stops and asks, and the referee decides:
+A task is what the engine is actually doing with a formation: a march to a destination,
+with optional waypoints. **A destination, not a path** — the referee sets it knowing where
+the formation really is, but the same rule protects a commander's own planning, where a
+path drawn from a wrongly-believed start is nonsense. It is also what you actually wrote
+in 1815: you told a corps where to go, not which fields to cross.
+
+A formation continues its task until it **discovers something**, and then stops and asks:
 
 ```ts
 interface PendingDecision {
@@ -254,7 +325,7 @@ interface PendingDecision {
   readonly atHours: number
   readonly trigger:
     | 'enemy_contact' | 'crossing_impassable' | 'gunfire_heard'
-    | 'objective_reached' | 'order_arrived' | 'out_of_provisions' | 'attacked'
+    | 'objective_reached' | 'despatch_arrived' | 'out_of_provisions' | 'attacked'
   readonly context: unknown
 }
 ```
@@ -262,41 +333,69 @@ interface PendingDecision {
 Raised against the **commander**, not the unit, because deciding is something a man does
 and the referee should decide from that man's information. Triggers are config-listed.
 
-The scheduler's primary control becomes **advance until something needs a human** — the
-clock runs forward and halts at the first decision, which is how a refereed game runs.
-
-This is also the hook for sub-commander personalities later: a personality is a policy
-that resolves some decisions without asking, and it drops in exactly here.
+The scheduler's primary control is **advance until something needs a human** — the clock
+runs forward and halts at the first decision. This is also the hook for sub-commander
+personalities later: a personality is a policy that resolves some decisions without
+asking, and it drops in exactly here.
 
 ---
 
-## Step 2 — The despatch book
+## Step 2 — The commander's interface
 
-The client's centre of gravity moves. With sight limited to the formation a commander
-rides with, the map shows accurate ground and almost nothing on it, and the **despatch
-book is the primary interface**.
+Two jobs: write despatches, and read the post. With orders as prose, the composer is
+small — a text box, an addressee, and one route override — and almost all the design
+effort belongs in the reading.
 
-The current console has that backwards — map centre stage, sidebar for detail — right for
-a referee looking at ground truth and wrong for a commander. The referee console keeps the
-current shape, plus the decision queue.
+### Writing
 
-What a commander's page must answer at a glance:
+- **To**: any commander in my faction; the tree marks which of them I may *order* rather
+  than merely write to.
+- **Text**: prose. The whole content of an order.
+- **Send my rider via…**: optional waypoints, chosen on the map from my own knowledge.
+  Distinct in wording and interaction from anything about where a formation should march —
+  these are two unrelated routes and a UI that blurs them will be misread.
+- **My estimate**: computed client-side from my last report of that formation, labelled as
+  the guess it is. Never a server figure.
 
-- Every formation beneath me, where I last heard it was, and **how long ago that was**
-- Every order I have sent, to whom, at what hour, and whether it has been acknowledged
-- Every report I have received, from whom, and **what hour it describes** rather than the
-  hour it arrived — a report that took six hours to reach me is telling me about 0400
-- What my own formation can see right now
+### Reading
 
-Age is the thing to draw loudly. Every fact on a commander's screen carries an hour, and
-the gap between that hour and the clock is now the whole of the fog.
+- **The hour it describes, not the hour it arrived**, shown first. A report that took six
+  hours is telling me about 0400, and drawing the arrival time loudly would be a lie about
+  what I know.
+- **Age everywhere.** Every fact on the page carries an hour, and the gap between it and
+  the clock is now the whole of the fog.
+- **Acknowledge**, one click. It is the only feedback channel that exists — the sole way a
+  sender ever learns anything arrived.
+- **Forward**, about as cheap. Passing a sighting to a peer or superior is how Grouchy's
+  despatches worked, and a forwarded report stacks two lags.
+- **Superseded orders marked**, not hidden. An order that arrived after a later one is
+  disregarded, and seeing that happen is half of understanding why the corps did what it
+  did.
+
+### The formations panel
+
+Every formation beneath me, where I last heard it was, and how long ago. This is the piece
+that makes the model legible: five rows, each with an hour, most of them old.
+
+---
+
+## Step 3 — The referee's console
+
+The referee's cost under prose orders is reading everyone's post and turning it into
+marches, so the console has to make that **one motion rather than two**: an arriving
+despatch and the control that sets the addressee's task live on the same screen, with the
+formation's own view beside them.
+
+The current console — map centre stage, sidebar for detail — is right for this and stays.
+It gains the decision queue, the despatch log, and the ability to sit in any commander's
+seat, which the role switcher already does in shape.
 
 ---
 
 ## Deferred: the issued map
 
 Kept because the thinking is done and only the timing changed. Terrain fog returns with
-it, as `terrainFog: true` plus the machinery below.
+it, as `terrainFog: true`.
 
 **Fog becomes doubt rather than darkness.** Three states replace two: **known** (ground
 truth, surveyed by a formation whose report has reached you), **mapped** (your issued
@@ -327,9 +426,10 @@ decision queue from step 1.
 
 1. **Commanders as entities and roles; knowledge per commander; terrain fog off.**
    `recon.ts`, `state.ts`, `observe.ts`, `view.ts`, the `roles` table, join links.
-2. **Despatches, orders, reports, decision points, the scheduler.**
-3. **The despatch book**, and the referee's decision queue.
-4. *Deferred:* issued maps, their falsification, and correction by recce.
+2. **Despatches and riders; tasks; decision points; the scheduler.**
+3. **The commander's interface**: composer, inbox, formations panel.
+4. **The referee's console**: decision queue, despatch log, seat-switching.
+5. *Deferred:* issued maps, their falsification, and correction by recce.
 
 Also deferred: combat, fatigue accumulation, provisions and equipment consumption, depots
 and convoys, terrain muting of gunfire, sub-commander personalities.
