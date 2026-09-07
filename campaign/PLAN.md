@@ -424,12 +424,38 @@ decision queue from step 1.
 
 ## Order of work
 
-1. **Commanders as entities and roles; knowledge per commander; terrain fog off.**
-   `recon.ts`, `state.ts`, `observe.ts`, `view.ts`, the `roles` table, join links.
-2. **Despatches and riders; tasks; decision points; the scheduler.**
+1. ~~**Commanders as entities and roles; knowledge per commander; terrain fog off.**~~
+   Done. `recon.ts`, `state.ts`, `observe.ts`, `view.ts`, the `roles` table, join links.
+2. ~~**Despatches and riders; tasks; decision points; the scheduler.**~~ Done.
+   `despatch.ts`, `task.ts`, `scheduler.ts`; four new commands; `sent`/`received`/
+   `captured` on the view, with `route` and `fate` pinned out of it by leakage tests.
 3. **The commander's interface**: composer, inbox, formations panel.
 4. **The referee's console**: decision queue, despatch log, seat-switching.
 5. *Deferred:* issued maps, their falsification, and correction by recce.
+
+### What step 2 settled that the design had left open
+
+- **A rider re-plans when his man has moved.** The route is laid to where the addressee
+  stood when the rider left; reaching the end and finding the corps gone, he routes again
+  from where he is. That is what makes "riders always find their man" a rule rather than
+  an approximation, and the cost is his time — which is the thing meant to hurt.
+- **One event per rider per advance, not per hex.** A courier covers ten hexes an hour, so
+  a day's advance would otherwise write two hundred events saying "still riding".
+  `despatch_progressed` carries his position and the path he is on, and is written when
+  the clock stops or when he re-plans.
+- **The clock only moves when something happens.** Ticks are `cfg.tickHours`; a quiet tick
+  emits nothing, so events are stamped at the hour they occurred rather than the hour the
+  referee clicked, and a twelve-hour advance through empty country costs one event.
+- **A halt truncates the clock only when the referee asked for one.** A decision raised
+  during a plain `advance 12h` goes into the queue and the clock runs on. Conflating those
+  was a real bug, caught by asserting that six one-hour advances land where one six-hour
+  advance does.
+- **The sender is whoever holds the token**, never the `from` in the payload. A forged
+  *report* would let anyone feed a commander false intelligence signed by his own
+  subordinate, which is worse than forging an order.
+- **A courier crosses a major river in an hour** rather than being stopped by it. Not from
+  the rules, which are silent; a communication system in which one river ends
+  correspondence altogether is not the period.
 
 Also deferred: combat, fatigue accumulation, provisions and equipment consumption, depots
 and convoys, terrain muting of gunfire, sub-commander personalities.

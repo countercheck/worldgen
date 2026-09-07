@@ -9,6 +9,7 @@
  * quotation, the comment says so.
  */
 
+import type { DecisionTrigger } from './task.js';
 import type { LandCover } from './world.js';
 import type { Trait, UnitKind } from './unit.js';
 
@@ -138,6 +139,42 @@ export interface CampaignConfig {
   readonly interceptDiceCavalry: number;
   readonly interceptDiceScout: number;
   readonly interceptDiceDivision: number;
+  /** The die every rider throws when he passes an enemy column, before modifiers. */
+  readonly interceptDiceBase: number;
+  /** Ones that lose the rider, and ones that lose the paper as well. */
+  readonly interceptLoseOnes: number;
+  readonly interceptCaptureOnes: number;
+  /**
+   * What a river costs a lone rider where it would stop a division.
+   *
+   * A courier fords, finds the boat, or swims the horse. Not from the rules, which do not
+   * discuss it; a courier system in which one river ends communication altogether is not
+   * the period.
+   */
+  readonly courierMajorCrossingHours: number;
+
+  // ---- the scheduler --------------------------------------------------
+  /**
+   * Which discoveries halt an advance and put a decision in the referee's queue.
+   *
+   * A dial rather than a constant because the cost of this game falls on the referee: a
+   * large campaign should be able to march through a distant sighting and stop only for
+   * what its referee actually wants to adjudicate.
+   *
+   * `gunfire_heard` is out by default — thirty kilometres is a wide net and it would halt
+   * every advance on a day anybody was fighting.
+   */
+  readonly haltTriggers: readonly DecisionTrigger[];
+  /**
+   * The clock's granularity while advancing, in hours.
+   *
+   * Riders and columns are stepped hex by hex, so this only bounds how finely two events
+   * in the same quarter-hour are ordered against each other. Smaller is more faithful and
+   * slower; a quarter of an hour is well under the time anything takes to cross a hex.
+   */
+  readonly tickHours: number;
+  /** A ceiling on one advance, so a mistyped `advance 1000` cannot lock the server up. */
+  readonly maxAdvanceHours: number;
 }
 
 export const DEFAULT_CONFIG: CampaignConfig = {
@@ -165,6 +202,19 @@ export const DEFAULT_CONFIG: CampaignConfig = {
   interceptDiceCavalry: 1,
   interceptDiceScout: 1,
   interceptDiceDivision: 1,
+  interceptDiceBase: 1,
+  interceptLoseOnes: 1,
+  interceptCaptureOnes: 2,
+  courierMajorCrossingHours: 1,
+
+  haltTriggers: [
+    'enemy_contact',
+    'crossing_impassable',
+    'objective_reached',
+    'despatch_arrived',
+  ],
+  tickHours: 0.25,
+  maxAdvanceHours: 24 * 14,
 };
 
 /** A campaign's overrides, merged onto the defaults. */

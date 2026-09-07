@@ -18,8 +18,11 @@
  */
 
 import type { Commander } from './commander.js';
+import type { Despatch } from './despatch.js';
+import type { Grade } from './config.js';
 import type { Hex } from './hex.js';
 import type { Strictness, Violation } from './ruling.js';
+import type { PendingDecision, Task } from './task.js';
 import type { Experience, Formation, Trait, Unit, UnitKind } from './unit.js';
 
 export const CAMPAIGN_SCHEMA_VERSION = '1.0';
@@ -102,6 +105,71 @@ export type EventPayload =
       readonly kind: 'unit_stat_set';
       readonly unitId: string;
       readonly changes: UnitStatChanges;
+    }
+  // ---- despatches -------------------------------------------------------
+  /** A commander wrote something and put a rider on the road with it. */
+  | { readonly kind: 'despatch_sent'; readonly despatch: Despatch }
+  /**
+   * Where a rider had got to when the clock stopped.
+   *
+   * One of these per rider per advance rather than one per hex: a courier covers ten
+   * hexes an hour, and a day's advance would otherwise write two hundred events saying
+   * nothing but "still riding". The route travels with it because a rider re-routes when
+   * his man moves, and the log has to carry the path he actually took.
+   */
+  | {
+      readonly kind: 'despatch_progressed';
+      readonly despatchId: string;
+      readonly progress: number;
+      readonly route: readonly Hex[];
+    }
+  | {
+      readonly kind: 'despatch_delivered';
+      readonly despatchId: string;
+      readonly atHours: number;
+    }
+  /**
+   * A rider was stopped. `outcome` says whether the paper was merely lost or was read.
+   *
+   * The dice are in the event, so a referee adjudicating a disputed interception can show
+   * them, and so replay reproduces the campaign without re-rolling anything.
+   */
+  | {
+      readonly kind: 'despatch_stopped';
+      readonly despatchId: string;
+      /** The faction whose column the rider tried to pass. */
+      readonly by: string;
+      readonly atHours: number;
+      readonly at: Hex;
+      readonly dice: readonly number[];
+      readonly outcome: 'lost' | 'captured';
+    }
+  // ---- tasks and the clock ---------------------------------------------
+  /** The referee, having read a despatch, set a formation marching. */
+  | { readonly kind: 'task_set'; readonly task: Task }
+  | { readonly kind: 'task_cleared'; readonly unitId: string }
+  /** The head of a column entered a hex. The tail follows along `column`. */
+  | {
+      readonly kind: 'unit_marched';
+      readonly unitId: string;
+      readonly to: Hex;
+      readonly atHours: number;
+      readonly grade: Grade;
+      readonly stepHours: number;
+      /** The next hex of the march, and when the head reaches it. Null on arrival. */
+      readonly nextHex: Hex | null;
+      readonly arrivesAtHours: number | null;
+    }
+  | { readonly kind: 'task_completed'; readonly unitId: string; readonly atHours: number }
+  /** Midnight. Every unit's day of marching starts again. */
+  | { readonly kind: 'day_rolled'; readonly toHours: number }
+  // ---- decisions --------------------------------------------------------
+  | { readonly kind: 'decision_raised'; readonly decision: PendingDecision }
+  | {
+      readonly kind: 'decision_resolved';
+      readonly decisionId: string;
+      readonly atHours: number;
+      readonly note: string | null;
     };
 
 /** The mutable stats a referee may set directly. Deliberately not every field. */

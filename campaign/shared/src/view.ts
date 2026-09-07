@@ -33,11 +33,27 @@
 
 import { formationsUnder, subordinates, type Commander } from './commander.js';
 import { DEFAULT_CONFIG, type CampaignConfig } from './config.js';
+import {
+  addresseeCopy,
+  captorCopy,
+  isSuperseded,
+  senderCopy,
+  type CapturedDespatch,
+  type Despatch,
+  type ReceivedDespatch,
+  type SentDespatch,
+} from './despatch.js';
 import type { Faction } from './events.js';
 import { key, type Hex, type HexKey } from './hex.js';
 import { maskWorld } from './mask.js';
 import { commanderVisible, spottedUnder, type Contact } from './recon.js';
-import type { CampaignState } from './state.js';
+import {
+  capturedBy,
+  despatchesFrom,
+  inboxOf,
+  type CampaignState,
+} from './state.js';
+import type { PendingDecision, Task } from './task.js';
 import { echelonOf, type Echelon, type Formation, type Unit, type UnitKind } from './unit.js';
 import { parseWorld, type World } from './world.js';
 
@@ -118,6 +134,31 @@ export interface ClientView {
   readonly surveyed: readonly HexKey[];
   /** What he can see from where he stands, right now. */
   readonly visible: readonly HexKey[];
+
+  // ---- the post -------------------------------------------------------
+  /**
+   * What he has written, as he may see it: no route, and no fate.
+   *
+   * The absence of a fate is the mechanic rather than an omission. A commander who could
+   * see that his rider had been taken would know his order never arrived, and no
+   * commander in 1815 knew that without being told. Empty for a referee, who has the
+   * despatches themselves.
+   */
+  readonly sent: readonly SentDespatch[];
+  /** What is actually in his hand. Delivered only — nothing in transit toward him. */
+  readonly received: readonly ReceivedDespatch[];
+  /** Enemy paper his side has taken off a rider. */
+  readonly captured: readonly CapturedDespatch[];
+  /** What the formation he rides with is doing. He set out on it; he knows. */
+  readonly task: Task | null;
+
+  // ---- the referee's, and only his ------------------------------------
+  /** Every despatch in the campaign, routes and fates and all. Empty for a commander. */
+  readonly despatches: readonly Despatch[];
+  /** The queue of things somebody has to decide. Empty for a commander. */
+  readonly decisions: readonly PendingDecision[];
+  /** What every formation is doing. Empty for a commander, who has `task`. */
+  readonly tasks: readonly Task[];
 }
 
 const publicFaction = (f: Faction): PublicFaction => ({
@@ -202,6 +243,17 @@ export function viewFor(input: ViewInput, role: Role): ClientView {
       contacts: [],
       surveyed: [],
       visible: [],
+      sent: [],
+      received: [],
+      captured: [],
+      task: null,
+      despatches: [...state.despatches.values()].sort(
+        (a, b) => a.sentAtHours - b.sentAtHours || (a.id < b.id ? -1 : 1),
+      ),
+      decisions: [...state.decisions.values()].sort(
+        (a, b) => a.atHours - b.atHours || (a.id < b.id ? -1 : 1),
+      ),
+      tasks: [...state.tasks.values()].sort((a, b) => (a.unitId < b.unitId ? -1 : 1)),
     };
   }
 
@@ -224,6 +276,13 @@ export function viewFor(input: ViewInput, role: Role): ClientView {
       contacts: [],
       surveyed: [],
       visible: [],
+      sent: [],
+      received: [],
+      captured: [],
+      task: null,
+      despatches: [],
+      decisions: [],
+      tasks: [],
     };
   }
 
@@ -243,6 +302,16 @@ export function viewFor(input: ViewInput, role: Role): ClientView {
     a.unitId < b.unitId ? -1 : 1,
   );
 
+  // His outbox, stripped by construction. An acknowledgement that has come back is the
+  // one and only thing he ever learns about a despatch's fate, so it is computed from
+  // his own inbox rather than from the despatch he sent.
+  const held = inboxOf(state, role.id);
+  const acknowledged = new Set(
+    held.filter((d) => d.kind === 'acknowledgement').map((d) => d.inReplyTo),
+  );
+  const sent = despatchesFrom(state, role.id).map((d) => senderCopy(d, acknowledged.has(d.id)));
+  const received = held.map((d) => addresseeCopy(d, isSuperseded(d, held)));
+
   return {
     role: 'commander',
     commander: publicCommander(me),
@@ -260,6 +329,13 @@ export function viewFor(input: ViewInput, role: Role): ClientView {
     contacts,
     surveyed: [...surveyed].sort(),
     visible: [...visible].sort(),
+    sent,
+    received,
+    captured: capturedBy(state, me.faction).map(captorCopy),
+    task: state.tasks.get(me.unitId) ?? null,
+    despatches: [],
+    decisions: [],
+    tasks: [],
   };
 }
 
@@ -334,6 +410,39 @@ export function assertMasked(view: ClientView, cfg: CampaignConfig = DEFAULT_CON
   for (const c of view.commanders) {
     if (faction !== null && c.faction !== faction) {
       throw new Error(`leak: ${c.id} commands for ${c.faction}, not ${faction}`);
+    }
+  }
+
+  // The despatch record itself carries the rider's route and the paper's fate, and both
+  // are ground truth about where a formation is and what happened out of sight. A
+  // commander is sent the ledgers instead, and never the record.
+  if (view.despatches.length > 0) {
+    throw new Error(`leak: a commander was sent ${view.despatches.length} raw despatches`);
+  }
+  if (view.decisions.length > 0 || view.tasks.length > 0) {
+    throw new Error("leak: the referee's queue was sent to a commander");
+  }
+
+  // Belt and braces over `senderCopy` and `addresseeCopy`. Those build by construction
+  // rather than by deletion, so this should be unreachable — which is exactly why it is
+  // worth asserting, because the day it is reachable nobody will be watching.
+  for (const d of [...view.sent, ...view.received] as unknown as Record<string, unknown>[]) {
+    for (const forbidden of ['route', 'fate', 'progress', 'etaHours']) {
+      if (forbidden in d) {
+        throw new Error(`leak: despatch ${String(d['id'])} carries ${forbidden}`);
+      }
+    }
+  }
+
+  for (const d of view.received) {
+    if (!Number.isFinite(d.receivedAtHours)) {
+      throw new Error(`leak: despatch ${d.id} is in a commander's hand but never arrived`);
+    }
+  }
+
+  for (const d of view.captured) {
+    if (faction !== null && d.faction === faction) {
+      throw new Error(`leak: ${d.id} is ${faction}'s own paper, not a capture`);
     }
   }
 

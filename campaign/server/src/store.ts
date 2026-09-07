@@ -25,7 +25,10 @@ import {
   type CampaignState,
   type Commander,
   type Command,
+  type Despatch,
   type LoggedEvent,
+  type PendingDecision,
+  type Task,
   commanderRole,
   REFEREE_ROLE,
   type Role,
@@ -263,6 +266,7 @@ export class CampaignStore {
     let state = this.state(campaign.id);
     const outcome = apply(command, state, campaign.world, campaign.strictness, {
       actor,
+      cfg: this.cfg,
       ...(opts.force !== undefined ? { force: opts.force } : {}),
       ...(opts.strictness !== undefined ? { strictness: opts.strictness } : {}),
     });
@@ -356,6 +360,9 @@ export function serialise(state: CampaignState): string {
       surveyed: [...k.surveyed],
       lastSurveyedHours: [...k.lastSurveyedHours],
     })),
+    despatches: [...state.despatches.values()],
+    tasks: [...state.tasks.values()],
+    decisions: [...state.decisions.values()],
   });
 }
 
@@ -374,6 +381,9 @@ export function deserialise(json: string): CampaignState {
       surveyed: string[];
       lastSurveyedHours: [string, number][];
     }[];
+    despatches?: Despatch[];
+    tasks?: Task[];
+    decisions?: PendingDecision[];
   };
 
   return {
@@ -397,5 +407,10 @@ export function deserialise(json: string): CampaignState {
         },
       ]),
     ),
+    // Tolerated as absent for the same reason as `commanders`: a snapshot written before
+    // riders existed still folds, and the events after it rebuild what it lacks.
+    despatches: new Map((d.despatches ?? []).map((x) => [x.id, x])),
+    tasks: new Map((d.tasks ?? []).map((t) => [t.unitId, t])),
+    decisions: new Map((d.decisions ?? []).map((k) => [k.id, k])),
   };
 }

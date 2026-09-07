@@ -70,6 +70,8 @@ export const CODES = {
   /** A loop in the chain of command: every tree walk in the engine would hang. */
   COMMAND_CYCLE: 'command_cycle',
   DUPLICATE_ID: 'duplicate_id',
+  NO_SUCH_DESPATCH: 'no_such_despatch',
+  NO_SUCH_DECISION: 'no_such_decision',
   OFF_MAP: 'off_map',
   WORLD_MISMATCH: 'world_mismatch',
   TIME_REVERSED: 'time_reversed',
@@ -82,7 +84,10 @@ export const CODES = {
   MARCH_LIMIT: 'march_limit',
   NIGHT_MOVE: 'night_move',
   NOT_YOUR_UNIT: 'not_your_unit',
+  /** An order sent sideways or upward. A message, in other words, dressed as an order. */
+  NOT_IN_COMMAND: 'not_in_command',
   NO_COURIER_ROUTE: 'no_courier_route',
+  NO_MARCH_ROUTE: 'no_march_route',
   UNIT_TOO_SMALL: 'unit_too_small',
 } as const;
 

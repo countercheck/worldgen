@@ -19,7 +19,12 @@
  * the first place. Both routes are logged.
  */
 
-import { type Commander, wouldCycle } from './commander.js';
+import { type Commander, mayOrder, mayWriteTo, wouldCycle } from './commander.js';
+import { DEFAULT_CONFIG, type CampaignConfig } from './config.js';
+import { planRide, type DespatchBody, type DespatchKind } from './despatch.js';
+import { planMarch, hoursToEnter } from './movement.js';
+import { advance, despatchNow } from './scheduler.js';
+import type { Task } from './task.js';
 import type { EventPayload, Faction, LoggedEvent, UnitStatChanges, WorldRef } from './events.js';
 import { byCommander, REFEREE, type Actor } from './events.js';
 import { key, type Hex } from './hex.js';
@@ -57,7 +62,35 @@ export type Command =
     }
   | { readonly kind: 'add_unit'; readonly unit: Unit }
   | { readonly kind: 'remove_unit'; readonly unitId: string }
-  | { readonly kind: 'advance_clock'; readonly hours: number }
+  | {
+      readonly kind: 'advance_clock';
+      readonly hours: number;
+      /** Stop at the first discovery a referee wants to see, rather than at the hour. */
+      readonly untilDecision?: boolean;
+    }
+  /** The one command a commander issues himself. Everything else is the referee's. */
+  | {
+      readonly kind: 'send_despatch';
+      readonly from: string;
+      readonly to: string;
+      readonly despatchKind: DespatchKind;
+      readonly body: DespatchBody;
+      /** Waypoints the sender insists his rider takes — around pickets, say. */
+      readonly via?: readonly Hex[];
+      readonly inReplyTo?: string;
+      readonly forwardedFrom?: string;
+    }
+  /** The referee, having read a despatch, sets a formation marching. */
+  | {
+      readonly kind: 'set_task';
+      readonly unitId: string;
+      readonly destination: Hex;
+      readonly via?: readonly Hex[];
+      /** The despatch he was reading. The paper trail from prose to march. */
+      readonly fromDespatchId?: string;
+    }
+  | { readonly kind: 'clear_task'; readonly unitId: string }
+  | { readonly kind: 'resolve_decision'; readonly decisionId: string; readonly note?: string }
   | { readonly kind: 'teleport_unit'; readonly unitId: string; readonly column: readonly Hex[] }
   | { readonly kind: 'reveal'; readonly commanderId: string; readonly coords: readonly Hex[] }
   | { readonly kind: 'conceal'; readonly commanderId: string; readonly coords: readonly Hex[] }
@@ -84,6 +117,11 @@ const REFEREE_ONLY: ReadonlySet<CommandKind> = new Set([
   'reveal',
   'conceal',
   'set_unit_stats',
+  // Tasks are the referee's, always. A commander writes prose; turning prose into a
+  // march is the adjudication this whole design exists to keep in human hands.
+  'set_task',
+  'clear_task',
+  'resolve_decision',
 ]);
 
 export const isRefereeCommand = (c: Command): boolean => REFEREE_ONLY.has(c.kind);
@@ -94,6 +132,8 @@ export interface ApplyOptions {
   readonly force?: boolean;
   /** Override the campaign's strictness for this one command. */
   readonly strictness?: Strictness;
+  /** The campaign's tuning. Routing, riding and the clock all need it. */
+  readonly cfg?: CampaignConfig;
 }
 
 export interface Outcome {
@@ -112,7 +152,12 @@ const onMap = (world: World, c: Hex): boolean => hexAt(world, c) !== undefined;
  * Pure. It is given the state and world and returns findings; it holds no references to
  * anything it could mutate, and the tests deep-freeze both arguments to prove it.
  */
-export function check(cmd: Command, state: CampaignState, world: World): Violation[] {
+export function check(
+  cmd: Command,
+  state: CampaignState,
+  world: World,
+  cfg: CampaignConfig = DEFAULT_CONFIG,
+): Violation[] {
   const v: Violation[] = [];
 
   const requireUnit = (id: string): Unit | undefined => {
@@ -307,6 +352,91 @@ export function check(cmd: Command, state: CampaignState, world: World): Violati
       }
       break;
     }
+
+    case 'send_despatch': {
+      const from = requireCommander(cmd.from);
+      const to = requireCommander(cmd.to);
+      requireOnMap(cmd.via ?? [], 'waypoint');
+
+      const empty =
+        (cmd.body.text ?? '').trim() === '' &&
+        (cmd.body.contacts ?? []).length === 0 &&
+        cmd.body.unitReport === undefined;
+      if (empty) {
+        v.push(hard(CODES.MALFORMED, 'a despatch with nothing written on it is not a despatch'));
+      }
+
+      if (from !== undefined && to !== undefined) {
+        // Hard: writing to the other side is not a despatch. If it ever becomes a
+        // mechanic — a summons to surrender, a parley — it will be a different one with
+        // its own rules, and letting it through here would produce state neither the
+        // inbox nor the fog knows how to describe.
+        if (!mayWriteTo(state, cmd.from, cmd.to)) {
+          v.push(
+            hard(
+              CODES.WRONG_FACTION,
+              `${cmd.from} cannot write to ${cmd.to}`,
+            ),
+          );
+        } else if (cmd.despatchKind === 'order' && !mayOrder(state, cmd.from, cmd.to)) {
+          // Soft: orders travel downward, but a referee reconstructing a moment where
+          // one marshal did give another instructions should be able to say so.
+          v.push(
+            soft(
+              CODES.NOT_IN_COMMAND,
+              `${cmd.to} does not answer to ${cmd.from}; that is a message, not an order`,
+            ),
+          );
+        }
+
+        const fromUnit = state.units.get(from.unitId);
+        const toUnit = state.units.get(to.unitId);
+        const origin = fromUnit?.column[0];
+        const destination = toUnit?.column[0];
+
+        if (origin === undefined || destination === undefined) {
+          v.push(hard(CODES.NO_SUCH_UNIT, 'a despatch needs a formation at both ends'));
+        } else if (planRide(world, cfg, origin, destination, cmd.via ?? []) === null) {
+          v.push(
+            soft(
+              CODES.NO_COURIER_ROUTE,
+              `no rider can get from ${key(origin)} to ${key(destination)} that way`,
+            ),
+          );
+        }
+      }
+      break;
+    }
+
+    case 'set_task': {
+      const unit = requireUnit(cmd.unitId);
+      requireOnMap([cmd.destination, ...(cmd.via ?? [])], 'destination');
+      if (unit !== undefined && onMap(world, cmd.destination)) {
+        // Soft, and checked against the real ground: a referee ordering a march to the
+        // far bank of an unbridged river should be told, and should still be able to
+        // order it — the column will discover the problem where it stands, which is the
+        // point.
+        if (planMarch(world, cfg, unit, cmd.destination) === null) {
+          v.push(
+            soft(
+              CODES.NO_MARCH_ROUTE,
+              `${cmd.unitId} cannot reach ${key(cmd.destination)} by any route`,
+            ),
+          );
+        }
+      }
+      break;
+    }
+
+    case 'clear_task':
+      requireUnit(cmd.unitId);
+      break;
+
+    case 'resolve_decision':
+      if (!state.decisions.has(cmd.decisionId)) {
+        v.push(hard(CODES.NO_SUCH_DECISION, `there is no decision ${cmd.decisionId}`));
+      }
+      break;
   }
 
   return v;
@@ -322,8 +452,9 @@ export function check(cmd: Command, state: CampaignState, world: World): Violati
 export function decide(
   cmd: Command,
   state: CampaignState,
-  _world: World,
-  _rng: Rng,
+  world: World,
+  rng: Rng,
+  cfg: CampaignConfig = DEFAULT_CONFIG,
 ): EventPayload[] {
   switch (cmd.kind) {
     case 'create_campaign':
@@ -363,7 +494,65 @@ export function decide(
       return [{ kind: 'unit_removed', unitId: cmd.unitId }];
 
     case 'advance_clock':
-      return [{ kind: 'clock_advanced', toHours: state.clockHours + cmd.hours }];
+      // Not a single event any more. Advancing the clock is the campaign happening:
+      // columns march, riders ride, and the whole of it comes back as the facts it
+      // produced, in the order it produced them.
+      return [
+        ...advance(state, world, cfg, rng, {
+          hours: cmd.hours,
+          ...(cmd.untilDecision !== undefined ? { untilDecision: cmd.untilDecision } : {}),
+        }).payloads,
+      ];
+
+    case 'send_despatch':
+      return [
+        ...despatchNow(state, world, cfg, rng, {
+          from: cmd.from,
+          to: cmd.to,
+          kind: cmd.despatchKind,
+          body: cmd.body,
+          ...(cmd.via !== undefined ? { via: cmd.via } : {}),
+          ...(cmd.inReplyTo !== undefined ? { inReplyTo: cmd.inReplyTo } : {}),
+          ...(cmd.forwardedFrom !== undefined ? { forwardedFrom: cmd.forwardedFrom } : {}),
+        }),
+      ];
+
+    case 'set_task': {
+      const unit = state.units.get(cmd.unitId);
+      const head = unit?.column[0];
+      const path = unit === undefined ? null : planMarch(world, cfg, unit, cmd.destination);
+      const next = path?.[1];
+
+      const task: Task = {
+        unitId: cmd.unitId,
+        destination: cmd.destination,
+        via: cmd.via ?? [],
+        setAtHours: state.clockHours,
+        fromDespatchId: cmd.fromDespatchId ?? null,
+        nextHex: next ?? null,
+        arrivesAtHours:
+          next === undefined || unit === undefined || head === undefined
+            ? null
+            : state.clockHours + hoursToEnter(world, cfg, unit, head, next),
+        // A march to where the column already stands is over before it starts, which is
+        // a legitimate thing for a referee to order and should not leave a task running.
+        complete: next === undefined,
+      };
+      return [{ kind: 'task_set', task }];
+    }
+
+    case 'clear_task':
+      return [{ kind: 'task_cleared', unitId: cmd.unitId }];
+
+    case 'resolve_decision':
+      return [
+        {
+          kind: 'decision_resolved',
+          decisionId: cmd.decisionId,
+          atHours: state.clockHours,
+          note: cmd.note ?? null,
+        },
+      ];
 
     case 'teleport_unit':
       return [{ kind: 'unit_teleported', unitId: cmd.unitId, column: cmd.column }];
@@ -396,14 +585,16 @@ export function apply(
   const forced = opts.force ?? false;
   const actor = opts.actor ?? REFEREE;
 
-  const violations = check(cmd, state, world);
+  const cfg = opts.cfg ?? DEFAULT_CONFIG;
+
+  const violations = check(cmd, state, world, cfg);
   if (refuses(violations, effective, forced)) {
     return { ok: false, state, events: [], violations };
   }
 
   const bent = bypassed(violations, effective, forced);
   const rng = rngFor(state.seed, state.nextSeq);
-  const payloads = decide(cmd, state, world, rng);
+  const payloads = decide(cmd, state, world, rng, cfg);
 
   let next = state;
   const events: LoggedEvent[] = [];

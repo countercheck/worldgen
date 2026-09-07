@@ -235,14 +235,22 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
       return reply.code(400).send({ error: 'a command is required' });
     }
 
-    // Every command in this build is a referee command — a commander's despatches arrive
-    // with the courier system, and are not engine commands at all. Rejecting here rather
-    // than in `check` keeps the engine free of any notion of who is connected.
+    // A commander may do exactly one thing: write. Everything else — tasks, the clock,
+    // the order of battle — is the referee's, and rejecting it here rather than in
+    // `check` keeps the engine free of any notion of who is connected.
+    let command = body.command;
     if (auth.role.kind !== 'referee') {
-      return reply.code(403).send({ error: 'only the referee may issue commands' });
+      if (command.kind !== 'send_despatch') {
+        return reply.code(403).send({ error: 'a commander may only send despatches' });
+      }
+      // The sender is who the token says he is, never who the payload claims. Trusting
+      // `from` would let anyone holding any seat write in another man's name, which is
+      // both forgery and — since a forged report would be believed — a way to feed the
+      // enemy's commander false intelligence signed by his own subordinate.
+      command = { ...command, from: auth.role.id };
     }
 
-    const result = store.execute(auth.campaign, body.command, auth.role, {
+    const result = store.execute(auth.campaign, command, auth.role, {
       ...(body.force !== undefined ? { force: body.force } : {}),
       ...(body.strictness !== undefined ? { strictness: body.strictness } : {}),
     });
@@ -266,12 +274,33 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
       return reply.code(403).send({ error: 'only the referee advances the clock' });
     }
 
-    const hours = (req.body as { hours?: number })?.hours ?? 1;
-    const result = store.execute(auth.campaign, { kind: 'advance_clock', hours }, auth.role);
+    const body = req.body as { hours?: number; untilDecision?: boolean };
+    const hours = body?.hours ?? 1;
+    const result = store.execute(
+      auth.campaign,
+      { kind: 'advance_clock', hours, untilDecision: body?.untilDecision ?? false },
+      auth.role,
+    );
     if (!result.ok) return reply.code(409).send({ ok: false, violations: result.violations });
 
     broadcast(auth.campaign.id);
-    return reply.send({ ok: true, clockHours: store.state(auth.campaign.id).clockHours });
+    const state = store.state(auth.campaign.id);
+    // What stopped the clock, if anything did. The referee's whole workflow is "run it
+    // until something needs me", so the answer to *what* needs him belongs in the reply
+    // rather than in a second request he has to know to make.
+    const halts = new Set(cfg.haltTriggers);
+    const halted = result.events
+      .map((e) => e.payload)
+      .find((p) => p.kind === 'decision_raised' && halts.has(p.decision.trigger));
+
+    return reply.send({
+      ok: true,
+      clockHours: state.clockHours,
+      halted:
+        body?.untilDecision === true && halted?.kind === 'decision_raised'
+          ? halted.decision
+          : null,
+    });
   });
 
   // ---- log --------------------------------------------------------------
