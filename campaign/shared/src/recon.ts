@@ -16,7 +16,7 @@ import { formationsUnder } from './commander.js';
 import type { CampaignConfig, Grade } from './config.js';
 import { distance, hexRange, key, type Hex, type HexKey } from './hex.js';
 import type { CampaignState } from './state.js';
-import { hasTrait, isDivision, type Unit } from './unit.js';
+import { echelonOf, hasTrait, isDivision, type Echelon, type Unit } from './unit.js';
 import { hexAt, type World } from './world.js';
 
 /** How far a unit sees: one hex, or two with scouts. */
@@ -113,6 +113,14 @@ export interface Contact {
   readonly seenAtHours: number;
   /** Only known at intel 5 and above. */
   readonly kind: Unit['kind'] | null;
+  /**
+   * Roughly how large it is. Only known at intel 4 and above.
+   *
+   * The rules' patrol table gives "the number of divisions" at 4, which is the same
+   * question as how big the thing in front of you is. Below that a sighting draws as an
+   * empty frame, which is exactly what NATO symbology means by it.
+   */
+  readonly echelon: Echelon | null;
   /** Only known at intel 6. */
   readonly corps: string | null;
 }
@@ -139,6 +147,7 @@ export function contactFrom(unit: Unit, intel: IntelLevel, atHours: number): Con
     intelLevel: intel,
     seenAtHours: atHours,
     kind: intel >= 5 ? unit.kind : null,
+    echelon: intel >= 4 ? echelonOf(unit) : null,
     corps: intel >= 6 ? unit.corps : null,
   };
 }

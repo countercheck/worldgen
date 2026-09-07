@@ -186,3 +186,70 @@ describe('a commander board', () => {
     for (const unit of board.units.values()) expect(unit.name).toBeTruthy();
   });
 });
+
+describe('the symbols a commander is given', () => {
+  const board = boardFrom(view(commanderRole('ney')), DEFAULT_THEME);
+  const symbolOf = (id: string) => board.marks.find((m) => m.id === id)!.symbol;
+
+  it('frames his own formation as friendly and solid', () => {
+    const [own] = [...board.units.values()];
+    const symbol = symbolOf(own!.id);
+    expect(symbol.affiliation).toBe('friend');
+    expect(symbol.dashed, 'a formation he is standing next to was drawn as reported').toBe(
+      false,
+    );
+    expect(symbol.kind).toBe(own!.kind);
+  });
+
+  it('frames a reported formation as friendly and dashed', () => {
+    // The standard's mark for a position reported rather than observed, which is exactly
+    // what a despatch carries. Its arm and size are not in doubt — only where it is.
+    for (const report of board.reports.values()) {
+      const symbol = symbolOf(report.unitId);
+      expect(symbol.affiliation).toBe('friend');
+      expect(symbol.dashed).toBe(true);
+      expect(symbol.kind).toBe(report.kind);
+      expect(symbol.echelon).toBe(report.echelon);
+    }
+  });
+
+  it('frames an enemy as hostile, and draws only what the sighting earned', () => {
+    // A plain sighting is intel 2. The patrol table grants rough size at 4 and the arm at
+    // 5, so both are null here and the symbol is an empty diamond — which is precisely
+    // what an empty frame means in the standard.
+    expect(board.contacts.size).toBeGreaterThan(0);
+    for (const contact of board.contacts.values()) {
+      const symbol = symbolOf(contact.unitId);
+      expect(symbol.affiliation).toBe('hostile');
+      expect(symbol.dashed).toBe(true);
+      expect(symbol.kind).toBe(contact.kind);
+      expect(symbol.echelon).toBe(contact.echelon);
+      if (contact.intelLevel < 5) expect(symbol.kind).toBeNull();
+      if (contact.intelLevel < 4) expect(symbol.echelon).toBeNull();
+    }
+  });
+});
+
+describe('the symbols a referee is given', () => {
+  const board = boardFrom(view(REFEREE_ROLE), DEFAULT_THEME);
+
+  it('frames every formation as known, because he has no side to be hostile to', () => {
+    expect(board.marks.length).toBeGreaterThan(0);
+    for (const mark of board.marks) {
+      expect(mark.symbol.affiliation).toBe('friend');
+      expect(mark.symbol.dashed).toBe(false);
+      expect(mark.symbol.kind).not.toBeNull();
+    }
+  });
+
+  it('draws a brigade as a brigade and a division as a division', () => {
+    // Stated on the unit rather than guessed from strength: the demo's Light Brigade is
+    // four thousand strong, which the fallback would round up to a division.
+    const brigade = [...board.units.values()].find((u) => u.name === 'Light Brigade');
+    expect(brigade, 'the demo should still field a brigade').toBeDefined();
+    expect(board.marks.find((m) => m.id === brigade!.id)!.symbol.echelon).toBe('brigade');
+
+    const division = [...board.units.values()].find((u) => u.name === '1re Division');
+    expect(board.marks.find((m) => m.id === division!.id)!.symbol.echelon).toBe('division');
+  });
+});

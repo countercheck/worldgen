@@ -384,13 +384,16 @@ describe('once an enemy is actually spotted', () => {
     expect(res.statusCode, res.body).toBe(200);
 
     const view = (await viewAs(f, f.ney)).json();
-    const contact = (view.contacts as { unitId: string; kind: null; corps: null }[]).find(
-      (c) => c.unitId === 'blue-2',
-    );
+    const contact = (
+      view.contacts as { unitId: string; kind: null; corps: null; echelon: null }[]
+    ).find((c) => c.unitId === 'blue-2');
 
     expect(contact, 'a division one hex away should be seen').toBeDefined();
-    // Presence and location only. Strength, arm and corps are not known from a sighting.
+    // Presence and location only. A plain sighting is intel 2, and the patrol table grants
+    // rough size at 4, arm at 5 and the corps at 6 — so all three are withheld, and the
+    // symbol this draws is an empty frame, which is what the standard means by it.
     expect(contact!.kind).toBeNull();
+    expect(contact!.echelon).toBeNull();
     expect(contact!.corps).toBeNull();
 
     const raw = (await viewAs(f, f.ney)).body;
@@ -402,7 +405,7 @@ describe('once an enemy is actually spotted', () => {
     // payload for `"morale"` — red's own division has one, so that would pass while
     // proving nothing at all.
     expect(Object.keys(contact!).sort()).toEqual(
-      ['corps', 'coord', 'faction', 'intelLevel', 'kind', 'seenAtHours', 'unitId'].sort(),
+      ['corps', 'coord', 'echelon', 'faction', 'intelLevel', 'kind', 'seenAtHours', 'unitId'].sort(),
     );
   });
 });
