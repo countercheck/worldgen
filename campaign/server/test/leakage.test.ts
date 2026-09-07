@@ -777,3 +777,103 @@ describe('despatches', () => {
     ).toBe(true);
   });
 });
+
+/**
+ * The referee's two controls, over the wire.
+ *
+ * "Run until something needs me" is the one a referee actually uses, and the answer to
+ * *what* needs him belongs in the reply rather than in a second request he has to know to
+ * make. The rest of this file is about what must not be sent; this is about the one role
+ * that is entitled to all of it.
+ */
+describe('the referee console', () => {
+  let f: Fixture;
+  beforeEach(async () => {
+    f = await setUp();
+  });
+
+  const run = (hours: number, untilDecision: boolean) =>
+    f.app.inject({
+      method: 'POST',
+      url: `/api/campaigns/${f.id}/advance`,
+      headers: { 'x-campaign-token': f.referee },
+      payload: { hours, untilDecision },
+    });
+
+  const command = (token: string, cmd: Command) =>
+    f.app.inject({
+      method: 'POST',
+      url: `/api/campaigns/${f.id}/commands`,
+      headers: { 'x-campaign-token': token },
+      payload: { command: cmd },
+    });
+
+  it('stops the clock and says what stopped it', async () => {
+    // A march that ends somewhere is the simplest thing that raises a decision: the
+    // column arrives, and arriving is something a referee has to have an opinion about.
+    const near = [...world.hexes.values()]
+      .filter((h) => h.terrainClass === 'land')
+      .map((h) => h.coord)
+      .find((c) => dist(c, RED_HEX) > 2 && dist(c, RED_HEX) < 5)!;
+
+    await command(f.referee, { kind: 'set_task', unitId: 'red-1', destination: near });
+
+    const res = await run(48, true);
+    expect(res.statusCode, res.body).toBe(200);
+
+    const halted = res.json().halted;
+    expect(halted).not.toBeNull();
+    expect(halted.unitId).toBe('red-1');
+    // And it really stopped rather than running the full forty-eight hours it was offered.
+    expect(res.json().clockHours).toBeLessThan(48);
+  });
+
+  it('runs the clock through a decision when it was not asked to stop', async () => {
+    const near = [...world.hexes.values()]
+      .filter((h) => h.terrainClass === 'land')
+      .map((h) => h.coord)
+      .find((c) => dist(c, RED_HEX) > 2 && dist(c, RED_HEX) < 5)!;
+
+    await command(f.referee, { kind: 'set_task', unitId: 'red-1', destination: near });
+
+    const res = await run(12, false);
+    expect(res.json().clockHours).toBe(12);
+    // The decision was still raised — it is in his queue — but the clock did not care.
+    expect(res.json().halted).toBeNull();
+    expect((await viewAs(f, f.referee)).json().decisions.length).toBeGreaterThan(0);
+  });
+
+  it('marks a decision dealt with', async () => {
+    const near = [...world.hexes.values()]
+      .filter((h) => h.terrainClass === 'land')
+      .map((h) => h.coord)
+      .find((c) => dist(c, RED_HEX) > 2 && dist(c, RED_HEX) < 5)!;
+
+    await command(f.referee, { kind: 'set_task', unitId: 'red-1', destination: near });
+    const halted = (await run(48, true)).json().halted;
+
+    const done = await command(f.referee, {
+      kind: 'resolve_decision',
+      decisionId: halted.id,
+      note: 'Told them to hold there.',
+    });
+    expect(done.statusCode, done.body).toBe(200);
+
+    const queue = (await viewAs(f, f.referee)).json().decisions;
+    const resolved = queue.find((d: { id: string }) => d.id === halted.id);
+    // Kept rather than deleted: the queue is a history as well as a workload, and why a
+    // referee decided something is the most interesting line in an after-action review.
+    expect(resolved.resolvedAtHours).not.toBeNull();
+    expect(resolved.note).toBe('Told them to hold there.');
+  });
+
+  it('lets nobody but the referee run the clock', async () => {
+    const res = await f.app.inject({
+      method: 'POST',
+      url: `/api/campaigns/${f.id}/advance`,
+      headers: { 'x-campaign-token': f.ney },
+      payload: { hours: 1 },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+});

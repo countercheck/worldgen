@@ -36,11 +36,20 @@ import {
   type World,
 } from '@campaign/shared';
 
-import type { Mark, SymbolSpec } from './map/draw.js';
+import type { Mark, Rider, SymbolSpec } from './map/draw.js';
 
 export interface Board {
   readonly world: World;
   readonly marks: readonly Mark[];
+  /**
+   * Despatch riders in flight.
+   *
+   * Always empty for a commander, and not because the console filters them out: the route
+   * is never in his payload at all, so there is nothing here to build one from. That is
+   * the difference between a display rule and a fog rule, and it is why this is derived
+   * from `view.despatches` — which only a referee ever receives.
+   */
+  readonly riders: readonly Rider[];
   /** Live formations: one for a commander, all of them for a referee. */
   readonly units: ReadonlyMap<string, Unit>;
   /** Own formations as last reported. Empty for a referee, who has the units. */
@@ -119,9 +128,26 @@ export function boardFrom(view: ClientView, theme: Theme): Board {
     })),
   ];
 
+  // Where each rider has actually got to. `progress` is fractional — the whole part is
+  // the last hex he passed — so it is floored to a hex rather than interpolated: a rider
+  // drawn between hexes would imply a precision the interception rules do not have.
+  const riders: Rider[] = view.despatches
+    .filter((d) => d.fate.kind === 'in_transit' && d.route.length > 1)
+    .map((d) => {
+      const i = Math.min(Math.max(0, Math.floor(d.progress)), d.route.length - 1);
+      return {
+        id: d.id,
+        at: d.route[i]!,
+        ridden: d.route.slice(0, i + 1),
+        ahead: d.route.slice(i),
+        color: colour(d.faction),
+      };
+    });
+
   return {
     world,
     marks,
+    riders,
     units,
     reports,
     contacts,

@@ -19,6 +19,7 @@ import type {
   DespatchKind,
   Faction,
   Hex,
+  PendingDecision,
   Strictness,
 } from '@campaign/shared';
 
@@ -167,10 +168,60 @@ export function sendDespatch(
   });
 }
 
-export function advanceClock(session: Session, hours: number): Promise<{ clockHours: number }> {
-  return request<{ clockHours: number }>(
+/**
+ * Set a formation marching. Referee only, and deliberately so.
+ *
+ * A commander writes prose; turning prose into a march is the adjudication this whole
+ * design exists to keep in human hands. A destination rather than a path: the referee says
+ * where the corps is to be, and the engine works out how it gets there.
+ */
+export function setTask(
+  session: Session,
+  unitId: string,
+  destination: Hex,
+  opts: { fromDespatchId?: string } = {},
+): Promise<CommandResult> {
+  return sendCommand(session, { kind: 'set_task', unitId, destination, ...opts });
+}
+
+export function clearTask(session: Session, unitId: string): Promise<CommandResult> {
+  return sendCommand(session, { kind: 'clear_task', unitId });
+}
+
+/** Mark a decision dealt with. The note is the referee's own record of why. */
+export function resolveDecision(
+  session: Session,
+  decisionId: string,
+  note?: string,
+): Promise<CommandResult> {
+  return sendCommand(session, {
+    kind: 'resolve_decision',
+    decisionId,
+    ...(note === undefined || note === '' ? {} : { note }),
+  });
+}
+
+export interface AdvanceResult {
+  readonly clockHours: number;
+  /** What stopped the clock, when the referee asked it to stop for something. */
+  readonly halted: PendingDecision | null;
+}
+
+/**
+ * Run the clock.
+ *
+ * `untilDecision` is the control a referee actually uses: run forward and stop the moment
+ * something needs a human, rather than guessing at an interval and finding out afterwards
+ * that two corps met each other ninety minutes in.
+ */
+export function advanceClock(
+  session: Session,
+  hours: number,
+  untilDecision = false,
+): Promise<AdvanceResult> {
+  return request<AdvanceResult>(
     `/api/campaigns/${encodeURIComponent(session.campaignId)}/advance`,
-    { method: 'POST', body: JSON.stringify({ hours }) },
+    { method: 'POST', body: JSON.stringify({ hours, untilDecision }) },
     session.token,
   );
 }

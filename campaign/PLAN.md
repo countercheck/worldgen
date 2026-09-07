@@ -431,8 +431,28 @@ decision queue from step 1.
    `captured` on the view, with `route` and `fate` pinned out of it by leakage tests.
 3. ~~**The commander's interface**: composer, inbox, formations panel.~~ Done — and it
    turned the fog on properly on the way, see below.
-4. **The referee's console**: decision queue, despatch log, seat-switching.
+4. ~~**The referee's console**: decision queue, despatch log, seat-switching.~~ Done.
 5. *Deferred:* issued maps, their falsification, and correction by recce.
+
+### What step 4 settled
+
+- **One motion, not two.** A decision names the commander and the formation, and carries
+  the button that sets that formation's task. Point at ground and the march is ordered.
+  If translating prose into a march were two actions the game would be tiring to run, and
+  a game that is tiring to run does not get run.
+- **Run until something happens** is the clock control that matters, and the reply says
+  *what* stopped it rather than making the referee ask again.
+- **Riders are drawn, for the referee alone.** Not by filtering: a commander's payload has
+  no route in it, so his board has nothing to build a rider from. Watching a courier cross
+  the country between two armies, and seeing it about to pass a picket before the dice do,
+  is the best thing on the screen and it costs nothing to draw.
+- **Two modes on one map**, which is usually a mistake. The alternative was a coordinate
+  box, and a referee reading a despatch that says *Quatre Bras* wants to point at Quatre
+  Bras. Mitigated by making the mode loud — the cursor ring, the hint bar and a banner all
+  change — and by Escape leaving it, since a map that has silently changed what a click
+  does is a trap.
+- **Resolved decisions are kept, with the referee's note.** The queue is a history as well
+  as a workload, and why he decided something is the most interesting line in a review.
 
 ### What step 3 found
 

@@ -26,7 +26,16 @@ import {
   type ClientView,
 } from '@campaign/shared';
 
-import { advanceClock, fetchView, sendDespatch, subscribe, type Session } from './api.js';
+import {
+  advanceClock,
+  clearTask,
+  fetchView,
+  resolveDecision,
+  sendDespatch,
+  setTask,
+  subscribe,
+  type Session,
+} from './api.js';
 import { ageLabel, boardFrom } from './board.js';
 import {
   correspondents as correspondentsOf,
@@ -43,11 +52,12 @@ import { Composer, type Draft } from './panels/Composer.jsx';
 import { ContactPanel } from './panels/ContactPanel.jsx';
 import { HexPanel } from './panels/HexPanel.js';
 import { Post } from './panels/Post.jsx';
+import { DecisionQueue, DespatchLog } from './panels/Referee.jsx';
 import { ReportPanel } from './panels/ReportPanel.jsx';
 import { UnitPanel } from './panels/UnitPanel.js';
 import { clearSession, joinLink, loadSession, saveSession } from './session.js';
 
-import type { ReceivedDespatch } from '@campaign/shared';
+import type { Hex, PendingDecision, ReceivedDespatch, Task } from '@campaign/shared';
 
 const cfg = DEFAULT_CONFIG;
 
@@ -119,6 +129,11 @@ function Console({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [postError, setPostError] = useState<string | null>(null);
 
+  // The referee's half: which formation is having its destination pointed at, and what
+  // the clock last stopped for. Both are transient and neither belongs in the view.
+  const [ordering, setOrdering] = useState<string | null>(null);
+  const [halted, setHalted] = useState<PendingDecision | null>(null);
+
   // Fetched once so the page has something immediately, then kept current by the socket.
   // The socket sends a full view on connect too, so this is only about the gap: a first
   // paint that waits on a WebSocket handshake looks like a broken page.
@@ -148,6 +163,17 @@ function Console({
     };
   }, [session.campaignId, session.token]);
 
+  // Escape leaves the pointing mode. A map that has silently changed what a click does,
+  // with no way out but clicking somewhere, is a trap.
+  useEffect(() => {
+    if (ordering === null) return;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setOrdering(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [ordering]);
+
   const board = useMemo(
     () => (view === null ? null : boardFrom(view, DEFAULT_THEME)),
     [view],
@@ -163,8 +189,11 @@ function Console({
   }, [showReach, selectedUnit, board]);
 
   const advance = useCallback(
-    (hours: number) => {
-      advanceClock(session, hours).catch((err: Error) => setError(err.message));
+    (hours: number, untilDecision = false) => {
+      setHalted(null);
+      advanceClock(session, hours, untilDecision)
+        .then((result) => setHalted(result.halted ?? null))
+        .catch((err: Error) => setError(err.message));
     },
     [session],
   );
@@ -200,6 +229,20 @@ function Console({
         return false;
       }
       return true;
+    },
+    [session],
+  );
+
+  /** Point at ground and send a formation to it. The referee's whole job, in one motion. */
+  const order = useCallback(
+    (unitId: string, destination: Hex) => {
+      setOrdering(null);
+      setPostError(null);
+      void setTask(session, unitId, destination).then((result) => {
+        if (!result.ok) {
+          setPostError(result.violations?.map((v) => v.message).join('; ') ?? 'refused');
+        }
+      });
     },
     [session],
   );
@@ -314,6 +357,16 @@ function Console({
             <span className="clock-controls">
               <button onClick={() => advance(1)}>+1 h</button>
               <button onClick={() => advance(6)}>+6 h</button>
+              {/* The control a referee actually uses: run forward and stop the moment
+                  something needs a human, rather than guessing at an interval and finding
+                  out afterwards that two corps met each other ninety minutes in. */}
+              <button
+                className="primary"
+                title="Advance until something needs a decision"
+                onClick={() => advance(48, true)}
+              >
+                Run
+              </button>
             </span>
           )}
         </div>
@@ -322,6 +375,26 @@ function Console({
           {live === 'open' ? 'live' : 'reconnecting'}
         </span>
       </header>
+
+      {isReferee && halted !== null && (
+        <div className="notice halted">
+          The clock stopped at hour {halted.atHours}: {nameOf(halted.commanderId)}
+          {"'s "}
+          {board.units.get(halted.unitId)?.name ?? halted.unitId}{' '}
+          {halted.trigger.replace(/_/g, ' ')}. It is in the queue below.
+          <button className="dismiss" onClick={() => setHalted(null)}>
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {isReferee && ordering !== null && (
+        <div className="notice picking">
+          Point at the ground {board.units.get(ordering)?.name ?? ordering} is to march to.
+          A destination, not a route — they will find their own way, and discover what is in
+          it when they get there. Escape to think again.
+        </div>
+      )}
 
       {!isReferee && view.commander !== null && (
         <div className="notice">
@@ -346,9 +419,42 @@ function Console({
           selectedId={selectedId}
           onSelect={setSelectedId}
           reach={reach}
+          riders={board.riders}
+          onPick={ordering === null ? undefined : (hex) => order(ordering, hex)}
         />
 
         <aside className="sidebar">
+          {isReferee && (
+            <>
+              {postError !== null && (
+                <section className="panel-section">
+                  <p className="error">{postError}</p>
+                </section>
+              )}
+
+              <DecisionQueue
+                decisions={view.decisions}
+                clockHours={clock}
+                nameOf={nameOf}
+                unitOf={(id) => board.units.get(id)}
+                taskOf={(id) => view.tasks.find((t) => t.unitId === id)}
+                orderingUnitId={ordering}
+                onOrder={setOrdering}
+                onResolve={(d) => {
+                  setBusyId(d.id);
+                  void resolveDecision(session, d.id).finally(() => setBusyId(null));
+                }}
+                busyId={busyId}
+              />
+
+              <DespatchLog
+                despatches={view.despatches}
+                clockHours={clock}
+                nameOf={nameOf}
+              />
+            </>
+          )}
+
           {!isReferee && view.commander !== null && (
             <>
               {writing !== null && (
@@ -409,6 +515,26 @@ function Console({
                 taskLine={taskLine}
               />
             </>
+          )}
+
+          {isReferee && shownUnit !== null && (
+            <section className="panel-section">
+              {/* Not the unit's name: the panel below already carries that, and a heading
+                  repeated twice reads as two sections about different things. */}
+              <h3>Orders</h3>
+              <div className="despatch-actions">
+                <button
+                  className={ordering === shownUnit.id ? 'primary' : ''}
+                  onClick={() => setOrdering(shownUnit.id)}
+                >
+                  {ordering === shownUnit.id ? 'Pointing…' : 'March them somewhere'}
+                </button>
+                {view.tasks.some((t) => t.unitId === shownUnit.id) && (
+                  <button onClick={() => void clearTask(session, shownUnit.id)}>Halt</button>
+                )}
+              </div>
+              <TaskLine task={view.tasks.find((t) => t.unitId === shownUnit.id)} />
+            </section>
           )}
 
           {shownUnit !== null && (
@@ -512,5 +638,34 @@ function Console({
         </aside>
       </div>
     </div>
+  );
+}
+
+/**
+ * What a formation is doing, for the referee's eye.
+ *
+ * Its destination and the hour it was set, which together are the audit trail from a
+ * piece of prose to a column on a road. A commander sees the same for his own formation
+ * and for no other.
+ */
+function TaskLine({ task }: { task: Task | undefined }) {
+  if (task === undefined) {
+    return <p className="muted small">No standing task. They stay where they are.</p>;
+  }
+  if (task.complete) {
+    return (
+      <p className="muted small">
+        Arrived at {task.destination.q}, {task.destination.r}. Nothing further ordered.
+      </p>
+    );
+  }
+  return (
+    <p className="muted small">
+      Marching on {task.destination.q}, {task.destination.r}, ordered at hour{' '}
+      {task.setAtHours}
+      {task.arrivesAtHours === null
+        ? '.'
+        : ` · next hex at hour ${task.arrivesAtHours.toFixed(1)}.`}
+    </p>
   );
 }
