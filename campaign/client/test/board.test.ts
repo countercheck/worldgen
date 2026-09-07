@@ -263,3 +263,79 @@ describe('the symbols a referee is given', () => {
     expect(board.marks.find((m) => m.id === division!.id)!.symbol.echelon).toBe('division');
   });
 });
+
+/**
+ * Riders in flight, which only a referee ever sees.
+ *
+ * The negative half is the one that matters. A commander's board has no riders not because
+ * the console filters them out but because the route is never in his payload — a rider's
+ * path runs to where his addressee actually stands, so drawing one for the sender would
+ * hand him the position of his own detached corps and end the game.
+ */
+describe('riders on the map', () => {
+  const riding = (() => {
+    const out = applyAll(
+      [
+        {
+          kind: 'send_despatch',
+          from: 'ney',
+          to: 'kellermann',
+          despatchKind: 'order',
+          body: { text: 'Move on Quatre Bras with all speed.' },
+        },
+        { kind: 'advance_clock', hours: 1 },
+      ],
+      state,
+      world,
+      'lenient',
+    );
+    if (!out.ok) throw new Error('the despatch was refused');
+    return out.state;
+  })();
+
+  const asRole = (role: Role): ClientView =>
+    viewFor({ campaignId: 'c1', state: riding, worldDoc, world }, role);
+
+  it('shows the referee where a courier has actually got to', () => {
+    const board = boardFrom(asRole(REFEREE_ROLE), DEFAULT_THEME);
+    expect(board.riders).toHaveLength(1);
+
+    const rider = board.riders[0]!;
+    // An hour of riding is several hexes at courier pace, so he is neither at the start
+    // nor at the end: the whole value of the overlay is seeing him in the country between.
+    expect(rider.ridden.length).toBeGreaterThan(1);
+    expect(rider.ahead.length).toBeGreaterThan(1);
+    // The two halves meet at the hex he is on, and nowhere else.
+    expect(rider.ridden.at(-1)).toEqual(rider.at);
+    expect(rider.ahead[0]).toEqual(rider.at);
+  });
+
+  it('gives the sender no rider at all, because he was sent no route', () => {
+    const ney = asRole(commanderRole('ney'));
+    expect(ney.despatches).toEqual([]);
+    expect(boardFrom(ney, DEFAULT_THEME).riders).toEqual([]);
+    // And the outbox says he wrote it, without a hint of where it is.
+    expect(ney.sent).toHaveLength(1);
+    expect(JSON.stringify(ney.sent)).not.toContain('route');
+  });
+
+  it('gives the addressee no rider either, and nothing in his hand yet', () => {
+    const kellermann = asRole(commanderRole('kellermann'));
+    expect(boardFrom(kellermann, DEFAULT_THEME).riders).toEqual([]);
+    expect(kellermann.received).toEqual([]);
+  });
+
+  it('stops drawing a rider once he has arrived', () => {
+    const arrived = applyAll(
+      [{ kind: 'advance_clock', hours: 200 }],
+      riding,
+      world,
+      'lenient',
+    );
+    const board = boardFrom(
+      viewFor({ campaignId: 'c1', state: arrived.state, worldDoc, world }, REFEREE_ROLE),
+      DEFAULT_THEME,
+    );
+    expect(board.riders).toEqual([]);
+  });
+});

@@ -57,6 +57,10 @@ header h1 {
 .roles {
   display: flex;
   gap: 6px;
+  /* Scrolls rather than wraps. A campaign with a dozen seats should push the seat list
+     sideways, not shove the clock onto a second line. */
+  min-width: 0;
+  overflow-x: auto;
 }
 
 .roles button {
@@ -96,6 +100,9 @@ header h1 {
   margin-left: auto;
   color: var(--muted);
   font-variant-numeric: tabular-nums;
+  /* The referee reads this constantly and it must never break across two lines. */
+  white-space: nowrap;
+  flex: none;
 }
 
 .notice {
@@ -657,4 +664,76 @@ button.formation:hover {
 
 .formation-age.now {
   color: var(--accent);
+}
+
+/* ---- the referee ----
+
+   A decision is louder than a despatch: it is the only thing on this screen that is
+   actually waiting on him, and it should be findable without reading. */
+
+.despatch.decision {
+  border-left-color: #e0b341;
+  background: rgb(203 161 53 / 8%);
+}
+
+.despatch.decision.trigger-enemy_contact {
+  border-left-color: #d1495b;
+  background: rgb(209 73 91 / 9%);
+}
+
+.despatch.decision.trigger-objective_reached,
+.despatch.decision.trigger-despatch_arrived {
+  border-left-color: #4c7fbf;
+  background: transparent;
+}
+
+/* The log is reference, not work: quieter than the queue above it, with only a capture
+   allowed to shout — that is the one line a referee will want to find again later. */
+.despatch.log {
+  background: transparent;
+  border-left-color: var(--line);
+}
+
+.despatch.log.fate-in_transit {
+  border-left-color: var(--accent);
+}
+
+.despatch.log.fate-captured {
+  border-left-color: #d1495b;
+}
+
+.despatch.log.fate-lost {
+  border-left-color: #6b4f2a;
+}
+
+.notice.halted {
+  color: var(--accent);
+  background: rgb(203 161 53 / 12%);
+}
+
+/* Pointing at ground changes what a click does, so it changes how the page looks. */
+.notice.picking {
+  color: #17181f;
+  background: var(--accent);
+  font-weight: 600;
+}
+
+.notice .dismiss {
+  margin-left: 10px;
+  padding: 2px 8px;
+  font: inherit;
+  font-size: 11px;
+  color: inherit;
+  background: none;
+  border: 1px solid currentcolor;
+  border-radius: 4px;
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+.map-hint.picking {
+  color: #17181f;
+  background: var(--accent);
+  font-weight: 600;
+  opacity: 1;
 }

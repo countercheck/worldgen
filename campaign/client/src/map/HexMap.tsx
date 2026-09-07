@@ -17,9 +17,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { key, pixelToAxial, type Hex, type Theme, type World } from '@campaign/shared';
 
-import { drawOverlay, drawTerrain, markAtHex, worldExtent, type Mark, type View } from './draw.js';
+import {
+  drawOverlay,
+  drawTerrain,
+  markAtHex,
+  worldExtent,
+  type Mark,
+  type Rider,
+  type View,
+} from './draw.js';
 
-export type { Mark } from './draw.js';
+export type { Mark, Rider } from './draw.js';
 
 export function HexMap({
   world,
@@ -30,6 +38,8 @@ export function HexMap({
   selectedId,
   onSelect,
   reach,
+  riders,
+  onPick,
 }: {
   world: World;
   marks: readonly Mark[];
@@ -40,6 +50,16 @@ export function HexMap({
   selectedId: string | null;
   onSelect: (markId: string | null) => void;
   reach?: ReadonlyMap<string, number> | undefined;
+  riders?: readonly Rider[] | undefined;
+  /**
+   * Choosing a hex rather than a unit.
+   *
+   * When set, a click names ground instead of selecting what is standing on it — which is
+   * how a referee sets a destination. Two modes on one surface is usually a mistake, but
+   * the alternative is a coordinate box, and a referee reading a despatch that says
+   * "Quatre Bras" wants to point at Quatre Bras.
+   */
+  onPick?: ((hex: Hex) => void) | undefined;
 }) {
   const wrap = useRef<HTMLDivElement>(null);
   const terrainRef = useRef<HTMLCanvasElement>(null);
@@ -111,8 +131,10 @@ export function HexMap({
       hoveredUnitId,
       selectedUnitId: selectedId,
       reach,
+      riders,
+      picking: onPick === undefined ? null : hovered,
     });
-  }, [marks, hovered, hoveredUnitId, selectedId, view, box, reach]);
+  }, [marks, hovered, hoveredUnitId, selectedId, view, box, reach, riders, onPick]);
 
   const hexAtPointer = useCallback(
     (e: React.PointerEvent): Hex | null => {
@@ -154,7 +176,11 @@ export function HexMap({
       onPointerDown={(e) => {
         if (e.button === 0) {
           const hex = hexAtPointer(e);
-          onSelect(hex === null ? null : markAtHex(marks, hex));
+          if (onPick !== undefined) {
+            if (hex !== null) onPick(hex);
+          } else {
+            onSelect(hex === null ? null : markAtHex(marks, hex));
+          }
         }
         dragging.current = { x: e.clientX, y: e.clientY };
         (e.target as HTMLElement).setPointerCapture(e.pointerId);
@@ -174,7 +200,11 @@ export function HexMap({
     >
       <canvas ref={terrainRef} style={{ width: box.w, height: box.h }} />
       <canvas ref={overlayRef} style={{ width: box.w, height: box.h }} />
-      <div className="map-hint">scroll to zoom · drag to pan · click a unit to select</div>
+      <div className={`map-hint${onPick === undefined ? '' : ' picking'}`}>
+        {onPick === undefined
+          ? 'scroll to zoom · drag to pan · click a unit to select'
+          : 'click the ground you want them to march to · Esc to think again'}
+      </div>
     </div>
   );
 }

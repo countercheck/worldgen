@@ -208,6 +208,25 @@ export interface Mark {
   readonly symbol: SymbolSpec;
 }
 
+/**
+ * A despatch rider, on the referee's map and on nobody else's.
+ *
+ * The route is where the addressee actually is, so drawing it for a commander would hand
+ * him the position of his own detached corps and end the game. For a referee it is the
+ * best thing on the screen: he can watch a rider cross the country between two armies and
+ * see, before the dice do, that the order is about to pass a picket.
+ *
+ * `ridden` is the ground behind him and `ahead` the ground in front — different weights,
+ * because where a rider has got to is the fact and where he is going is a plan.
+ */
+export interface Rider {
+  readonly id: string;
+  readonly at: Hex;
+  readonly ridden: readonly Hex[];
+  readonly ahead: readonly Hex[];
+  readonly color: string;
+}
+
 /** Everything that follows the cursor. Redrawn every frame; must stay cheap. */
 export function drawOverlay(
   ctx: CanvasRenderingContext2D,
@@ -218,6 +237,9 @@ export function drawOverlay(
     hoveredUnitId: string | null;
     selectedUnitId: string | null;
     reach?: ReadonlyMap<string, number> | undefined;
+    riders?: readonly Rider[] | undefined;
+    /** A hex the referee is about to choose as a destination. */
+    picking?: Hex | null | undefined;
   },
 ): void {
   ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
@@ -231,6 +253,10 @@ export function drawOverlay(
     }
   }
 
+  // Riders under the formations: a courier is a man on a horse and a division is a corps,
+  // and where the two are on the same hex the corps is the thing to see.
+  for (const rider of opts.riders ?? []) drawRider(ctx, view, rider);
+
   // Live formations first, so a report or a contact standing on the same ground is drawn
   // over them rather than hidden beneath.
   const order: MarkKind[] = ['live', 'reported', 'contact'];
@@ -243,11 +269,61 @@ export function drawOverlay(
   }
 
   if (opts.hovered !== null) {
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = Math.max(1.5, view.size * 0.12);
+    // While a destination is being chosen the ring is the accent colour and thicker: the
+    // next click does something irreversible, and the cursor should say so.
+    const picking = opts.picking !== undefined && opts.picking !== null;
+    ctx.strokeStyle = picking ? '#cba135' : '#ffffff';
+    ctx.lineWidth = Math.max(picking ? 2.5 : 1.5, view.size * (picking ? 0.18 : 0.12));
     hexPath(ctx, toScreen(opts.hovered, view), view.size * 0.94);
     ctx.stroke();
   }
+}
+
+/**
+ * One rider: the road behind him solid and thin, the road ahead dotted, and a small mark
+ * where he has actually got to.
+ *
+ * Small on purpose. There may be a dozen of these on a busy evening and they must not
+ * compete with the formations — a rider is a fact about communication rather than about
+ * ground, and the eye should find him only when it goes looking.
+ */
+function drawRider(ctx: CanvasRenderingContext2D, view: View, rider: Rider): void {
+  const line = (path: readonly Hex[], dash: boolean, alpha: number): void => {
+    if (path.length < 2) return;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = rider.color;
+    ctx.lineWidth = Math.max(1, view.size * 0.1);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    if (dash) ctx.setLineDash([view.size * 0.35, view.size * 0.4]);
+    ctx.beginPath();
+    path.forEach((h, i) => {
+      const p = toScreen(h, view);
+      if (i === 0) ctx.moveTo(p.x, p.y);
+      else ctx.lineTo(p.x, p.y);
+    });
+    ctx.stroke();
+    ctx.restore();
+  };
+
+  line(rider.ridden, false, 0.7);
+  line(rider.ahead, true, 0.35);
+
+  // A pale ring rather than a dark one. The column ribbons are faction-coloured lines
+  // too, so a faction-coloured dot on a faction-coloured trail disappears into it; the
+  // ring is what separates "a man on a horse" from "eighteen kilometres of cavalry".
+  const p = toScreen(rider.at, view);
+  const r = Math.max(3.5, view.size * 0.3);
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+  ctx.fillStyle = rider.color;
+  ctx.fill();
+  ctx.lineWidth = Math.max(1.4, r * 0.4);
+  ctx.strokeStyle = '#e6e8ef';
+  ctx.stroke();
+  ctx.restore();
 }
 
 /**
