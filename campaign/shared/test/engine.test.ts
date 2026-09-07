@@ -141,6 +141,19 @@ describe('check', () => {
       { kind: 'teleport_unit', unitId: 'red-1', column: [LAND] },
       { kind: 'reveal', commanderId: 'ney', coords: [LAND] },
       { kind: 'set_unit_stats', unitId: 'red-1', changes: { morale: 10 } },
+      // The commands that route, ride and run the clock. These do the most work of any
+      // checker — planning a ride crosses the whole map — so they are the likeliest to
+      // reach for something they should not.
+      {
+        kind: 'send_despatch',
+        from: 'ney',
+        to: 'ney',
+        despatchKind: 'order',
+        body: { text: 'Hold the crossroads.' },
+      },
+      { kind: 'set_task', unitId: 'red-1', destination: LAND },
+      { kind: 'clear_task', unitId: 'red-1' },
+      { kind: 'resolve_decision', decisionId: 'k1' },
     ];
     for (const cmd of commands) {
       expect(() => check(cmd, frozen, frozenWorld), cmd.kind).not.toThrow();
@@ -217,6 +230,166 @@ describe('check', () => {
       world,
     );
     expect(v.map((x) => x.code)).toContain(CODES.WORLD_MISMATCH);
+  });
+});
+
+/**
+ * Tasks, despatches and the clock, as they arrive through the engine.
+ *
+ * The scheduler's own suite covers the mechanics. What matters here is that they come in
+ * through `check`/`decide` like everything else, so a march is refused, audited and
+ * logged by the same machinery as a teleport.
+ */
+describe('tasks and the clock', () => {
+  /** A land hex some distance from the first, so a march has somewhere to go. */
+  const somewhereElse = (): Hex => {
+    const land = [...world.hexes.values()].filter((h) => h.terrainClass === 'land');
+    const far = land.find(
+      (h) => Math.abs(h.coord.q - LAND.q) + Math.abs(h.coord.r - LAND.r) > 6,
+    );
+    if (far === undefined) throw new Error('the fixture world is too small');
+    return far.coord;
+  };
+
+  it('schedules the first leg when a task is set', () => {
+    const state = setUp();
+    const out = applyOrThrow(
+      { kind: 'set_task', unitId: 'red-1', destination: somewhereElse() },
+      state,
+      world,
+      'lenient',
+    );
+
+    const task = out.state.tasks.get('red-1')!;
+    expect(task.destination).toEqual(somewhereElse());
+    // A destination, not a path — but the engine has to know which hex is next, and
+    // when the head reaches it, or the clock has nothing to run.
+    expect(task.nextHex).not.toBeNull();
+    expect(task.arrivesAtHours).toBeGreaterThan(state.clockHours);
+    expect(task.complete).toBe(false);
+  });
+
+  it('completes a march to where the column already stands', () => {
+    const out = applyOrThrow(
+      { kind: 'set_task', unitId: 'red-1', destination: LAND },
+      setUp(),
+      world,
+      'lenient',
+    );
+    expect(out.state.tasks.get('red-1')!.complete).toBe(true);
+  });
+
+  it('advances the clock by marching, not by fiat', () => {
+    const state = applyOrThrow(
+      { kind: 'set_task', unitId: 'red-1', destination: somewhereElse() },
+      setUp(),
+      world,
+      'lenient',
+    ).state;
+
+    const out = applyOrThrow({ kind: 'advance_clock', hours: 6 }, state, world, 'lenient');
+    const kinds = out.events.map((e) => e.payload.kind);
+
+    expect(kinds).toContain('unit_marched');
+    // Every one of them is a logged event with an actor and a sequence number, which is
+    // what makes a march reviewable after the fact rather than a number that changed.
+    expect(out.events.every((e) => Number.isInteger(e.seq))).toBe(true);
+    expect(out.state.units.get('red-1')!.column[0]).not.toEqual(LAND);
+  });
+
+  it('refuses to run the clock backwards, whatever the strictness', () => {
+    for (const strictness of ['strict', 'lenient', 'open'] as const) {
+      const out = apply({ kind: 'advance_clock', hours: -1 }, setUp(), world, strictness, {
+        force: true,
+      });
+      expect(out.ok).toBe(false);
+    }
+  });
+
+  it('refuses a decision nobody raised', () => {
+    const v = check({ kind: 'resolve_decision', decisionId: 'k99' }, setUp(), world);
+    expect(v[0]!.code).toBe(CODES.NO_SUCH_DECISION);
+    expect(v[0]!.severity).toBe('hard');
+  });
+
+  /** A second red seat, so there is somebody for Ney to write to. */
+  const withSubordinate = (): CampaignState =>
+    applyAll(
+      [
+        { kind: 'add_unit', unit: division('red-2', 'red') },
+        {
+          kind: 'add_commander',
+          commander: {
+            id: 'kellermann',
+            name: 'General Kellermann',
+            faction: 'red',
+            unitId: 'red-2',
+            superiorId: 'ney',
+            autoCascade: false,
+          },
+        },
+      ],
+      setUp(),
+      world,
+      'lenient',
+    ).state;
+
+  it('puts an order on the road as an event like any other', () => {
+    const out = applyOrThrow(
+      {
+        kind: 'send_despatch',
+        from: 'ney',
+        to: 'kellermann',
+        despatchKind: 'order',
+        body: { text: 'Hold the crossroads.' },
+      },
+      withSubordinate(),
+      world,
+      'strict',
+      { actor: byCommander('ney') },
+    );
+
+    const despatches = [...out.state.despatches.values()];
+    expect(despatches).toHaveLength(1);
+    expect(despatches[0]!.from).toBe('ney');
+    // The two divisions were placed on the same hex, so this one is handed over rather
+    // than ridden — which is the concentration rule, arriving through the engine.
+    expect(despatches[0]!.handed).toBe(true);
+    expect(out.events[0]!.actor).toEqual(byCommander('ney'));
+  });
+
+  it('refuses to write to the other side, at every strictness', () => {
+    for (const strictness of ['strict', 'lenient', 'open'] as const) {
+      const out = apply(
+        {
+          kind: 'send_despatch',
+          from: 'ney',
+          to: 'wellington',
+          despatchKind: 'report',
+          body: { text: 'I surrender.' },
+        },
+        withSubordinate(),
+        world,
+        strictness,
+        { force: true },
+      );
+      expect(out.ok, strictness).toBe(false);
+    }
+  });
+
+  it('refuses a despatch with nothing written on it', () => {
+    const v = check(
+      {
+        kind: 'send_despatch',
+        from: 'ney',
+        to: 'kellermann',
+        despatchKind: 'order',
+        body: {},
+      },
+      withSubordinate(),
+      world,
+    );
+    expect(v.some((x) => x.code === CODES.MALFORMED && x.severity === 'hard')).toBe(true);
   });
 });
 

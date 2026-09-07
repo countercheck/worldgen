@@ -11,9 +11,12 @@
  * not, and the store stays free to page or truncate what it keeps in memory.
  */
 
+import { advanceColumn } from './column.js';
 import type { Commander } from './commander.js';
+import type { Despatch } from './despatch.js';
 import { key, type Hex, type HexKey } from './hex.js';
 import type { Faction, LoggedEvent, WorldRef } from './events.js';
+import type { PendingDecision, Task } from './task.js';
 import type { Unit } from './unit.js';
 
 /**
@@ -51,6 +54,18 @@ export interface CampaignState {
   readonly units: ReadonlyMap<string, Unit>;
   /** Keyed by commander id. */
   readonly knowledge: ReadonlyMap<string, CommanderKnowledge>;
+  /**
+   * Every despatch ever written, in flight or not.
+   *
+   * Kept rather than pruned on delivery. A commander's inbox is a filter over this, an
+   * intercepted despatch has to stay readable by its captor, and the log of who wrote
+   * what to whom is most of what an after-action review is for.
+   */
+  readonly despatches: ReadonlyMap<string, Despatch>;
+  /** What each formation is doing, keyed by unit id. One task at a time, by design. */
+  readonly tasks: ReadonlyMap<string, Task>;
+  /** The referee's queue, resolved entries included so it has a history. */
+  readonly decisions: ReadonlyMap<string, PendingDecision>;
 }
 
 const EMPTY_WORLD: WorldRef = {
@@ -78,6 +93,9 @@ export const EMPTY_STATE: CampaignState = {
   commanders: new Map(),
   units: new Map(),
   knowledge: new Map(),
+  despatches: new Map(),
+  tasks: new Map(),
+  decisions: new Map(),
 };
 
 const withUnit = (s: CampaignState, unit: Unit): CampaignState => ({
@@ -88,6 +106,11 @@ const withUnit = (s: CampaignState, unit: Unit): CampaignState => ({
 const withCommander = (s: CampaignState, commander: Commander): CampaignState => ({
   ...s,
   commanders: new Map(s.commanders).set(commander.id, commander),
+});
+
+const withDespatch = (s: CampaignState, d: Despatch): CampaignState => ({
+  ...s,
+  despatches: new Map(s.despatches).set(d.id, d),
 });
 
 function knowledgeFor(s: CampaignState, commanderId: string): CommanderKnowledge {
@@ -224,6 +247,104 @@ export function reduce(state: CampaignState, event: LoggedEvent): CampaignState 
       );
       return withUnit(s, { ...unit, ...changes });
     }
+
+    case 'despatch_sent':
+      return withDespatch(s, p.despatch);
+
+    case 'despatch_progressed': {
+      const d = s.despatches.get(p.despatchId);
+      if (d === undefined) return s;
+      return withDespatch(s, { ...d, progress: p.progress, route: p.route });
+    }
+
+    case 'despatch_delivered': {
+      const d = s.despatches.get(p.despatchId);
+      if (d === undefined) return s;
+      return withDespatch(s, {
+        ...d,
+        progress: Math.max(0, d.route.length - 1),
+        fate: { kind: 'delivered', atHours: p.atHours },
+      });
+    }
+
+    case 'despatch_stopped': {
+      const d = s.despatches.get(p.despatchId);
+      if (d === undefined) return s;
+      return withDespatch(s, {
+        ...d,
+        fate:
+          p.outcome === 'captured'
+            ? { kind: 'captured', by: p.by, atHours: p.atHours, dice: p.dice }
+            : { kind: 'lost', by: p.by, atHours: p.atHours, dice: p.dice },
+      });
+    }
+
+    case 'task_set':
+      return { ...s, tasks: new Map(s.tasks).set(p.task.unitId, p.task) };
+
+    case 'task_cleared': {
+      const tasks = new Map(s.tasks);
+      tasks.delete(p.unitId);
+      return { ...s, tasks };
+    }
+
+    case 'unit_marched': {
+      const unit = s.units.get(p.unitId);
+      if (unit === undefined) return s;
+
+      const moved = withUnit(s, {
+        ...unit,
+        column: advanceColumn(unit, p.to, p.grade),
+        hoursMarchedToday: unit.hoursMarchedToday + p.stepHours,
+      });
+
+      const task = moved.tasks.get(p.unitId);
+      if (task === undefined) return moved;
+      return {
+        ...moved,
+        tasks: new Map(moved.tasks).set(p.unitId, {
+          ...task,
+          nextHex: p.nextHex,
+          arrivesAtHours: p.arrivesAtHours,
+        }),
+      };
+    }
+
+    case 'task_completed': {
+      const task = s.tasks.get(p.unitId);
+      if (task === undefined) return s;
+      return {
+        ...s,
+        tasks: new Map(s.tasks).set(p.unitId, {
+          ...task,
+          complete: true,
+          nextHex: null,
+          arrivesAtHours: null,
+        }),
+      };
+    }
+
+    case 'day_rolled': {
+      const units = new Map(s.units);
+      for (const [id, u] of units) units.set(id, { ...u, hoursMarchedToday: 0 });
+      return { ...s, units, clockHours: Math.max(s.clockHours, p.toHours) };
+    }
+
+    case 'decision_raised':
+      return { ...s, decisions: new Map(s.decisions).set(p.decision.id, p.decision) };
+
+    case 'decision_resolved': {
+      const decision = s.decisions.get(p.decisionId);
+      if (decision === undefined) return s;
+      return {
+        ...s,
+        decisions: new Map(s.decisions).set(p.decisionId, {
+          ...decision,
+          resolvedAtHours: p.atHours,
+          note: p.note,
+        }),
+      };
+    }
   }
 }
 
@@ -250,3 +371,52 @@ export const factionIds = (s: CampaignState): string[] => [...s.factions.keys()]
 /** Whether a commander's formations have ever covered a hex. */
 export const hasSurveyed = (s: CampaignState, commanderId: string, c: Hex): boolean =>
   s.knowledge.get(commanderId)?.surveyed.has(key(c)) ?? false;
+
+/**
+ * Despatches in a stable order.
+ *
+ * By the hour written, then by id. Sorting on the hour rather than on insertion is what
+ * makes an inbox read as a sequence of events in the war rather than as a queue of
+ * arrivals — two despatches written an hour apart belong in that order however their
+ * riders fared.
+ */
+const byWritten = (a: Despatch, b: Despatch): number =>
+  a.sentAtHours - b.sentAtHours || (a.id < b.id ? -1 : 1);
+
+/** Everything a commander has written, whatever became of it. */
+export const despatchesFrom = (s: CampaignState, commanderId: string): Despatch[] =>
+  [...s.despatches.values()].filter((d) => d.from === commanderId).sort(byWritten);
+
+/** Everything addressed to a commander — including what never reached him. */
+export const despatchesTo = (s: CampaignState, commanderId: string): Despatch[] =>
+  [...s.despatches.values()].filter((d) => d.to === commanderId).sort(byWritten);
+
+/**
+ * A commander's inbox: what is actually in his hand.
+ *
+ * Delivered only. Nothing in transit toward him is visible, because a rider still on the
+ * road has told him nothing — and showing him a despatch before it arrives would let him
+ * read his subordinate's mind at the speed of light.
+ */
+export const inboxOf = (s: CampaignState, commanderId: string): Despatch[] =>
+  despatchesTo(s, commanderId).filter((d) => d.fate.kind === 'delivered');
+
+/** Despatches riders are still carrying. The referee's problem, and nobody else's. */
+export const inFlight = (s: CampaignState): Despatch[] =>
+  [...s.despatches.values()].filter((d) => d.fate.kind === 'in_transit').sort(byWritten);
+
+/** Enemy paper a faction has taken off a rider. */
+export const capturedBy = (s: CampaignState, faction: string): Despatch[] =>
+  [...s.despatches.values()]
+    .filter((d) => d.fate.kind === 'captured' && d.fate.by === faction)
+    .sort(byWritten);
+
+/** Decisions nobody has dealt with yet, oldest first. */
+export const openDecisions = (s: CampaignState): PendingDecision[] =>
+  [...s.decisions.values()]
+    .filter((d) => d.resolvedAtHours === null)
+    .sort((a, b) => a.atHours - b.atHours || (a.id < b.id ? -1 : 1));
+
+/** What a formation is doing, if anything. */
+export const taskFor = (s: CampaignState, unitId: string): Task | undefined =>
+  s.tasks.get(unitId);

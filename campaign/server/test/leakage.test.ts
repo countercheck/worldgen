@@ -577,3 +577,142 @@ describe('authorisation', () => {
     expect(res.cookies.some((c) => c.name === TOKEN_COOKIE)).toBe(true);
   });
 });
+
+/**
+ * The despatch surface, where a leak would now be both invisible and total.
+ *
+ * A rider takes the least-time path to where the addressee **actually** is, so his route
+ * is computed from ground truth. Show a commander that route and you have told him where
+ * his detached corps stands — and he would never read a report again, because his own
+ * outbox would be a better source than any of them.
+ */
+describe('despatches', () => {
+  let f: Fixture;
+  beforeEach(async () => {
+    f = await setUp();
+  });
+
+  const post = (token: string, command: Command) =>
+    f.app.inject({
+      method: 'POST',
+      url: `/api/campaigns/${f.id}/commands`,
+      headers: { 'x-campaign-token': token },
+      payload: { command },
+    });
+
+  const ORDER = 'Move on Quatre Bras with all speed; I expect you astride the crossroads.';
+
+  const write = (token: string, from: string, to: string, text = ORDER) =>
+    post(token, { kind: 'send_despatch', from, to, despatchKind: 'order', body: { text } });
+
+  const advance = (hours: number) =>
+    f.app.inject({
+      method: 'POST',
+      url: `/api/campaigns/${f.id}/advance`,
+      headers: { 'x-campaign-token': f.referee },
+      payload: { hours },
+    });
+
+  it('never sends a commander a route, a fate, or a rider position', async () => {
+    expect((await write(f.ney, 'ney', 'kellermann')).statusCode).toBe(200);
+
+    const res = await viewAs(f, f.ney);
+    const view = res.json();
+    expect(view.sent).toHaveLength(1);
+    expect(view.sent[0].body.text).toBe(ORDER);
+
+    // Against the bytes, not the object graph: an enumerable field added to `Despatch`
+    // later, or a `toJSON`, would sail straight past a shaped assertion.
+    expect(res.body).not.toContain('"route"');
+    expect(res.body).not.toContain('"fate"');
+    expect(res.body).not.toContain('"progress"');
+    // And no ETA, ever. An estimate is a distance, and a distance is a position.
+    // Quoted, because "eta" unquoted matches `metadata` in the world document.
+    expect(res.body).not.toContain('"eta"');
+    expect(res.body).not.toContain('"etaHours"');
+  });
+
+  it('tells the sender nothing about whether it arrived', async () => {
+    await write(f.ney, 'ney', 'kellermann');
+    const before = (await viewAs(f, f.ney)).json().sent;
+
+    await advance(200);
+
+    const after = (await viewAs(f, f.ney)).json().sent;
+    // Whatever became of the rider — delivered, lost, or read by the enemy — Ney's
+    // outbox says exactly what it said the moment he sealed it. That is the mechanic.
+    expect(after).toEqual(before);
+    expect(after[0].acknowledged).toBe(false);
+  });
+
+  it('keeps a despatch out of the addressee’s hands until it arrives', async () => {
+    await write(f.ney, 'ney', 'kellermann');
+
+    const res = await viewAs(f, f.kellermann);
+    expect(res.json().received).toEqual([]);
+    // Not merely absent from the ledger — absent from the payload. A commander must not
+    // be able to read his orders early by opening the developer tools.
+    expect(res.body).not.toContain('Quatre Bras');
+  });
+
+  it('delivers it eventually, dated with the hour it was written', async () => {
+    await write(f.ney, 'ney', 'kellermann');
+    await advance(200);
+
+    const view = (await viewAs(f, f.kellermann)).json();
+    expect(view.received).toHaveLength(1);
+    expect(view.received[0].body.text).toBe(ORDER);
+    // The hour it describes and the hour it arrived are different numbers, and both are
+    // on the page. The gap between them is the whole of the fog.
+    expect(view.received[0].sentAtHours).toBeLessThan(view.received[0].receivedAtHours);
+  });
+
+  it('gives the referee the route, because that is what a referee is for', async () => {
+    await write(f.ney, 'ney', 'kellermann');
+    const res = await viewAs(f, f.referee);
+
+    expect(res.json().despatches).toHaveLength(1);
+    expect(res.body).toContain('"route"');
+    expect(res.json().despatches[0].route.length).toBeGreaterThan(1);
+  });
+
+  it('sends no decision queue and no tasks to a commander', async () => {
+    await write(f.ney, 'ney', 'kellermann');
+    await advance(200);
+
+    const view = (await viewAs(f, f.kellermann)).json();
+    expect(view.despatches).toEqual([]);
+    expect(view.decisions).toEqual([]);
+    expect(view.tasks).toEqual([]);
+  });
+
+  it('writes in the name of the token, not the name in the payload', async () => {
+    // Kellermann, claiming to be Ney. Forgery would be bad enough; a forged *report*
+    // would let anyone feed a commander false intelligence signed by his own subordinate.
+    const res = await write(f.kellermann, 'ney', 'kellermann', 'Fall back at once.');
+    expect(res.statusCode).toBe(409);
+
+    expect((await viewAs(f, f.referee)).json().despatches).toEqual([]);
+  });
+
+  it('refuses every other command from a commander', async () => {
+    const res = await post(f.ney, { kind: 'set_task', unitId: 'red-2', destination: RED_HEX });
+    expect(res.statusCode).toBe(403);
+  });
+
+  it('refuses an order sent sideways under strict rules', async () => {
+    // Kellermann does not command Ney. It is a message, not an order — and a referee who
+    // wants it to be one can force it, which is why this is soft rather than hard.
+    const res = await write(f.kellermann, 'kellermann', 'ney');
+    expect(res.statusCode).toBe(409);
+    expect(res.json().violations[0].code).toBe('not_in_command');
+  });
+
+  it('refuses a despatch to the other side outright', async () => {
+    const res = await write(f.ney, 'ney', 'wellington');
+    expect(res.statusCode).toBe(409);
+    expect(
+      res.json().violations.some((v: { code: string }) => v.code === 'wrong_faction'),
+    ).toBe(true);
+  });
+});
