@@ -21,6 +21,7 @@
  */
 
 import {
+  echelonOf,
   key,
   occupied,
   parseWorld,
@@ -35,7 +36,7 @@ import {
   type World,
 } from '@campaign/shared';
 
-import type { Mark } from './map/draw.js';
+import type { Mark, SymbolSpec } from './map/draw.js';
 
 export interface Board {
   readonly world: World;
@@ -60,30 +61,61 @@ export function boardFrom(view: ClientView, theme: Theme): Board {
   const reports = new Map(view.reports.map((r) => [r.unitId, r]));
   const contacts = new Map(view.contacts.map((c) => [c.unitId, c]));
 
+  // Whose side a thing is on, from the viewpoint of whoever is looking. A referee has no
+  // side, so nothing is hostile to him and every formation is drawn as a known unit.
+  const mine = view.commander?.faction ?? null;
+  const affiliationOf = (faction: string): SymbolSpec['affiliation'] =>
+    mine !== null && faction !== mine ? 'hostile' : 'friend';
+
   const marks: Mark[] = [
     // Live formations occupy the length of their column; the whole point of a division
     // here is that it is a line of ground rather than a counter on a hex.
     ...view.units.map((u) => ({
       id: u.id,
       column: occupied(u),
-      color: colour(u.faction),
       kind: 'live' as const,
+      symbol: {
+        affiliation: affiliationOf(u.faction),
+        kind: u.kind,
+        echelon: echelonOf(u),
+        color: colour(u.faction),
+        dashed: false,
+        emphasised: false,
+      },
     })),
     // A reported formation is one hex: where it was said to be. Drawing its column would
-    // claim knowledge of how it is strung out, which no despatch carries.
+    // claim knowledge of how it is strung out, which no despatch carries. Its frame is
+    // dashed, which is the standard's mark for a position reported rather than seen.
     ...view.reports.map((r) => ({
       id: r.unitId,
       column: [r.head],
-      color: colour(r.faction),
       kind: 'reported' as const,
+      symbol: {
+        affiliation: affiliationOf(r.faction),
+        // Your own formation, so its arm and size are not in doubt. Only where it is.
+        kind: r.kind,
+        echelon: r.echelon,
+        color: colour(r.faction),
+        dashed: true,
+        emphasised: false,
+      },
     })),
-    // A contact is one hex too. Knowing an enemy was in a village is not knowing how far
-    // back its baggage was; a column here would invent a report nobody made.
+    // A contact is one hex too, and its symbol degrades exactly as the intelligence does:
+    // an empty frame for a plain sighting, an arm once a patrol has closed. Passing the
+    // nulls straight through is deliberate — the drawing code is never given a fact it
+    // has been told not to draw.
     ...view.contacts.map((c) => ({
       id: c.unitId,
       column: [c.coord],
-      color: colour(c.faction),
       kind: 'contact' as const,
+      symbol: {
+        affiliation: affiliationOf(c.faction),
+        kind: c.kind,
+        echelon: c.echelon,
+        color: colour(c.faction),
+        dashed: true,
+        emphasised: false,
+      },
     })),
   ];
 

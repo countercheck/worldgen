@@ -38,7 +38,7 @@ import { key, type Hex, type HexKey } from './hex.js';
 import { maskWorld } from './mask.js';
 import { commanderVisible, spottedUnder, type Contact } from './recon.js';
 import type { CampaignState } from './state.js';
-import type { Formation, Unit } from './unit.js';
+import { echelonOf, type Echelon, type Formation, type Unit, type UnitKind } from './unit.js';
 import { parseWorld, type World } from './world.js';
 
 /** Who is asking. */
@@ -76,6 +76,9 @@ export interface UnitReport {
   readonly unitId: string;
   readonly name: string;
   readonly faction: string;
+  /** Your own formation, so its arm and size are not in doubt — only its position is. */
+  readonly kind: UnitKind;
+  readonly echelon: Echelon;
   /** The hour the report describes, which is not the hour it arrived. */
   readonly atHours: number;
   readonly head: Hex;
@@ -142,6 +145,8 @@ export const reportOf = (unit: Unit, atHours: number): UnitReport => ({
   unitId: unit.id,
   name: unit.name,
   faction: unit.faction,
+  kind: unit.kind,
+  echelon: echelonOf(unit),
   atHours,
   head: unit.column[0] ?? { q: 0, r: 0 },
   effectives: unit.effectives,

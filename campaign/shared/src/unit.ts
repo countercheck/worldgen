@@ -56,6 +56,25 @@ export const MAX_MORALE: Readonly<Record<Experience, number>> = {
 /** A division may not be formed or split below this. */
 export const MIN_DIVISION_EFFECTIVES = 4000;
 
+/**
+ * How large a formation is, in the sense the map cares about.
+ *
+ * Only ever used for display: it is the size marker above a NATO symbol, and nothing in
+ * the rules keys off it. Optional on `Unit` because a scenario that does not say gets a
+ * sensible guess from strength rather than a wrong assertion.
+ */
+export type Echelon = 'none' | 'battalion' | 'regiment' | 'brigade' | 'division' | 'corps';
+
+/** Echelon marks, in the order they are drawn above the frame. */
+export const ECHELON_MARKS: Readonly<Record<Echelon, string>> = {
+  none: '',
+  battalion: 'II',
+  regiment: 'III',
+  brigade: 'X',
+  division: 'XX',
+  corps: 'XXX',
+};
+
 export interface Unit {
   readonly id: string;
   /**
@@ -108,6 +127,15 @@ export interface Unit {
 
   /** Corps grouping. Presentation and combat only — everything tracks individually. */
   readonly corps: string | null;
+
+  /**
+   * How large the formation is, for the size marker on its map symbol.
+   *
+   * Optional: absent means "work it out from strength", which is right often enough and
+   * wrong quietly rather than loudly. A scenario that knows better says so — the demo's
+   * Light Brigade is four thousand strong and is still a brigade.
+   */
+  readonly echelon?: Echelon;
 }
 
 export const hasTrait = (u: Unit, t: Trait): boolean => u.traits.includes(t);
@@ -144,6 +172,25 @@ export const isStarving = (u: Unit): boolean => u.provisions <= 0;
  */
 export const isDivision = (u: Unit): boolean =>
   u.kind === 'infantry' || u.kind === 'cavalry' || u.kind === 'artillery_reserve';
+
+/**
+ * The formation's echelon, guessed from strength when it was not stated.
+ *
+ * A guess, and only ever drawn — never used by a rule. The thresholds are the ordinary
+ * Napoleonic ones: a division is several thousand, a brigade a couple, a regiment under a
+ * thousand. A headquarters is drawn at corps level because that is what an HQ formation in
+ * these rules represents, and a convoy gets no marker at all because it is not a
+ * manoeuvre unit and a size mark on it would be a category error.
+ */
+export function echelonOf(u: Unit): Echelon {
+  if (u.echelon !== undefined) return u.echelon;
+  if (u.kind === 'hq') return 'corps';
+  if (u.kind === 'convoy') return 'none';
+  if (u.effectives >= MIN_DIVISION_EFFECTIVES) return 'division';
+  if (u.effectives >= 1500) return 'brigade';
+  if (u.effectives >= 500) return 'regiment';
+  return 'battalion';
+}
 
 /** Sensible starting values by kind, from the rules' worked examples. */
 export const KIND_DEFAULTS: Readonly<

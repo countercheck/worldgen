@@ -67,6 +67,15 @@ own III Corps is, not what the country looks like — and with sight limited to 
 formation, a blacked-out map is unplayable. The masking machinery is unchanged and still
 tested in both positions; it returns with the issued map. See `PLAN.md`.
 
+**Formations are drawn as NATO symbols, and the standard does the fog for you.** A frame
+with nothing in it means something is there and you cannot say what — which is exactly a
+plain sighting at intel 2. The arm appears inside once a patrol has closed enough to earn
+it, the size marks appear once you know roughly how big it is, and a dashed frame means a
+position reported rather than observed. So a symbol degrades precisely as the intelligence
+does, and a reader who knows the standard can tell how good a report is without reading a
+word. Behind each symbol runs the ground its column occupies, because a division is two to
+eighteen kilometres of road rather than a counter on a hex.
+
 **The log is the campaign; everything else is cache.** State is the fold of an append-only
 event log. Snapshots exist only so folding does not get slower forever, and a test deletes
 them all and asserts the state rebuilds byte-identically. Rewind is replaying a prefix.

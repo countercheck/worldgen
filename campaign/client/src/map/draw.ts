@@ -23,6 +23,10 @@ import {
   type WorldHex,
 } from '@campaign/shared';
 
+import { drawSymbol, symbolSize, type SymbolSpec } from './symbols.js';
+
+export type { SymbolSpec } from './symbols.js';
+
 export interface View {
   /** Pixel radius of a hex. */
   readonly size: number;
@@ -189,16 +193,19 @@ function drawSettlements(ctx: CanvasRenderingContext2D, world: World, view: View
 export type MarkKind = 'live' | 'reported' | 'contact';
 
 /**
- * Something to draw on the map: an id, the ground it covers, and what kind of claim it is.
+ * Something to draw on the map: an id, the ground it covers, and its symbol.
  *
- * Deliberately not a unit. Keeping this shape thin is what stops the drawing code from
- * having the enemy's record in reach at all.
+ * Deliberately not a unit. The symbol spec carries only what is drawn — the arm and size
+ * as far as they are known, and no further — so the drawing code never has the enemy's
+ * record within reach in the first place. A contact whose arm is not known arrives here
+ * with `kind: null`, not with the arm and an instruction not to draw it.
  */
 export interface Mark {
   readonly id: string;
+  /** The ground it occupies. One hex for anything not observed directly. */
   readonly column: readonly Hex[];
-  readonly color: string;
   readonly kind: MarkKind;
+  readonly symbol: SymbolSpec;
 }
 
 /** Everything that follows the cursor. Redrawn every frame; must stay cheap. */
@@ -244,16 +251,16 @@ export function drawOverlay(
 }
 
 /**
- * One mark, drawn according to what it claims.
+ * One mark: a NATO symbol at the head, and behind it the ground the column covers.
  *
- * A live formation is a solid disc at the head of a solid ribbon along the ground it
- * occupies — the length is the point, and a reader should see a division is a column of
- * hexes without consulting the sidebar. A report is a hollow ring: something was there.
- * A contact is a diamond, a different shape entirely, because it is not one of yours.
+ * The trail is the point of the whole model. A division is not a counter on a hex — at its
+ * own spacing it is between two and eighteen kilometres of road, exposed along all of it,
+ * and a reader should see that without consulting the sidebar. So the symbol says what the
+ * formation is and the trail says how much country it is standing on.
  *
- * The two uncertain kinds are drawn *larger* than the certain one, not smaller. They are
- * what a commander is actually reasoning about, and the instinct to make uncertainty faint
- * had them nearly invisible on a map whose whole subject is uncertainty.
+ * Only a formation actually observed has a trail. A reported position and an enemy
+ * sighting are single hexes: a despatch says where something was, not how it was strung
+ * out, and drawing a column from either would invent a report nobody made.
  */
 function drawMark(
   ctx: CanvasRenderingContext2D,
@@ -261,77 +268,39 @@ function drawMark(
   mark: Mark,
   emphasised: boolean,
 ): void {
-  const { column, color, kind } = mark;
+  const { column, symbol } = mark;
   if (column.length === 0) return;
 
   const head = toScreen(column[0]!, view);
-  const r = view.size * (emphasised ? 0.58 : 0.46);
-  ctx.lineWidth = Math.max(1.5, view.size * 0.1);
 
-  if (kind === 'live') {
-    if (column.length > 1) {
-      ctx.strokeStyle = color;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      ctx.lineWidth = Math.max(2, view.size * (emphasised ? 0.42 : 0.3));
-      ctx.beginPath();
-      column.forEach((c, i) => {
-        const p = toScreen(c, view);
-        if (i === 0) ctx.moveTo(p.x, p.y);
-        else ctx.lineTo(p.x, p.y);
-      });
-      ctx.stroke();
-      ctx.lineWidth = Math.max(1.5, view.size * 0.1);
-    }
-
+  if (column.length > 1) {
+    ctx.save();
+    ctx.strokeStyle = symbol.color;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    // Capped as well as scaled. Zoomed in, an uncapped ribbon becomes a wall that hides
+    // the ground it is meant to be lying on.
+    ctx.lineWidth = Math.max(2, Math.min(11, view.size * (emphasised ? 0.4 : 0.28)));
+    // Behind the symbol rather than through it, so the frame stays readable.
+    ctx.globalAlpha = 0.85;
     ctx.beginPath();
-    ctx.arc(head.x, head.y, r * 0.9, 0, Math.PI * 2);
-    ctx.fillStyle = color;
-    ctx.fill();
-    ctx.strokeStyle = emphasised ? '#ffffff' : 'rgba(0,0,0,0.55)';
+    column.forEach((c, i) => {
+      const p = toScreen(c, view);
+      if (i === 0) ctx.moveTo(p.x, p.y);
+      else ctx.lineTo(p.x, p.y);
+    });
     ctx.stroke();
-    return;
+
+    // A cap at the tail, so the end of the column is a place rather than a fade.
+    const tail = toScreen(column[column.length - 1]!, view);
+    ctx.beginPath();
+    ctx.arc(tail.x, tail.y, Math.max(1.5, Math.min(7, view.size * 0.16)), 0, Math.PI * 2);
+    ctx.fillStyle = symbol.color;
+    ctx.fill();
+    ctx.restore();
   }
 
-  if (kind === 'reported') {
-    // A hollow ring, dashed: a position somebody vouched for, not one you can see.
-    ctx.beginPath();
-    ctx.arc(head.x, head.y, r, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(0,0,0,0.45)';
-    ctx.fill();
-    ctx.setLineDash([view.size * 0.28, view.size * 0.22]);
-    ctx.strokeStyle = color;
-    ctx.lineWidth = Math.max(2, view.size * 0.16);
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    if (emphasised) {
-      ctx.beginPath();
-      ctx.arc(head.x, head.y, r * 1.45, 0, Math.PI * 2);
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = Math.max(1.5, view.size * 0.08);
-      ctx.stroke();
-    }
-    return;
-  }
-
-  // A contact: a diamond, so it cannot be mistaken for one of yours at a glance.
-  const d = r * 1.15;
-  ctx.beginPath();
-  ctx.moveTo(head.x, head.y - d);
-  ctx.lineTo(head.x + d, head.y);
-  ctx.lineTo(head.x, head.y + d);
-  ctx.lineTo(head.x - d, head.y);
-  ctx.closePath();
-  ctx.fillStyle = color;
-  ctx.globalAlpha = 0.8;
-  ctx.fill();
-  ctx.globalAlpha = 1;
-  ctx.setLineDash([view.size * 0.25, view.size * 0.2]);
-  ctx.strokeStyle = emphasised ? '#ffffff' : 'rgba(255,255,255,0.75)';
-  ctx.lineWidth = Math.max(1.5, view.size * 0.11);
-  ctx.stroke();
-  ctx.setLineDash([]);
+  drawSymbol(ctx, head.x, head.y, symbolSize(view.size), { ...symbol, emphasised });
 }
 
 /**

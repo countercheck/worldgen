@@ -25,7 +25,7 @@ import { type Command } from './engine.js';
 import { distance, key, neighbors, unkey, type Hex } from './hex.js';
 import { planMarch } from './movement.js';
 import type { Faction } from './events.js';
-import { KIND_DEFAULTS, type Trait, type Unit, type UnitKind } from './unit.js';
+import { KIND_DEFAULTS, type Echelon, type Trait, type Unit, type UnitKind } from './unit.js';
 import type { World } from './world.js';
 
 export const RED: Faction = { id: 'red', name: 'Armée du Nord', color: '#d1495b' };
@@ -42,6 +42,8 @@ interface Spec {
   spacingMultiplier: number;
   guns: number;
   corps: string | null;
+  /** Stated rather than guessed: the Light Brigade is four thousand and still a brigade. */
+  echelon: Echelon;
   /** The man riding with it, and who he answers to. Null superior means army command. */
   commander: { id: string; name: string; superiorOf?: readonly string[] };
 }
@@ -70,6 +72,7 @@ function makeUnit(spec: Spec, at: Hex): Unit {
     column: [at],
     hoursMarchedToday: 0,
     corps: spec.corps,
+    echelon: spec.echelon,
   };
 }
 
@@ -85,6 +88,7 @@ const SPECS: Spec[] = [
     spacingMultiplier: 1.3,
     guns: 12,
     corps: 'I Corps',
+    echelon: 'division',
     commander: { id: 'ney', name: 'Marshal Ney', superiorOf: ['kellermann', 'soult'] },
   },
   {
@@ -98,6 +102,7 @@ const SPECS: Spec[] = [
     spacingMultiplier: 1.5,
     guns: 6,
     corps: 'Cavalry Reserve',
+    echelon: 'division',
     commander: { id: 'kellermann', name: 'General Kellermann' },
   },
   {
@@ -111,6 +116,7 @@ const SPECS: Spec[] = [
     spacingMultiplier: 1,
     guns: 0,
     corps: null,
+    echelon: 'corps',
     commander: { id: 'soult', name: 'Marshal Soult' },
   },
   {
@@ -124,6 +130,7 @@ const SPECS: Spec[] = [
     spacingMultiplier: 1.2,
     guns: 8,
     corps: 'II Corps',
+    echelon: 'division',
     commander: { id: 'wellington', name: 'The Duke of Wellington', superiorOf: ['uxbridge'] },
   },
   {
@@ -137,6 +144,7 @@ const SPECS: Spec[] = [
     spacingMultiplier: 1.4,
     guns: 0,
     corps: 'II Corps',
+    echelon: 'brigade',
     commander: { id: 'uxbridge', name: 'The Earl of Uxbridge' },
   },
 ];
