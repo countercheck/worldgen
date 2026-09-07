@@ -98,6 +98,20 @@ export interface CampaignConfig {
 
   // ---- reconnaissance -------------------------------------------------
   /** Hexes either side of the march column a unit observes. */
+  /**
+   * Whether ground a commander's formations have not covered is hidden from him.
+   *
+   * Off. The tension the ruleset turns on is where the enemy is and where one's own
+   * detached corps is, not what the country looks like — a commander in 1815 had a map.
+   * And with sight limited to the formation he rides with, terrain fog would leave him a
+   * two-hex bubble and darkness beyond it, unable to plan a march at all.
+   *
+   * The masking machinery is unchanged and still tested in both positions, so turning
+   * this on is a switch rather than a rebuild. It comes back with the issued map — the
+   * period survey that is wrong about minor roads, fords and river courses — because that
+   * turns fog from darkness into doubt, which is the version worth having.
+   */
+  readonly terrainFog: boolean;
   readonly reconRadius: number;
   /** The same, for a unit with the scout trait. */
   readonly scoutReconRadius: number;
@@ -138,6 +152,7 @@ export const DEFAULT_CONFIG: CampaignConfig = {
   majorCrossingHours: 1,
   pontoonBuildHours: 6,
 
+  terrainFog: false,
   reconRadius: 1,
   scoutReconRadius: 2,
   freePatrols: 3,

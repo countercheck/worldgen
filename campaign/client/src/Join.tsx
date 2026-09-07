@@ -16,16 +16,24 @@ import { useState } from 'react';
 
 import { DEMO_FACTIONS, demoCommands, parseWorld, type Faction } from '@campaign/shared';
 
-import { createCampaign, sendCommand, type Session } from './api.js';
+import { createCampaign, fetchView, issueSeatToken, sendCommand, type Session } from './api.js';
 import { joinLink, type HeldTokens } from './session.js';
 
 export interface Joined {
   readonly session: Session;
   readonly held: HeldTokens;
   readonly ownToken: string;
+  /** Who each seat belongs to, so a link can be labelled with a name rather than an id. */
+  readonly seats: Record<string, { name: string; faction: string }>;
 }
 
-/** Build a campaign from a world document and populate it with the demo scenario. */
+/**
+ * Build a campaign from a world document and populate it with the demo scenario.
+ *
+ * Three phases, in the order a real game is prepared: upload the world, put the order of
+ * battle on the map, then issue a link per seat. The seats come last because a commander
+ * needs a formation to ride with before anybody can be appointed to one.
+ */
 async function startCampaign(
   name: string,
   worldDoc: unknown,
@@ -40,11 +48,11 @@ async function startCampaign(
   if (populate) {
     const commands = demoCommands(parseWorld(worldDoc));
     for (const [i, command] of commands.entries()) {
-      onProgress(`Placing units… ${i + 1} of ${commands.length}`);
+      onProgress(`Forming the army… ${i + 1} of ${commands.length}`);
       const result = await sendCommand(session, command);
       if (!result.ok) {
-        // A refused placement is worth showing rather than swallowing: it means the
-        // engine disagrees with the scenario, which is a real answer about the world.
+        // A refusal is worth showing rather than swallowing: it means the engine
+        // disagrees with the scenario, which is a real answer about the world.
         throw new Error(
           result.violations?.map((v) => v.message).join('; ') ?? 'a command was refused',
         );
@@ -52,15 +60,27 @@ async function startCampaign(
     }
   }
 
-  return { session, held: created.factionTokens, ownToken: created.refereeToken };
+  // One link per seat, so the referee can hand any of them to a player.
+  onProgress('Issuing join links…');
+  const view = await fetchView(session);
+  const held: HeldTokens = {};
+  const seats: Record<string, { name: string; faction: string }> = {};
+  for (const commander of view.commanders) {
+    const { token } = await issueSeatToken(session, commander.id);
+    held[commander.id] = token;
+    seats[commander.id] = { name: commander.name, faction: commander.faction };
+  }
+
+  return { session, held, ownToken: created.refereeToken, seats };
 }
 
 export function Join({ onJoined }: { onJoined: (joined: Joined) => void }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [links, setLinks] = useState<{ referee: string; factions: [string, string][] } | null>(
-    null,
-  );
+  const [links, setLinks] = useState<{
+    referee: string;
+    seats: { id: string; label: string; link: string }[];
+  } | null>(null);
   const [pending, setPending] = useState<Joined | null>(null);
 
   const run = async (make: () => Promise<Joined>): Promise<void> => {
@@ -73,10 +93,11 @@ export function Join({ onJoined }: { onJoined: (joined: Joined) => void }) {
       // copying them has to start again.
       setLinks({
         referee: joinLink(joined.session),
-        factions: Object.entries(joined.held).map(([f, t]) => [
-          f,
-          joinLink({ campaignId: joined.session.campaignId, token: t }),
-        ]),
+        seats: Object.entries(joined.held).map(([id, token]) => ({
+          id,
+          label: joined.seats[id]?.name ?? id,
+          link: joinLink({ campaignId: joined.session.campaignId, token }),
+        })),
       });
       setPending(joined);
     } catch (err) {
@@ -115,19 +136,19 @@ export function Join({ onJoined }: { onJoined: (joined: Joined) => void }) {
       <div className="join">
         <h1>Campaign created</h1>
         <p className="muted">
-          One link per side. Send each commander theirs and keep the referee's — they are
-          minted once and stored only as hashes, so a lost link is reissued rather than
-          looked up.
+          One link per seat. Send each man his own and keep the referee's — they are minted
+          once and stored only as hashes, so a lost link is reissued rather than looked up.
+          Two commanders on the same side see different wars, which is the point.
         </p>
         <ul className="links">
           <li>
             <strong>Referee</strong>
             <code>{links.referee}</code>
           </li>
-          {links.factions.map(([faction, link]) => (
-            <li key={faction}>
-              <strong>{faction}</strong>
-              <code>{link}</code>
+          {links.seats.map((seat) => (
+            <li key={seat.id}>
+              <strong>{seat.label}</strong>
+              <code>{seat.link}</code>
             </li>
           ))}
         </ul>

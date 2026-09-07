@@ -19,6 +19,7 @@
  */
 
 import { advanceColumn } from './column.js';
+import type { Commander } from './commander.js';
 import { DEFAULT_CONFIG } from './config.js';
 import { type Command } from './engine.js';
 import { distance, key, neighbors, unkey, type Hex } from './hex.js';
@@ -41,6 +42,8 @@ interface Spec {
   spacingMultiplier: number;
   guns: number;
   corps: string | null;
+  /** The man riding with it, and who he answers to. Null superior means army command. */
+  commander: { id: string; name: string; superiorOf?: readonly string[] };
 }
 
 function makeUnit(spec: Spec, at: Hex): Unit {
@@ -82,6 +85,7 @@ const SPECS: Spec[] = [
     spacingMultiplier: 1.3,
     guns: 12,
     corps: 'I Corps',
+    commander: { id: 'ney', name: 'Marshal Ney', superiorOf: ['kellermann', 'soult'] },
   },
   {
     id: 'red-2',
@@ -94,6 +98,7 @@ const SPECS: Spec[] = [
     spacingMultiplier: 1.5,
     guns: 6,
     corps: 'Cavalry Reserve',
+    commander: { id: 'kellermann', name: 'General Kellermann' },
   },
   {
     id: 'red-3',
@@ -106,6 +111,7 @@ const SPECS: Spec[] = [
     spacingMultiplier: 1,
     guns: 0,
     corps: null,
+    commander: { id: 'soult', name: 'Marshal Soult' },
   },
   {
     id: 'blue-1',
@@ -118,6 +124,7 @@ const SPECS: Spec[] = [
     spacingMultiplier: 1.2,
     guns: 8,
     corps: 'II Corps',
+    commander: { id: 'wellington', name: 'The Duke of Wellington', superiorOf: ['uxbridge'] },
   },
   {
     id: 'blue-2',
@@ -130,6 +137,7 @@ const SPECS: Spec[] = [
     spacingMultiplier: 1.4,
     guns: 0,
     corps: 'II Corps',
+    commander: { id: 'uxbridge', name: 'The Earl of Uxbridge' },
   },
 ];
 
@@ -250,6 +258,35 @@ export function demoCommands(world: World): Command[] {
 
   const units = SPECS.map((spec, i) => makeUnit(spec, starts[i] ?? starts[0]!));
   const commands: Command[] = units.map((unit) => ({ kind: 'add_unit', unit }));
+
+  // Commanders come after every unit, because a man must have a formation to ride with
+  // before he can be appointed to it, and after the superiors he answers to. Both are
+  // hard violations rather than soft ones — an appointment to nothing is not an
+  // irregularity a referee might want, it is a state nothing can read.
+  const superiorOf = new Map<string, string>();
+  for (const spec of SPECS) {
+    for (const below of spec.commander.superiorOf ?? []) {
+      superiorOf.set(below, spec.commander.id);
+    }
+  }
+
+  const byDepth = [...SPECS].sort(
+    (a, b) =>
+      (superiorOf.has(a.commander.id) ? 1 : 0) - (superiorOf.has(b.commander.id) ? 1 : 0),
+  );
+
+  for (const spec of byDepth) {
+    const commander: Commander = {
+      id: spec.commander.id,
+      name: spec.commander.name,
+      faction: spec.faction,
+      unitId: spec.id,
+      superiorId: superiorOf.get(spec.commander.id) ?? null,
+      // The referee runs every seat until somebody is sent a link for one.
+      autoCascade: true,
+    };
+    commands.push({ kind: 'add_commander', commander });
+  }
 
   const objectives: Hex[] = [];
   for (const unit of [...units].sort((a, b) => (a.id < b.id ? -1 : 1))) {

@@ -17,6 +17,7 @@ import {
   parseWorld,
   REFEREE_ROLE,
   type Command,
+  type Commander,
   type Hex,
   type Unit,
 } from '@campaign/shared';
@@ -55,6 +56,20 @@ function division(id: string, faction: string, at: Hex): Unit {
   };
 }
 
+const commander = (
+  id: string,
+  faction: string,
+  unitId: string,
+  superiorId: string | null = null,
+): Commander => ({
+  id,
+  name: `Commander ${id}`,
+  faction,
+  unitId,
+  superiorId,
+  autoCascade: true,
+});
+
 function setUp() {
   const store = new CampaignStore(openDb());
   const created = store.create({
@@ -70,6 +85,22 @@ function setUp() {
   return { store, ...created };
 }
 
+/**
+ * A campaign with one formation and one man riding with it.
+ *
+ * Most of these tests are about knowledge, and knowledge belongs to a commander now, so
+ * there is nothing to observe until somebody is appointed to do the observing.
+ */
+function withCommander(id = 'r1', faction = 'red', at: Hex = land[0]!) {
+  const s = setUp();
+  const run = (c: Command) => s.store.execute(s.campaign, c, REFEREE_ROLE);
+  expect(run({ kind: 'add_unit', unit: division(id, faction, at) }).ok).toBe(true);
+  expect(run({ kind: 'add_commander', commander: commander(`c-${id}`, faction, id) }).ok).toBe(
+    true,
+  );
+  return s;
+}
+
 const run = (
   s: ReturnType<typeof setUp>,
   command: Command,
@@ -77,17 +108,37 @@ const run = (
 ) => s.store.execute(s.campaign, command, REFEREE_ROLE, opts);
 
 describe('creating a campaign', () => {
-  it('mints a distinct token per role', () => {
+  it('mints only the referee link, because there are no seats yet', () => {
+    // A join link names a commander, and a commander needs a formation to ride with. The
+    // order of battle arrives after creation, so the seats do too.
     const s = setUp();
-    const tokens = [s.refereeToken, s.tokens.red!, s.tokens.blue!];
-    expect(new Set(tokens).size).toBe(3);
+    expect(s.refereeToken).toBeTruthy();
+    expect(s.store.roleFor('c1', s.refereeToken)).toEqual({ kind: 'referee' });
   });
 
-  it('resolves each token to its own role', () => {
-    const s = setUp();
+  it('mints a distinct link per seat, resolving to that man', () => {
+    const s = withCommander();
+    const first = s.store.issueToken('c1', 'c-r1');
+    const second = s.store.issueToken('c1', 'c-r1');
+
+    expect(first).not.toBe(second);
+    expect(first).not.toBe(s.refereeToken);
+    // Reissuing does not invalidate the old one — that is `revokeTokens`, and keeping the
+    // two separate is what lets a referee hand out a replacement before killing the leak.
+    expect(s.store.roleFor('c1', first)).toEqual({ kind: 'commander', id: 'c-r1' });
+    expect(s.store.roleFor('c1', second)).toEqual({ kind: 'commander', id: 'c-r1' });
+  });
+
+  it('revokes every link to a seat at once', () => {
+    const s = withCommander();
+    const a = s.store.issueToken('c1', 'c-r1');
+    const b = s.store.issueToken('c1', 'c-r1');
+
+    s.store.revokeTokens('c1', 'c-r1');
+    expect(s.store.roleFor('c1', a)).toBeNull();
+    expect(s.store.roleFor('c1', b)).toBeNull();
+    // The referee's own link is not a commander's and must survive.
     expect(s.store.roleFor('c1', s.refereeToken)).toEqual({ kind: 'referee' });
-    expect(s.store.roleFor('c1', s.tokens.red)).toEqual({ kind: 'faction', id: 'red' });
-    expect(s.store.roleFor('c1', s.tokens.blue)).toEqual({ kind: 'faction', id: 'blue' });
   });
 
   it('resolves nothing for an unknown token', () => {
@@ -204,52 +255,75 @@ describe('state', () => {
 });
 
 describe('observation', () => {
-  it('records what a faction sees when a unit appears', () => {
-    const s = setUp();
-    run(s, { kind: 'add_unit', unit: division('r1', 'red', land[0]!) });
-
-    const state = s.store.state('c1');
-    const seen = state.knowledge.get('red')!.seen;
-    expect(seen.size).toBeGreaterThan(0);
-    expect(seen.has(key(land[0]!))).toBe(true);
+  it('records what a commander covers once he is appointed', () => {
+    const s = withCommander();
+    const surveyed = s.store.state('c1').knowledge.get('c-r1')!.surveyed;
+    expect(surveyed.size).toBeGreaterThan(0);
+    expect(surveyed.has(key(land[0]!))).toBe(true);
   });
 
-  it('does not give one faction another faction knowledge', () => {
+  it('records nothing for a formation nobody commands', () => {
+    // Formations observe, but observing is not knowing: what a division sees becomes
+    // knowledge when there is a man riding with it to take note of it.
     const s = setUp();
     run(s, { kind: 'add_unit', unit: division('r1', 'red', land[0]!) });
-
-    const state = s.store.state('c1');
-    expect(state.knowledge.get('blue')!.seen.size).toBe(0);
+    expect(s.store.state('c1').knowledge.size).toBe(0);
   });
 
-  it('remembers ground a unit has left', () => {
-    // The whole point of storing knowledge rather than recomputing it: an army does not
-    // forget a valley the moment it marches out of the far side.
-    const s = setUp();
+  it('does not give one commander another commander\'s knowledge', () => {
+    const s = withCommander();
+    const far = land.find((c) => Math.abs(c.q - land[0]!.q) > 12)!;
+    run(s, { kind: 'add_unit', unit: division('b1', 'blue', far) });
+    run(s, { kind: 'add_commander', commander: commander('c-b1', 'blue', 'b1') });
+
+    const state = s.store.state('c1');
+    const mine = state.knowledge.get('c-r1')!.surveyed;
+    const theirs = state.knowledge.get('c-b1')!.surveyed;
+    expect([...mine].some((k) => theirs.has(k))).toBe(false);
+  });
+
+  it('gives a superior what his subordinate covers, and not the reverse', () => {
+    // The interim rule, stated in observe.ts: every formation reports upward instantly
+    // until riders exist. Reports travel up the tree, never down it.
+    const s = withCommander();
+    const far = land.find((c) => Math.abs(c.q - land[0]!.q) > 12)!;
+    run(s, { kind: 'add_unit', unit: division('r2', 'red', far) });
+    run(s, {
+      kind: 'add_commander',
+      commander: commander('c-r2', 'red', 'r2', 'c-r1'),
+    });
+
+    const state = s.store.state('c1');
+    const chief = state.knowledge.get('c-r1')!.surveyed;
+    const junior = state.knowledge.get('c-r2')!.surveyed;
+
+    expect(chief.has(key(far)), 'the subordinate never reported in').toBe(true);
+    expect(junior.has(key(land[0]!)), 'a subordinate learned his chief\'s ground').toBe(false);
+  });
+
+  it('remembers ground a formation has left', () => {
+    // The whole point of storing knowledge rather than recomputing it: a man does not
+    // forget a valley the moment his column marches out of the far side.
+    const s = withCommander();
     const start = land[0]!;
-    run(s, { kind: 'add_unit', unit: division('r1', 'red', start) });
-
-    const far = land.find(
-      (c) => Math.abs(c.q - start.q) + Math.abs(c.r - start.r) > 12,
-    )!;
+    const far = land.find((c) => Math.abs(c.q - start.q) + Math.abs(c.r - start.r) > 12)!;
     run(s, { kind: 'teleport_unit', unitId: 'r1', column: [far] });
 
-    const seen = s.store.state('c1').knowledge.get('red')!.seen;
-    expect(seen.has(key(start)), 'the starting ground was forgotten').toBe(true);
-    expect(seen.has(key(far))).toBe(true);
+    const surveyed = s.store.state('c1').knowledge.get('c-r1')!.surveyed;
+    expect(surveyed.has(key(start)), 'the starting ground was forgotten').toBe(true);
+    expect(surveyed.has(key(far))).toBe(true);
   });
 
   it('emits nothing when nothing new was seen', () => {
-    const s = setUp();
-    run(s, { kind: 'add_unit', unit: division('r1', 'red', land[0]!) });
+    const s = withCommander();
     const afterFirst = s.store.events('c1').length;
 
-    // Advancing the clock moves nobody, so no new ground is observed.
+    // Advancing the clock moves nobody, so no new ground is covered.
     run(s, { kind: 'advance_clock', hours: 1 });
-    const events = s.store.events('c1');
-    const observations = events
+    const observations = s.store
+      .events('c1')
       .slice(afterFirst)
-      .filter((e) => e.payload.kind === 'hexes_revealed');
+      .filter((e) => e.payload.kind === 'hexes_surveyed');
 
     expect(observations).toEqual([]);
   });
@@ -257,19 +331,21 @@ describe('observation', () => {
 
 describe('snapshot round trip', () => {
   it('preserves maps and sets, which JSON does not', () => {
-    // A snapshot that silently lost a faction's `seen` set would be indistinguishable
-    // from an army that forgot the war.
-    const s = setUp();
-    run(s, { kind: 'add_unit', unit: division('r1', 'red', land[0]!) });
+    // A snapshot that silently lost what a commander had surveyed would be
+    // indistinguishable from a man who forgot the campaign.
+    const s = withCommander();
 
     const state = s.store.state('c1');
     const round = deserialise(serialise(state));
 
     expect(round.units.get('r1')).toEqual(state.units.get('r1'));
     expect(round.factions.size).toBe(state.factions.size);
-    expect(round.knowledge.get('red')!.seen).toEqual(state.knowledge.get('red')!.seen);
-    expect(round.knowledge.get('red')!.lastSeenHours).toEqual(
-      state.knowledge.get('red')!.lastSeenHours,
+    expect(round.commanders.get('c-r1')).toEqual(state.commanders.get('c-r1'));
+    expect(round.knowledge.get('c-r1')!.surveyed).toEqual(
+      state.knowledge.get('c-r1')!.surveyed,
+    );
+    expect(round.knowledge.get('c-r1')!.lastSurveyedHours).toEqual(
+      state.knowledge.get('c-r1')!.lastSurveyedHours,
     );
   });
 });

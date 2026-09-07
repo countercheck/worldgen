@@ -172,19 +172,33 @@ function drawSettlements(ctx: CanvasRenderingContext2D, world: World, view: View
 }
 
 /**
- * Something to draw on the map: an id, the ground it covers, and how solid it looks.
+ * What a mark stands for, which decides how it is drawn.
  *
- * Deliberately not a unit. A commander's own division and an enemy contact both end up
- * here, and the difference between them — that one is a full record and the other is a
- * sighting with almost nothing in it — must not be something the drawing code can lose
- * track of. `visible` is the distinction, drawn as a ghost.
+ * Three kinds, and they must be told apart at a glance, because on a commander's map they
+ * are three different claims about the world:
+ *
+ * - `live` — a formation he is standing next to. This is true now.
+ * - `reported` — one of his own, where a despatch says it stood. True at an hour that has
+ *   passed, and the older it is the less it means.
+ * - `contact` — an enemy somebody saw. Barely anything is known and it may have marched.
+ *
+ * An earlier version drew the last two identically as small faint dots, which was both
+ * illegible and a lie: it made "my own cavalry, an hour ago" and "an enemy column, seen
+ * by somebody else" look like the same class of fact.
+ */
+export type MarkKind = 'live' | 'reported' | 'contact';
+
+/**
+ * Something to draw on the map: an id, the ground it covers, and what kind of claim it is.
+ *
+ * Deliberately not a unit. Keeping this shape thin is what stops the drawing code from
+ * having the enemy's record in reach at all.
  */
 export interface Mark {
   readonly id: string;
   readonly column: readonly Hex[];
   readonly color: string;
-  /** False for ground where something was seen, rather than where it is known to be. */
-  readonly visible: boolean;
+  readonly kind: MarkKind;
 }
 
 /** Everything that follows the cursor. Redrawn every frame; must stay cheap. */
@@ -210,9 +224,15 @@ export function drawOverlay(
     }
   }
 
-  for (const { id, column, color, visible } of opts.marks) {
-    const emphasised = id === opts.hoveredUnitId || id === opts.selectedUnitId;
-    drawColumn(ctx, view, column, color, { emphasised, ghost: !visible });
+  // Live formations first, so a report or a contact standing on the same ground is drawn
+  // over them rather than hidden beneath.
+  const order: MarkKind[] = ['live', 'reported', 'contact'];
+  for (const kind of order) {
+    for (const mark of opts.marks) {
+      if (mark.kind !== kind) continue;
+      const emphasised = mark.id === opts.hoveredUnitId || mark.id === opts.selectedUnitId;
+      drawMark(ctx, view, mark, emphasised);
+    }
   }
 
   if (opts.hovered !== null) {
@@ -224,51 +244,94 @@ export function drawOverlay(
 }
 
 /**
- * A unit, drawn as the line of ground it stands on.
+ * One mark, drawn according to what it claims.
  *
- * The head gets a marker and the tail a tapering ribbon, because the length is the point:
- * a division is a column of hexes and a reader should see that at a glance rather than
- * having to consult the sidebar.
+ * A live formation is a solid disc at the head of a solid ribbon along the ground it
+ * occupies — the length is the point, and a reader should see a division is a column of
+ * hexes without consulting the sidebar. A report is a hollow ring: something was there.
+ * A contact is a diamond, a different shape entirely, because it is not one of yours.
+ *
+ * The two uncertain kinds are drawn *larger* than the certain one, not smaller. They are
+ * what a commander is actually reasoning about, and the instinct to make uncertainty faint
+ * had them nearly invisible on a map whose whole subject is uncertainty.
  */
-function drawColumn(
+function drawMark(
   ctx: CanvasRenderingContext2D,
   view: View,
-  column: readonly Hex[],
-  color: string,
-  opts: { emphasised: boolean; ghost: boolean },
+  mark: Mark,
+  emphasised: boolean,
 ): void {
+  const { column, color, kind } = mark;
   if (column.length === 0) return;
 
-  ctx.globalAlpha = opts.ghost ? 0.45 : 1;
+  const head = toScreen(column[0]!, view);
+  const r = view.size * (emphasised ? 0.58 : 0.46);
+  ctx.lineWidth = Math.max(1.5, view.size * 0.1);
 
-  if (column.length > 1) {
-    ctx.strokeStyle = color;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
-    ctx.setLineDash(opts.ghost ? [view.size * 0.4, view.size * 0.3] : []);
-    ctx.lineWidth = Math.max(2, view.size * (opts.emphasised ? 0.42 : 0.3));
+  if (kind === 'live') {
+    if (column.length > 1) {
+      ctx.strokeStyle = color;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.lineWidth = Math.max(2, view.size * (emphasised ? 0.42 : 0.3));
+      ctx.beginPath();
+      column.forEach((c, i) => {
+        const p = toScreen(c, view);
+        if (i === 0) ctx.moveTo(p.x, p.y);
+        else ctx.lineTo(p.x, p.y);
+      });
+      ctx.stroke();
+      ctx.lineWidth = Math.max(1.5, view.size * 0.1);
+    }
+
     ctx.beginPath();
-    column.forEach((c, i) => {
-      const p = toScreen(c, view);
-      if (i === 0) ctx.moveTo(p.x, p.y);
-      else ctx.lineTo(p.x, p.y);
-    });
+    ctx.arc(head.x, head.y, r * 0.9, 0, Math.PI * 2);
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.strokeStyle = emphasised ? '#ffffff' : 'rgba(0,0,0,0.55)';
     ctx.stroke();
-    ctx.setLineDash([]);
+    return;
   }
 
-  const head = toScreen(column[0]!, view);
-  const r = view.size * (opts.emphasised ? 0.52 : 0.42);
+  if (kind === 'reported') {
+    // A hollow ring, dashed: a position somebody vouched for, not one you can see.
+    ctx.beginPath();
+    ctx.arc(head.x, head.y, r, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0,0,0,0.45)';
+    ctx.fill();
+    ctx.setLineDash([view.size * 0.28, view.size * 0.22]);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = Math.max(2, view.size * 0.16);
+    ctx.stroke();
+    ctx.setLineDash([]);
 
+    if (emphasised) {
+      ctx.beginPath();
+      ctx.arc(head.x, head.y, r * 1.45, 0, Math.PI * 2);
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = Math.max(1.5, view.size * 0.08);
+      ctx.stroke();
+    }
+    return;
+  }
+
+  // A contact: a diamond, so it cannot be mistaken for one of yours at a glance.
+  const d = r * 1.15;
   ctx.beginPath();
-  ctx.arc(head.x, head.y, r, 0, Math.PI * 2);
+  ctx.moveTo(head.x, head.y - d);
+  ctx.lineTo(head.x + d, head.y);
+  ctx.lineTo(head.x, head.y + d);
+  ctx.lineTo(head.x - d, head.y);
+  ctx.closePath();
   ctx.fillStyle = color;
+  ctx.globalAlpha = 0.8;
   ctx.fill();
-  ctx.lineWidth = Math.max(1.5, view.size * 0.09);
-  ctx.strokeStyle = opts.emphasised ? '#ffffff' : 'rgba(0,0,0,0.55)';
-  ctx.stroke();
-
   ctx.globalAlpha = 1;
+  ctx.setLineDash([view.size * 0.25, view.size * 0.2]);
+  ctx.strokeStyle = emphasised ? '#ffffff' : 'rgba(255,255,255,0.75)';
+  ctx.lineWidth = Math.max(1.5, view.size * 0.11);
+  ctx.stroke();
+  ctx.setLineDash([]);
 }
 
 /**

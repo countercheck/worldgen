@@ -9,11 +9,13 @@ import { key, type Hex, type HexKey } from '../src/hex.js';
 import {
   contactFrom,
   detectionDice,
-  factionVisible,
+  commanderVisible,
+  commandVisible,
   hearsGunfire,
   reconRadius,
   reconZone,
-  spotted,
+  spottedBy,
+  spottedUnder,
   SIGHTING_INTEL,
 } from '../src/recon.js';
 import { EMPTY_STATE, type CampaignState } from '../src/state.js';
@@ -77,6 +79,7 @@ function unit(
 ): Unit {
   return {
     id,
+    name: id,
     faction,
     kind,
     effectives: 4000,
@@ -105,6 +108,27 @@ const stateWith = (...units: Unit[]): CampaignState => ({
   clockHours: 12,
   units: new Map(units.map((u) => [u.id, u])),
 });
+
+/** A man for each formation, the first of them commanding the rest of his side. */
+function commanded(...units: Unit[]): CampaignState {
+  const base = stateWith(...units);
+  const chiefs = new Map<string, string>();
+  const commanders = new Map<string, Commander>();
+
+  for (const u of units) {
+    const chief = chiefs.get(u.faction);
+    commanders.set(`c-${u.id}`, {
+      id: `c-${u.id}`,
+      name: `Commander of ${u.id}`,
+      faction: u.faction,
+      unitId: u.id,
+      superiorId: chief ?? null,
+      autoCascade: true,
+    });
+    if (chief === undefined) chiefs.set(u.faction, `c-${u.id}`);
+  }
+  return { ...base, commanders };
+}
 
 describe('reconRadius', () => {
   it('is one hex, or two with scouts', () => {
@@ -189,31 +213,91 @@ describe('reconZone', () => {
   });
 });
 
-describe('factionVisible', () => {
-  it('unions every unit of the faction and nobody else', () => {
-    const state = stateWith(
+describe('commanderVisible', () => {
+  it('is what he can see from where he stands, and no further', () => {
+    // The whole point of the model. A man riding with r1 at 5,5 does not see the country
+    // around r2 at 20,20 merely because r2 is his; that arrives by despatch or not at all.
+    const state = commanded(
       unit('r1', 'red', [{ q: 5, r: 5 }]),
       unit('r2', 'red', [{ q: 20, r: 20 }]),
       unit('b1', 'blue', [{ q: 30, r: 30 }]),
     );
-    const red = factionVisible(state, world, cfg, 'red');
-    expect(red.has(key({ q: 5, r: 5 }))).toBe(true);
-    expect(red.has(key({ q: 20, r: 20 }))).toBe(true);
-    expect(red.has(key({ q: 30, r: 30 }))).toBe(false);
+    const his = commanderVisible(state, world, cfg, 'c-r1');
+    expect(his.has(key({ q: 5, r: 5 }))).toBe(true);
+    expect(his.has(key({ q: 20, r: 20 })), 'he saw his own subordinate forty km away').toBe(
+      false,
+    );
+    expect(his.has(key({ q: 30, r: 30 }))).toBe(false);
   });
 
-  it('is empty for a faction with nothing in the field', () => {
-    expect(factionVisible(stateWith(), world, cfg, 'red').size).toBe(0);
+  it('is exactly his formation\'s recon zone', () => {
+    const u = unit('r1', 'red', [{ q: 5, r: 5 }]);
+    const state = commanded(u);
+    expect([...commanderVisible(state, world, cfg, 'c-r1')].sort()).toEqual(
+      [...reconZone(world, cfg, u)].sort(),
+    );
+  });
+
+  it('is empty for a commander who is nobody, or who rides with nothing', () => {
+    expect(commanderVisible(stateWith(), world, cfg, 'nobody').size).toBe(0);
+
+    const orphaned: CampaignState = {
+      ...EMPTY_STATE,
+      commanders: new Map([
+        [
+          'ghost',
+          {
+            id: 'ghost',
+            name: 'A man with no army',
+            faction: 'red',
+            unitId: 'gone',
+            superiorId: null,
+            autoCascade: true,
+          },
+        ],
+      ]),
+    };
+    expect(commanderVisible(orphaned, world, cfg, 'ghost').size).toBe(0);
   });
 });
 
-describe('spotted', () => {
+describe('commandVisible', () => {
+  it('unions everything his formations can see, which is not what he knows', () => {
+    // The observing side of the transaction: the ground his divisions are looking at, from
+    // which reports are made. Distinct from `commanderVisible` on purpose.
+    const state = commanded(
+      unit('r1', 'red', [{ q: 5, r: 5 }]),
+      unit('r2', 'red', [{ q: 20, r: 20 }]),
+      unit('b1', 'blue', [{ q: 30, r: 30 }]),
+    );
+    const all = commandVisible(state, world, cfg, 'c-r1');
+    expect(all.has(key({ q: 5, r: 5 }))).toBe(true);
+    expect(all.has(key({ q: 20, r: 20 }))).toBe(true);
+    expect(all.has(key({ q: 30, r: 30 }))).toBe(false);
+  });
+
+  it('is only his own formation for a man with no subordinates', () => {
+    const state = commanded(
+      unit('r1', 'red', [{ q: 5, r: 5 }]),
+      unit('r2', 'red', [{ q: 20, r: 20 }]),
+    );
+    const junior = commandVisible(state, world, cfg, 'c-r2');
+    expect(junior.has(key({ q: 20, r: 20 }))).toBe(true);
+    expect(junior.has(key({ q: 5, r: 5 }))).toBe(false);
+  });
+
+  it('is empty for nobody', () => {
+    expect(commandVisible(stateWith(), world, cfg, 'nobody').size).toBe(0);
+  });
+});
+
+describe('spottedBy', () => {
   it('finds an enemy standing in the recon zone', () => {
     const state = stateWith(
       unit('r1', 'red', [{ q: 10, r: 10 }]),
       unit('b1', 'blue', [{ q: 11, r: 10 }]),
     );
-    const contacts = spotted(state, world, cfg, 'red');
+    const contacts = spottedBy(state, world, cfg, state.units.get('r1')!);
     expect(contacts.has('b1')).toBe(true);
     expect(contacts.get('b1')!.coord).toEqual({ q: 11, r: 10 });
     expect(contacts.get('b1')!.seenAtHours).toBe(12);
@@ -224,7 +308,7 @@ describe('spotted', () => {
       unit('r1', 'red', [{ q: 10, r: 10 }]),
       unit('b1', 'blue', [{ q: 20, r: 20 }]),
     );
-    expect(spotted(state, world, cfg, 'red').size).toBe(0);
+    expect(spottedBy(state, world, cfg, state.units.get('r1')!).size).toBe(0);
   });
 
   it("spots a corps by its baggage when its head is clear", () => {
@@ -240,7 +324,7 @@ describe('spotted', () => {
     );
     const state = stateWith(unit('r1', 'red', [{ q: 15, r: 10 }]), enemy);
 
-    const contacts = spotted(state, world, cfg, 'red');
+    const contacts = spottedBy(state, world, cfg, state.units.get('r1')!);
     expect(contacts.has('b1')).toBe(true);
     // Reported where it was actually seen — its tail, not its head.
     expect(contacts.get('b1')!.coord).not.toEqual({ q: 30, r: 10 });
@@ -251,7 +335,7 @@ describe('spotted', () => {
       unit('r1', 'red', [{ q: 10, r: 10 }]),
       unit('r2', 'red', [{ q: 11, r: 10 }]),
     );
-    expect(spotted(state, world, cfg, 'red').size).toBe(0);
+    expect(spottedBy(state, world, cfg, state.units.get('r1')!).size).toBe(0);
   });
 
   it('gives a plain sighting presence and location only', () => {
@@ -259,7 +343,7 @@ describe('spotted', () => {
       unit('r1', 'red', [{ q: 10, r: 10 }]),
       unit('b1', 'blue', [{ q: 11, r: 10 }], [], 'cavalry', { corps: 'I Corps' }),
     );
-    const contact = spotted(state, world, cfg, 'red').get('b1')!;
+    const contact = spottedBy(state, world, cfg, state.units.get('r1')!).get('b1')!;
     expect(contact.intelLevel).toBe(SIGHTING_INTEL);
     expect(contact.kind).toBeNull();
     expect(contact.corps).toBeNull();
@@ -309,5 +393,56 @@ describe('hearsGunfire', () => {
   it('carries thirty kilometres', () => {
     expect(hearsGunfire(cfg, { q: 0, r: 0 }, { q: 30, r: 0 })).toBe(true);
     expect(hearsGunfire(cfg, { q: 0, r: 0 }, { q: 31, r: 0 })).toBe(false);
+  });
+});
+
+describe('spottedUnder', () => {
+  it('merges what every formation under a commander can see', () => {
+    // The interim rule: until riders exist, subordinates report the instant they see
+    // anything. A chief learns of an enemy his cavalry found forty kilometres away.
+    const state = commanded(
+      unit('r1', 'red', [{ q: 5, r: 5 }]),
+      unit('r2', 'red', [{ q: 20, r: 20 }]),
+      unit('b1', 'blue', [{ q: 21, r: 20 }]),
+    );
+
+    const chief = spottedUnder(state, world, cfg, 'c-r1');
+    expect(chief.has('b1'), 'the chief never heard from his cavalry').toBe(true);
+    expect(chief.get('b1')!.coord).toEqual({ q: 21, r: 20 });
+  });
+
+  it('tells a subordinate nothing about what his chief can see', () => {
+    // Reports travel up the tree and never down it.
+    const state = commanded(
+      unit('r1', 'red', [{ q: 5, r: 5 }]),
+      unit('r2', 'red', [{ q: 20, r: 20 }]),
+      unit('b1', 'blue', [{ q: 6, r: 5 }]),
+    );
+
+    expect(spottedUnder(state, world, cfg, 'c-r1').has('b1')).toBe(true);
+    expect(spottedUnder(state, world, cfg, 'c-r2').has('b1')).toBe(false);
+  });
+
+  it('keeps the better of two sightings of the same enemy', () => {
+    // Two despatches about one column; a headquarters believes the more informative.
+    const state = commanded(
+      unit('r1', 'red', [{ q: 5, r: 5 }]),
+      unit('r2', 'red', [{ q: 20, r: 20 }]),
+      unit('b1', 'blue', [{ q: 6, r: 5 }]),
+    );
+    const merged = spottedUnder(state, world, cfg, 'c-r1');
+    const direct = spottedBy(state, world, cfg, state.units.get('r1')!);
+
+    expect(merged.get('b1')!.intelLevel).toBeGreaterThanOrEqual(
+      direct.get('b1')!.intelLevel,
+    );
+  });
+
+  it('is empty for a commander whose formations see nothing', () => {
+    const state = commanded(
+      unit('r1', 'red', [{ q: 5, r: 5 }]),
+      unit('b1', 'blue', [{ q: 25, r: 25 }]),
+    );
+    expect(spottedUnder(state, world, cfg, 'c-r1').size).toBe(0);
   });
 });

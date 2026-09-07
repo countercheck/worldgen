@@ -1,5 +1,5 @@
 /**
- * What a faction can see.
+ * What a formation can see, and therefore what the man riding with it knows.
  *
  * The rules keep this deliberately simple: a unit observes a zone extending one hex from
  * its march column in all directions, or two hexes if it has the Scout trait. There is no
@@ -12,6 +12,7 @@
  */
 
 import { occupied } from './column.js';
+import { formationsUnder } from './commander.js';
 import type { CampaignConfig, Grade } from './config.js';
 import { distance, hexRange, key, type Hex, type HexKey } from './hex.js';
 import type { CampaignState } from './state.js';
@@ -46,21 +47,47 @@ export function reconZone(
 }
 
 /**
- * Everything a faction can currently see.
+ * What the commander himself can see, from where he stands.
  *
- * Derived from unit positions every time it is asked, never stored. A stored copy is a
- * second fact that can disagree with the units, and the one thing a fog-of-war engine
- * cannot afford is two answers to "what can they see".
+ * The formation he rides with, and nothing else. Not his corps, not his side — a man on a
+ * horse at Fleurus can see about a kilometre, whatever else is marching under his name
+ * forty kilometres away. Everything beyond this reaches him by despatch or not at all,
+ * which is the whole subject of the ruleset.
+ *
+ * Derived from the column's position every time it is asked, never stored. A stored copy
+ * is a second fact that can disagree with where the unit actually stands, and the one
+ * thing a fog-of-war engine cannot afford is two answers to "what can he see".
  */
-export function factionVisible(
+export function commanderVisible(
   state: CampaignState,
   world: World,
   cfg: CampaignConfig,
-  faction: string,
+  commanderId: string,
+): Set<HexKey> {
+  const commander = state.commanders.get(commanderId);
+  if (commander === undefined) return new Set<HexKey>();
+  const unit = state.units.get(commander.unitId);
+  if (unit === undefined) return new Set<HexKey>();
+  return reconZone(world, cfg, unit);
+}
+
+/**
+ * Everything the formations under a commander can currently see between them.
+ *
+ * Emphatically **not** what the commander knows — that is `commanderVisible` plus what
+ * has been reported to him. This is the observing side of the transaction: the ground his
+ * divisions are actually looking at, from which reports are generated. Keeping the two
+ * functions distinct, and distinctly named, is what stops the second quietly becoming the
+ * first the next time somebody needs "what can this command see".
+ */
+export function commandVisible(
+  state: CampaignState,
+  world: World,
+  cfg: CampaignConfig,
+  commanderId: string,
 ): Set<HexKey> {
   const seen = new Set<HexKey>();
-  for (const unit of state.units.values()) {
-    if (unit.faction !== faction) continue;
+  for (const unit of formationsUnder(state, commanderId)) {
     for (const k of reconZone(world, cfg, unit)) seen.add(k);
   }
   return seen;
@@ -117,23 +144,28 @@ export function contactFrom(unit: Unit, intel: IntelLevel, atHours: number): Con
 }
 
 /**
- * Enemy units a faction can see, and how well.
+ * Enemy units one formation can see, and how well.
  *
  * A unit is spotted when any part of its column stands in the observer's recon zone. The
  * whole column counts — a corps whose head is hidden but whose baggage is strung across
  * open country has been seen.
+ *
+ * Per observing formation rather than per side, because a sighting is something a
+ * particular division made at a particular hour, and it is that division which has to get
+ * word back. A contact with no observer attached cannot be reported, cannot be dated
+ * honestly, and cannot be told apart from a rumour.
  */
-export function spotted(
+export function spottedBy(
   state: CampaignState,
   world: World,
   cfg: CampaignConfig,
-  faction: string,
+  observer: Unit,
 ): Map<string, Contact> {
-  const zone = factionVisible(state, world, cfg, faction);
+  const zone = reconZone(world, cfg, observer);
   const found = new Map<string, Contact>();
 
   for (const unit of state.units.values()) {
-    if (unit.faction === faction) continue;
+    if (unit.faction === observer.faction) continue;
     const seenHex = occupied(unit).find((c) => zone.has(key(c)));
     if (seenHex === undefined) continue;
 
@@ -144,6 +176,31 @@ export function spotted(
     });
   }
   return found;
+}
+
+/**
+ * Every enemy the formations under a commander can see, merged.
+ *
+ * Until riders exist, every formation reports to its superior the instant it sees
+ * anything — see `observe.ts` for why that is a stated rule rather than a leak. When two
+ * of them see the same enemy, the better-informed sighting wins, which is what a
+ * headquarters comparing two despatches would conclude.
+ */
+export function spottedUnder(
+  state: CampaignState,
+  world: World,
+  cfg: CampaignConfig,
+  commanderId: string,
+): Map<string, Contact> {
+  const merged = new Map<string, Contact>();
+
+  for (const observer of formationsUnder(state, commanderId)) {
+    for (const [id, contact] of spottedBy(state, world, cfg, observer)) {
+      const held = merged.get(id);
+      if (held === undefined || contact.intelLevel > held.intelLevel) merged.set(id, contact);
+    }
+  }
+  return merged;
 }
 
 /**

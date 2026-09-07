@@ -23,9 +23,10 @@ import {
   replay,
   type CampaignConfig,
   type CampaignState,
+  type Commander,
   type Command,
   type LoggedEvent,
-  factionRole,
+  commanderRole,
   REFEREE_ROLE,
   type Role,
   type Strictness,
@@ -61,11 +62,16 @@ export class CampaignStore {
   ) {}
 
   /**
-   * Create a campaign from a world document, and mint one join link per faction.
+   * Create a campaign from a world document, and mint the referee's link.
+   *
+   * Only the referee's. A join link names a commander, and there are no commanders yet —
+   * they need formations to ride with, and those arrive afterwards. The referee sets up
+   * the order of battle and then issues a link per seat with `issueToken`, which is also
+   * the order a real game is prepared in.
    *
    * The world is stored with the campaign rather than referenced, so a campaign is
    * self-contained and a regenerated `world.json` on disk cannot silently invalidate
-   * every coordinate in a saved fog set.
+   * every coordinate in a saved campaign.
    */
   create(opts: {
     id: string;
@@ -74,7 +80,7 @@ export class CampaignStore {
     factions: readonly { id: string; name: string; color: string }[];
     seed?: number;
     strictness?: Strictness;
-  }): { campaign: CampaignRow; tokens: Record<string, string>; refereeToken: string } {
+  }): { campaign: CampaignRow; refereeToken: string } {
     const blob = JSON.stringify(opts.worldDoc);
     const world = parseWorld(opts.worldDoc);
     const strictness = opts.strictness ?? 'strict';
@@ -89,20 +95,9 @@ export class CampaignStore {
     const refereeToken = newToken();
     this.db
       .prepare(
-        `INSERT INTO roles (campaign_id, token_hash, role_kind, faction_id) VALUES (?, ?, ?, ?)`,
+        `INSERT INTO roles (campaign_id, token_hash, role_kind, commander_id) VALUES (?, ?, ?, ?)`,
       )
       .run(opts.id, hashToken(refereeToken), 'referee', null);
-
-    const tokens: Record<string, string> = {};
-    for (const f of opts.factions) {
-      const token = newToken();
-      tokens[f.id] = token;
-      this.db
-        .prepare(
-          `INSERT INTO roles (campaign_id, token_hash, role_kind, faction_id) VALUES (?, ?, ?, ?)`,
-        )
-        .run(opts.id, hashToken(token), 'faction', f.id);
-    }
 
     const campaign: CampaignRow = {
       id: opts.id,
@@ -139,7 +134,32 @@ export class CampaignStore {
       }
     }
 
-    return { campaign, tokens, refereeToken };
+    return { campaign, refereeToken };
+  }
+
+  /**
+   * Mint a join link for one commander's seat.
+   *
+   * Returned once and never stored in the clear, so a lost link is reissued rather than
+   * looked up. Calling this again for the same seat is legitimate and mints a second
+   * working token — which is how a referee replaces a link somebody forwarded to the
+   * wrong person, and why revocation is `revokeTokens` rather than an overwrite.
+   */
+  issueToken(campaignId: string, commanderId: string): string {
+    const token = newToken();
+    this.db
+      .prepare(
+        `INSERT INTO roles (campaign_id, token_hash, role_kind, commander_id) VALUES (?, ?, ?, ?)`,
+      )
+      .run(campaignId, hashToken(token), 'commander', commanderId);
+    return token;
+  }
+
+  /** Invalidate every link to a seat. The other half of reissuing one. */
+  revokeTokens(campaignId: string, commanderId: string): void {
+    this.db
+      .prepare(`DELETE FROM roles WHERE campaign_id = ? AND commander_id = ?`)
+      .run(campaignId, commanderId);
   }
 
   campaign(id: string): CampaignRow | null {
@@ -165,12 +185,12 @@ export class CampaignStore {
   roleFor(campaignId: string, token: string | undefined): Role | null {
     if (token === undefined || token === '') return null;
     const row = this.db
-      .prepare(`SELECT role_kind, faction_id FROM roles WHERE campaign_id = ? AND token_hash = ?`)
+      .prepare(`SELECT role_kind, commander_id FROM roles WHERE campaign_id = ? AND token_hash = ?`)
       .get(campaignId, hashToken(token)) as
-      | { role_kind: string; faction_id: string | null }
+      | { role_kind: string; commander_id: string | null }
       | undefined;
     if (row === undefined) return null;
-    return row.role_kind === 'referee' ? REFEREE_ROLE : factionRole(row.faction_id!);
+    return row.role_kind === 'referee' ? REFEREE_ROLE : commanderRole(row.commander_id!);
   }
 
   events(campaignId: string, fromSeq = 0): LoggedEvent[] {
@@ -238,7 +258,7 @@ export class CampaignStore {
     const actor =
       role.kind === 'referee'
         ? ({ kind: 'referee' } as const)
-        : ({ kind: 'faction', id: role.id } as const);
+        : ({ kind: 'commander', id: role.id } as const);
 
     let state = this.state(campaign.id);
     const outcome = apply(command, state, campaign.world, campaign.strictness, {
@@ -322,18 +342,19 @@ export class CampaignStore {
  * State to JSON and back.
  *
  * `Map` and `Set` do not survive `JSON.stringify`, so they are written as arrays and
- * rebuilt on the way in. A snapshot that silently lost a faction's `seen` set would be
- * indistinguishable from an army that forgot the war.
+ * rebuilt on the way in. A snapshot that silently lost what a commander had surveyed
+ * would be indistinguishable from a man who forgot the campaign.
  */
 export function serialise(state: CampaignState): string {
   return JSON.stringify({
     ...state,
     factions: [...state.factions.values()],
+    commanders: [...state.commanders.values()],
     units: [...state.units.values()],
     knowledge: [...state.knowledge.values()].map((k) => ({
-      faction: k.faction,
-      seen: [...k.seen],
-      lastSeenHours: [...k.lastSeenHours],
+      commanderId: k.commanderId,
+      surveyed: [...k.surveyed],
+      lastSurveyedHours: [...k.lastSurveyedHours],
     })),
   });
 }
@@ -346,8 +367,13 @@ export function deserialise(json: string): CampaignState {
     clockHours: number;
     nextSeq: number;
     factions: CampaignState['factions'] extends ReadonlyMap<string, infer F> ? F[] : never;
+    commanders: Commander[];
     units: CampaignState['units'] extends ReadonlyMap<string, infer U> ? U[] : never;
-    knowledge: { faction: string; seen: string[]; lastSeenHours: [string, number][] }[];
+    knowledge: {
+      commanderId: string;
+      surveyed: string[];
+      lastSurveyedHours: [string, number][];
+    }[];
   };
 
   return {
@@ -357,14 +383,17 @@ export function deserialise(json: string): CampaignState {
     clockHours: d.clockHours,
     nextSeq: d.nextSeq,
     factions: new Map(d.factions.map((f) => [f.id, f])),
+    // Tolerated as absent: a snapshot written before commanders existed still folds, and
+    // the events after it will rebuild what it lacks.
+    commanders: new Map((d.commanders ?? []).map((c) => [c.id, c])),
     units: new Map(d.units.map((u) => [u.id, u])),
     knowledge: new Map(
-      d.knowledge.map((k) => [
-        k.faction,
+      (d.knowledge ?? []).map((k) => [
+        k.commanderId,
         {
-          faction: k.faction,
-          seen: new Set(k.seen),
-          lastSeenHours: new Map(k.lastSeenHours),
+          commanderId: k.commanderId,
+          surveyed: new Set(k.surveyed),
+          lastSurveyedHours: new Map(k.lastSurveyedHours),
         },
       ]),
     ),
