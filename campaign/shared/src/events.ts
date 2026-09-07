@@ -23,7 +23,7 @@ import type { Grade } from './config.js';
 import type { Hex } from './hex.js';
 import type { Strictness, Violation } from './ruling.js';
 import type { PendingDecision, Task } from './task.js';
-import type { Experience, Formation, Trait, Unit, UnitKind } from './unit.js';
+import type { Experience, Formation, Trait, Unit, UnitKind, UnitReport } from './unit.js';
 
 export const CAMPAIGN_SCHEMA_VERSION = '1.0';
 export const SUPPORTED_CAMPAIGN_VERSIONS = new Set([CAMPAIGN_SCHEMA_VERSION]);
@@ -100,6 +100,18 @@ export type EventPayload =
       readonly kind: 'hexes_forgotten';
       readonly commanderId: string;
       readonly coords: readonly Hex[];
+    }
+  /**
+   * Word of where a formation was reached a commander.
+   *
+   * By rider, by a column marching into sight of his own, or because the formation is the
+   * one he is standing next to. Held rather than recomputed: the hour on it is the whole
+   * of the fog, and a snapshot taken when a client asks would always read "now".
+   */
+  | {
+      readonly kind: 'report_filed';
+      readonly commanderId: string;
+      readonly report: UnitReport;
     }
   | {
       readonly kind: 'unit_stat_set';

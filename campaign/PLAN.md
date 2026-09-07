@@ -429,9 +429,39 @@ decision queue from step 1.
 2. ~~**Despatches and riders; tasks; decision points; the scheduler.**~~ Done.
    `despatch.ts`, `task.ts`, `scheduler.ts`; four new commands; `sent`/`received`/
    `captured` on the view, with `route` and `fate` pinned out of it by leakage tests.
-3. **The commander's interface**: composer, inbox, formations panel.
+3. ~~**The commander's interface**: composer, inbox, formations panel.~~ Done — and it
+   turned the fog on properly on the way, see below.
 4. **The referee's console**: decision queue, despatch log, seat-switching.
 5. *Deferred:* issued maps, their falsification, and correction by recce.
+
+### What step 3 found
+
+Building the formations panel exposed that **reports were still snapshotted live**. Every
+subordinate read "now", beside a caption explaining that the hour was when he last heard —
+a design about not knowing where your own corps is, displaying a list of exactly where it
+was. The delay step 2 built never reached the one place it mattered most.
+
+So reports became **held knowledge** rather than a computed view:
+
+- `CommanderKnowledge.reports`, filed by a `report_filed` event and replaced only by a
+  *later* one, because riders overtake each other.
+- Every despatch carries `unitReport` — where its sender stood when he sealed it — so
+  arriving paper refreshes the picture of the man who wrote it. Silence from a corps is
+  not merely a missing order; it is a stale map.
+- Three cases need no rider: the formation he is standing next to, one whose column is
+  touching his own, and a one-off seed for a formation he has never had word of, because
+  he wrote the order of battle. Everything else waits.
+
+And **contacts were merged across every formation under him**, which handed him whatever a
+division forty kilometres away was looking at, this instant. `viewFor` now uses
+`spottedBy` on his own formation alone. What his subordinates see reaches him as sightings
+attached to a report, hours late.
+
+**Still open, and the same defect class:** contacts are computed rather than held, so they
+neither persist nor age — an enemy his column loses sight of vanishes instead of going
+stale. And a contact still carries the observed unit's engine id, which lets two sightings
+be correlated for free. Both are the remaining half of *Contacts become reported, not
+computed*, and both want the treatment reports just had.
 
 ### What step 2 settled that the design had left open
 

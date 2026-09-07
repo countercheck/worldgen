@@ -12,29 +12,30 @@
  * which keeps a log of a hundred marches from carrying a hundred thousand redundant
  * coordinates.
  *
- * ## The interim rule, stated rather than assumed
+ * ## Two passes, and why they are different
  *
- * A commander's knowledge here is the union of what **all his formations** can see, not
- * only the one he rides with. That is not the finished model: the design is that he sees
- * through his own formation and learns the rest by despatch rider, hours late and
- * sometimes never.
+ * `observationEvents` records **ground**, which is public and never stale — terrain fog is
+ * off, so this only feeds the memory the issued map will want when it arrives.
  *
- * Until riders exist, the rule in force is **every formation reports to its superior the
- * instant it sees anything**. That is a coherent intermediate rule rather than a leak —
- * the reports are real, dated, and attributed; they simply travel at infinite speed. Step
- * 2 gives them a rider and a delay, and nothing else about this changes.
+ * `reportEvents` records **formations**, which is the fog that carries the game. It fires
+ * only where a commander needs no rider: the formation he is standing next to, one whose
+ * column is touching his own, and a one-off seed for a formation he has never had word of
+ * — because he wrote the order of battle and knows where he put his divisions. Everything
+ * else arrives by despatch, hours late, or never.
  *
- * `commanderVisible` is already the finished thing and is what a client draws as "what I
- * can see from here". The distinction is live in the code before it is live in the rules,
- * which is the cheap way round.
+ * Both are the store's job rather than the engine's, because both are consequences of a
+ * command rather than part of one. A state built by `applyAll` alone has commanders who
+ * know nothing, which is why the tests run this pass themselves.
  */
 
+import { commanderIds, formationOf, formationsUnder } from './commander.js';
 import type { CampaignConfig } from './config.js';
-import { commanderIds } from './commander.js';
+import { formationsTouch } from './despatch.js';
 import type { EventPayload } from './events.js';
 import { unkey, type HexKey } from './hex.js';
 import { commandVisible } from './recon.js';
 import type { CampaignState } from './state.js';
+import { reportOf } from './unit.js';
 import type { World } from './world.js';
 
 /**
@@ -71,6 +72,53 @@ export function observationEvents(
 
   return out;
 }
+
+/**
+ * Reports a commander does not need a rider for.
+ *
+ * Three cases, and no others. He is standing next to the formation, so he sees it. His own
+ * column is touching it, so word crosses in minutes — the same free traffic that lets two
+ * touching formations hand despatches over. Or he has never had a report of it at all, in
+ * which case he is given one at the current hour, because he wrote the order of battle and
+ * knows where he put his divisions before anybody marched anywhere.
+ *
+ * Everything else waits for a rider, which is the point. The third case is a seed rather
+ * than a rule: it fires once per formation, and from then on that hour only moves when a
+ * despatch arrives or the columns close up.
+ */
+export function reportEvents(state: CampaignState): EventPayload[] {
+  const out: EventPayload[] = [];
+
+  for (const commanderId of commanderIds(state)) {
+    const own = formationOf(state, commanderId);
+    const held = state.knowledge.get(commanderId)?.reports;
+
+    for (const unit of formationsUnder(state, commanderId)) {
+      const inHand =
+        own !== undefined &&
+        (unit.id === own.id || formationsTouch(own, unit));
+
+      if (!inHand && held?.has(unit.id) === true) continue;
+      out.push({
+        kind: 'report_filed',
+        commanderId,
+        report: reportOf(unit, state.clockHours),
+      });
+    }
+  }
+
+  return out;
+}
+
+/** Everything a command produced that nobody had to be told. */
+export const knowledgeEvents = (
+  state: CampaignState,
+  world: World,
+  cfg: CampaignConfig,
+): EventPayload[] => [
+  ...observationEvents(state, world, cfg),
+  ...reportEvents(state),
+];
 
 /** Whether anybody would learn anything new right now. */
 export const hasNewObservations = (

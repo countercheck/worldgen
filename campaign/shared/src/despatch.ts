@@ -39,7 +39,7 @@ import { astar, distance, key, neighbors, type Hex } from './hex.js';
 import { speedKmh } from './movement.js';
 import type { Contact } from './recon.js';
 import { gradeOf, isPassable, isRiver } from './terrain.js';
-import type { Unit } from './unit.js';
+import type { Unit, UnitReport } from './unit.js';
 import { hexAt, type World, type WorldHex } from './world.js';
 
 /**
@@ -61,7 +61,16 @@ export type DespatchKind = 'order' | 'report' | 'acknowledgement';
 export interface DespatchBody {
   readonly text?: string;
   readonly contacts?: readonly Contact[];
-  readonly unitReport?: unknown;
+  /**
+   * Where the sender's own formation stood when he sealed it.
+   *
+   * Attached to every despatch, whether or not anybody asked for it: a rider who has come
+   * from III Corps knows where III Corps was when he left, and that is most of what a
+   * despatch was actually for. It is why an order arriving also refreshes the recipient's
+   * picture of the man who sent it — and why silence from a corps is not merely a missing
+   * order but a stale map.
+   */
+  readonly unitReport?: UnitReport;
 }
 
 /**

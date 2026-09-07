@@ -12,7 +12,15 @@
  * the description of a fog boundary is the last thing worth writing down twice.
  */
 
-import type { ClientView, Command, Faction, Strictness } from '@campaign/shared';
+import type {
+  ClientView,
+  Command,
+  DespatchBody,
+  DespatchKind,
+  Faction,
+  Hex,
+  Strictness,
+} from '@campaign/shared';
 
 /** A campaign and the token that says who you are in it. */
 export interface Session {
@@ -129,6 +137,34 @@ export async function sendCommand(
     }
     throw err;
   }
+}
+
+/**
+ * Write a despatch.
+ *
+ * The one command a commander issues. `from` is filled in by the server from the token
+ * rather than taken from here — a forged *report* would let anyone feed a commander false
+ * intelligence signed by his own subordinate — so the client does not send it at all,
+ * and a value here would be ignored rather than trusted.
+ */
+export function sendDespatch(
+  session: Session,
+  despatch: {
+    to: string;
+    despatchKind: DespatchKind;
+    body: DespatchBody;
+    via?: readonly Hex[];
+    inReplyTo?: string;
+    forwardedFrom?: string;
+  },
+): Promise<CommandResult> {
+  return sendCommand(session, {
+    kind: 'send_despatch',
+    // Overwritten server-side. Sent only because the command type wants it, and a
+    // deliberately useless value is safer than a plausible one.
+    from: '',
+    ...despatch,
+  });
 }
 
 export function advanceClock(session: Session, hours: number): Promise<{ clockHours: number }> {

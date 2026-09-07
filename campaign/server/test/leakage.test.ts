@@ -602,8 +602,13 @@ describe('despatches', () => {
 
   const ORDER = 'Move on Quatre Bras with all speed; I expect you astride the crossroads.';
 
-  const write = (token: string, from: string, to: string, text = ORDER) =>
-    post(token, { kind: 'send_despatch', from, to, despatchKind: 'order', body: { text } });
+  const write = (
+    token: string,
+    from: string,
+    to: string,
+    text = ORDER,
+    despatchKind: 'order' | 'report' = 'order',
+  ) => post(token, { kind: 'send_despatch', from, to, despatchKind, body: { text } });
 
   const advance = (hours: number) =>
     f.app.inject({
@@ -706,6 +711,62 @@ describe('despatches', () => {
     const res = await write(f.kellermann, 'kellermann', 'ney');
     expect(res.statusCode).toBe(409);
     expect(res.json().violations[0].code).toBe('not_in_command');
+  });
+
+  /**
+   * The fog that carries the game, now that the ground is public.
+   *
+   * A commander's picture of his own detached corps has to be capable of being *wrong* —
+   * not merely delayed in some abstract sense, but showing a hex the formation is no
+   * longer standing on. If this ever passes trivially, the reports have gone back to being
+   * snapshotted live and the design has quietly stopped working.
+   */
+  it('lets a commander’s picture of his own corps go stale, and wrong', async () => {
+    const far = [...world.hexes.values()]
+      .filter((h) => h.terrainClass === 'land')
+      .map((h) => h.coord)
+      .find((c) => dist(c, SUB_HEX) > 6 && dist(c, SUB_HEX) < 14)!;
+
+    // Kellermann's division marches. Ney, forty kilometres away, is told nothing.
+    await post(f.referee, { kind: 'set_task', unitId: 'red-2', destination: far });
+    await advance(12);
+
+    const truth = (await viewAs(f, f.referee)).json();
+    const actual = truth.units.find((u: Unit) => u.id === 'red-2').column[0];
+    expect(actual, 'the division never moved, so this test proves nothing').not.toEqual(
+      SUB_HEX,
+    );
+
+    const ney = (await viewAs(f, f.ney)).json();
+    const report = ney.reports.find((r: UnitReport) => r.unitId === 'red-2');
+
+    expect(report.atHours).toBe(0);
+    expect(report.head).toEqual(SUB_HEX);
+    // The whole of it: he is looking at a hex his division left hours ago, and nothing in
+    // his payload tells him where it actually is.
+    expect(report.head).not.toEqual(actual);
+    // Nothing else in his payload knows better either: the report is his only record of
+    // that formation, and there is no live unit beside it to contradict it.
+    expect(ney.units.map((u: Unit) => u.id)).toEqual(['red-1']);
+  });
+
+  it('refreshes that picture when a despatch arrives from the man himself', async () => {
+    await post(f.referee, { kind: 'set_task', unitId: 'red-2', destination: SUB_HEX });
+    await advance(6);
+
+    // Kellermann writes to Ney. The rider carries word of where Kellermann stood when he
+    // sealed it, whether or not he thought to mention it.
+    // A report, not an order: Kellermann does not command Ney, and writing upward is
+    // exactly what a report is for.
+    const sent = await write(f.kellermann, 'kellermann', 'ney', 'All quiet here.', 'report');
+    expect(sent.statusCode, sent.body).toBe(200);
+    await advance(200);
+
+    const ney = (await viewAs(f, f.ney)).json();
+    const report = ney.reports.find((r: UnitReport) => r.unitId === 'red-2');
+    // Dated when it was written, not when it landed. The gap is the fog.
+    expect(report.atHours).toBeGreaterThan(0);
+    expect(report.atHours).toBeLessThan(ney.campaign.clockHours);
   });
 
   it('refuses a despatch to the other side outright', async () => {

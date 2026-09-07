@@ -17,7 +17,7 @@ import type { Despatch } from './despatch.js';
 import { key, type Hex, type HexKey } from './hex.js';
 import type { Faction, LoggedEvent, WorldRef } from './events.js';
 import type { PendingDecision, Task } from './task.js';
-import type { Unit } from './unit.js';
+import type { Unit, UnitReport } from './unit.js';
 
 /**
  * One commander's picture of the war.
@@ -38,6 +38,19 @@ export interface CommanderKnowledge {
   readonly surveyed: ReadonlySet<HexKey>;
   /** Campaign hour each hex was last looked at. Drives how stale a memory reads. */
   readonly lastSurveyedHours: ReadonlyMap<HexKey, number>;
+  /**
+   * Where he last heard each formation under him was, keyed by unit id.
+   *
+   * Held rather than computed, and that is the whole of the fog now that the ground is
+   * public. A view that snapshotted these from the units at the moment of asking would
+   * hand him every position live and date them "now" — which is what the console did
+   * before riders existed, and which made a design about not knowing where your own corps
+   * is display a list of exactly where it was.
+   *
+   * A report is replaced only by a *later* one. Riders overtake each other, and a
+   * despatch that arrives carrying older news than the map already holds is not news.
+   */
+  readonly reports: ReadonlyMap<string, UnitReport>;
 }
 
 export interface CampaignState {
@@ -119,6 +132,7 @@ function knowledgeFor(s: CampaignState, commanderId: string): CommanderKnowledge
       commanderId,
       surveyed: new Set<HexKey>(),
       lastSurveyedHours: new Map<HexKey, number>(),
+      reports: new Map<string, UnitReport>(),
     }
   );
 }
@@ -141,7 +155,7 @@ function survey(
     surveyed.add(kk);
     last.set(kk, atHours);
   }
-  return withKnowledge(s, { commanderId, surveyed, lastSurveyedHours: last });
+  return withKnowledge(s, { ...k, commanderId, surveyed, lastSurveyedHours: last });
 }
 
 function forget(
@@ -157,7 +171,24 @@ function forget(
     surveyed.delete(kk);
     last.delete(kk);
   }
-  return withKnowledge(s, { commanderId, surveyed, lastSurveyedHours: last });
+  return withKnowledge(s, { ...k, commanderId, surveyed, lastSurveyedHours: last });
+}
+
+/**
+ * File a report, unless a later one is already on the table.
+ *
+ * Riders overtake each other, so a despatch carrying older news than the map already
+ * holds is not news. Same rule as an order arriving out of turn, and for the same reason:
+ * the date is the only thing an engine can compare, and it is enough.
+ */
+function file(s: CampaignState, commanderId: string, report: UnitReport): CampaignState {
+  const k = knowledgeFor(s, commanderId);
+  const held = k.reports.get(report.unitId);
+  if (held !== undefined && held.atHours >= report.atHours) return s;
+  return withKnowledge(s, {
+    ...k,
+    reports: new Map(k.reports).set(report.unitId, report),
+  });
 }
 
 /**
@@ -190,6 +221,7 @@ export function reduce(state: CampaignState, event: LoggedEvent): CampaignState 
         commanderId: p.commander.id,
         surveyed: new Set(),
         lastSurveyedHours: new Map(),
+        reports: new Map(),
       });
 
     case 'commander_removed': {
@@ -235,6 +267,9 @@ export function reduce(state: CampaignState, event: LoggedEvent): CampaignState 
 
     case 'hexes_forgotten':
       return forget(s, p.commanderId, p.coords);
+
+    case 'report_filed':
+      return file(s, p.commanderId, p.report);
 
     case 'unit_stat_set': {
       const unit = s.units.get(p.unitId);

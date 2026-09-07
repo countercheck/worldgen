@@ -5,10 +5,11 @@
  * not get slower forever, and are always reconstructible — deleting the snapshot table is
  * a valid recovery, and the tests do exactly that to prove it.
  *
- * The store owns one rule the engine does not: after any command, each faction is asked
- * what it can now see, and anything newly observed is appended as its own event. That is
- * what makes knowledge persist. Without it a faction would forget a valley the moment it
- * marched out of the far side.
+ * The store owns one rule the engine does not: after any command, every commander is
+ * asked what he can now see for himself, and anything newly learned is appended as its own
+ * event. That is what makes knowledge persist rather than being recomputed — without it a
+ * man would forget a valley the moment his column marched out of the far side, and a
+ * report of his own corps would always read "now".
  */
 
 import { createHash, randomBytes } from 'node:crypto';
@@ -17,7 +18,7 @@ import {
   apply,
   DEFAULT_CONFIG,
   EMPTY_STATE,
-  observationEvents,
+  knowledgeEvents,
   parseWorld,
   reduce,
   replay,
@@ -29,6 +30,7 @@ import {
   type LoggedEvent,
   type PendingDecision,
   type Task,
+  type UnitReport,
   commanderRole,
   REFEREE_ROLE,
   type Role,
@@ -276,7 +278,7 @@ export class CampaignStore {
     const all = [...outcome.events];
     state = outcome.state;
 
-    for (const payload of observationEvents(state, campaign.world, this.cfg)) {
+    for (const payload of knowledgeEvents(state, campaign.world, this.cfg)) {
       const event: LoggedEvent = {
         seq: state.nextSeq,
         clockHours: state.clockHours,
@@ -359,6 +361,7 @@ export function serialise(state: CampaignState): string {
       commanderId: k.commanderId,
       surveyed: [...k.surveyed],
       lastSurveyedHours: [...k.lastSurveyedHours],
+      reports: [...k.reports.values()],
     })),
     despatches: [...state.despatches.values()],
     tasks: [...state.tasks.values()],
@@ -380,6 +383,7 @@ export function deserialise(json: string): CampaignState {
       commanderId: string;
       surveyed: string[];
       lastSurveyedHours: [string, number][];
+      reports?: UnitReport[];
     }[];
     despatches?: Despatch[];
     tasks?: Task[];
@@ -404,6 +408,7 @@ export function deserialise(json: string): CampaignState {
           commanderId: k.commanderId,
           surveyed: new Set(k.surveyed),
           lastSurveyedHours: new Map(k.lastSurveyedHours),
+          reports: new Map((k.reports ?? []).map((r) => [r.unitId, r])),
         },
       ]),
     ),

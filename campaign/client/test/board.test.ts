@@ -25,7 +25,7 @@ import {
   EMPTY_STATE,
   commanderRole,
   key,
-  observationEvents,
+  knowledgeEvents,
   occupied,
   parseWorld,
   reduce,
@@ -74,7 +74,7 @@ if (!built.ok) throw new Error('the demo scenario is not legal');
  * empty `seen`. Doing here what the server does after every command is the only way these
  * tests are looking at a view a client could actually receive.
  */
-const state: CampaignState = observationEvents(built.state, world, DEFAULT_CONFIG).reduce(
+const state: CampaignState = knowledgeEvents(built.state, world, DEFAULT_CONFIG).reduce(
   (acc, payload, i) =>
     reduce(acc, {
       seq: acc.nextSeq + i,
@@ -217,8 +217,18 @@ describe('the symbols a commander is given', () => {
     // A plain sighting is intel 2. The patrol table grants rough size at 4 and the arm at
     // 5, so both are null here and the symbol is an empty diamond — which is precisely
     // what an empty frame means in the standard.
-    expect(board.contacts.size).toBeGreaterThan(0);
-    for (const contact of board.contacts.values()) {
+    //
+    // Taken from whichever commander's own formation is actually in contact: a commander
+    // sees through the column he rides with and no other, so which of them has a sighting
+    // is a fact about the scenario rather than something to assume.
+    const seeing = ['ney', 'kellermann', 'soult']
+      .map((id) => boardFrom(view(commanderRole(id)), DEFAULT_THEME))
+      .find((b) => b.contacts.size > 0);
+
+    expect(seeing, 'nobody on the red side can see the enemy at all').toBeDefined();
+    const symbolOf = (id: string) => seeing!.marks.find((m) => m.id === id)!.symbol;
+
+    for (const contact of seeing!.contacts.values()) {
       const symbol = symbolOf(contact.unitId);
       expect(symbol.affiliation).toBe('hostile');
       expect(symbol.dashed).toBe(true);
