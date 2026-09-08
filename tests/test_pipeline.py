@@ -186,3 +186,45 @@ def test_organic_stage_order_is_load_bearing():
     ]
     positions = [names.index(n) for n in order]
     assert positions == sorted(positions), f"Stage order violated: {names}"
+
+
+def test_progress_is_reported_once_at_each_end_of_every_stage():
+    """`on_stage` fires as a stage starts and again when it returns.
+
+    Both halves matter: the name has to go out *before* the work so a slow stage shows
+    what is running rather than only what has finished.
+    """
+    calls: list[tuple[int, int, str, float | None]] = []
+    pipeline = build_pipeline(seed=7, width=16, height=16)
+    expected = [cls.__name__ for cls, _cfg in pipeline.stages]
+
+    pipeline.run(on_stage=lambda *args: calls.append(args))
+
+    assert [c[2] for c in calls] == [n for n in expected for _ in range(2)]
+    assert all(c[1] == len(expected) for c in calls), "total should be the stage count"
+    assert [c[0] for c in calls] == [i for i in range(1, len(expected) + 1) for _ in range(2)]
+
+    starts, ends = calls[0::2], calls[1::2]
+    assert all(c[3] is None for c in starts), "a starting stage has no duration yet"
+    assert all(isinstance(c[3], float) and c[3] >= 0.0 for c in ends)
+
+
+def test_reporting_progress_does_not_change_the_world():
+    """The regression this guard exists for.
+
+    `on_stage` is called inside the loop that draws each stage's child seed. A callback
+    placed on the wrong side of that draw, or one that touched the generator, would change
+    every world the project has ever made while looking like a logging change.
+    """
+    quiet = build_pipeline(seed=99, width=24, height=24).run()
+    noisy = build_pipeline(seed=99, width=24, height=24).run(on_stage=lambda *_: None)
+
+    assert [s.name for s in quiet.settlements] == [s.name for s in noisy.settlements]
+    assert [s.coord for s in quiet.settlements] == [s.coord for s in noisy.settlements]
+    assert all(quiet.hexes[c].elevation == noisy.hexes[c].elevation for c in quiet.hexes), (
+        "elevation differs between a reported run and a silent one"
+    )
+
+
+def test_run_still_works_with_no_reporter():
+    assert isinstance(build_pipeline(seed=3, width=16, height=16).run(), WorldState)
