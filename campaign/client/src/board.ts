@@ -26,7 +26,7 @@ import {
   occupied,
   parseWorld,
   type ClientView,
-  type Contact,
+  type PublicContact,
   type HexKey,
   type PublicCommander,
   type PublicFaction,
@@ -54,7 +54,7 @@ export interface Board {
   readonly units: ReadonlyMap<string, Unit>;
   /** Own formations as last reported. Empty for a referee, who has the units. */
   readonly reports: ReadonlyMap<string, UnitReport>;
-  readonly contacts: ReadonlyMap<string, Contact>;
+  readonly contacts: ReadonlyMap<string, PublicContact>;
   readonly factions: ReadonlyMap<string, PublicFaction>;
   readonly commanders: ReadonlyMap<string, PublicCommander>;
   readonly surveyed: ReadonlySet<HexKey>;
@@ -68,7 +68,7 @@ export function boardFrom(view: ClientView, theme: Theme): Board {
 
   const units = new Map(view.units.map((u) => [u.id, u]));
   const reports = new Map(view.reports.map((r) => [r.unitId, r]));
-  const contacts = new Map(view.contacts.map((c) => [c.unitId, c]));
+  const contacts = new Map(view.contacts.map((c) => [c.id, c]));
 
   // Whose side a thing is on, from the viewpoint of whoever is looking. A referee has no
   // side, so nothing is hostile to him and every formation is drawn as a known unit.
@@ -114,7 +114,9 @@ export function boardFrom(view: ClientView, theme: Theme): Board {
     // nulls straight through is deliberate — the drawing code is never given a fact it
     // has been told not to draw.
     ...view.contacts.map((c) => ({
-      id: c.unitId,
+      // His own label for the sighting, not the observed unit's id — which is not in the
+      // payload at all. See `PublicContact`.
+      id: c.id,
       column: [c.coord],
       kind: 'contact' as const,
       symbol: {

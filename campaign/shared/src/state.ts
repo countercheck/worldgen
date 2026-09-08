@@ -17,6 +17,7 @@ import type { Despatch } from './despatch.js';
 import { key, type Hex, type HexKey } from './hex.js';
 import type { Faction, LoggedEvent, WorldRef } from './events.js';
 import type { PendingDecision, Task } from './task.js';
+import type { Contact } from './recon.js';
 import type { Unit, UnitReport } from './unit.js';
 
 /**
@@ -51,6 +52,27 @@ export interface CommanderKnowledge {
    * despatch that arrives carrying older news than the map already holds is not news.
    */
   readonly reports: ReadonlyMap<string, UnitReport>;
+  /**
+   * Enemies he has been told about, keyed by his own label for them.
+   *
+   * Held, not recomputed — the same correction reports needed. A view that asked
+   * `spottedBy` at the moment a client requested it would show him exactly what his
+   * column can see this instant and nothing else: an enemy would appear the moment it
+   * came into view and vanish the moment it left, when what actually happens is that it
+   * stops being current and starts being a place somebody was once seen.
+   *
+   * Contacts are never removed. They go stale, and staleness is the reader's problem.
+   */
+  readonly contacts: ReadonlyMap<string, Contact>;
+  /**
+   * The number his staff will give the next new contact.
+   *
+   * A counter rather than anything derived from the enemy's identity. A label that could
+   * be computed from the observed unit — a hash, say — would be brute-forceable against a
+   * small and guessable id space, and would hand back exactly the correlation the label
+   * exists to withhold.
+   */
+  readonly nextContactNo: number;
 }
 
 export interface CampaignState {
@@ -133,6 +155,8 @@ function knowledgeFor(s: CampaignState, commanderId: string): CommanderKnowledge
       surveyed: new Set<HexKey>(),
       lastSurveyedHours: new Map<HexKey, number>(),
       reports: new Map<string, UnitReport>(),
+      contacts: new Map<string, Contact>(),
+      nextContactNo: 1,
     }
   );
 }
@@ -222,6 +246,8 @@ export function reduce(state: CampaignState, event: LoggedEvent): CampaignState 
         surveyed: new Set(),
         lastSurveyedHours: new Map(),
         reports: new Map(),
+        contacts: new Map(),
+        nextContactNo: 1,
       });
 
     case 'commander_removed': {
@@ -270,6 +296,31 @@ export function reduce(state: CampaignState, event: LoggedEvent): CampaignState 
 
     case 'report_filed':
       return file(s, p.commanderId, p.report);
+
+    case 'contact_filed': {
+      const k = knowledgeFor(s, p.commanderId);
+      const held = k.contacts.get(p.contact.id);
+      // An older sighting never overwrites a newer one. Two riders can arrive out of
+      // order carrying word of the same column, and the later hour is the better fact.
+      if (held !== undefined && held.seenAtHours > p.contact.seenAtHours) return s;
+      return withKnowledge(s, {
+        ...k,
+        contacts: new Map(k.contacts).set(p.contact.id, p.contact),
+        // A label already in use was minted by an earlier filing; only a new one moves
+        // the counter, so replaying a log twice cannot inflate it.
+        nextContactNo: held === undefined ? k.nextContactNo + 1 : k.nextContactNo,
+      });
+    }
+
+    case 'contact_lost': {
+      const k = knowledgeFor(s, p.commanderId);
+      const held = k.contacts.get(p.contactId);
+      if (held === undefined || !held.inSight) return s;
+      return withKnowledge(s, {
+        ...k,
+        contacts: new Map(k.contacts).set(p.contactId, { ...held, inSight: false }),
+      });
+    }
 
     case 'unit_stat_set': {
       const unit = s.units.get(p.unitId);
@@ -455,3 +506,14 @@ export const openDecisions = (s: CampaignState): PendingDecision[] =>
 /** What a formation is doing, if anything. */
 export const taskFor = (s: CampaignState, unitId: string): Task | undefined =>
   s.tasks.get(unitId);
+
+/**
+ * What a commander knows about the enemy, oldest sighting last.
+ *
+ * Newest first because a contact's whole meaning is its hour: the top of this list is the
+ * least wrong thing he holds.
+ */
+export const contactsOf = (s: CampaignState, commanderId: string): Contact[] =>
+  [...(s.knowledge.get(commanderId)?.contacts.values() ?? [])].sort(
+    (a, b) => b.seenAtHours - a.seenAtHours || (a.id < b.id ? -1 : 1),
+  );

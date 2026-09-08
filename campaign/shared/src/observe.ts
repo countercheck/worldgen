@@ -17,6 +17,9 @@
  * `observationEvents` records **ground**, which is public and never stale — terrain fog is
  * off, so this only feeds the memory the issued map will want when it arrives.
  *
+ * `sightingEvents` records **the enemy**, under each commander's own labels — see
+ * `knowledge.ts`, which decides whether a fresh sighting continues a contact or starts one.
+ *
  * `reportEvents` records **formations**, which is the fog that carries the game. It fires
  * only where a commander needs no rider: the formation he is standing next to, one whose
  * column is touching his own, and a one-off seed for a formation he has never had word of
@@ -32,6 +35,7 @@ import { commanderIds, formationOf, formationsUnder } from './commander.js';
 import type { CampaignConfig } from './config.js';
 import { formationsTouch } from './despatch.js';
 import type { EventPayload } from './events.js';
+import { sightingEvents } from './knowledge.js';
 import { unkey, type HexKey } from './hex.js';
 import { commandVisible } from './recon.js';
 import type { CampaignState } from './state.js';
@@ -118,6 +122,7 @@ export const knowledgeEvents = (
 ): EventPayload[] => [
   ...observationEvents(state, world, cfg),
   ...reportEvents(state),
+  ...sightingEvents(state, world, cfg),
 ];
 
 /** Whether anybody would learn anything new right now. */

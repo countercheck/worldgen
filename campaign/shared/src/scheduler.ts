@@ -44,8 +44,9 @@ import {
 } from './despatch.js';
 import { REFEREE, type EventPayload, type LoggedEvent } from './events.js';
 import { key, type Hex } from './hex.js';
+import { fileSightings } from './knowledge.js';
 import { hoursToEnter, marchHoursLeftToday, planMarch } from './movement.js';
-import { detectionDice, spottedBy, type Contact } from './recon.js';
+import { detectionDice, spottedBy, type Sighting } from './recon.js';
 import { ones, type Rng } from './rng.js';
 import { reduce, type CampaignState } from './state.js';
 import type { DecisionTrigger, PendingDecision, Task } from './task.js';
@@ -194,6 +195,15 @@ function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: 
     // when it arrived, which is exactly the lag the design is about.
     if (d.body.unitReport !== undefined) {
       emit({ kind: 'report_filed', commanderId: d.to, report: d.body.unitReport });
+    }
+
+    // Sightings attached to the paper, filed under the *recipient's* own labels. Two
+    // commanders who both hear about the same column hold two contacts with two different
+    // numbers, and nothing in either man's payload says they are the same thing — which
+    // is the correlation these rules make you buy with a patrol.
+    if (d.body.contacts !== undefined && d.body.contacts.length > 0) {
+      const filed = fileSightings(s, cfg, d.to, d.body.contacts, d.sentAtHours, 'reported');
+      for (const payload of filed) emit(payload);
     }
 
     const to = s.commanders.get(d.to);
@@ -468,7 +478,7 @@ function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: 
     const units = [...s.units.values()].sort((a, b) => (a.id < b.id ? -1 : 1));
 
     for (const unit of units) {
-      const fresh: Contact[] = [];
+      const fresh: Sighting[] = [];
       for (const [enemyId, contact] of spottedBy(s, world, cfg, unit)) {
         const k = `${unit.id}->${enemyId}`;
         if (alreadySeen.has(k)) continue;
