@@ -60,17 +60,100 @@ jobs:
       - name: Check test coverage
         run: python -m pytest --cov=worldgen --cov-fail-under=85 --quiet
 
+  # ---- campaign/, the TypeScript half -----------------------------------
+  #
+  # Two jobs rather than one, matching the Python side: a lint failure and a test failure
+  # are different news, and reading which of them went red off the job list is worth the
+  # duplicated install.
+  #
+  # `npm ci` rather than `npm install`: it installs exactly what `package-lock.json` says
+  # and fails if the lock and the manifest disagree, which is the whole reason the lock is
+  # committed. An unpinned install is the same class of mistake as the unpinned ruff that
+  # broke this workflow the first time it ran again.
+
+  js-lint:
+    name: JS Lint & Types
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: campaign
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: campaign/package-lock.json
+
+      - run: npm ci
+
+      # Typechecking is a gate, not a build step. `exactOptionalPropertyTypes` and the
+      # strict flags are doing real work in this codebase — several fog bugs were caught
+      # by the compiler rather than by a test — so a type error must fail CI even though
+      # vitest would happily run the same files through esbuild without checking them.
+      - name: Check types
+        run: npm run typecheck
+
+      - name: Check code style
+        run: npm run lint
+
+  js-test:
+    name: JS Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: campaign
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: campaign/package-lock.json
+
+      - run: npm ci
+
+      # A precondition of the tests, not a separate concern. The server and client suites
+      # import `@campaign/shared` by package name, which resolves to its built `dist/`; a
+      # fresh checkout has none, so without this every test file in two of the three
+      # workspaces fails to load. It passes locally only because a developer has built at
+      # some point — exactly the kind of thing that is green on a laptop and red on a
+      # runner, and it was red on the first attempt here.
+      - name: Build the shared engine
+        run: npm run build
+
+      # All three workspaces: shared, server and client. The server suite is where the
+      # fog leakage tests live, and they are the most important tests in the project —
+      # they assert against serialised response bytes that a commander's payload carries
+      # no enemy position, no route, and no despatch he has not been handed.
+      - name: Run tests
+        run: npm test
+
   # The gate branch protection points at. Its name is load-bearing: a required status
   # check is matched by name, so renaming this job silently stops it gating anything.
+  #
+  # Every real job must appear in BOTH `needs` and the shell check below. A job in `needs`
+  # but not in the check is waited for and then ignored, which is the quiet way to add a
+  # suite that gates nothing — the same hole the four-month outage left open, one language
+  # over. `tests/test_ci_workflow.py` asserts the two lists agree.
   required:
     name: CIExpected
     runs-on: ubuntu-latest
-    needs: [lint, test]
+    needs: [lint, test, js-lint, js-test]
     if: always()
     steps:
+      # `needs['js-lint']`, not `needs.js-lint`. A hyphen is an operator in GitHub's
+      # expression language, so the dotted form parses as a subtraction and evaluates to
+      # nothing — which compares unequal to "success" and would fail every run, or worse,
+      # be "fixed" by deleting the check.
       - name: Check results
         run: |
-          if [ "${{ needs.lint.result }}" != "success" ] || [ "${{ needs.test.result }}" != "success" ]; then
+          if [ "${{ needs.lint.result }}" != "success" ] \
+            || [ "${{ needs.test.result }}" != "success" ] \
+            || [ "${{ needs['js-lint'].result }}" != "success" ] \
+            || [ "${{ needs['js-test'].result }}" != "success" ]; then
             echo "❌ Linting or tests failed"
             exit 1
           fi
