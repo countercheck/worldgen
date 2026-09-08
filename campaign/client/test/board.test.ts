@@ -229,7 +229,9 @@ describe('the symbols a commander is given', () => {
     const symbolOf = (id: string) => seeing!.marks.find((m) => m.id === id)!.symbol;
 
     for (const contact of seeing!.contacts.values()) {
-      const symbol = symbolOf(contact.unitId);
+      // Keyed by the commander's own label for the sighting. The observed unit's id is
+      // not in the payload at all, which is what stops two marks being correlated.
+      const symbol = symbolOf(contact.id);
       expect(symbol.affiliation).toBe('hostile');
       expect(symbol.dashed).toBe(true);
       expect(symbol.kind).toBe(contact.kind);

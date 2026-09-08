@@ -26,6 +26,7 @@ import {
   type CampaignState,
   type Commander,
   type Command,
+  type Contact,
   type Despatch,
   type LoggedEvent,
   type PendingDecision,
@@ -362,6 +363,8 @@ export function serialise(state: CampaignState): string {
       surveyed: [...k.surveyed],
       lastSurveyedHours: [...k.lastSurveyedHours],
       reports: [...k.reports.values()],
+      contacts: [...k.contacts.values()],
+      nextContactNo: k.nextContactNo,
     })),
     despatches: [...state.despatches.values()],
     tasks: [...state.tasks.values()],
@@ -384,6 +387,8 @@ export function deserialise(json: string): CampaignState {
       surveyed: string[];
       lastSurveyedHours: [string, number][];
       reports?: UnitReport[];
+      contacts?: Contact[];
+      nextContactNo?: number;
     }[];
     despatches?: Despatch[];
     tasks?: Task[];
@@ -409,6 +414,8 @@ export function deserialise(json: string): CampaignState {
           surveyed: new Set(k.surveyed),
           lastSurveyedHours: new Map(k.lastSurveyedHours),
           reports: new Map((k.reports ?? []).map((r) => [r.unitId, r])),
+          contacts: new Map((k.contacts ?? []).map((c) => [c.id, c])),
+          nextContactNo: k.nextContactNo ?? 1,
         },
       ]),
     ),

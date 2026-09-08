@@ -22,6 +22,7 @@ import type { Despatch } from './despatch.js';
 import type { Grade } from './config.js';
 import type { Hex } from './hex.js';
 import type { Strictness, Violation } from './ruling.js';
+import type { Contact } from './recon.js';
 import type { PendingDecision, Task } from './task.js';
 import type { Experience, Formation, Trait, Unit, UnitKind, UnitReport } from './unit.js';
 
@@ -112,6 +113,31 @@ export type EventPayload =
       readonly kind: 'report_filed';
       readonly commanderId: string;
       readonly report: UnitReport;
+    }
+  /**
+   * A commander has been told where an enemy was.
+   *
+   * By his own column seeing it, or by a report reaching him. The contact carries the
+   * label his own staff gave it, minted when the trail was cold and reused while it is
+   * warm — see `knowledge.ts`, which decides which of those happened.
+   */
+  | {
+      readonly kind: 'contact_filed';
+      readonly commanderId: string;
+      readonly contact: Contact;
+    }
+  /**
+   * A column his pickets were watching has gone out of view.
+   *
+   * The contact stays on his map at the hex he last saw it — losing sight of something
+   * does not unsee it. What changes is that the next sighting will be a *new* contact
+   * rather than a continuation of this one.
+   */
+  | {
+      readonly kind: 'contact_lost';
+      readonly commanderId: string;
+      readonly contactId: string;
+      readonly atHours: number;
     }
   | {
       readonly kind: 'unit_stat_set';

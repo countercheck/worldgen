@@ -384,9 +384,18 @@ describe('once an enemy is actually spotted', () => {
     expect(res.statusCode, res.body).toBe(200);
 
     const view = (await viewAs(f, f.ney)).json();
+    // Found by where it was seen, because that is all he has. There is deliberately no
+    // way to ask "which contact is blue-2?" from inside a commander's payload — that
+    // question is the correlation the rules make him buy with a patrol.
     const contact = (
-      view.contacts as { unitId: string; kind: null; corps: null; echelon: null }[]
-    ).find((c) => c.unitId === 'blue-2');
+      view.contacts as {
+        id: string;
+        coord: { q: number; r: number };
+        kind: null;
+        corps: null;
+        echelon: null;
+      }[]
+    ).find((c) => c.coord.q === beside.q && c.coord.r === beside.r);
 
     expect(contact, 'a division one hex away should be seen').toBeDefined();
     // Presence and location only. A plain sighting is intel 2, and the patrol table grants
@@ -404,9 +413,72 @@ describe('once an enemy is actually spotted', () => {
     // A contact carries exactly these fields and no others. Not a search of the whole
     // payload for `"morale"` — red's own division has one, so that would pass while
     // proving nothing at all.
+    //
+    // `unitId` is the field this list exists to keep out. A contact naming the formation
+    // it is a sighting of would let a commander correlate two marks hours apart as the
+    // same corps, which is top-level intelligence in these rules and is meant to cost a
+    // patrol. `id` in its place is his own staff's label and means nothing to anybody
+    // else — two commanders watching the same column hold two different numbers.
     expect(Object.keys(contact!).sort()).toEqual(
-      ['corps', 'coord', 'echelon', 'faction', 'intelLevel', 'kind', 'seenAtHours', 'unitId'].sort(),
+      ['corps', 'coord', 'echelon', 'faction', 'id', 'intelLevel', 'kind', 'seenAtHours'].sort(),
     );
+    expect(contact!.id).not.toContain('blue');
+  });
+
+  it('keeps the enemy’s unit ids out of the payload entirely', async () => {
+    const f = await setUp();
+
+    const beside = { q: RED_HEX.q + 1, r: RED_HEX.r };
+    await f.app.inject({
+      method: 'POST',
+      url: `/api/campaigns/${f.id}/commands`,
+      headers: { 'x-campaign-token': f.referee },
+      payload: {
+        command: {
+          kind: 'add_unit',
+          unit: division('blue-2', 'blue', beside, 'II Corps', BLUE_NAME, BLUE_STRENGTH),
+        } satisfies Command,
+      },
+    });
+
+    // Against the bytes. The engine holds the observed formation on every contact — it has
+    // to, or it could not tell this evening's column from this morning's — so the only
+    // thing standing between that and the wire is `publicContact`, and this is the
+    // assertion that says it ran.
+    const raw = (await viewAs(f, f.ney)).body;
+    expect(raw).not.toContain('blue-2');
+    expect(raw).not.toContain('"unitId":"blue');
+  });
+
+  it('keeps a sighting after the enemy has marched out of view', async () => {
+    const f = await setUp();
+
+    const beside = { q: RED_HEX.q + 1, r: RED_HEX.r };
+    const run = (command: Command) =>
+      f.app.inject({
+        method: 'POST',
+        url: `/api/campaigns/${f.id}/commands`,
+        headers: { 'x-campaign-token': f.referee },
+        payload: { command },
+      });
+
+    await run({
+      kind: 'add_unit',
+      unit: division('blue-2', 'blue', beside, 'II Corps', BLUE_NAME, BLUE_STRENGTH),
+    });
+    const seen = (await viewAs(f, f.ney)).json().contacts;
+    expect(seen).toHaveLength(1);
+
+    // Teleported clean across the map, well outside anybody's recon zone.
+    await run({ kind: 'teleport_unit', unitId: 'blue-2', column: [BLUE_HEX] });
+
+    const after = (await viewAs(f, f.ney)).json().contacts;
+    // Still there, and still saying where it was. A contact that vanished when the enemy
+    // walked away would mean a commander's map could only ever show what his pickets can
+    // see this second — which is the opposite of a fog-of-war map.
+    expect(after).toHaveLength(1);
+    expect(after[0].coord).toEqual(beside);
+    expect(after[0].id).toBe(seen[0].id);
   });
 });
 

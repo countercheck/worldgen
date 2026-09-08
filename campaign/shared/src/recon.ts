@@ -104,7 +104,15 @@ export function commandVisible(
  * Recording *how well* an enemy was seen, rather than merely that it was, is what lets a
  * commander's map show a vague contact differently from a positively identified corps.
  */
-export interface Contact {
+export interface Sighting {
+  /**
+   * The formation actually seen.
+   *
+   * **Never sent to a client.** The engine needs it to know that this evening's column
+   * and this morning's are the same corps; a commander who had it could correlate two
+   * sightings hours apart for free, which is top-level intelligence in these rules and is
+   * meant to cost a patrol. `publicContact` is what goes on the wire.
+   */
   readonly unitId: string;
   readonly faction: string;
   readonly coord: Hex;
@@ -125,6 +133,56 @@ export interface Contact {
   readonly corps: string | null;
 }
 
+/**
+ * A sighting once a commander has filed it, with the label his staff gave it.
+ *
+ * The id is his own — *the column reported by 1re Division, contact 4* — and means
+ * nothing to anybody else. Two commanders watching the same enemy hold two contacts with
+ * two different labels, which is correct: nothing about their two reports says they are
+ * looking at the same corps until a man decides they are.
+ */
+export interface Contact extends Sighting {
+  readonly id: string;
+  /**
+   * Whether his own men still have eyes on it.
+   *
+   * The whole of contact identity turns on this. A column never lost sight of stays one
+   * contact however long the watch lasts; one that goes out of view is marked lost, and a
+   * later sighting of it is a new contact with a new number, because deciding the two are
+   * the same body of troops is his job rather than the engine's.
+   */
+  readonly inSight: boolean;
+}
+
+/**
+ * A contact as it reaches a client: the label, and not the thing it labels.
+ *
+ * Built by construction rather than by deleting a field, for the same reason
+ * `senderCopy` is: a `delete c.unitId` leaks the day somebody adds a field and forgets
+ * the line.
+ */
+export interface PublicContact {
+  readonly id: string;
+  readonly faction: string;
+  readonly coord: Hex;
+  readonly intelLevel: IntelLevel;
+  readonly seenAtHours: number;
+  readonly kind: Unit['kind'] | null;
+  readonly echelon: Echelon | null;
+  readonly corps: string | null;
+}
+
+export const publicContact = (c: Contact): PublicContact => ({
+  id: c.id,
+  faction: c.faction,
+  coord: c.coord,
+  intelLevel: c.intelLevel,
+  seenAtHours: c.seenAtHours,
+  kind: c.kind,
+  echelon: c.echelon,
+  corps: c.corps,
+});
+
 export type IntelLevel = 1 | 2 | 3 | 4 | 5 | 6;
 
 /** Presence and location — what simply seeing a unit tells you. */
@@ -138,7 +196,7 @@ export const SIGHTING_INTEL: IntelLevel = 2;
  * entitled to know should not reach their client at all — filtering it out on the way to
  * the screen is how it leaks.
  */
-export function contactFrom(unit: Unit, intel: IntelLevel, atHours: number): Contact {
+export function contactFrom(unit: Unit, intel: IntelLevel, atHours: number): Sighting {
   const at = unit.column[0];
   return {
     unitId: unit.id,
@@ -169,9 +227,9 @@ export function spottedBy(
   world: World,
   cfg: CampaignConfig,
   observer: Unit,
-): Map<string, Contact> {
+): Map<string, Sighting> {
   const zone = reconZone(world, cfg, observer);
-  const found = new Map<string, Contact>();
+  const found = new Map<string, Sighting>();
 
   for (const unit of state.units.values()) {
     if (unit.faction === observer.faction) continue;
@@ -200,8 +258,8 @@ export function spottedUnder(
   world: World,
   cfg: CampaignConfig,
   commanderId: string,
-): Map<string, Contact> {
-  const merged = new Map<string, Contact>();
+): Map<string, Sighting> {
+  const merged = new Map<string, Sighting>();
 
   for (const observer of formationsUnder(state, commanderId)) {
     for (const [id, contact] of spottedBy(state, world, cfg, observer)) {

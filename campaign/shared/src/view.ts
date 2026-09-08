@@ -46,9 +46,10 @@ import {
 import type { Faction } from './events.js';
 import { key, type HexKey } from './hex.js';
 import { maskWorld } from './mask.js';
-import { commanderVisible, spottedBy, type Contact } from './recon.js';
+import { commanderVisible, publicContact, type PublicContact } from './recon.js';
 import {
   capturedBy,
+  contactsOf,
   despatchesFrom,
   inboxOf,
   type CampaignState,
@@ -104,8 +105,14 @@ export interface ClientView {
   readonly units: readonly Unit[];
   /** Formations beneath him, as last reported. Empty for a referee, who has the units. */
   readonly reports: readonly UnitReport[];
-  /** Enemies, as last seen and no better. Empty for a referee, who sees units instead. */
-  readonly contacts: readonly Contact[];
+  /**
+   * Enemies, as last heard of and no better. Empty for a referee, who sees units instead.
+   *
+   * Each carries his own label and never the observed unit's id — a man who had that
+   * could correlate two sightings hours apart for free, which these rules make him buy
+   * with a patrol.
+   */
+  readonly contacts: readonly PublicContact[];
   /** Ground his formations have covered. Terrain memory; says nothing about the enemy. */
   readonly surveyed: readonly HexKey[];
   /** What he can see from where he stands, right now. */
@@ -255,22 +262,15 @@ export function viewFor(input: ViewInput, role: Role): ClientView {
     .filter((r) => under.has(r.unitId) && r.unitId !== me.unitId)
     .sort((a, b) => (a.unitId < b.unitId ? -1 : 1));
 
-  // What the formation he rides with can see from where it stands, and nothing else.
+  // What he has been told, not what his columns can see this instant. Held knowledge,
+  // like his reports and for the same reason: an enemy that walks out of view stops being
+  // current, it does not stop having been there. `spottedBy` at request time would make a
+  // contact blink out the moment a picket looked away.
   //
-  // Emphatically not `spottedUnder`, which merges every formation beneath him: that would
-  // hand him whatever a division forty kilometres away is looking at, this instant, with
-  // no rider involved — the same telepathy that made his own corps' positions read "now"
-  // before reports were held rather than computed. What his subordinates see reaches him
-  // as sightings attached to a report despatch, hours later, or not at all.
-  //
-  // Each contact is built by `contactFrom` already stripped to what the sighting earned,
-  // so nothing here has to remember to redact.
-  const contacts =
-    own === undefined
-      ? []
-      : [...spottedBy(state, world, cfg, own).values()].sort((a, b) =>
-          a.unitId < b.unitId ? -1 : 1,
-        );
+  // Two redactions, both by construction rather than by deletion. `contactFrom` built each
+  // sighting already stripped to what its intelligence grade earned, and `publicContact`
+  // drops the observed unit's id on the way out.
+  const contacts = contactsOf(state, role.id).map(publicContact);
 
   // His outbox, stripped by construction. An acknowledgement that has come back is the
   // one and only thing he ever learns about a despatch's fate, so it is computed from

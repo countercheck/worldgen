@@ -11,7 +11,7 @@
  * sighting is a presence, and it takes a patrol closing to identify a formation.
  */
 
-import type { Contact, IntelLevel } from '@campaign/shared';
+import type { PublicContact, IntelLevel } from '@campaign/shared';
 
 import { Row, Section } from './parts.js';
 
@@ -33,7 +33,7 @@ export function ContactPanel({
   color,
   clockHours,
 }: {
-  contact: Contact;
+  contact: PublicContact;
   factionName: string;
   color: string;
   clockHours: number;
@@ -41,7 +41,7 @@ export function ContactPanel({
   const age = Math.max(0, clockHours - contact.seenAtHours);
 
   return (
-    <Section title="Enemy contact">
+    <Section title={`Contact ${contact.id}`}>
       <div className="unit-head">
         <span className="swatch" style={{ background: color }} />
         <div>
@@ -66,6 +66,11 @@ export function ContactPanel({
           within {Math.round(age * 3)} km of that hex by now.
         </p>
       )}
+      <p className="muted small">
+        Your staff&rsquo;s own number for this sighting. Whether it is the same body of
+        troops as any other contact on your map is your judgement, not a fact you have
+        been given.
+      </p>
     </Section>
   );
 }

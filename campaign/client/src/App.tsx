@@ -609,13 +609,13 @@ function Console({
                   <h3>Contacts</h3>
                   <ul className="unit-list">
                     {[...board.contacts.values()].map((c) => (
-                      <li key={c.unitId}>
-                        <button onClick={() => setSelectedId(c.unitId)}>
+                      <li key={c.id}>
+                        <button onClick={() => setSelectedId(c.id)}>
                           <span
                             className="swatch small ghost"
                             style={{ background: board.factions.get(c.faction)?.color }}
                           />
-                          {c.corps ?? 'Unidentified'}
+                          {c.corps ?? `Contact ${c.id}`}
                           <span className="muted">
                             {' '}
                             · {ageLabel(c.seenAtHours, clock)}

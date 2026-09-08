@@ -432,7 +432,38 @@ decision queue from step 1.
 3. ~~**The commander's interface**: composer, inbox, formations panel.~~ Done — and it
    turned the fog on properly on the way, see below.
 4. ~~**The referee's console**: decision queue, despatch log, seat-switching.~~ Done.
-5. *Deferred:* issued maps, their falsification, and correction by recce.
+5. ~~**Contacts held rather than computed**, with labels that do not name the enemy.~~ Done.
+6. *Deferred:* issued maps, their falsification, and correction by recce.
+
+### What step 5 settled
+
+Contacts became knowledge, like reports: filed by event, persisting after the enemy walks
+away, dated when they were actually seen. A contact that vanished the moment a picket
+looked elsewhere would mean a commander's map could only ever show what his men can see
+this second, which is the opposite of a fog-of-war map.
+
+**A contact carries his own label and never the observed unit's id.** `PublicContact` is
+built by construction rather than by deletion, and the leakage suite asserts on the
+serialised bytes that no enemy unit id reaches a commander at all. The engine still holds
+it — it must, or it could not tell this evening's column from this morning's — so the only
+thing between that and the wire is one function, and there is a test that says it ran.
+
+**Identity turns on eyes on, not on elapsed time.** A column his men have not lost sight of
+is one contact however long the watch lasts. One that goes out of view is marked lost, and
+a later sighting of it gets a new number with the old mark left standing — whether the two
+are the same corps is his judgement, which is the judgement the period turned on.
+
+The first attempt got this wrong in a way worth recording. It compared *hours since the
+contact was last filed* against a window, which measures when somebody clicked rather than
+anything about the world: a referee advancing in six-hour steps minted a new contact every
+step, for an enemy standing still in front of a division that had never once stopped
+looking at it. Found by driving the running server rather than by a test, because every
+test filed at a single hour.
+
+**Word from somebody else always starts its own contact**, even when his own pickets are
+watching the same column. A headquarters told of an enemy on its flank has no way to know
+it is the same body of troops its screen can see, and deciding that they are is the work
+of a staff rather than of a reducer.
 
 ### What step 4 settled
 
@@ -477,11 +508,7 @@ division forty kilometres away was looking at, this instant. `viewFor` now uses
 `spottedBy` on his own formation alone. What his subordinates see reaches him as sightings
 attached to a report, hours late.
 
-**Still open, and the same defect class:** contacts are computed rather than held, so they
-neither persist nor age — an enemy his column loses sight of vanishes instead of going
-stale. And a contact still carries the observed unit's engine id, which lets two sightings
-be correlated for free. Both are the remaining half of *Contacts become reported, not
-computed*, and both want the treatment reports just had.
+Contacts got the same treatment shortly afterwards — see below.
 
 ### What step 2 settled that the design had left open
 

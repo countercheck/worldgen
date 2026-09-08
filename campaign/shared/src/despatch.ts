@@ -37,7 +37,7 @@ import type { CampaignConfig } from './config.js';
 import { crossingAt, riverClass } from './crossing.js';
 import { astar, distance, key, neighbors, type Hex } from './hex.js';
 import { speedKmh } from './movement.js';
-import type { Contact } from './recon.js';
+import { publicContact, type PublicContact, type Sighting } from './recon.js';
 import { gradeOf, isPassable, isRiver } from './terrain.js';
 import type { Unit, UnitReport } from './unit.js';
 import { hexAt, type World, type WorldHex } from './world.js';
@@ -60,7 +60,15 @@ export type DespatchKind = 'order' | 'report' | 'acknowledgement';
  */
 export interface DespatchBody {
   readonly text?: string;
-  readonly contacts?: readonly Contact[];
+  /**
+   * Sightings attached to the paper.
+   *
+   * Held internally as `Sighting`, which names the formation actually seen, because the
+   * recipient's staff has to be able to tell whether this is the column they are already
+   * watching. That name never reaches a client: `addresseeCopy` and `captorCopy` strip it,
+   * and the leakage suite asserts on the serialised bytes that they did.
+   */
+  readonly contacts?: readonly Sighting[];
   /**
    * Where the sender's own formation stood when he sealed it.
    *
@@ -154,7 +162,7 @@ export interface SentDespatch {
   readonly kind: DespatchKind;
   readonly to: string;
   readonly sentAtHours: number;
-  readonly body: DespatchBody;
+  readonly body: PublicBody;
   /** His own waypoints, which he chose and therefore already knows. */
   readonly via: readonly Hex[];
   readonly inReplyTo: string | null;
@@ -178,7 +186,7 @@ export interface ReceivedDespatch {
   readonly sentAtHours: number;
   /** The hour it reached him. The gap between the two is the fog. */
   readonly receivedAtHours: number;
-  readonly body: DespatchBody;
+  readonly body: PublicBody;
   readonly forwardedFrom: string | null;
   readonly inReplyTo: string | null;
   /**
@@ -199,15 +207,42 @@ export interface CapturedDespatch {
   readonly faction: string;
   readonly sentAtHours: number;
   readonly capturedAtHours: number;
-  readonly body: DespatchBody;
+  readonly body: PublicBody;
 }
+
+/**
+ * A body as it goes on the wire.
+ *
+ * The prose unchanged — it is what somebody wrote — and the sightings stripped of the
+ * formation they name. A captured despatch is intelligence about *where* the enemy
+ * believes things are, not a key to his order of battle.
+ */
+export interface PublicBody {
+  readonly text?: string;
+  readonly contacts?: readonly PublicContact[];
+  readonly unitReport?: UnitReport;
+}
+
+const publicBody = (b: DespatchBody): PublicBody => ({
+  ...(b.text === undefined ? {} : { text: b.text }),
+  ...(b.contacts === undefined
+    ? {}
+    : // No id has been minted for these — they are somebody else's sightings, not filed
+      // knowledge — so they are labelled by position, which is all the paper carries.
+      {
+        contacts: b.contacts.map((c, i) =>
+          publicContact({ ...c, id: `s${i + 1}`, inSight: false }),
+        ),
+      }),
+  ...(b.unitReport === undefined ? {} : { unitReport: b.unitReport }),
+});
 
 export const senderCopy = (d: Despatch, acknowledged: boolean): SentDespatch => ({
   id: d.id,
   kind: d.kind,
   to: d.to,
   sentAtHours: d.sentAtHours,
-  body: d.body,
+  body: publicBody(d.body),
   via: d.via,
   inReplyTo: d.inReplyTo,
   handed: d.handed,
@@ -220,7 +255,7 @@ export const addresseeCopy = (d: Despatch, superseded: boolean): ReceivedDespatc
   from: d.from,
   sentAtHours: d.sentAtHours,
   receivedAtHours: deliveredAt(d) ?? d.sentAtHours,
-  body: d.body,
+  body: publicBody(d.body),
   forwardedFrom: d.forwardedFrom,
   inReplyTo: d.inReplyTo,
   superseded,
@@ -234,7 +269,7 @@ export const captorCopy = (d: Despatch): CapturedDespatch => ({
   faction: d.faction,
   sentAtHours: d.sentAtHours,
   capturedAtHours: d.fate.kind === 'captured' ? d.fate.atHours : d.sentAtHours,
-  body: d.body,
+  body: publicBody(d.body),
 });
 
 /**

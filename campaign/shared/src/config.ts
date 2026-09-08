@@ -122,6 +122,18 @@ export interface CampaignConfig {
   readonly extraPatrolCost: number;
   /** How far gunfire carries, in km. */
   readonly gunfireRangeKm: number;
+  /**
+   * How often a contact somebody is still watching is written down again.
+   *
+   * A logging cadence, not a rule — nothing keys off it. A picket watching a stationary
+   * column would otherwise write an identical event on every command; this bounds that to
+   * once an hour, which is also how stale the hour on a watched contact may read.
+   *
+   * Contact *identity* does not use this. Whether a sighting continues a contact or starts
+   * a new one turns on whether his men ever lost sight of it, which is a fact about the
+   * world rather than about elapsed time — see `knowledge.ts`.
+   */
+  readonly contactRefreshHours: number;
 
   // ---- the clock ------------------------------------------------------
   /**
@@ -195,6 +207,7 @@ export const DEFAULT_CONFIG: CampaignConfig = {
   freePatrols: 3,
   extraPatrolCost: 100,
   gunfireRangeKm: 30,
+  contactRefreshHours: 1,
 
   sunriseHour: 6,
   sunsetHour: 18,
