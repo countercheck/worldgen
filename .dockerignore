@@ -1,0 +1,47 @@
+# The build context is the repository root, because the client's demonstration scenario
+# imports a world fixture from `campaign/shared/test/fixtures`. Everything the image does
+# not need is kept out here — a smaller context is a faster build, and secrets that are
+# never sent to the daemon cannot end up in a layer.
+
+# Python. The image runs the campaign server; `worldgen` generates the maps it is played
+# on, and that happens on somebody's machine long before this is built.
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+htmlcov/
+.coverage
+worldgen/
+tests/
+scripts/
+docs/
+*.md
+
+# Node artefacts. `node_modules` especially: it is reinstalled from the lock file inside
+# the image, and copying a host one in would ship whatever platform it was built for.
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+# Both spellings. A bare `*.tsbuildinfo` matches only the context root, so a stale
+# `shared/tsconfig.tsbuildinfo` from a developer's machine travelled into the image and
+# `tsc --build` decided the project was already up to date — emitting nothing, and leaving
+# the client's build to fail resolving a package whose `dist/` did not exist.
+*.tsbuildinfo
+**/*.tsbuildinfo
+coverage/
+
+# Somebody's actual campaign, and the journals beside it.
+campaign.db*
+**/campaign.db*
+
+# Local noise.
+.git/
+.github/
+.claude/
+.idea/
+.vscode/
+*.log
