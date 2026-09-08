@@ -9,6 +9,11 @@ Hex-based procedural world generator for TTRPGs, worldbuilding, and wargaming.
 For a full reference of every calculation, formula, and config value, see
 [docs/REFERENCE.md](docs/REFERENCE.md).
 
+There is also a play layer. `campaign/` is a refereed Napoleonic campaign game played on a
+generated world — one referee runs the clock, each commander is sent a link, and orders
+travel by despatch rider at 10 km/h and can be intercepted. See
+[docs/CAMPAIGN.md](docs/CAMPAIGN.md).
+
 ## Status
 
 | Phase | Description | Status |

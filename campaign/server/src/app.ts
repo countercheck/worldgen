@@ -14,6 +14,7 @@
  */
 
 import cookie from '@fastify/cookie';
+import fastifyStatic from '@fastify/static';
 import websocket from '@fastify/websocket';
 import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 
@@ -36,6 +37,15 @@ export interface AppOptions {
   readonly db?: Db;
   readonly cfg?: CampaignConfig;
   readonly logger?: boolean;
+  /**
+   * Where the built client lives, if this process is to serve it.
+   *
+   * Unset in development, where Vite serves the client on its own port and proxies the
+   * API here — two processes, because that is what gives hot reloading. Set in a
+   * container, where the whole application is one process on one port and there is no
+   * CORS story to have.
+   */
+  readonly clientDir?: string;
 }
 
 /** Where a request's token may come from, in order of preference. */
@@ -398,6 +408,26 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
   });
 
   app.get('/health', async () => ({ ok: true }));
+
+  // ---- the client -------------------------------------------------------
+
+  if (opts.clientDir !== undefined) {
+    app.register(fastifyStatic, { root: opts.clientDir, wildcard: false });
+
+    // Anything not matched by a route above is the client's own. It routes on the URL
+    // fragment — join links are `#/j/<campaign>/<token>`, deliberately, so a token never
+    // reaches a server log — so in practice this only ever serves `/`, but a deep link
+    // somebody typed should land on the app rather than on a 404.
+    //
+    // `/api` is excluded so a mistyped endpoint returns a JSON 404 rather than a page,
+    // which is far easier to diagnose from a fetch that suddenly parses as HTML.
+    app.setNotFoundHandler((req, reply) => {
+      if (req.url.startsWith('/api')) {
+        return reply.code(404).send({ error: 'no such endpoint' });
+      }
+      return reply.sendFile('index.html');
+    });
+  }
 
   return app;
 }
