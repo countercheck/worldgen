@@ -189,6 +189,30 @@ def bifurcation_ratio(link_counts: dict[int, int]) -> float:
     return math.exp(statistics.fmean(ratios))
 
 
+def channel_hexes(state: WorldState, net: "DrainageNetwork") -> set[HexCoord]:
+    """The land hexes the network runs through.
+
+    Land only.  A river path ends *in* the sea or a lake, and that last hex is water: it
+    is where the river arrives, not part of the channel.
+    """
+    water = (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
+    land = {c for c, hx in state.hexes.items() if hx.terrain_class not in water}
+    return net.nodes() & land
+
+
+def confluences(net: "DrainageNetwork", channel: set[HexCoord]) -> set[HexCoord]:
+    """Where two channels actually meet.
+
+    Restricted to *channel* — that is, to land — because two rivers ending on the same
+    lake hex have two feeders in the graph and have not met: they have both arrived
+    somewhere.  Counting that as a fork would credit every map with a lake on it.
+
+    Every consumer asks through here rather than testing `len(upstream) >= 2` for itself,
+    so the number on a debug plate and the number in a test cannot drift apart.
+    """
+    return {c for c in channel if len(net.upstream.get(c, ())) >= 2}
+
+
 def _direction(a: HexCoord, b: HexCoord) -> int | None:
     """Which of the six ways *a* flows to reach *b*, or None if they are not neighbours."""
     return _DIRECTION_INDEX.get((b[0] - a[0], b[1] - a[1]))
@@ -322,8 +346,11 @@ class DrainageMetrics:
         )
 
 
-def drainage_metrics(state: WorldState) -> DrainageMetrics:
+def drainage_metrics(state: WorldState, net: DrainageNetwork | None = None) -> DrainageMetrics:
     """Measure the drainage network of a finished world.
+
+    Pass *net* when the caller has already built one — rebuilding it repeats a descent
+    along every edge, which a renderer drawing the same network should not pay twice.
 
     Drainage density is channel hexes over land hexes.  At the project's one hex to the
     kilometre that *is* the usual km/km² figure — a channel hex is a kilometre of channel
@@ -335,10 +362,11 @@ def drainage_metrics(state: WorldState) -> DrainageMetrics:
     water = (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
     land = {c for c, hx in state.hexes.items() if hx.terrain_class not in water}
 
-    net = build_network(state)
-    channel = net.nodes() & land
+    if net is None:
+        net = build_network(state)
+    channel = channel_hexes(state, net)
 
-    confluences = [c for c in channel if len(net.upstream.get(c, ())) >= 2]
+    junctions = confluences(net, channel)
     lengths = [len(r.hexes) for r in state.rivers]
     counts = links_by_order(net)
     parallel_fraction, joined_fraction = pair_statistics(net, channel)
@@ -347,8 +375,8 @@ def drainage_metrics(state: WorldState) -> DrainageMetrics:
         land_hexes=len(land),
         channel_hexes=len(channel),
         river_count=len(state.rivers),
-        confluence_count=len(confluences),
-        confluence_rate=len(confluences) / len(channel) if channel else 0.0,
+        confluence_count=len(junctions),
+        confluence_rate=len(junctions) / len(channel) if channel else 0.0,
         strahler_max=max(net.order.values()) if net.order else 0,
         link_counts=counts,
         bifurcation_ratio=bifurcation_ratio(counts),

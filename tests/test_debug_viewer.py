@@ -92,3 +92,35 @@ def test_render_drainage_produces_a_file(small_state, tmp_path):
     out = tmp_path / "drainage.svg"
     render(small_state, "drainage", str(out))
     assert out.exists() and out.stat().st_size > 0
+
+
+def test_the_drainage_plate_agrees_with_its_own_caption(small_state):
+    """The plate prints its own numbers, so what it draws has to be what it counts.
+
+    Two ways this drifted before: the markers were drawn for every junction in the graph
+    while the caption counted land junctions only, so a hex where two rivers merely arrive
+    at the same lake got a dot and no tally; and one-hex links were dropped from the
+    drawing while still feeding the N1/N2 and bifurcation figures in the caption.
+    """
+    import re
+
+    from worldgen.analysis import build_network, drainage_metrics, links_by_order
+    from worldgen.render.debug_viewer import render_svg
+
+    svg = render_svg(small_state, "drainage")
+    metrics = drainage_metrics(small_state)
+
+    caption = re.search(r"confluences (\d+)", svg)
+    assert caption is not None, "the plate should state its own numbers"
+    assert int(caption.group(1)) == metrics.confluence_count
+
+    markers = svg.count('fill="#d95f02"')
+    assert markers == metrics.confluence_count, (
+        f"plate draws {markers} confluence markers, caption counts {metrics.confluence_count}"
+    )
+
+    # Every link counted is a link drawn — as a polyline, or as a dot where a one-hex link
+    # has no direction to draw. The confluence markers are the other circles, so take them
+    # off before comparing.
+    drawn = svg.count("<polyline") + svg.count("<circle") - markers
+    assert drawn == sum(links_by_order(build_network(small_state)).values())

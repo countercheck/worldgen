@@ -253,7 +253,14 @@ _DRAINAGE_WIDTH_STEP = 1.4
 
 
 def _drainage_links(net) -> list[tuple[int, list]]:
-    """The network as maximal runs of one order, headwater end first."""
+    """The network as maximal runs of one order, headwater end first.
+
+    Every link `analysis.links_by_order` counts, including the one-hex ones — a single
+    channel hex that flows nowhere, which is a lone stream reaching the coast in one step.
+    Dropping those made the plate disagree with its own caption, since they still fed the
+    N1/N2 and bifurcation figures: four of the fifteen links on seed 7 were invisible.
+    A one-hex run has no direction to draw, so `_drainage_overlay` marks it instead.
+    """
     starts = [
         node
         for node, order in net.order.items()
@@ -269,16 +276,21 @@ def _drainage_links(net) -> list[tuple[int, list]]:
             node = net.downstream.get(node)
         if node is not None:
             run.append(node)  # carry into the junction so the lines actually meet
-        if len(run) > 1:
-            links.append((order, run))
+        links.append((order, run))
     return links
 
 
 def _drainage_overlay(state: WorldState, hex_size: float, ox: float, oy: float) -> list[str]:
-    """Channels by Strahler order, with the confluences marked."""
-    from ..analysis import build_network, drainage_metrics
+    """Channels by Strahler order, with the confluences marked.
+
+    The network is built once and handed to `drainage_metrics`: the caption describes the
+    lines above it, so drawing them from one graph and counting them from another would be
+    both slower and a way for the two to disagree.
+    """
+    from ..analysis import build_network, channel_hexes, confluences, drainage_metrics
 
     net = build_network(state)
+    channel = channel_hexes(state, net)
     links = _drainage_links(net)
     highest = max((order for order, _ in links), default=1)
     cmap = mpl.colormaps["Blues"]
@@ -290,13 +302,18 @@ def _drainage_overlay(state: WorldState, hex_size: float, ox: float, oy: float) 
         pts = [(px + ox, py + oy) for px, py in (axial_to_pixel(c, hex_size) for c in run)]
         width = _DRAINAGE_BASE_WIDTH + (order - 1) * _DRAINAGE_WIDTH_STEP
         stroke = _rgb_to_hex(*cmap(0.35 + 0.65 * (order / highest))[:3])
+        if len(pts) == 1:
+            # A one-hex link: no line to draw, so a dot the width of the line it would be.
+            out.append(
+                f'    <circle cx="{pts[0][0]:.2f}" cy="{pts[0][1]:.2f}"'
+                f' r="{width / 2:.2f}" fill="{stroke}"/>'
+            )
+            continue
         out.append(
             f'    <polyline points="{_points_str(pts)}" fill="none" stroke="{stroke}"'
             f' stroke-width="{width:.2f}" stroke-linecap="round" stroke-linejoin="round"/>'
         )
-    for node, feeders in net.upstream.items():
-        if len(feeders) < 2:
-            continue
+    for node in sorted(confluences(net, channel)):
         px, py = axial_to_pixel(node, hex_size)
         r = 2.0 + 0.8 * net.order.get(node, 1)
         out.append(
@@ -308,7 +325,7 @@ def _drainage_overlay(state: WorldState, hex_size: float, ox: float, oy: float) 
     # agree about the same map.
     out.append(
         f'  <text x="8" y="36" font-family="sans-serif" font-size="11">'
-        f"{drainage_metrics(state).summary()}</text>"
+        f"{drainage_metrics(state, net).summary()}</text>"
     )
     return out
 
