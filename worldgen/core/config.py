@@ -176,6 +176,50 @@ class WorldConfig:
     erosion_affinity_update_interval: int = 500
     erosion_delta_min_load: float = 0.15
 
+    # Channel incision.  The droplets above cut in proportion to slope alone: each carries
+    # one unit of water whatever country it drains, which is stream power with the area
+    # term set to zero.  Nothing then distinguishes a trunk from the hillslope beside it,
+    # so no valley ever deepens below its surroundings, so no channel ever captures its
+    # neighbour — and the map comes out as a crowd of unbranched threads running side by
+    # side.  Measured before this existed: no seed's network reached third order, and
+    # first-order streams outnumbered second by 7 to 1 and worse against Horton's 3 to 5.
+    #
+    # The fix is the missing term.  Lowering per pass is K * A^m * S^n with A the upstream
+    # area in km2 (one hex is one km2) and S the drop to the receiver over one km.  K is
+    # not set directly — it is derived from how far a *reference* channel should cut, so
+    # the dial below is in metres rather than in a coefficient whose magnitude changes
+    # whenever an exponent does.
+    erosion_incision_m_per_pass: float = 12.0
+    # The exponent that creates the effect.  It is the contrast between what a trunk cuts
+    # and what a hillslope cuts, and hence whether capture happens at all: at the default
+    # a 500 km2 channel lowers about 22 times as fast as the 1 km2 ground beside it.
+    # Zero reproduces the old behaviour of eroding by slope alone.
+    erosion_incision_area_exponent: float = 0.5
+    # m/n of 0.5 is the textbook concavity.  n = 1 also makes the step linear in
+    # elevation, which is what lets the floor against the receiver serve as an exact
+    # stability guard; other values can overshoot and need a timestep instead.
+    erosion_incision_slope_exponent: float = 1.0
+    erosion_incision_reference_km2: float = 500.0  # A_ref: a mid-sized trunk on a 64x64 map
+    erosion_incision_reference_slope: float = 0.01  # S_ref: 10 m/km
+    # The gap kept above the receiver, in metres.  Incision walks outlets first, so the
+    # receiver has already dropped when a cell is reached and this floor never prevents
+    # deepening — it only prevents flow being turned back on itself, which is what keeps
+    # the surface free of new sinks for hydrology to refill.
+    erosion_incision_min_gradient_m: float = 0.01
+    # Cap on one cell's lowering in one pass, in metres.  A guard against an inherited
+    # cliff, not a parameter of normal operation.
+    erosion_incision_max_cut_m: float = 40.0
+    # How far a droplet may cut past its own receiver, in metres.  Zero — the droplets'
+    # job is transport and roughening, and incision is what deepens valleys.  Non-zero
+    # makes droplets punch pits the sink fill then has to span, which buys no capture:
+    # capture needs a sustained trunk-to-hillslope contrast, which a point process cannot
+    # deliver.  Kept as a knob because the question comes up.
+    erosion_droplet_overcut_m: float = 0.0
+    # Width of the blur applied after the droplets and before the carve loop, in cells.
+    # It takes the per-cell speckle off the droplet field so incision cuts into a clean
+    # surface; running before rather than after is what keeps it from damping the notches.
+    erosion_smoothing_sigma: float = 0.5
+
     # Valley widening.  Droplets only incise — each cuts along its own path — so the model
     # carves narrow V-notches and nothing ever widens them.  Real valleys get their width
     # from the channel migrating sideways over geological time, planing the floor flat
@@ -230,7 +274,22 @@ class WorldConfig:
     # two. It replaced a threshold that was really a rank: the top 5% of land by
     # accumulation, which gave every map the same 5.6% of its land under channel
     # whether it was desert or rainforest.
-    channel_min_discharge: float = 20000.0
+    #
+    # This is also the dial that decides whether the drainage *network* is a network at
+    # all, which is not obvious from the name.  A basin can only show as many Strahler
+    # orders as its area will divide into channel-sized pieces, so the ratio of basin to
+    # threshold sets the branching, and at 20,000 (42 km2 at temperate runoff) the ratio
+    # on a 64 km map was about five: no seed's network reached third order and first-order
+    # streams outnumbered second by nine to one, against Horton's three to five.  The map
+    # came out as unbranched threads running seaward side by side.
+    #
+    # 6,000 is 12.5 km2, which by the humid-temperate regional curve (W = 2.5 * A^0.4) is
+    # a channel about 7 m across and knee deep — a watercourse a cart has to ford, not a
+    # ditch.  It is the largest value that puts every seed at third order with N1/N2 back
+    # inside Horton's band, and it leaves 88% of the land dry.  The old default was not
+    # drawing big rivers either: 42 km2 is 11 m across, and the largest river a 64 km map
+    # raises drains 204 km2 and runs 21 m wide.
+    channel_min_discharge: float = 6000.0
     # Rain the ground and its plants take before anything runs off. Evapotranspiration
     # rises with temperature — that is most of what it is — so it is expressed as a base
     # plus a rate per degree rather than a flat figure. A flat one gave a boreal region
@@ -829,6 +888,47 @@ class WorldConfig:
             raise ValueError(f"unknown model {self.model!r}; choose from {', '.join(MODELS)}")
         self.wind_direction = _coerce_pair("wind_direction", self.wind_direction)
         self.elevation_gradient_m = _coerce_pair("elevation_gradient_m", self.elevation_gradient_m)
+        if self.erosion_incision_m_per_pass < 0:
+            raise ValueError(
+                f"erosion_incision_m_per_pass must be >= 0, got {self.erosion_incision_m_per_pass}"
+            )
+        if self.erosion_incision_area_exponent < 0:
+            raise ValueError(
+                "erosion_incision_area_exponent must be >= 0, got "
+                f"{self.erosion_incision_area_exponent}"
+            )
+        if self.erosion_incision_slope_exponent < 0:
+            raise ValueError(
+                "erosion_incision_slope_exponent must be >= 0, got "
+                f"{self.erosion_incision_slope_exponent}"
+            )
+        if self.erosion_incision_reference_km2 <= 0:
+            raise ValueError(
+                "erosion_incision_reference_km2 must be > 0 — it is a divisor, got "
+                f"{self.erosion_incision_reference_km2}"
+            )
+        if self.erosion_incision_reference_slope <= 0:
+            raise ValueError(
+                "erosion_incision_reference_slope must be > 0 — it is a divisor, got "
+                f"{self.erosion_incision_reference_slope}"
+            )
+        if self.erosion_incision_min_gradient_m < 0:
+            raise ValueError(
+                "erosion_incision_min_gradient_m must be >= 0, got "
+                f"{self.erosion_incision_min_gradient_m}"
+            )
+        if self.erosion_incision_max_cut_m < 0:
+            raise ValueError(
+                f"erosion_incision_max_cut_m must be >= 0, got {self.erosion_incision_max_cut_m}"
+            )
+        if self.erosion_droplet_overcut_m < 0:
+            raise ValueError(
+                f"erosion_droplet_overcut_m must be >= 0, got {self.erosion_droplet_overcut_m}"
+            )
+        if self.erosion_smoothing_sigma < 0:
+            raise ValueError(
+                f"erosion_smoothing_sigma must be >= 0, got {self.erosion_smoothing_sigma}"
+            )
         if self.valley_carve_passes < 0:
             raise ValueError(f"valley_carve_passes must be >= 0, got {self.valley_carve_passes}")
         if self.valley_width_max < 0:
