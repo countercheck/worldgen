@@ -134,6 +134,9 @@ def _color_getter(attribute: str):
         return _get_color_biome, False, False
     if attribute == "terrain_class":
         return _get_color_terrain, False, False
+    if attribute == "drainage":
+        # Terrain underneath, with the network drawn over it by `_drainage_overlay`.
+        return _get_color_terrain, False, False
     if attribute == "elevation":
         cmap = mpl.colormaps["terrain"]
         return (lambda h: cmap(h.elevation)), False, False
@@ -241,6 +244,75 @@ def _color_getter(attribute: str):
     raise ValueError(f"Unknown attribute: {attribute}")
 
 
+# How thick an order-1 channel is drawn, and what each further order adds.  Width by
+# Strahler order rather than by flow so that the *branching* is what the eye picks up —
+# a plate drawn by flow alone shows a thread getting slowly fatter and hides whether it
+# ever joined anything.
+_DRAINAGE_BASE_WIDTH = 1.2
+_DRAINAGE_WIDTH_STEP = 1.4
+
+
+def _drainage_links(net) -> list[tuple[int, list]]:
+    """The network as maximal runs of one order, headwater end first."""
+    starts = [
+        node
+        for node, order in net.order.items()
+        if not any(net.order[f] == order for f in net.upstream.get(node, ()))
+    ]
+    links = []
+    for start in sorted(starts):
+        order = net.order[start]
+        run = [start]
+        node = net.downstream.get(start)
+        while node is not None and net.order[node] == order:
+            run.append(node)
+            node = net.downstream.get(node)
+        if node is not None:
+            run.append(node)  # carry into the junction so the lines actually meet
+        if len(run) > 1:
+            links.append((order, run))
+    return links
+
+
+def _drainage_overlay(state: WorldState, hex_size: float, ox: float, oy: float) -> list[str]:
+    """Channels by Strahler order, with the confluences marked."""
+    from ..analysis import build_network, drainage_metrics
+
+    net = build_network(state)
+    links = _drainage_links(net)
+    highest = max((order for order, _ in links), default=1)
+    cmap = mpl.colormaps["Blues"]
+
+    out = ['  <g id="layer-drainage">']
+    # Ascending order, so a trunk paints over the tributaries feeding it rather than the
+    # other way about — the same precedence the road overlay needs and for the same reason.
+    for order, run in sorted(links, key=lambda pair: pair[0]):
+        pts = [(px + ox, py + oy) for px, py in (axial_to_pixel(c, hex_size) for c in run)]
+        width = _DRAINAGE_BASE_WIDTH + (order - 1) * _DRAINAGE_WIDTH_STEP
+        stroke = _rgb_to_hex(*cmap(0.35 + 0.65 * (order / highest))[:3])
+        out.append(
+            f'    <polyline points="{_points_str(pts)}" fill="none" stroke="{stroke}"'
+            f' stroke-width="{width:.2f}" stroke-linecap="round" stroke-linejoin="round"/>'
+        )
+    for node, feeders in net.upstream.items():
+        if len(feeders) < 2:
+            continue
+        px, py = axial_to_pixel(node, hex_size)
+        r = 2.0 + 0.8 * net.order.get(node, 1)
+        out.append(
+            f'    <circle cx="{px + ox:.2f}" cy="{py + oy:.2f}" r="{r:.2f}"'
+            f' fill="#d95f02" stroke="black" stroke-width="0.6"/>'
+        )
+    out.append("  </g>")
+    # A plate that states its own numbers is what makes the eyeball check and the test
+    # agree about the same map.
+    out.append(
+        f'  <text x="8" y="36" font-family="sans-serif" font-size="11">'
+        f"{drainage_metrics(state).summary()}</text>"
+    )
+    return out
+
+
 def render_svg(state: WorldState, attribute: str, hex_size: float = 20) -> str:
     """Render hex map colored by attribute as an SVG string."""
     get_color, settlement_overlay, road_overlay = _color_getter(attribute)
@@ -312,6 +384,9 @@ def render_svg(state: WorldState, attribute: str, hex_size: float = 20) -> str:
                 f' stroke-linecap="round" stroke-linejoin="round"{da}/>'
             )
         out.append("  </g>")
+
+    if attribute == "drainage":
+        out.extend(_drainage_overlay(state, hex_size, ox, oy))
 
     out.append(
         f'  <text x="8" y="18" font-family="sans-serif" font-size="14">World Map — {attribute}</text>'
