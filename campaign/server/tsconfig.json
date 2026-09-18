@@ -4,6 +4,8 @@
     "lib": ["ES2022"],
     "rootDir": "./src",
     "outDir": "./dist",
+    // Inside the output; see the note in `shared/tsconfig.json`.
+    "tsBuildInfoFile": "./dist/tsconfig.tsbuildinfo",
     "types": ["node"]
   },
   "include": ["src/**/*"],
