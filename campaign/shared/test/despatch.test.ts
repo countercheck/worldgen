@@ -22,7 +22,7 @@ import {
 } from '../src/despatch.js';
 import { DEFAULT_CONFIG } from '../src/config.js';
 import { key, type Hex, type HexKey } from '../src/hex.js';
-import type { Unit } from '../src/unit.js';
+import { reportOf, type Unit } from '../src/unit.js';
 import type { World, WorldHex } from '../src/world.js';
 
 const cfg = DEFAULT_CONFIG;
@@ -181,6 +181,41 @@ describe('a captor', () => {
     // Not the route: knowing where the rider was going is knowing where the addressee
     // stands, which is the one thing capture must not hand over for free.
     expect('route' in copy).toBe(false);
+  });
+
+  it('reads where the sender stood, and not his returns', () => {
+    // A despatch carries the sender's own report whether or not he thought to attach one.
+    // Taken off a rider it is worth exactly what a good sighting is worth — a position,
+    // an hour, and the size of the thing — and no more. The engine's id for the formation
+    // is the correlation key these rules make a player buy with a patrol, and the returns
+    // are the order of battle the module comment says a capture is not.
+    const taken = despatch({
+      fate: { kind: 'captured', by: 'blue', atHours: 6, dice: [1, 1] },
+      body: {
+        text: 'Move on Quatre Bras with all speed.',
+        unitReport: reportOf(unit('red-1', 'red', [{ q: 5, r: 5 }], 4210), 4),
+      },
+    });
+
+    const report = captorCopy(taken).body.unitReport as Record<string, unknown>;
+    expect(report['head']).toEqual({ q: 5, r: 5 });
+    expect(report['atHours']).toBe(4);
+    expect(report['echelon']).toBe('division');
+    for (const forbidden of ['unitId', 'effectives', 'fatigue', 'provisions', 'formation']) {
+      expect(forbidden in report).toBe(false);
+    }
+  });
+
+  it('leaves his own side’s report intact for the men entitled to it', () => {
+    const arrived = despatch({
+      fate: { kind: 'delivered', atHours: 11 },
+      body: { unitReport: reportOf(unit('red-1', 'red', [{ q: 5, r: 5 }], 4210), 4) },
+    });
+    // The addressee is being written to by his own subordinate: the point of the paper is
+    // that it tells him where III Corps is and what state it is in.
+    const report = addresseeCopy(arrived, false).body.unitReport as Record<string, unknown>;
+    expect(report['unitId']).toBe('red-1');
+    expect(report['effectives']).toBe(4210);
   });
 });
 

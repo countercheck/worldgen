@@ -32,7 +32,7 @@
  */
 
 import { occupied } from './column.js';
-import { directSubordinates } from './commander.js';
+import { directSubordinates, superiors } from './commander.js';
 import type { CampaignConfig } from './config.js';
 import {
   courierStepHours,
@@ -248,9 +248,13 @@ function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: 
     // slower — that is the whole point of insisting on them. Only touching formations
     // skip the ride, and then there is no route to insist on.
     const handed = via.length === 0 && formationsTouch(fromUnit, toUnit);
-    const route = handed
-      ? [origin]
-      : (planRide(world, cfg, origin, destination, via) ?? [origin]);
+    // No legal ride — an addressee across water, or a waypoint the rider cannot reach.
+    // `check` has already said so as a soft violation, so arriving here means a referee
+    // sent him anyway. He sets out and is still out there: `rideTick` re-plans from where
+    // he stands on every tick, so he finds his man if the ground ever allows it and never
+    // if it does not. Standing him on the origin hex and calling that a delivery would
+    // put the paper in the addressee's hand at the hour it was written, across an ocean.
+    const route = handed ? [origin] : (planRide(world, cfg, origin, destination, via) ?? [origin]);
 
     clockTo(atHours);
     const despatch: Despatch = {
@@ -260,8 +264,13 @@ function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: 
       to: spec.to,
       faction: sender.faction,
       sentAtHours: atHours,
-      // Where he stood when he sealed it, attached whether or not he thought to say so.
-      body: { unitReport: reportOf(fromUnit, atHours), ...spec.body },
+      // Where he stood when he sealed it, attached whether or not he thought to say so —
+      // and written last, so it is the ground truth about the sender rather than whatever
+      // a client put in the field. A body that could override it is a forged report, and
+      // a forged report is believed: it is filed as knowledge the moment it arrives. It
+      // also makes a cascaded order carry the cascading commander's position rather than
+      // the original sender's, which is the one a rider coming from him would know.
+      body: { ...spec.body, unitReport: reportOf(fromUnit, atHours) },
       via,
       forwardedFrom: spec.forwardedFrom ?? null,
       inReplyTo: spec.inReplyTo ?? null,
@@ -272,7 +281,7 @@ function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: 
     };
     emit({ kind: 'despatch_sent', despatch });
 
-    if (handed || route.length <= 1) {
+    if (handed) {
       deliver(despatch, atHours);
       return;
     }
@@ -315,12 +324,20 @@ function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: 
     return true;
   };
 
-  /** The commander who rides with a formation, preferring the senior one. */
+  /**
+   * The commander who rides with a formation, preferring the senior one.
+   *
+   * Seniority is depth in the chain of command: the fewer men above him, the senior. A
+   * corps commander fallen back on one of his own divisions decides for it, and the
+   * divisional commander does not. Ties — two men of equal depth on one formation — break
+   * on id, which is arbitrary but stable, and is the only part of this that ever was.
+   */
   const commanderRiding = (unitId: string): string | null => {
     const riders = [...s.commanders.values()]
       .filter((c) => c.unitId === unitId)
-      .sort((a, b) => (a.id < b.id ? -1 : 1));
-    return riders.find((c) => c.superiorId === null)?.id ?? riders[0]?.id ?? null;
+      .map((c) => ({ id: c.id, depth: superiors(s, c.id).length }))
+      .sort((a, b) => a.depth - b.depth || (a.id < b.id ? -1 : 1));
+    return riders[0]?.id ?? null;
   };
 
   /**
@@ -418,50 +435,77 @@ function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: 
     }
   };
 
-  /** Move every column whose next hex is due, and route it onward. */
+  /**
+   * Move every column as far through the tick as its hours will carry it.
+   *
+   * A hex at a time, but as many hexes as fit: infantry on a road crosses one in twenty
+   * minutes, and a tick is a referee's unit of attention rather than a speed limit. One
+   * step per tick would silently cap every march at `1 / tickHours` km/h — four, on the
+   * default — which is slower than the rules' slowest going and would never look like a
+   * bug, only like mud. Each step is re-read from the folded state, because `scheduleNext`
+   * charges the hours against the day and the next leg depends on what is left of it.
+   */
   const marchTick = (tickEnd: number): void => {
     const running = [...s.tasks.values()].sort((a, b) => (a.unitId < b.unitId ? -1 : 1));
 
-    for (const task of running) {
-      if (task.complete || task.nextHex === null || task.arrivesAtHours === null) continue;
-      if (task.arrivesAtHours > tickEnd) continue;
+    for (const started of running) {
+      let task = started;
 
-      const unit = s.units.get(task.unitId);
-      const head = unit?.column[0];
-      if (unit === undefined || head === undefined) continue;
+      while (!task.complete && task.nextHex !== null && task.arrivesAtHours !== null) {
+        // The same slack `rideTick` allows: an arrival landing exactly on the tick
+        // boundary is this tick's, and accumulated steps rarely land on it exactly.
+        if (task.arrivesAtHours > tickEnd + 1e-9) break;
 
-      const to = task.nextHex;
-      const atHours = Math.max(task.arrivesAtHours, now);
-      const grade = gradeOf(world, cfg, head, to);
-      const stepHours = hoursToEnter(world, cfg, unit, head, to);
+        const unit = s.units.get(task.unitId);
+        const head = unit?.column[0];
+        if (unit === undefined || head === undefined) break;
 
-      clockTo(atHours);
-      const onward = scheduleNext(unit, task, to, atHours, stepHours);
-      emit({
-        kind: 'unit_marched',
-        unitId: unit.id,
-        to,
-        atHours,
-        grade,
-        stepHours: Number.isFinite(stepHours) ? stepHours : 0,
-        nextHex: onward?.nextHex ?? null,
-        arrivesAtHours: onward?.arrivesAtHours ?? null,
-      });
+        const to = task.nextHex;
+        const atHours = Math.max(task.arrivesAtHours, now);
+        const grade = gradeOf(world, cfg, head, to);
+        const stepHours = hoursToEnter(world, cfg, unit, head, to);
 
-      if (onward !== null) continue;
+        clockTo(atHours);
+        const onward = scheduleNext(unit, task, to, atHours, stepHours);
+        emit({
+          kind: 'unit_marched',
+          unitId: unit.id,
+          to,
+          atHours,
+          grade,
+          stepHours: Number.isFinite(stepHours) ? stepHours : 0,
+          nextHex: onward?.nextHex ?? null,
+          arrivesAtHours: onward?.arrivesAtHours ?? null,
+        });
 
-      const arrived = key(to) === key(task.destination);
-      emit({ kind: 'task_completed', unitId: unit.id, atHours });
+        if (onward !== null) {
+          const next = s.tasks.get(task.unitId);
+          if (next === undefined) break;
+          task = next;
+          continue;
+        }
 
-      const commander = commanderRiding(unit.id);
-      if (commander === null) continue;
-      raise(
-        arrived ? 'objective_reached' : 'crossing_impassable',
-        commander,
-        unit.id,
-        atHours,
-        arrived ? { destination: task.destination } : { at: to, destination: task.destination },
-      );
+        // Nowhere onward, for one of two very different reasons. Arrived is done. Stopped
+        // by ground he cannot cross is *not* done — `task_completed` there would report
+        // "the march is finished" for a column standing on the wrong bank of a river, and
+        // the referee's own queue would say so while the decision beside it said the
+        // opposite. The task stays open with nowhere to go, which is what a halted column
+        // is, and resolving the decision is what starts it again.
+        const arrived = key(to) === key(task.destination);
+        if (arrived) emit({ kind: 'task_completed', unitId: unit.id, atHours });
+
+        const commander = commanderRiding(unit.id);
+        if (commander !== null) {
+          raise(
+            arrived ? 'objective_reached' : 'crossing_impassable',
+            commander,
+            unit.id,
+            atHours,
+            arrived ? { destination: task.destination } : { at: to, destination: task.destination },
+          );
+        }
+        break;
+      }
     }
   };
 
@@ -493,6 +537,12 @@ function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: 
       raise('enemy_contact', commanderId, unit.id, tickEnd, {
         contacts: fresh.map((c) => ({ coord: c.coord, intelLevel: c.intelLevel })),
       });
+
+      // Filed for the man who saw it, here rather than only in the store's pass after the
+      // whole command. That pass looks at the final state, so an enemy sighted and lost
+      // again during a long advance never reached the observer's own contacts at all —
+      // his superior got it by despatch and he did not, which is precisely backwards.
+      for (const payload of fileSightings(s, cfg, commanderId, fresh, tickEnd)) emit(payload);
 
       const commander = s.commanders.get(commanderId);
       if (commander != null && commander.superiorId !== null) {

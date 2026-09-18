@@ -43,7 +43,7 @@ import {
   type ReceivedDespatch,
   type SentDespatch,
 } from './despatch.js';
-import type { Faction } from './events.js';
+import type { Faction, LoggedEvent } from './events.js';
 import { key, type HexKey } from './hex.js';
 import { maskWorld } from './mask.js';
 import { commanderVisible, publicContact, type PublicContact } from './recon.js';
@@ -414,6 +414,13 @@ export function assertMasked(view: ClientView, cfg: CampaignConfig = DEFAULT_CON
     if (faction !== null && d.faction === faction) {
       throw new Error(`leak: ${d.id} is ${faction}'s own paper, not a capture`);
     }
+    // The sender's own return travels on every despatch, and `captorCopy` cuts it down to
+    // `capturedReport` on the way out. `unitId` surviving that is the whole of the
+    // correlation a patrol is supposed to buy, handed over with the paper.
+    const report = d.body.unitReport as Record<string, unknown> | undefined;
+    if (report !== undefined && 'unitId' in report) {
+      throw new Error(`leak: captured despatch ${d.id} names the formation that sent it`);
+    }
   }
 
   if (!cfg.terrainFog) return;
@@ -429,6 +436,44 @@ export function assertMasked(view: ClientView, cfg: CampaignConfig = DEFAULT_CON
       );
     }
   }
+}
+
+/**
+ * A log entry as a commander may read it.
+ *
+ * The log is the single richest thing in the campaign: every march in order, every
+ * rider's path, every contact anyone filed. Filtering it by who *acted* is not enough,
+ * because one command produces events that happened to other men — a cascaded order
+ * carries a route to the addressee's subordinate, stamped with the original sender's
+ * name — so the filter is on the fact rather than on the actor.
+ *
+ * What survives is his outbox: the despatches he himself wrote, in the shape `senderCopy`
+ * already defines. Everything else is somebody else's business and is dropped rather
+ * than trimmed.
+ */
+export interface LoggedAction {
+  readonly seq: number;
+  readonly clockHours: number;
+  readonly despatch: SentDespatch;
+}
+
+export function logFor(
+  events: readonly LoggedEvent[],
+  commanderId: string,
+  acknowledged: ReadonlySet<string | null> = new Set(),
+): LoggedAction[] {
+  const out: LoggedAction[] = [];
+  for (const e of events) {
+    if (e.payload.kind !== 'despatch_sent') continue;
+    const d = e.payload.despatch;
+    if (d.from !== commanderId) continue;
+    out.push({
+      seq: e.seq,
+      clockHours: e.clockHours,
+      despatch: senderCopy(d, acknowledged.has(d.id)),
+    });
+  }
+  return out;
 }
 
 /** Reparse a view's world, for callers that want it as a `World` rather than a document. */

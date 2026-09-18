@@ -21,6 +21,8 @@ import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import {
   assertMasked,
   DEFAULT_CONFIG,
+  inboxOf,
+  logFor,
   viewFor,
   type CampaignConfig,
   type Command,
@@ -322,13 +324,19 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
     const events = store.events(auth.campaign.id);
     if (auth.role.kind === 'referee') return reply.send(events);
 
-    // A commander sees his own actions and nothing else. The log is a rich source of
-    // exactly the information the fog exists to withhold — an enemy's marches are all in
-    // there, and so are his own subordinates' — so it is filtered rather than trimmed.
+    // A commander gets his outbox, rebuilt from the log rather than filtered out of it.
+    // The raw events are a rich source of exactly what the fog exists to withhold — every
+    // march in order, and every rider's route, which is a position — and filtering by
+    // actor does not remove them: a cascaded order is stamped with the name of the man
+    // who started the chain but carries a route to somebody else's subordinate. See
+    // `logFor`, which builds by construction for the same reason `senderCopy` does.
     const mine = auth.role.id;
-    return reply.send(
-      events.filter((e) => e.actor.kind === 'commander' && e.actor.id === mine),
+    const acknowledged = new Set(
+      inboxOf(store.state(auth.campaign.id), mine)
+        .filter((d) => d.kind === 'acknowledgement')
+        .map((d) => d.inReplyTo),
     );
+    return reply.send(logFor(events, mine, acknowledged));
   });
 
   // ---- live updates -----------------------------------------------------

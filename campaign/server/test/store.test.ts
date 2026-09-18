@@ -243,6 +243,53 @@ describe('state', () => {
     expect(serialise(fromScratch)).toBe(serialise(withSnapshots));
   });
 
+  it('snapshots by distance along the log, not by a coincidence of sequence numbers', () => {
+    // `nextSeq % 50` only fires when a command happens to land the sequence exactly on a
+    // multiple, and a command emits as many events as it produced — an advance through a
+    // day of marching emits dozens. In practice none were ever written after setup, and
+    // every read replayed the whole log, which is the thing snapshots exist to stop.
+    const db = openDb();
+    const store = new CampaignStore(db);
+    const created = store.create({
+      id: 'c1',
+      name: 'Test',
+      worldDoc,
+      seed: 42,
+      factions: [{ id: 'red', name: 'Red', color: '#f00' }],
+    });
+
+    const drive = (command: Command) => store.execute(created.campaign, command, REFEREE_ROLE);
+    expect(drive({ kind: 'add_unit', unit: division('r1', 'red', land[0]!) }).ok).toBe(true);
+    expect(
+      drive({ kind: 'add_commander', commander: commander('c-r1', 'red', 'r1') }).ok,
+    ).toBe(true);
+
+    // A column actually marching, so each advance emits several events rather than one.
+    // That is the case the modulus missed: it lands on a multiple of 50 only by accident
+    // once a command can carry the sequence past one in a single step.
+    const far = land[land.length - 1]!;
+    expect(drive({ kind: 'set_task', unitId: 'r1', destination: far }).ok).toBe(true);
+    for (let i = 0; i < 60; i++) drive({ kind: 'advance_clock', hours: 3 });
+
+    const rows = db
+      .prepare(`SELECT seq FROM snapshots WHERE campaign_id = ? ORDER BY seq`)
+      .all('c1') as { seq: number }[];
+
+    // One per interval the log has actually covered — not the two the modulus happened
+    // to catch out of the four this campaign earned.
+    const head = store.state('c1').nextSeq;
+    expect(rows.length).toBeGreaterThanOrEqual(Math.floor(head / 50));
+
+    // And each is a real saving: no two closer together than the interval, and the newest
+    // close enough to the head that a read replays a handful of events, not the campaign.
+    let previous = 0;
+    for (const row of rows) {
+      expect(row.seq - previous).toBeGreaterThanOrEqual(50);
+      previous = row.seq;
+    }
+    expect(head - rows[rows.length - 1]!.seq).toBeLessThan(50);
+  });
+
   it('rewinds by replaying a prefix', () => {
     const s = setUp();
     run(s, { kind: 'advance_clock', hours: 4 });
