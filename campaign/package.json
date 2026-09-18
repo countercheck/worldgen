@@ -13,6 +13,7 @@
   },
   "scripts": {
     "build": "npm run build --workspaces --if-present",
+    "predev": "npm run build -w @campaign/shared",
     "dev": "npm run dev -w @campaign/server & npm run dev -w @campaign/client & wait",
     "test": "npm run test --workspaces --if-present",
     "lint": "eslint .",

@@ -2,7 +2,11 @@
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
     "rootDir": "./src",
-    "outDir": "./dist"
+    "outDir": "./dist",
+    // Inside the output, not beside it. `tsc --build` skips emitting when this file says
+    // it is up to date, so left in the package root a `rm -rf dist` produces a silent
+    // no-op rebuild and a package whose entry point does not exist.
+    "tsBuildInfoFile": "./dist/tsconfig.tsbuildinfo"
   },
   "include": ["src/**/*"]
 }

@@ -5,6 +5,8 @@
     "jsx": "react-jsx",
     "rootDir": "./src",
     "outDir": "./dist-tsc",
+    // Inside the output; see the note in `shared/tsconfig.json`.
+    "tsBuildInfoFile": "./dist-tsc/tsconfig.tsbuildinfo",
     "types": ["vite/client"],
     "resolveJsonModule": true
   },
