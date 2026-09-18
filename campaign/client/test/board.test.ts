@@ -38,6 +38,7 @@ import {
 } from '@campaign/shared';
 
 import { boardFrom } from '../src/board.js';
+import { washBand } from '../src/map/draw.js';
 
 const world = parseWorld(worldDoc);
 
@@ -339,5 +340,73 @@ describe('riders on the map', () => {
       DEFAULT_THEME,
     );
     expect(board.riders).toEqual([]);
+  });
+});
+
+/**
+ * The wash: which of the three bands a hex falls in.
+ *
+ * Classification only. What it looks like is a matter of taste and lives in the theme;
+ * what it *claims* is not, and getting that wrong would either hide ground a commander is
+ * entitled to see or, worse, imply he is watching ground he is not.
+ */
+describe('the observation wash', () => {
+  const ney = boardFrom(view(commanderRole('ney')), DEFAULT_THEME);
+  const referee = boardFrom(view(REFEREE_ROLE), DEFAULT_THEME);
+
+  const watched = [...ney.visible][0]!;
+  const remembered = [...ney.surveyed].find((k) => !ney.visible.has(k))!;
+  const stranger = [...world.hexes.keys()].find(
+    (k) => !ney.visible.has(k) && !ney.surveyed.has(k),
+  )!;
+
+  it('has ground in all three states to begin with', () => {
+    expect(watched).toBeDefined();
+    expect(remembered).toBeDefined();
+    expect(stranger).toBeDefined();
+  });
+
+  it('tells watched, marched-over and unknown ground apart', () => {
+    expect(washBand(watched, ney.visible, ney.surveyed, 'three')).toBe('observed');
+    expect(washBand(remembered, ney.visible, ney.surveyed, 'three')).toBe('surveyed');
+    expect(washBand(stranger, ney.visible, ney.surveyed, 'three')).toBe('unseen');
+  });
+
+  it('collapses remembered ground into the dark at two tones', () => {
+    expect(washBand(watched, ney.visible, ney.surveyed, 'two')).toBe('observed');
+    expect(washBand(remembered, ney.visible, ney.surveyed, 'two')).toBe('unseen');
+    expect(washBand(stranger, ney.visible, ney.surveyed, 'two')).toBe('unseen');
+  });
+
+  it('washes nothing at all when it is switched off', () => {
+    for (const k of [watched, remembered, stranger]) {
+      expect(washBand(k, ney.visible, ney.surveyed, 'off')).toBe('observed');
+    }
+  });
+
+  it('counts a hex he is looking at as observed even if the survey lags', () => {
+    // The two sets are maintained independently, and sight is the stronger claim.
+    expect(washBand(watched, new Set([watched]), new Set(), 'three')).toBe('observed');
+  });
+
+  /**
+   * The regression that would black out the one screen meant to see everything. A referee
+   * is sent `visible: []` because he is not on the map, and that must read as "wash
+   * nothing" rather than as "he can see nothing".
+   */
+  it('leaves the referee an unwashed map', () => {
+    expect(referee.visible.size).toBe(0);
+    expect(referee.surveyed.size).toBe(0);
+    for (const k of [...world.hexes.keys()].slice(0, 50)) {
+      expect(washBand(k, referee.visible, referee.surveyed, 'three')).toBe('observed');
+    }
+  });
+
+  it('gives a scouting column more ground to watch than the man it reports to', () => {
+    // Kellermann's cavalry is eighteen kilometres of column with the scout trait, so it
+    // sweeps a corridor where Ney's infantry sees a patch. That gap is the whole reason
+    // for drawing this at all.
+    const kellermann = boardFrom(view(commanderRole('kellermann')), DEFAULT_THEME);
+    expect(kellermann.visible.size).toBeGreaterThan(ney.visible.size);
   });
 });

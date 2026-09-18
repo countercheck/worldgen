@@ -37,6 +37,38 @@ export interface RoadStyle {
 /** A palette keyed by the enum values `world.json` carries. */
 export type ColorMap = Readonly<Record<string, Color>>;
 
+/**
+ * The wash laid over ground nobody is currently watching.
+ *
+ * Distinct from `fog`, and the distinction is the whole point. `fog` is a *colour*, used
+ * when `terrainFog` is on and the server has replaced a hex with a blank that carries no
+ * biome and no elevation — there is nothing to draw, so something stands in for it. This
+ * is a *veil* over terrain that is perfectly well known: the ground is on the map, but no
+ * one of yours is looking at it, and what is standing there now is anybody's guess.
+ *
+ * The two compose. With `terrainFog` on, a hex can be both blank and unwatched, and it
+ * should read as both. Reusing one for the other is how that stops being possible.
+ *
+ * Alphas rather than three colours, because the wash has to sit over snow and over forest
+ * and stay legible on both; a flat opaque tone that suits one drowns the other.
+ */
+export interface WashStyle {
+  /**
+   * Desaturated blue-black rather than pure black.
+   *
+   * Black drains the hue out of what it covers and the map goes grey; a cold dark tone
+   * leaves enough terrain colour showing to be read as terrain, which is the point —
+   * unwatched ground is still ground you have marched over and mapped.
+   */
+  readonly color: Color;
+  /** Under observation right now. Zero: nothing between the reader and the ground. */
+  readonly observed: number;
+  /** Marched over before, watched by nobody now. Terrain remembered, occupants not. */
+  readonly surveyed: number;
+  /** Never seen by anybody under his command. */
+  readonly unseen: number;
+}
+
 export interface Theme {
   readonly terrain: ColorMap;
   readonly biome: ColorMap;
@@ -46,6 +78,8 @@ export interface Theme {
   readonly road: Readonly<Record<string, RoadStyle>>;
   /** Ground a faction has never observed. */
   readonly fog: Color;
+  /** The veil over ground not under observation. See `WashStyle`. */
+  readonly wash: WashStyle;
   /** Drawn when a key is missing, so a gap is visible rather than invisible. */
   readonly fallback: Color;
 }
@@ -59,6 +93,10 @@ export const DEFAULT_THEME: Theme = {
   landUse: LAND_USE_COLORS,
   road: ROAD_STYLE,
   fog: FOG_COLOR,
+  // Not from `palette.ts`: the Python renderer draws a finished map of a whole country and
+  // has no notion of who is looking at it. The wash only means anything on a screen being
+  // read by one man.
+  wash: { color: '#0b1020', observed: 0, surveyed: 0.25, unseen: 0.55 },
   // Magenta on purpose. A missing colour should look like a bug, not like terrain — a
   // tasteful grey fallback is how an incomplete palette ships unnoticed.
   fallback: '#ff00ff',
@@ -73,6 +111,7 @@ export interface ThemeOverrides {
   readonly landUse?: ColorMap;
   readonly road?: Readonly<Record<string, RoadStyle>>;
   readonly fog?: Color;
+  readonly wash?: Partial<WashStyle>;
   readonly fallback?: Color;
 }
 
@@ -93,6 +132,9 @@ export function resolveTheme(overrides?: ThemeOverrides): Theme {
     landUse: { ...DEFAULT_THEME.landUse, ...overrides.landUse },
     road: { ...DEFAULT_THEME.road, ...overrides.road },
     fog: overrides.fog ?? DEFAULT_THEME.fog,
+    // Per key like the palettes above: a referee who wants the unwatched ground darker
+    // should not have to restate the colour and the other two bands to say so.
+    wash: { ...DEFAULT_THEME.wash, ...overrides.wash },
     fallback: overrides.fallback ?? DEFAULT_THEME.fallback,
   };
 }

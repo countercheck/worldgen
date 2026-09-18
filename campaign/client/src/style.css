@@ -96,6 +96,22 @@ header h1 {
   opacity: 0.5;
 }
 
+/* Says what the map is currently doing to itself, so a darkened map reads as a setting
+   rather than as a rendering fault. */
+.wash-toggle {
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--line, rgba(255, 255, 255, 0.18));
+  border-radius: 5px;
+  padding: 3px 9px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.wash-toggle:hover {
+  color: inherit;
+}
+
 .clock {
   margin-left: auto;
   color: var(--muted);
