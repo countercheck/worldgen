@@ -332,8 +332,22 @@ export class CampaignStore {
     }
   }
 
+  /**
+   * Write a snapshot once the log has grown `SNAPSHOT_EVERY` events past the last one.
+   *
+   * Measured as a distance from the previous snapshot rather than as `nextSeq % 50`. A
+   * command emits as many events as it produced — an advance through a day of marching
+   * emits dozens — so a modulus is only ever hit by coincidence, and in practice never
+   * was: after setup no snapshot was written at all and every read replayed the whole log.
+   */
   private maybeSnapshot(campaignId: string, state: CampaignState): void {
-    if (state.nextSeq % SNAPSHOT_EVERY !== 0) return;
+    const last = this.db
+      .prepare(`SELECT MAX(seq) AS seq FROM snapshots WHERE campaign_id = ?`)
+      .get(campaignId) as { seq: number | null } | undefined;
+
+    const since = state.nextSeq - (last?.seq ?? 0);
+    if (since < SNAPSHOT_EVERY) return;
+
     this.db
       .prepare(`INSERT OR REPLACE INTO snapshots (campaign_id, seq, state_json) VALUES (?, ?, ?)`)
       .run(campaignId, state.nextSeq, serialise(state));

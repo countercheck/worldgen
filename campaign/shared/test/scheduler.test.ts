@@ -68,6 +68,16 @@ function flatWorld(size = 40): World {
 
 const world = flatWorld();
 
+/** The same ground with a wall of water down one column of hexes. */
+function splitWorld(atQ: number, size = 40): World {
+  const w = flatWorld(size);
+  for (let r = 0; r < size; r++) {
+    const hex = w.hexes.get(key({ q: atQ, r }))!;
+    w.hexes.set(key({ q: atQ, r }), { ...hex, terrainClass: 'open_water' });
+  }
+  return w;
+}
+
 function unit(
   id: string,
   faction: string,
@@ -598,5 +608,279 @@ describe('determinism', () => {
     advance(state, world, cfg, clean, { hours: 6 });
     expect(JSON.stringify([...state.units.values()])).toBe(before);
     expect(state.clockHours).toBe(6);
+  });
+});
+
+describe('the pace of a march', () => {
+  // Cavalry at five km/h crosses a hex in 0.2 hours, which is less than one tick. A
+  // scheduler that moved each column at most once a tick would cap every formation at
+  // 1 / tickHours km/h — four, on the default — and it would look like mud rather than
+  // like a bug, which is why the rate is pinned rather than the count.
+  const fast = unit('red-1', 'red', { q: 5, r: 5 }, {}, 'cavalry', ['very_fast']);
+  const murat = commander('murat', 'red', 'red-1');
+
+  const task: Task = {
+    unitId: 'red-1',
+    destination: { q: 15, r: 5 },
+    via: [],
+    setAtHours: 6,
+    fromDespatchId: null,
+    nextHex: { q: 6, r: 5 },
+    arrivesAtHours: 6.2,
+    complete: false,
+  };
+
+  it('covers more than one hex in a tick when the speed table says so', () => {
+    const state = stateFrom({ units: [fast], commanders: [murat], tasks: [task] });
+    const { payloads } = advance(state, world, cfg, clean, { hours: 1 });
+
+    // Five km/h for an hour is five hexes, not the four a tick-per-hex would allow.
+    expect(payloads.filter((p) => p.kind === 'unit_marched')).toHaveLength(5);
+    const after = fold(state, payloads);
+    expect(after.units.get('red-1')!.column[0]).toEqual({ q: 10, r: 5 });
+  });
+
+  it('stamps each step at the hour it actually happened', () => {
+    const state = stateFrom({ units: [fast], commanders: [murat], tasks: [task] });
+    const { payloads } = advance(state, world, cfg, clean, { hours: 1 });
+    const hours = payloads
+      .filter((p) => p.kind === 'unit_marched')
+      .map((p) => (p.kind === 'unit_marched' ? Number(p.atHours.toFixed(3)) : 0));
+
+    expect(hours).toEqual([6.2, 6.4, 6.6, 6.8, 7]);
+  });
+});
+
+describe('a column that cannot get there', () => {
+  const split = splitWorld(8);
+  const red = unit('red-1', 'red', { q: 5, r: 5 });
+  const ney = commander('ney', 'red', 'red-1');
+
+  /** The far bank: reachable ground on the map, with a wall of water in front of it. */
+  const stranded = (): CampaignState =>
+    stateFrom({
+      units: [red],
+      commanders: [ney],
+      tasks: [marchTo(red, { q: 12, r: 5 }, 6, { q: 6, r: 5 })],
+    });
+
+  it('raises the crossing, and does not call the march done', () => {
+    const state = stranded();
+    const { payloads } = advance(state, split, cfg, clean, { hours: 12 });
+
+    const raised = payloads
+      .filter((p) => p.kind === 'decision_raised')
+      .map((p) => (p.kind === 'decision_raised' ? p.decision.trigger : null));
+    expect(raised).toContain('crossing_impassable');
+
+    // The console reads the task, and "complete" beside a formation stuck on the wrong
+    // bank is a lie the referee would act on.
+    expect(kinds(payloads)).not.toContain('task_completed');
+    const after = fold(state, payloads);
+    expect(after.tasks.get('red-1')!.complete).toBe(false);
+    // It stopped where the route ran out rather than at the bank: the router plans from
+    // where the head now stands, and from here there is no path to the far side at all.
+    expect(after.units.get('red-1')!.column[0]).toEqual({ q: 6, r: 5 });
+  });
+
+  it('still calls an arrival an arrival', () => {
+    const state = stateFrom({
+      units: [red],
+      commanders: [ney],
+      tasks: [marchTo(red, { q: 7, r: 5 }, 6, { q: 6, r: 5 })],
+    });
+    const { payloads } = advance(state, split, cfg, clean, { hours: 12 });
+    expect(kinds(payloads)).toContain('task_completed');
+    expect(fold(state, payloads).tasks.get('red-1')!.complete).toBe(true);
+  });
+});
+
+describe('a rider with nowhere to ride', () => {
+  const split = splitWorld(15);
+  const near = unit('red-1', 'red', { q: 5, r: 5 });
+  const far = unit('red-2', 'red', { q: 25, r: 5 });
+  const ney = commander('ney', 'red', 'red-1');
+  const kellermann = commander('kellermann', 'red', 'red-2', 'ney', false);
+
+  const sundered = (): CampaignState =>
+    stateFrom({ units: [near, far], commanders: [ney, kellermann] });
+
+  it('does not put the paper in his hand across an ocean', () => {
+    const state = sundered();
+    const payloads = despatchNow(state, split, cfg, clean, {
+      from: 'ney',
+      to: 'kellermann',
+      kind: 'order',
+      body: { text: 'Close on me.' },
+    });
+
+    // `check` has already raised this as a soft violation; a referee may send him anyway.
+    // What he must not get is a delivery at the hour it was written.
+    expect(kinds(payloads)).not.toContain('despatch_delivered');
+    const after = fold(state, payloads);
+    const sent = [...after.despatches.values()][0]!;
+    expect(sent.fate.kind).toBe('in_transit');
+    expect(sent.handed).toBe(false);
+  });
+
+  it('is still out there, and finds his man if the ground ever allows it', () => {
+    const state = sundered();
+    const after = fold(
+      state,
+      despatchNow(state, split, cfg, clean, {
+        from: 'ney',
+        to: 'kellermann',
+        kind: 'order',
+        body: { text: 'Close on me.' },
+      }),
+    );
+
+    // Hours of riding change nothing while the water is in the way.
+    const stuck = advance(after, split, cfg, clean, { hours: 12 });
+    expect(kinds(stuck.payloads)).not.toContain('despatch_delivered');
+
+    // Put the addressee on this side of it and the same rider re-plans and gets through.
+    const moved: CampaignState = {
+      ...fold(after, stuck.payloads),
+      units: new Map(after.units).set('red-2', unit('red-2', 'red', { q: 9, r: 5 })),
+    };
+    const found = advance(moved, split, cfg, clean, { hours: 12 });
+    expect(kinds(found.payloads)).toContain('despatch_delivered');
+  });
+});
+
+describe('what a despatch says about its sender', () => {
+  const near = unit('red-1', 'red', { q: 5, r: 5 });
+  const far = unit('red-2', 'red', { q: 25, r: 5 });
+  const ney = commander('ney', 'red', 'red-1');
+  const kellermann = commander('kellermann', 'red', 'red-2', 'ney', false);
+
+  it('is the engine\'s own return, not the one the caller wrote', () => {
+    // A forged report is believed — it is filed as knowledge the moment it arrives — so a
+    // body that could overwrite the server's own would let anyone holding a seat feed his
+    // own side false intelligence signed by a real subordinate.
+    const state = stateFrom({ units: [near, far], commanders: [ney, kellermann] });
+    const payloads = despatchNow(state, world, cfg, clean, {
+      from: 'ney',
+      to: 'kellermann',
+      kind: 'report',
+      body: {
+        text: 'All quiet.',
+        unitReport: {
+          unitId: 'FORGED',
+          name: 'FORGED',
+          faction: 'red',
+          kind: 'infantry',
+          echelon: 'division',
+          atHours: 0,
+          head: { q: 39, r: 39 },
+          effectives: 1,
+          fatigue: 0,
+          formation: 'march',
+          provisions: 0,
+          corps: null,
+        },
+      },
+    });
+
+    const sent = payloads.find((p) => p.kind === 'despatch_sent');
+    const report = sent?.kind === 'despatch_sent' ? sent.despatch.body.unitReport : undefined;
+    expect(report?.unitId).toBe('red-1');
+    expect(report?.head).toEqual({ q: 5, r: 5 });
+    // The prose is his own and is left alone.
+    expect(sent?.kind === 'despatch_sent' ? sent.despatch.body.text : null).toBe('All quiet.');
+  });
+
+  it('is the cascading commander\'s own position, not the original sender\'s', () => {
+    // A rider coming from the corps commander knows where the corps commander was. He has
+    // never been near the army headquarters that wrote the order in the first place.
+    // Standing beside him, so the paper is handed over and the cascade happens at once
+    // rather than a rider's journey later.
+    const army = unit('red-3', 'red', { q: 4, r: 5 });
+    const state = stateFrom({
+      units: [near, far, army],
+      commanders: [
+        commander('napoleon', 'red', 'red-3'),
+        commander('ney', 'red', 'red-1', 'napoleon', true),
+        commander('kellermann', 'red', 'red-2', 'ney', false),
+      ],
+    });
+
+    const payloads = despatchNow(state, world, cfg, clean, {
+      from: 'napoleon',
+      to: 'ney',
+      kind: 'order',
+      body: { text: 'Take Quatre Bras.' },
+    });
+
+    const cascaded = payloads
+      .filter((p) => p.kind === 'despatch_sent')
+      .map((p) => (p.kind === 'despatch_sent' ? p.despatch : null))
+      .find((d) => d?.from === 'ney');
+
+    expect(cascaded).toBeDefined();
+    expect(cascaded!.body.unitReport?.unitId).toBe('red-1');
+    expect(cascaded!.body.text).toBe('Take Quatre Bras.');
+  });
+});
+
+describe('who decides for a formation', () => {
+  it('is the senior man riding with it, by depth in the chain', () => {
+    // A corps commander fallen back on one of his own divisions decides for it. Neither
+    // he nor the divisional commander is the army commander, so "has no superior" cannot
+    // tell them apart and alphabetical order would hand it to the junior man.
+    const red = unit('red-1', 'red', { q: 5, r: 5 });
+    const army = unit('red-9', 'red', { q: 30, r: 30 });
+    const state = stateFrom({
+      units: [red, army],
+      commanders: [
+        commander('zieten', 'red', 'red-9'),
+        commander('mouton', 'red', 'red-1', 'zieten'),
+        commander('bertrand', 'red', 'red-1', 'mouton'),
+      ],
+      tasks: [marchTo(red, { q: 7, r: 5 }, 6, { q: 6, r: 5 })],
+    });
+
+    const { payloads } = advance(state, world, cfg, clean, { hours: 3 });
+    const raised = payloads
+      .filter((p) => p.kind === 'decision_raised')
+      .map((p) => (p.kind === 'decision_raised' ? p.decision : null));
+
+    expect(raised).toHaveLength(1);
+    expect(raised[0]!.commanderId).toBe('mouton');
+  });
+});
+
+describe('what the man who saw it keeps', () => {
+  it('files the contact for the observer, not only for his superior', () => {
+    // The store asks every commander what he can see after the whole command, from the
+    // final state. An enemy sighted and lost again during a long advance would never
+    // reach the observer's own contacts at all — his superior would get it by despatch
+    // and he would not, which is precisely backwards.
+    const red = unit('red-1', 'red', { q: 5, r: 5 });
+    const blue = unit('blue-1', 'blue', { q: 12, r: 5 });
+    const soult = commander('soult', 'red', 'red-2');
+    const state = stateFrom({
+      units: [red, blue, unit('red-2', 'red', { q: 30, r: 30 })],
+      commanders: [
+        soult,
+        commander('ney', 'red', 'red-1', 'soult'),
+        commander('wellington', 'blue', 'blue-1'),
+      ],
+      tasks: [marchTo(red, { q: 20, r: 5 }, 6, { q: 6, r: 5 })],
+    });
+
+    const { payloads } = advance(state, world, cfg, clean, { hours: 12 });
+    const filed = payloads
+      .filter((p) => p.kind === 'contact_filed')
+      .map((p) => (p.kind === 'contact_filed' ? p.commanderId : null));
+
+    expect(filed).toContain('ney');
+
+    // And it is his own eyes, so it continues rather than being reminted next time.
+    const after = fold(state, payloads);
+    const contacts = [...(after.knowledge.get('ney')?.contacts.values() ?? [])];
+    expect(contacts).toHaveLength(1);
+    expect(contacts[0]!.inSight).toBe(true);
   });
 });

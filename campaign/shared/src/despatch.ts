@@ -220,10 +220,44 @@ export interface CapturedDespatch {
 export interface PublicBody {
   readonly text?: string;
   readonly contacts?: readonly PublicContact[];
-  readonly unitReport?: UnitReport;
+  readonly unitReport?: UnitReport | CapturedReport;
 }
 
-const publicBody = (b: DespatchBody): PublicBody => ({
+/**
+ * The sender's own return, as the man who took the paper off the rider reads it.
+ *
+ * Where the formation stood and what hour it is speaking about — the thing a captured
+ * despatch was actually worth — and not one field of its internal state. A letter signed
+ * by a marshal names his corps, so the name and the echelon stay; its returns do not
+ * travel with it, and neither does the engine's id for it, which is the one field that
+ * would let a captor correlate every later sighting for free. See `recon.ts` on why that
+ * correlation is meant to cost a patrol.
+ */
+export interface CapturedReport {
+  readonly name: string;
+  readonly faction: string;
+  readonly kind: UnitReport['kind'];
+  readonly echelon: UnitReport['echelon'];
+  readonly atHours: number;
+  readonly head: Hex;
+  readonly corps: string | null;
+}
+
+export const capturedReport = (r: UnitReport): CapturedReport => ({
+  name: r.name,
+  faction: r.faction,
+  kind: r.kind,
+  echelon: r.echelon,
+  atHours: r.atHours,
+  head: r.head,
+  corps: r.corps,
+});
+
+/**
+ * `report` says whose side is reading it: his own man's return travels intact, a
+ * captured one is cut down to `capturedReport`.
+ */
+const publicBody = (b: DespatchBody, report: 'own' | 'captured' = 'own'): PublicBody => ({
   ...(b.text === undefined ? {} : { text: b.text }),
   ...(b.contacts === undefined
     ? {}
@@ -234,7 +268,9 @@ const publicBody = (b: DespatchBody): PublicBody => ({
           publicContact({ ...c, id: `s${i + 1}`, inSight: false }),
         ),
       }),
-  ...(b.unitReport === undefined ? {} : { unitReport: b.unitReport }),
+  ...(b.unitReport === undefined
+    ? {}
+    : { unitReport: report === 'own' ? b.unitReport : capturedReport(b.unitReport) }),
 });
 
 export const senderCopy = (d: Despatch, acknowledged: boolean): SentDespatch => ({
@@ -269,7 +305,7 @@ export const captorCopy = (d: Despatch): CapturedDespatch => ({
   faction: d.faction,
   sentAtHours: d.sentAtHours,
   capturedAtHours: d.fate.kind === 'captured' ? d.fate.atHours : d.sentAtHours,
-  body: publicBody(d.body),
+  body: publicBody(d.body, 'captured'),
 });
 
 /**

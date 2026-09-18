@@ -363,6 +363,72 @@ describe('the view endpoint', () => {
     });
     expect(res.body).toContain('blue-1');
   });
+
+  it('does not hand a sender his own rider’s route back through the log', async () => {
+    // The total, invisible leak. A `despatch_sent` event carries the whole `Despatch`,
+    // route included, and the route is planned to where the addressee actually stands —
+    // so a commander who could read his own outbox in the log would never need a report
+    // again. Filtering the log by actor does not remove it: the event is his.
+    const sent = await f.app.inject({
+      method: 'POST',
+      url: `/api/campaigns/${f.id}/commands`,
+      headers: { 'x-campaign-token': f.ney },
+      payload: {
+        command: {
+          kind: 'send_despatch',
+          from: 'ney',
+          to: 'kellermann',
+          despatchKind: 'order',
+          body: { text: 'Close on Ligny.' },
+        },
+      },
+    });
+    expect(sent.statusCode, sent.body).toBe(200);
+
+    const res = await f.app.inject({
+      method: 'GET',
+      url: `/api/campaigns/${f.id}/log`,
+      headers: { 'x-campaign-token': f.ney },
+    });
+
+    // He sees that he wrote it, and what he wrote.
+    expect(res.body).toContain('Close on Ligny.');
+    // And nothing about where the rider is going, or whether he got there.
+    for (const forbidden of ['route', 'fate', 'progress', 'in_transit']) {
+      expect(res.body).not.toContain(forbidden);
+    }
+    expect(res.body).not.toContain(`"q":${SUB_HEX.q},"r":${SUB_HEX.r}`);
+    expect(res.body).not.toContain(SUB_NAME);
+    expect(res.body).not.toContain('red-2');
+  });
+
+  it('shows a commander nothing of the despatches other men wrote', async () => {
+    const sent = await f.app.inject({
+      method: 'POST',
+      url: `/api/campaigns/${f.id}/commands`,
+      headers: { 'x-campaign-token': f.ney },
+      payload: {
+        command: {
+          kind: 'send_despatch',
+          from: 'ney',
+          to: 'kellermann',
+          despatchKind: 'order',
+          body: { text: 'Close on Ligny.' },
+        },
+      },
+    });
+    expect(sent.statusCode, sent.body).toBe(200);
+
+    const res = await f.app.inject({
+      method: 'GET',
+      url: `/api/campaigns/${f.id}/log`,
+      headers: { 'x-campaign-token': f.kellermann },
+    });
+    // The order is Ney's. Kellermann learns of it by its arrival, in his inbox, at the
+    // hour the rider reaches him — and the log is not a second way in.
+    expect(res.json()).toEqual([]);
+    expect(res.body).not.toContain('Close on Ligny.');
+  });
 });
 
 describe('once an enemy is actually spotted', () => {
