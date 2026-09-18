@@ -55,7 +55,17 @@ import { Post } from './panels/Post.jsx';
 import { DecisionQueue, DespatchLog } from './panels/Referee.jsx';
 import { ReportPanel } from './panels/ReportPanel.jsx';
 import { UnitPanel } from './panels/UnitPanel.js';
-import { clearSession, joinLink, loadSession, saveSession } from './session.js';
+import {
+  clearSession,
+  joinLink,
+  loadSession,
+  loadWash,
+  nextWash,
+  saveSession,
+  saveWash,
+} from './session.js';
+
+import type { WashMode } from './map/draw.js';
 
 import type { Hex, PendingDecision, ReceivedDespatch, Task } from '@campaign/shared';
 
@@ -120,6 +130,7 @@ function Console({
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showReach, setShowReach] = useState(false);
+  const [washMode, setWashMode] = useState<WashMode>(() => loadWash() ?? 'three');
 
   // The composer, and whichever despatch is currently waiting on the server. Kept here
   // rather than in the panels so that a view arriving over the socket mid-write does not
@@ -173,6 +184,25 @@ function Console({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [ordering]);
+
+  // `v` cycles how much of the map is washed. Separate from the Escape handler above,
+  // which is only bound while a destination is being pointed at.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'v' || e.metaKey || e.ctrlKey || e.altKey) return;
+      // A commander writing "v" in a despatch is writing, not asking for the map.
+      const el = e.target as HTMLElement | null;
+      const tag = el?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || el?.isContentEditable === true) return;
+      setWashMode((m) => {
+        const next = nextWash(m);
+        saveWash(next);
+        return next;
+      });
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   const board = useMemo(
     () => (view === null ? null : boardFrom(view, DEFAULT_THEME)),
@@ -351,6 +381,26 @@ function Console({
           Reach of selected, 10 h
         </label>
 
+        {/* Only where there is something to wash. A referee is sent no visible set, so
+            offering him the control would be offering him a switch that does nothing. */}
+        {!isReferee && (
+          <button
+            className="wash-toggle"
+            title="What is under observation right now (v)"
+            onClick={() => {
+              const next = nextWash(washMode);
+              saveWash(next);
+              setWashMode(next);
+            }}
+          >
+            {washMode === 'three'
+              ? 'Watched · marched · unknown'
+              : washMode === 'two'
+                ? 'Watched only'
+                : 'No shading'}
+          </button>
+        )}
+
         <div className="clock">
           Hour {view.campaign.clockHours}
           {isReferee && (
@@ -421,6 +471,9 @@ function Console({
           reach={reach}
           riders={board.riders}
           onPick={ordering === null ? undefined : (hex) => order(ordering, hex)}
+          visible={board.visible}
+          surveyed={board.surveyed}
+          washMode={washMode}
         />
 
         <aside className="sidebar">

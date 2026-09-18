@@ -18,6 +18,7 @@ import {
   DEFAULT_THEME,
   key,
   type Hex,
+  type HexKey,
   type Theme,
   type World,
   type WorldHex,
@@ -45,15 +46,31 @@ export const toScreen = (h: Hex, view: View): { x: number; y: number } => {
   return { x: p.x + view.offsetX, y: p.y + view.offsetY };
 };
 
-export function hexPath(ctx: CanvasRenderingContext2D, centre: { x: number; y: number }, size: number): void {
-  ctx.beginPath();
+/**
+ * Add one hexagon to a path that is already open.
+ *
+ * Split out from `hexPath` because that function begins a new path, which makes it
+ * useless for accumulating many hexes into one fill: called in a loop it discards
+ * everything but the last hexagon. Anything drawing more than one hex at a time wants
+ * this and a `Path2D`.
+ */
+export function hexSubPath(
+  path: Path2D | CanvasRenderingContext2D,
+  centre: { x: number; y: number },
+  size: number,
+): void {
   for (const [i, c] of CORNERS.entries()) {
     const x = centre.x + c.x * size;
     const y = centre.y + c.y * size;
-    if (i === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
+    if (i === 0) path.moveTo(x, y);
+    else path.lineTo(x, y);
   }
-  ctx.closePath();
+  path.closePath();
+}
+
+export function hexPath(ctx: CanvasRenderingContext2D, centre: { x: number; y: number }, size: number): void {
+  ctx.beginPath();
+  hexSubPath(ctx, centre, size);
 }
 
 /**
@@ -172,6 +189,111 @@ function drawSettlements(ctx: CanvasRenderingContext2D, world: World, view: View
     ctx.rect(p.x - r / 2, p.y - r / 2, r, r);
     ctx.fill();
     ctx.stroke();
+  }
+}
+
+/**
+ * How much of the observation wash to show.
+ *
+ * `three` is the honest picture and the default. `two` collapses remembered ground into
+ * the dark, which answers the narrower question — *where are my eyes right now* — more
+ * loudly. `off` is for reading the terrain itself, and for deciding how dark is too dark.
+ */
+export type WashMode = 'three' | 'two' | 'off';
+
+/**
+ * What is known about one hex, as far as the wash is concerned.
+ *
+ * Three claims a commander's map has to keep apart:
+ *
+ * - `observed` — somebody of his is looking at it now. What is drawn here is true.
+ * - `surveyed` — his men have covered it. He knows the ground; he knows nothing about
+ *   who is standing on it, and the map is silent rather than empty.
+ * - `unseen` — never covered. The terrain is drawn because `terrainFog` is off, which is
+ *   a convenience of this campaign's settings and not something he has earned.
+ */
+export type WashBand = 'observed' | 'surveyed' | 'unseen';
+
+/**
+ * Which band a hex falls in.
+ *
+ * Pure, and separated from the drawing so the classification can be tested without a
+ * canvas. `visible` wins over `surveyed` unconditionally: the two sets are maintained
+ * independently, and a hex he is looking at right now is observed whether or not the
+ * survey bookkeeping has caught up with it.
+ *
+ * An empty `visible` means the viewer has no eyes on the map at all — a referee, who is
+ * sent no sets because he is not standing anywhere. It must read as *wash nothing*, not
+ * as *he sees nothing*, or the one screen meant to see everything goes black. The guard
+ * lives here rather than in the renderer so the two cannot come to different conclusions.
+ */
+export function washBand(
+  k: HexKey,
+  visible: ReadonlySet<HexKey>,
+  surveyed: ReadonlySet<HexKey>,
+  mode: WashMode,
+): WashBand {
+  if (mode === 'off' || visible.size === 0) return 'observed';
+  if (visible.has(k)) return 'observed';
+  if (mode === 'three' && surveyed.has(k)) return 'surveyed';
+  return 'unseen';
+}
+
+/**
+ * The wash over ground nobody is watching.
+ *
+ * On its own canvas rather than in the overlay, because it changes when the clock moves
+ * and not when the cursor does. Painting it per frame would put a pass over every hex of
+ * the map back into the hover path, which is the one thing the two-layer split exists to
+ * prevent.
+ *
+ * One fill per band rather than one per hex, following `drawRoads`: the path accumulates
+ * every hex of a band and is rasterised once. On a 128x128 world that is two fills
+ * instead of sixteen thousand.
+ *
+ * A referee is sent empty sets, so `washBand` puts everything in `observed` and this
+ * draws nothing at all. The early return below is only an optimisation; the decision
+ * itself belongs to the classifier.
+ */
+export function drawWash(
+  ctx: CanvasRenderingContext2D,
+  world: World,
+  view: View,
+  opts: {
+    visible: ReadonlySet<HexKey>;
+    surveyed: ReadonlySet<HexKey>;
+    mode: WashMode;
+  },
+  theme: Theme = DEFAULT_THEME,
+): void {
+  ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+  if (opts.mode === 'off' || opts.visible.size === 0) return;
+
+  const bands: readonly WashBand[] = ['surveyed', 'unseen'];
+  for (const band of bands) {
+    const alpha = theme.wash[band];
+    if (alpha <= 0) continue;
+
+    const path = new Path2D();
+    let any = false;
+    for (const hex of world.hexes.values()) {
+      if (washBand(key(hex.coord), opts.visible, opts.surveyed, opts.mode) !== band) continue;
+      // A hair over the true size. Neighbouring hexes share an edge, and at exactly
+      // `view.size` the antialiased seams between them let a lattice of bright lines
+      // through the wash.
+      hexSubPath(path, toScreen(hex.coord, view), view.size + 0.5);
+      any = true;
+    }
+    if (!any) continue;
+
+    ctx.save();
+    ctx.fillStyle = theme.wash.color;
+    ctx.globalAlpha = alpha;
+    // Every hex is a separate subpath and neighbours overlap by the half pixel above.
+    // Nonzero so those overlaps stay filled; even-odd would punch them out and the wash
+    // would come back as a lattice of holes.
+    ctx.fill(path, 'nonzero');
+    ctx.restore();
   }
 }
 

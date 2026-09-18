@@ -15,19 +15,28 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { key, pixelToAxial, type Hex, type Theme, type World } from '@campaign/shared';
+import {
+  key,
+  pixelToAxial,
+  type Hex,
+  type HexKey,
+  type Theme,
+  type World,
+} from '@campaign/shared';
 
 import {
   drawOverlay,
   drawTerrain,
+  drawWash,
   markAtHex,
   worldExtent,
   type Mark,
   type Rider,
   type View,
+  type WashMode,
 } from './draw.js';
 
-export type { Mark, Rider } from './draw.js';
+export type { Mark, Rider, WashMode } from './draw.js';
 
 export function HexMap({
   world,
@@ -40,6 +49,9 @@ export function HexMap({
   reach,
   riders,
   onPick,
+  visible,
+  surveyed,
+  washMode,
 }: {
   world: World;
   marks: readonly Mark[];
@@ -60,9 +72,17 @@ export function HexMap({
    * "Quatre Bras" wants to point at Quatre Bras.
    */
   onPick?: ((hex: Hex) => void) | undefined;
+  /**
+   * Ground under observation from the formation the viewer rides with, and ground his
+   * command has covered at some point. Both empty for a referee, who sees everything.
+   */
+  visible?: ReadonlySet<HexKey> | undefined;
+  surveyed?: ReadonlySet<HexKey> | undefined;
+  washMode?: WashMode | undefined;
 }) {
   const wrap = useRef<HTMLDivElement>(null);
   const terrainRef = useRef<HTMLCanvasElement>(null);
+  const washRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
 
   const [box, setBox] = useState({ w: 800, h: 600 });
@@ -115,6 +135,30 @@ export function HexMap({
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     drawTerrain(ctx, world, view, theme);
   }, [world, view, theme, box]);
+
+  // Its own pass, and deliberately not in the overlay's dependency list: the wash moves
+  // when the clock does, so a hover must not repaint it.
+  useEffect(() => {
+    const canvas = washRef.current;
+    if (canvas === null) return;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = box.w * dpr;
+    canvas.height = box.h * dpr;
+    const ctx = canvas.getContext('2d');
+    if (ctx === null) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    drawWash(
+      ctx,
+      world,
+      view,
+      {
+        visible: visible ?? new Set<HexKey>(),
+        surveyed: surveyed ?? new Set<HexKey>(),
+        mode: washMode ?? 'three',
+      },
+      theme,
+    );
+  }, [world, view, theme, box, visible, surveyed, washMode]);
 
   useEffect(() => {
     const canvas = overlayRef.current;
@@ -199,6 +243,8 @@ export function HexMap({
       }}
     >
       <canvas ref={terrainRef} style={{ width: box.w, height: box.h }} />
+      {/* Between the ground and the men on it: the wash dims terrain, never a symbol. */}
+      <canvas ref={washRef} style={{ width: box.w, height: box.h }} />
       <canvas ref={overlayRef} style={{ width: box.w, height: box.h }} />
       <div className={`map-hint${onPick === undefined ? '' : ' picking'}`}>
         {onPick === undefined

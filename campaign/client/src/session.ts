@@ -12,10 +12,12 @@
  */
 
 import type { Session } from './api.js';
+import type { WashMode } from './map/draw.js';
 
 const SESSION_KEY = 'campaign.session';
 const TOKENS_KEY = 'campaign.tokens';
 const SEATS_KEY = 'campaign.seats';
+const WASH_KEY = 'campaign.wash';
 
 /** Tokens a referee holds for the other sides, so they can look through those eyes. */
 export type HeldTokens = Record<string, string>;
@@ -102,6 +104,30 @@ export function saveSession(stored: Stored): void {
     write(SEATS_KEY, seats);
   }
 }
+
+const WASH_MODES: readonly WashMode[] = ['three', 'two', 'off'];
+
+/**
+ * How much wash this browser last asked for.
+ *
+ * Kept apart from the session rather than inside it, because it belongs to the person at
+ * the keyboard rather than to the seat: a referee switching between four commanders'
+ * views should not have to re-press the key four times, and should still have his choice
+ * after he reloads.
+ *
+ * Validated on the way out. The value is in `localStorage`, which anybody can edit, and
+ * an unknown mode would otherwise reach the renderer as a band nothing matches.
+ */
+export function loadWash(): WashMode | null {
+  const stored = read<string>(WASH_KEY);
+  return WASH_MODES.includes(stored as WashMode) ? (stored as WashMode) : null;
+}
+
+export const saveWash = (mode: WashMode): void => write(WASH_KEY, mode);
+
+/** The next mode in the cycle, so the key and any button agree on the order. */
+export const nextWash = (mode: WashMode): WashMode =>
+  WASH_MODES[(WASH_MODES.indexOf(mode) + 1) % WASH_MODES.length]!;
 
 export function clearSession(): void {
   try {
