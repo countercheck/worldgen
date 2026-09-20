@@ -40,9 +40,15 @@ jobs:
 
       - run: pip install -e ".[dev]" -q
 
-      - name: Run tests
-        run: python -m pytest -v --tb=short
-
+      # One pass, not two. The tests and the coverage figure used to be separate steps
+      # running the identical suite, which is far too slow to run twice for one answer.
+      #
+      # `COVERAGE_CORE=sysmon` puts coverage.py on PEP 669 `sys.monitoring` instead of
+      # its default tracer. Measured on the full suite: 103s plain, 363s traced, 112s
+      # under sysmon — 3.5x overhead down to 1.09x, for the same numbers (TOTAL 93%).
+      # It needs Python 3.12+ and coverage 7.4+, both of which this project has, and it
+      # is opt-in: drop the variable and the 3.5x comes straight back.
+      #
       # No `|| true`. The floor is a ratchet: it is set just under the coverage the
       # suite actually carries, so a change that drops coverage materially fails here
       # rather than passing quietly. Raise it when the real figure rises; never lower it
@@ -57,8 +63,10 @@ jobs:
       # took 20m15s against 6m26s with numba, turning a 13-minute job into a 27-minute
       # one on every push. Fourteen minutes a run is not worth making a number look
       # right about code that was never actually untested. See TECH_DEBT.md item 1.
-      - name: Check test coverage
-        run: python -m pytest --cov=worldgen --cov-fail-under=85 --quiet
+      - name: Run tests and check coverage
+        env:
+          COVERAGE_CORE: sysmon
+        run: python -m pytest -v --tb=short --cov=worldgen --cov-fail-under=85
 
   # ---- campaign/, the TypeScript half -----------------------------------
   #
