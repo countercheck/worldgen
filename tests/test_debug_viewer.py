@@ -60,3 +60,67 @@ def test_debug_viewer_paints_the_primary_road_over_the_branching_track():
         for a, b in zip(pts, pts[1:], strict=False)
     ]
     assert len(edges) == len(set(edges)), "an edge was drawn twice"
+
+
+def test_render_drainage_marks_confluences_and_scales_by_order():
+    """The plate must show branching, not just wet hexes."""
+    from worldgen.core.hex import Hex
+    from worldgen.core.world_state import River, WorldState
+    from worldgen.render.debug_viewer import render_svg
+
+    state = WorldState.empty(seed=1, width=1, height=1)
+    state.hexes = {(q, r): Hex(coord=(q, r)) for q in range(-1, 4) for r in range(-2, 2)}
+    state.rivers = [
+        River(hexes=[(0, 0), (1, 0), (2, 0)], flow_volume=1.0),
+        River(hexes=[(1, -1), (2, -1), (2, 0)], flow_volume=1.0),
+        River(hexes=[(2, 0), (3, 0)], flow_volume=1.0),
+    ]
+    svg = render_svg(state, "drainage")
+    assert 'id="layer-drainage"' in svg
+    assert 'fill="#d95f02"' in svg, "the confluence should be marked"
+    widths = {
+        line.split('stroke-width="')[1].split('"')[0]
+        for line in svg.splitlines()
+        if "polyline" in line
+    }
+    assert len(widths) >= 2, f"trunk and tributary should differ in width: {widths}"
+
+
+def test_render_drainage_produces_a_file(small_state, tmp_path):
+    from worldgen.render.debug_viewer import render
+
+    out = tmp_path / "drainage.svg"
+    render(small_state, "drainage", str(out))
+    assert out.exists() and out.stat().st_size > 0
+
+
+def test_the_drainage_plate_agrees_with_its_own_caption(small_state):
+    """The plate prints its own numbers, so what it draws has to be what it counts.
+
+    Two ways this drifted before: the markers were drawn for every junction in the graph
+    while the caption counted land junctions only, so a hex where two rivers merely arrive
+    at the same lake got a dot and no tally; and one-hex links were dropped from the
+    drawing while still feeding the N1/N2 and bifurcation figures in the caption.
+    """
+    import re
+
+    from worldgen.analysis import build_network, drainage_metrics, links_by_order
+    from worldgen.render.debug_viewer import render_svg
+
+    svg = render_svg(small_state, "drainage")
+    metrics = drainage_metrics(small_state)
+
+    caption = re.search(r"confluences (\d+)", svg)
+    assert caption is not None, "the plate should state its own numbers"
+    assert int(caption.group(1)) == metrics.confluence_count
+
+    markers = svg.count('fill="#d95f02"')
+    assert markers == metrics.confluence_count, (
+        f"plate draws {markers} confluence markers, caption counts {metrics.confluence_count}"
+    )
+
+    # Every link counted is a link drawn — as a polyline, or as a dot where a one-hex link
+    # has no direction to draw. The confluence markers are the other circles, so take them
+    # off before comparing.
+    drawn = svg.count("<polyline") + svg.count("<circle") - markers
+    assert drawn == sum(links_by_order(build_network(small_state)).values())

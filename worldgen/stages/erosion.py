@@ -113,6 +113,7 @@ def _drop_particle(
     capacity: float,
     deposition: float,
     erosion_rate: float,
+    overcut: float,
     affinity_gain: float,
     delta_min_load: float,
 ) -> None:
@@ -168,7 +169,12 @@ def _drop_particle(
             # same height are the same elevation and nothing alike to plough.
             alluvium[ci, cj] += deposit
         else:
-            erode = min(erosion_rate * (cap - sediment), abs(dh) if dh < 0 else 0.0)
+            # A droplet may not cut a cell below its own downstream neighbour (plus
+            # `overcut`, normally zero).  That clamp is why droplets alone never deepen a
+            # valley — which is deliberate: deepening is `_incise_channels`'s job, and a
+            # droplet let loose here punches pits the sink fill then has to span.
+            limit = (abs(dh) + overcut) if dh < 0 else 0.0
+            erode = min(erosion_rate * (cap - sediment), limit)
             arr[ci, cj] -= erode
             sediment += erode
             # Netted, not accumulated: sediment picked back up has left.  A channel that
@@ -245,6 +251,47 @@ def _fill_sinks(
     return filled
 
 
+def _grid_receivers(
+    arr: np.ndarray,
+    sea_level: float,
+    neighbours: list[list[tuple[int, int]]],
+) -> tuple[dict[tuple[int, int], tuple[int, int]], list[tuple[int, int]]]:
+    """Where each land cell sends its water, and the cells ordered high to low.
+
+    Routing runs over the sink-filled surface, not the raw one, so water crosses a
+    depression rather than disappearing into it — the same thing hydrology does, and the
+    reason the two agree about where the rivers are.  A cell with no lower neighbour is
+    absent from the mapping: it is an outlet, or it sits on a filled flat.
+
+    Split out of `_grid_flow_accumulation`, which computed both and kept neither, because
+    incision needs the same receivers and the same order and recomputing them would mean
+    a second sink fill per pass.
+
+    Returns `(receivers, order)`.  The order is descending by routing elevation; ties are
+    left to Python's stable sort over `np.argwhere`, which is what makes a run
+    reproducible — a comparison that breaks ties differently would change every map.
+    """
+    w, h = arr.shape
+    land = arr >= sea_level
+    routing = _fill_sinks(arr, sea_level, neighbours)
+    order = [(int(i), int(j)) for i, j in np.argwhere(land)]
+    order.sort(key=lambda c: -routing[c])
+
+    receivers: dict[tuple[int, int], tuple[int, int]] = {}
+    for i, j in order:
+        lowest = None
+        lowest_elev = routing[i, j]
+        for ni, nj in neighbours[i * h + j]:
+            if not land[ni, nj]:
+                continue
+            if routing[ni, nj] < lowest_elev:
+                lowest_elev = routing[ni, nj]
+                lowest = (ni, nj)
+        if lowest is not None:
+            receivers[(i, j)] = lowest
+    return receivers, order
+
+
 def _grid_flow_accumulation(
     arr: np.ndarray,
     sea_level: float,
@@ -264,7 +311,23 @@ def _grid_flow_accumulation(
     it — without that the network is a scatter of short segments and no trunk river ever
     forms.
     """
-    w, h = arr.shape
+    receivers, order = _grid_receivers(arr, sea_level, neighbours)
+    return _accumulate(arr, sea_level, receivers, order, inflow)
+
+
+def _accumulate(
+    arr: np.ndarray,
+    sea_level: float,
+    receivers: dict[tuple[int, int], tuple[int, int]],
+    order: list[tuple[int, int]],
+    inflow: dict[tuple[int, int], float] | None = None,
+) -> np.ndarray:
+    """Upstream area per cell, given a routing already worked out.
+
+    Separate from `_grid_flow_accumulation` so a carve pass can compute the receivers once
+    and then both accumulate and incise over them; doing it through the wrapper would mean
+    a second sink fill for the same answer.
+    """
     land = arr >= sea_level
     acc = np.where(land, 1.0, 0.0)
     # A river entering from off the map brings a catchment this map never had.  Seeding it
@@ -275,25 +338,71 @@ def _grid_flow_accumulation(
         if land[cell]:
             acc[cell] = max(acc[cell], volume)
 
-    # Route over the filled surface, so water crosses a depression instead of vanishing
-    # into it — the same thing hydrology does, and the reason the two agree on where the
-    # rivers are.
-    routing = _fill_sinks(arr, sea_level, neighbours)
-    order = [(int(i), int(j)) for i, j in np.argwhere(land)]
-    order.sort(key=lambda c: -routing[c])
-
-    for i, j in order:
-        lowest = None
-        lowest_elev = routing[i, j]
-        for ni, nj in neighbours[i * h + j]:
-            if not land[ni, nj]:
-                continue
-            if routing[ni, nj] < lowest_elev:
-                lowest_elev = routing[ni, nj]
-                lowest = (ni, nj)
+    for cell in order:
+        lowest = receivers.get(cell)
         if lowest is not None:
-            acc[lowest] += acc[i, j]
+            acc[lowest] += acc[cell]
     return acc
+
+
+def _incise_channels(
+    arr: np.ndarray,
+    acc: np.ndarray,
+    receivers: dict[tuple[int, int], tuple[int, int]],
+    order: list[tuple[int, int]],
+    sea_level: float,
+    span: float,
+    *,
+    m_per_pass: float,
+    area_exponent: float,
+    slope_exponent: float,
+    reference_km2: float,
+    reference_slope: float,
+    min_gradient_m: float,
+    max_cut_m: float,
+) -> None:
+    """Lower each cell by K * A^m * S^n, in place.
+
+    The term the droplet model has no way to express.  A droplet carries one unit of water
+    however much country it drains, so it cuts a trunk and a hillslope at the same rate and
+    no valley ever gets deeper than its surroundings; with an area exponent of 0.5 a
+    500 km2 channel cuts about 22 times as fast as the 1 km2 ground beside it.  That
+    contrast is what makes stream capture happen: a hillslope cell next to a valley that
+    has been cut finds, when the next pass recomputes receivers, that the valley is now its
+    lowest neighbour, and its own catchment jumps.  Run over a few passes, neighbouring
+    channels stop running side by side and start joining.
+
+    Cells are taken **outlets first**, the reverse of the accumulation order, so a cell's
+    receiver has already been lowered by the time the cell is reached.  That is what lets
+    the floor at `receiver + min_gradient` permit deepening while still forbidding
+    inversion: the whole trunk migrates downward together rather than being pinned to
+    ground that has not moved.  Two things follow.  The surface stays strictly monotone
+    downstream, so no new sink appears for hydrology's priority flood to refill; and with
+    `slope_exponent` of 1 the step is linear in elevation, so that floor is an exact
+    stability guard and no timestep is needed.  `max_cut_m` only catches an inherited
+    cliff.
+
+    Arithmetic is in metres — `arr` is the normalised field and `span` converts — because
+    a stream power law with a physical exponent means nothing in units of relief fraction.
+    Unlike the rest of this module's constants, which are deliberately fractions.
+    """
+    if m_per_pass <= 0.0:
+        return
+    # K is derived rather than configured, so the dial stays in metres whatever the
+    # exponents are: at the reference area and slope, a cell lowers by exactly m_per_pass.
+    k = m_per_pass / (reference_km2**area_exponent * reference_slope**slope_exponent)
+    min_gap = min_gradient_m / span
+
+    for cell in reversed(order):
+        receiver = receivers.get(cell)
+        if receiver is None:
+            continue  # an outlet: base level, and nothing below it to cut toward
+        drop = arr[cell] - arr[receiver]
+        if drop <= 0.0:
+            continue  # inside a filled depression; there is no gradient to cut with
+        slope = drop * span / 1000.0  # metres of fall per kilometre-wide hex step
+        cut_m = min(k * float(acc[cell]) ** area_exponent * slope**slope_exponent, max_cut_m)
+        arr[cell] = max(arr[cell] - cut_m / span, arr[receiver] + min_gap, sea_level)
 
 
 def _inflow_mouths(
@@ -587,6 +696,7 @@ class ErosionStage(GeneratorStage):
                     cfg.erosion_capacity,
                     cfg.erosion_deposition,
                     cfg.erosion_erosion_rate,
+                    cfg.erosion_droplet_overcut_m / span,
                     cfg.erosion_channel_affinity_gain,
                     cfg.erosion_delta_min_load,
                 )
@@ -601,7 +711,11 @@ class ErosionStage(GeneratorStage):
                             n_land, size=remaining, p=land_weights
                         )
 
-        arr = gaussian_filter(arr, sigma=0.5)
+        # Before the carve loop, not after: this takes the per-cell speckle off the
+        # droplet field so incision cuts into a clean surface, and running it here is what
+        # keeps it from damping the notches incision goes on to cut.
+        if cfg.erosion_smoothing_sigma > 0.0:
+            arr = gaussian_filter(arr, sigma=cfg.erosion_smoothing_sigma)
 
         # Back to metres below. There is deliberately no re-stretch to [0, 1] first: it
         # would undo the datum, putting the lowest point of the eroded map at the seabed
@@ -617,7 +731,8 @@ class ErosionStage(GeneratorStage):
         # Letting terrain and drainage settle against each other is what a landscape
         # evolution model does, and it is the only way the two agree by the time anything
         # downstream reads either.
-        if land_coords and cfg.valley_width_max > 0.0:
+        carving = cfg.valley_width_max > 0.0 or cfg.erosion_incision_m_per_pass > 0.0
+        if land_coords and carving:
             # Rivers that enter from off the map bring a catchment this map never had, and
             # nothing here knew about it: accumulation starts every cell at one hex of
             # rain, so an imported trunk was measured as the trickle its first few on-map
@@ -643,17 +758,40 @@ class ErosionStage(GeneratorStage):
             # they are divided by the same span the array was built with.
             meander = np.zeros((w, h))
             for _ in range(cfg.valley_carve_passes):
-                _widen_valleys(
+                # Receivers once per pass, shared by both carving steps: they are the same
+                # routing, and a second sink fill for the same answer is pure cost.
+                receivers, order = _grid_receivers(arr, sea_shaped, neighbours)
+                acc = _accumulate(arr, sea_shaped, receivers, order, inflow)
+                # Incise first, then widen.  Incision cuts the line; widening planes the
+                # floor outward from it.  The other way round would plane a floor flat and
+                # then notch the floor it had just made.
+                _incise_channels(
                     arr,
-                    _grid_flow_accumulation(arr, sea_shaped, neighbours, inflow),
+                    acc,
+                    receivers,
+                    order,
                     sea_shaped,
-                    cfg.valley_width_max,
-                    cfg.valley_width_exponent,
-                    cfg.valley_floor_slope_m / span,
-                    cfg.valley_max_relief_m / span,
-                    cfg.valley_channel_fraction,
-                    meander,
+                    span,
+                    m_per_pass=cfg.erosion_incision_m_per_pass,
+                    area_exponent=cfg.erosion_incision_area_exponent,
+                    slope_exponent=cfg.erosion_incision_slope_exponent,
+                    reference_km2=cfg.erosion_incision_reference_km2,
+                    reference_slope=cfg.erosion_incision_reference_slope,
+                    min_gradient_m=cfg.erosion_incision_min_gradient_m,
+                    max_cut_m=cfg.erosion_incision_max_cut_m,
                 )
+                if cfg.valley_width_max > 0.0:
+                    _widen_valleys(
+                        arr,
+                        acc,
+                        sea_shaped,
+                        cfg.valley_width_max,
+                        cfg.valley_width_exponent,
+                        cfg.valley_floor_slope_m / span,
+                        cfg.valley_max_relief_m / span,
+                        cfg.valley_channel_fraction,
+                        meander,
+                    )
 
             # Soil is settled last, against the final coastline.  Deposition was recorded
             # over the pre-renormalisation field and the belts over the carved one, but

@@ -28,6 +28,12 @@ generation pipeline in run order.
 - `stages/` — pure transformers: `stage.run(WorldState) -> WorldState`
 - `export/` — all file I/O lives here; stages never write files
 - `render/` — matplotlib debug viewer; never imported by stages or core
+- `analysis/` — measurements over a finished world (drainage-network shape, and whatever
+  follows); imports `core/` only, does no file I/O, and is **never imported by a stage** —
+  a stage that could read its own report card would start tuning itself against a metric
+
+These are checked, not just described: `tests/test_layering.py` parses every module and
+fails on a layer importing one above it. Add a rule there when you add one here.
 - All random calls use a seeded `numpy.random.Generator` passed explicitly — no global state
 - All tunable parameters live in `WorldConfig`; nothing hardcoded in stage logic
 

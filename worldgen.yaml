@@ -173,6 +173,20 @@ erosion_channel_affinity_gain: 0.5     # Affinity gain per deposition event; hig
 erosion_affinity_update_interval: 500  # Update channel affinity every N droplets. Default: 500
 erosion_delta_min_load: 0.15 # Sediment a droplet must still carry when it reaches the sea for it to build anything. Below this the load is treated as carried away along the shore rather than settling. Without it every droplet that trickled off a nearby hillside deposited where it entered the water, silting the shelf evenly instead of building deltas at the river mouths. Default: 0.15
 
+# Channel incision. The droplets above cut by slope alone — one unit of water per droplet
+# whatever country it drains — so nothing tells a trunk from the hillslope beside it, no
+# valley deepens below its surroundings, and no channel ever captures its neighbour. These
+# add the missing drainage-area term: lowering per pass is K * A^m * S^n.
+erosion_incision_m_per_pass: 12.0      # Metres a reference channel cuts per pass. The dial to tune; 0 disables incision. Default: 12.0
+erosion_incision_area_exponent: 0.5    # m. The exponent that creates the effect: the trunk-to-hillslope contrast, and hence capture. 0 reverts to eroding by slope alone. Default: 0.5
+erosion_incision_slope_exponent: 1.0   # n. m/n = 0.5 is the textbook concavity; n = 1 also keeps the step linear in elevation, which is what makes the guard exact. Default: 1.0
+erosion_incision_reference_km2: 500.0  # A_ref, in km2: a mid-sized trunk on a 64x64 map. Default: 500.0
+erosion_incision_reference_slope: 0.01 # S_ref: 10 m/km. Default: 0.01
+erosion_incision_min_gradient_m: 0.01  # Gap kept above the receiver, in metres. Stops flow being turned back on itself, so no new sinks appear. Default: 0.01
+erosion_incision_max_cut_m: 40.0       # Cap on one cell's lowering in one pass, in metres. A guard against inherited cliffs, not a normal parameter. Default: 40.0
+erosion_droplet_overcut_m: 0.0         # How far a droplet may cut past its own receiver, in metres. 0: deepening is incision's job, not the droplets'. Default: 0.0
+erosion_smoothing_sigma: 0.5           # Blur applied after the droplets and before the carve loop, in cells. 0 skips it. Default: 0.5
+
 # Valley widening. Droplets only incise — each cuts along its own path — so the model
 # carves narrow V-notches and nothing ever widens them. Real valleys get their width from
 # the channel migrating sideways over geological time, planing the floor flat between
@@ -200,7 +214,7 @@ alluvium_quantile: 0.98       # Depth treated as full, for the droplet term only
 # A channel forms where enough water passes to keep one open: catchment area times runoff
 # depth. This replaced a threshold that was really a rank — the top 5% of land by
 # accumulation — which gave desert and rainforest alike 5.6% of their land under channel.
-channel_min_discharge: 20000.0   # Catchment km2 x runoff mm needed to cut a channel. Default: 20000
+channel_min_discharge: 6000.0    # Catchment km2 x runoff mm needed to cut a channel — also the dial that decides whether the network branches at all: a basin shows only as many stream orders as its area divides into channel-sized pieces. 6000 is 12.5 km2, a channel ~7 m across and knee deep. Default: 6000
 navigable_min_discharge: 60000.0 # ...and to float a boat. Default: 150000
 river_flow_continuous: false # Record a flow figure on every draining land hex, not only on hexes that carry a channel. Off by default: it is a diagnostic for inspecting the drainage field in the viewer, and turning it on does not add rivers to the map. Default: false
 # Rain the ground and its plants take before anything runs off. Rises with temperature,

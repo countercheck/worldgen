@@ -45,6 +45,13 @@ flowchart TB
         DV[debug_viewer.render]
     end
 
+    subgraph ANALYSIS["analysis/ — measurements over a finished world"]
+        DN[drainage.drainage_metrics]
+    end
+
+    DV --> DN
+    WS --> DN
+
     G --> CFG
     G --> REG
     IH --> REG

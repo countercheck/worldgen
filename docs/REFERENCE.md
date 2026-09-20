@@ -2070,6 +2070,15 @@ convergence loop rather than a single pass. Floodplains come out 79% wider.
 
 | Param | Type | Default | Range | Effect |
 |---|---|---|---|---|
+| `erosion_incision_m_per_pass` | `float` | `12.0` | `≥ 0` (validated) | Metres a reference channel lowers per carve pass — the dial for how hard rivers cut. `K` in `K·A^m·S^n` is derived from this rather than set directly, so the tunable stays in metres whatever the exponents are. `0` disables incision |
+| `erosion_incision_area_exponent` | `float` | `0.5` | `≥ 0` (validated) | `m`. The exponent that creates the effect: it is the contrast between what a trunk cuts and what the hillslope beside it cuts, and hence whether one channel ever captures another. At the default a 500 km² channel lowers about 22× as fast as 1 km² of ground. `0` reverts to eroding by slope alone, which is the behaviour that gave unbranched parallel threads |
+| `erosion_incision_slope_exponent` | `float` | `1.0` | `≥ 0` (validated) | `n`. `m/n = 0.5` is the textbook concavity. `1.0` also makes the step linear in elevation, which is what lets the floor against the receiver act as an exact stability guard; other values can overshoot |
+| `erosion_incision_reference_km2` | `float` | `500.0` | `> 0` (validated) | `A_ref`, the catchment in km² at which `erosion_incision_m_per_pass` is the lowering. A mid-sized trunk on a 64×64 map |
+| `erosion_incision_reference_slope` | `float` | `0.01` | `> 0` (validated) | `S_ref`, the slope at which `erosion_incision_m_per_pass` is the lowering. `0.01` is 10 m/km |
+| `erosion_incision_min_gradient_m` | `float` | `0.01` | `≥ 0` (validated) | The gap kept above the receiver, in metres. Incision walks outlets first, so the receiver has already dropped when a cell is reached: this floor never prevents deepening, it only prevents flow being turned back on itself, which is what keeps the surface free of new sinks for hydrology to refill |
+| `erosion_incision_max_cut_m` | `float` | `40.0` | `≥ 0` (validated) | Cap on one cell's lowering in one pass, in metres. A guard against an inherited cliff, not a parameter of normal operation |
+| `erosion_droplet_overcut_m` | `float` | `0.0` | `≥ 0` (validated) | How far a droplet may cut past its own receiver, in metres. `0` because the droplets' job is transport and roughening while incision does the deepening; non-zero makes droplets punch pits the sink fill must span, which buys no capture — capture needs a sustained trunk-to-hillslope contrast a point process cannot deliver |
+| `erosion_smoothing_sigma` | `float` | `0.5` | `≥ 0` (validated) | Width of the blur applied after the droplets and before the carve loop, in cells. Running before rather than after is what keeps it from damping the notches incision cuts. `0` skips it |
 | `valley_carve_passes` | `int` | `3` | `≥ 0` (validated) | Cut, re-measure the drainage, cut again. One pass does not do it: widening a valley moves the water into it, so the network measured before the first cut is not the one that exists after |
 | `valley_width_max` | `float` | `6.0` | `≥ 0` (validated) | Cap on valley half-width, in hexes. `0` disables widening entirely |
 | `valley_width_exponent` | `float` | `0.6` | `≥ 0` (validated) | Discharge → width. `0.5` is the textbook root |
@@ -2122,7 +2131,7 @@ no navigable river at all, and tropical 12.6%.
 
 | Param | Type | Default | Range | Effect |
 |---|---|---|---|---|
-| `channel_min_discharge` | `float` | `20000.0` | `> 0` | Catchment km² × runoff mm needed to cut a channel |
+| `channel_min_discharge` | `float` | `6000.0` | `> 0` | Catchment km² × runoff mm needed to cut a channel. Also the dial that decides whether the drainage *network* branches: a basin shows only as many Strahler orders as its area divides into channel-sized pieces, so basin ÷ threshold sets the branching. At the old `20000` (41.7 km²) that ratio was about five on a 64 km map — no seed reached third order and first-order streams outnumbered second by nine to one, against Horton's three to five. `6000` is 12.5 km², by the humid-temperate regional curve `W = 2.5·A^0.4` a channel ~7 m across and ~0.6 m deep — a watercourse a cart must ford — and it leaves 88% of the land dry |
 | `navigable_min_discharge` | `float` | `60000.0` | `> channel` | ...and to float a boat. Consumed by the haulage model: a navigable hex multiplies a city's supply reach |
 | `evapotranspiration_base_mm` | `float` | `50.0` | `≥ 0` | Rain the ground and its plants take before anything runs off, even at freezing |
 | `evapotranspiration_per_c_mm` | `float` | `30.0` | `≥ 0` | ...plus this much per degree of mean temperature. Why cold country sheds nearly all its rain and the taiga is full of rivers |

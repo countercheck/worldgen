@@ -545,7 +545,13 @@ def test_inflow_prefers_the_longer_course():
 
     def median_course(**overrides):
         lengths = []
-        for seed in (3, 4, 5, 6):
+        # Twelve seeds, not four.  Four gave about eight measurements a side, few enough
+        # that the two medians could land on the same value and say nothing: they did
+        # exactly that when `channel_min_discharge` dropped to 6,000 and the river set
+        # changed under them.  Twelve gives about twenty-two a side and separates cleanly
+        # — measured 8.5 biased against 7.0 unbiased — and the worlds stop after hydrology,
+        # so the extra eight cost about five seconds.
+        for seed in range(3, 15):
             state = build_world(seed=seed, until="HydrologyStage", **{**_INFLOW_KW, **overrides})
             lengths += [course_length(state, c) for c in _sources(state)]
         return statistics.median(lengths) if lengths else 0
