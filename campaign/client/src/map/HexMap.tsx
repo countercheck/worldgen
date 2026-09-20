@@ -31,6 +31,7 @@ import {
   markAtHex,
   worldExtent,
   type Mark,
+  type Plan,
   type Rider,
   type View,
   type WashMode,
@@ -49,6 +50,9 @@ export function HexMap({
   reach,
   riders,
   onPick,
+  route,
+  plans,
+  battle,
   visible,
   surveyed,
   washMode,
@@ -72,6 +76,12 @@ export function HexMap({
    * "Quatre Bras" wants to point at Quatre Bras.
    */
   onPick?: ((hex: Hex) => void) | undefined;
+  /** Ground already pointed at in this order, drawn as the referee builds the chain. */
+  route?: readonly Hex[] | undefined;
+  /** Where every marching column is going. Empty for a commander, who is sent no tasks. */
+  plans?: readonly Plan[] | undefined;
+  /** Ground being fought over. */
+  battle?: ReadonlySet<HexKey> | undefined;
   /**
    * Ground under observation from the formation the viewer rides with, and ground his
    * command has covered at some point. Both empty for a referee, who sees everything.
@@ -177,8 +187,24 @@ export function HexMap({
       reach,
       riders,
       picking: onPick === undefined ? null : hovered,
+      route,
+      plans,
+      battle,
     });
-  }, [marks, hovered, hoveredUnitId, selectedId, view, box, reach, riders, onPick]);
+  }, [
+    marks,
+    hovered,
+    hoveredUnitId,
+    selectedId,
+    view,
+    box,
+    reach,
+    riders,
+    onPick,
+    route,
+    plans,
+    battle,
+  ]);
 
   const hexAtPointer = useCallback(
     (e: React.PointerEvent): Hex | null => {

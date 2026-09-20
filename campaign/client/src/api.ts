@@ -17,10 +17,14 @@ import type {
   Command,
   DespatchBody,
   DespatchKind,
+  Commander,
   Faction,
+  Formation,
   Hex,
   PendingDecision,
   Strictness,
+  Unit,
+  UnitStatChanges,
 } from '@campaign/shared';
 
 /** A campaign and the token that says who you are in it. */
@@ -143,10 +147,14 @@ export async function sendCommand(
 /**
  * Write a despatch.
  *
- * The one command a commander issues. `from` is filled in by the server from the token
- * rather than taken from here — a forged *report* would let anyone feed a commander false
- * intelligence signed by his own subordinate — so the client does not send it at all,
- * and a value here would be ignored rather than trusted.
+ * For a commander, `from` is filled in by the server from the token rather than taken from
+ * here — a forged *report* would let anyone feed a commander false intelligence signed by
+ * his own subordinate — so a value sent by a commander is ignored rather than trusted.
+ *
+ * A referee's is honoured, because writing in a commander's name is his ordinary work: he
+ * runs most of the men on the map and takes dictation from the players who hold the rest.
+ * The despatch is from that commander; the event recording it is from the referee, so the
+ * log says who actually put pen to paper.
  */
 export function sendDespatch(
   session: Session,
@@ -157,12 +165,13 @@ export function sendDespatch(
     via?: readonly Hex[];
     inReplyTo?: string;
     forwardedFrom?: string;
+    from?: string;
   },
 ): Promise<CommandResult> {
   return sendCommand(session, {
     kind: 'send_despatch',
-    // Overwritten server-side. Sent only because the command type wants it, and a
-    // deliberately useless value is safer than a plausible one.
+    // A deliberately useless value is safer than a plausible one where the server is
+    // going to overwrite it anyway.
     from: '',
     ...despatch,
   });
@@ -174,18 +183,110 @@ export function sendDespatch(
  * A commander writes prose; turning prose into a march is the adjudication this whole
  * design exists to keep in human hands. A destination rather than a path: the referee says
  * where the corps is to be, and the engine works out how it gets there.
+ *
+ * `via` is the one qualification. A referee who says "to Ligny, by way of the bridge at
+ * Genappe" is still naming places rather than fields, and the engine still routes between
+ * them.
  */
 export function setTask(
   session: Session,
   unitId: string,
   destination: Hex,
-  opts: { fromDespatchId?: string } = {},
+  opts: { fromDespatchId?: string; via?: readonly Hex[] } = {},
 ): Promise<CommandResult> {
   return sendCommand(session, { kind: 'set_task', unitId, destination, ...opts });
 }
 
+/**
+ * Send a patrol out from a formation.
+ *
+ * Twenty troopers and a parent. What the patrol sees is what the parent's commander comes
+ * to know, which is the whole reason a division bothers to detach one.
+ */
+export function detachPatrol(
+  session: Session,
+  unitId: string,
+  opts: { at?: Hex; patrolId?: string; name?: string } = {},
+): Promise<CommandResult> {
+  return sendCommand(session, { kind: 'detach_patrol', unitId, ...opts });
+}
+
+/**
+ * Put a formation on the map.
+ *
+ * The referee's, and the order of battle is his whole preparation for a game: he builds
+ * both sides, places them, and only then issues the links that let anyone see any of it.
+ */
+export function addUnit(session: Session, unit: Unit): Promise<CommandResult> {
+  return sendCommand(session, { kind: 'add_unit', unit });
+}
+
+export function removeUnit(session: Session, unitId: string): Promise<CommandResult> {
+  return sendCommand(session, { kind: 'remove_unit', unitId });
+}
+
+/**
+ * Move a formation without marching it.
+ *
+ * Not a march and not pretending to be one: it breaks every movement rule at once, which
+ * is why it is the referee's alone and why it is logged as what it is. Setting up a
+ * scenario, correcting a mistake, and adjudicating something the rules do not cover are
+ * all the same act.
+ */
+export function teleportUnit(
+  session: Session,
+  unitId: string,
+  column: readonly Hex[],
+): Promise<CommandResult> {
+  return sendCommand(session, { kind: 'teleport_unit', unitId, column });
+}
+
+/** Change what a formation is. Every field optional; what is absent is left alone. */
+export function setUnitStats(
+  session: Session,
+  unitId: string,
+  changes: UnitStatChanges,
+): Promise<CommandResult> {
+  return sendCommand(session, { kind: 'set_unit_stats', unitId, changes });
+}
+
+export function addCommander(session: Session, commander: Commander): Promise<CommandResult> {
+  return sendCommand(session, { kind: 'add_commander', commander });
+}
+
+export function removeCommander(
+  session: Session,
+  commanderId: string,
+): Promise<CommandResult> {
+  return sendCommand(session, { kind: 'remove_commander', commanderId });
+}
+
+/** Move a man to another formation, or give him a new superior. */
+export function reassignCommander(
+  session: Session,
+  commanderId: string,
+  changes: { unitId?: string; superiorId?: string | null },
+): Promise<CommandResult> {
+  return sendCommand(session, { kind: 'reassign_commander', commanderId, ...changes });
+}
+
 export function clearTask(session: Session, unitId: string): Promise<CommandResult> {
   return sendCommand(session, { kind: 'clear_task', unitId });
+}
+
+/**
+ * Order a change of formation.
+ *
+ * Making camp at the end of a day and breaking it to march again both happen without
+ * asking. This is everything else — forming for battle, camping early, occupying a town —
+ * and it is the referee's, like every other order.
+ */
+export function setFormation(
+  session: Session,
+  unitId: string,
+  formation: Formation,
+): Promise<CommandResult> {
+  return sendCommand(session, { kind: 'set_formation', unitId, formation });
 }
 
 /** Mark a decision dealt with. The note is the referee's own record of why. */
@@ -193,11 +294,15 @@ export function resolveDecision(
   session: Session,
   decisionId: string,
   note?: string,
+  favouring?: string,
 ): Promise<CommandResult> {
   return sendCommand(session, {
     kind: 'resolve_decision',
     decisionId,
     ...(note === undefined || note === '' ? {} : { note }),
+    // Only a contested hex has anything to rule between. Everywhere else this is absent
+    // and the decision is simply acknowledged.
+    ...(favouring === undefined ? {} : { favouring }),
   });
 }
 
@@ -282,3 +387,17 @@ export function subscribe(
     socket?.close();
   };
 }
+
+/**
+ * Referee: declare ground as being fought over.
+ *
+ * A set of hexes, not a battle object. The campaign layer records where the fighting is so
+ * that the rules written for open country stop applying there; what happens inside is
+ * below the resolution of a 1 km map.
+ */
+export const declareBattle = (s: Session, coords: readonly Hex[]): Promise<CommandResult> =>
+  sendCommand(s, { kind: 'declare_battle', coords });
+
+/** Referee: the fighting here is over, and the ground goes back to being ground. */
+export const endBattle = (s: Session, coords: readonly Hex[]): Promise<CommandResult> =>
+  sendCommand(s, { kind: 'end_battle', coords });

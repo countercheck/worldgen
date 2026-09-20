@@ -18,11 +18,13 @@
  * thing his players cannot see and are most curious about.
  */
 
+import { contestants } from '@campaign/shared';
+
 import type { Despatch, PendingDecision, Task, Unit } from '@campaign/shared';
 
-import { ageLabel } from '../board.js';
+import { ageLabel, dayHour } from '../board.js';
 
-const hour = (h: number): string => (h % 1 === 0 ? String(h) : h.toFixed(1));
+
 
 /** What each trigger means, in the referee's language rather than the engine's. */
 const TRIGGERS: Readonly<Record<string, string>> = {
@@ -33,6 +35,9 @@ const TRIGGERS: Readonly<Record<string, string>> = {
   despatch_arrived: 'has received a despatch',
   out_of_provisions: 'is out of provisions',
   attacked: 'is under attack',
+  column_blocked: 'has run into a column in its way',
+  column_contested: 'is contesting a hex, and neither is the faster',
+  patrol_contact: 'has run into something',
 };
 
 export function DecisionQueue({
@@ -54,7 +59,7 @@ export function DecisionQueue({
   /** The formation whose destination is currently being pointed at, if any. */
   orderingUnitId: string | null;
   onOrder: (unitId: string) => void;
-  onResolve: (decision: PendingDecision) => void;
+  onResolve: (decision: PendingDecision, favouring?: string) => void;
   busyId: string | null;
 }) {
   const open = decisions.filter((d) => d.resolvedAtHours === null);
@@ -77,7 +82,11 @@ export function DecisionQueue({
             return (
               <li key={d.id} className={`despatch decision trigger-${d.trigger}`}>
                 <div className="despatch-head">
-                  <span className="despatch-from">{nameOf(d.commanderId)}</span>
+                  {/* Traffic carries no commander: two columns meeting on a road is a
+                      fact about the ground rather than about what anyone believes. */}
+                  <span className="despatch-from">
+                    {d.commanderId === null ? 'The ground' : nameOf(d.commanderId)}
+                  </span>
                   <span className="despatch-kind">{d.trigger.replace(/_/g, ' ')}</span>
                 </div>
 
@@ -85,7 +94,7 @@ export function DecisionQueue({
                   {unit?.name ?? d.unitId} {TRIGGERS[d.trigger] ?? 'needs a decision'}
                 </div>
                 <div className="muted small">
-                  Hour {hour(d.atHours)} · {ageLabel(d.atHours, clockHours)}
+                  {dayHour(d.atHours)} · {ageLabel(d.atHours, clockHours)}
                   {task === undefined
                     ? ' · no standing task'
                     : task.complete
@@ -94,6 +103,25 @@ export function DecisionQueue({
                 </div>
 
                 <Context decision={d} />
+
+                {/* A tie for a hex is the one decision with a ruling to make rather than
+                    just an acknowledgement, so it gets the two names to choose between.
+                    "Dealt with" stays available and deliberately settles nothing: the
+                    columns meet again and ask again, which is what not deciding means. */}
+                {d.trigger === 'column_contested' && (
+                  <div className="despatch-actions">
+                    {[d.unitId, ...contestants(d)].map((id) => (
+                      <button
+                        key={id}
+                        className="primary"
+                        disabled={busyId === d.id}
+                        onClick={() => onResolve(d, id)}
+                      >
+                        Give it to {unitOf(id)?.name ?? id}
+                      </button>
+                    ))}
+                  </div>
+                )}
 
                 <div className="despatch-actions">
                   <button
@@ -130,6 +158,10 @@ function Context({ decision }: { decision: PendingDecision }) {
     at?: { q: number; r: number };
     from?: string;
     sentAtHours?: number;
+    withUnitId?: string;
+    patrolUnitId?: string;
+    hostile?: boolean;
+    dice?: number;
   };
 
   if (c.contacts !== undefined && c.contacts.length > 0) {
@@ -141,10 +173,25 @@ function Context({ decision }: { decision: PendingDecision }) {
     );
   }
 
+  // A patrol meeting something is the one decision that comes with a die roll attached,
+  // so the pool the rules call for is worked out here rather than left to be counted off
+  // the modifiers by hand at the moment it matters.
+  if (decision.trigger === 'patrol_contact') {
+    return (
+      <p className="muted small">
+        {c.hostile === true ? 'Enemy' : 'Friendly'} {c.withUnitId ?? 'column'} at {c.at?.q},{' '}
+        {c.at?.r}.
+        {c.dice === undefined
+          ? ''
+          : ` Roll ${c.dice}d6: any 1 and the patrol is lost, otherwise it recoils 2 km.`}
+      </p>
+    );
+  }
+
   if (decision.trigger === 'despatch_arrived') {
     return (
       <p className="muted small">
-        From {c.from ?? 'somebody'}, written hour {hour(c.sentAtHours ?? decision.atHours)}.
+        From {c.from ?? 'somebody'}, written {dayHour(c.sentAtHours ?? decision.atHours)}.
         Read it in his seat, then tell his formation where to go.
       </p>
     );
@@ -195,10 +242,9 @@ export function DespatchLog({
                 <span className="despatch-from">
                   {nameOf(d.from)} → {nameOf(d.to)}
                 </span>
-                <span className="despatch-kind">{d.kind}</span>
               </div>
               <div className="despatch-when">
-                Hour {hour(d.sentAtHours)} · {ageLabel(d.sentAtHours, clockHours)}
+                {dayHour(d.sentAtHours)} · {ageLabel(d.sentAtHours, clockHours)}
               </div>
               <div className="muted small">
                 <Fate d={d} />
@@ -227,7 +273,7 @@ function Fate({ d }: { d: Despatch }) {
     case 'delivered':
       return (
         <>
-          Delivered hour {hour(fate.atHours)}, after{' '}
+          Delivered {dayHour(fate.atHours)}, after{' '}
           {(fate.atHours - d.sentAtHours).toFixed(1)} h.
           {d.handed ? ' Handed over on the spot.' : ''}
         </>
@@ -235,14 +281,14 @@ function Fate({ d }: { d: Despatch }) {
     case 'lost':
       return (
         <>
-          Rider stopped by {fate.by} at hour {hour(fate.atHours)} — dice [{fate.dice.join(', ')}].
+          Rider stopped by {fate.by} on {dayHour(fate.atHours)} — dice [{fate.dice.join(', ')}].
           The paper went with him.
         </>
       );
     case 'captured':
       return (
         <>
-          <strong className="bad">Captured</strong> by {fate.by} at hour {hour(fate.atHours)} —
+          <strong className="bad">Captured</strong> by {fate.by} on {dayHour(fate.atHours)} —
           dice [{fate.dice.join(', ')}]. They have read it; the sender has not been told.
         </>
       );

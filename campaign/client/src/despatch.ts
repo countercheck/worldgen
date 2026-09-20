@@ -76,13 +76,16 @@ export function descendantsOf(
  * Subordinates first, because most despatches are orders and most orders go down. Then
  * everyone else on his own side. Never himself, and never the enemy.
  */
-export function correspondents(view: ClientView): Correspondent[] {
-  const me = view.commander;
-  if (me === null) return [];
+export function correspondents(view: ClientView, senderId?: string): Correspondent[] {
+  // The viewer, normally. A referee writing on a commander's behalf names the sender
+  // explicitly — he has no seat of his own, and the question "who may this man write to"
+  // is about the man, not about who is looking.
+  const from = senderId ?? view.commander?.id;
+  if (from === undefined) return [];
 
-  const under = descendantsOf(view.commanders, me.id);
+  const under = descendantsOf(view.commanders, from);
   return view.commanders
-    .filter((c) => c.id !== me.id)
+    .filter((c) => c.id !== from)
     .map((c) => ({ id: c.id, name: c.name, unitId: c.unitId, mayOrder: under.has(c.id) }))
     .sort((a, b) => {
       if (a.mayOrder !== b.mayOrder) return a.mayOrder ? -1 : 1;
@@ -91,15 +94,14 @@ export function correspondents(view: ClientView): Correspondent[] {
 }
 
 /**
- * A commander's own guess at how long a rider would take.
+ * How long a rider would take, over the ground as it actually is.
  *
- * Null when he has no idea where the man is — which is the common case for a peer he has
- * never had a report of, and is worth saying rather than papering over with a number.
+ * The referee's, and only his. A commander is shown none of this: he does not know where
+ * the addressee is, so he cannot know how long the ride will be, and a number — even a
+ * hedged one — is a distance, and a distance is a position.
  */
 export interface Estimate {
   readonly hours: number;
-  /** The hour the report this was computed from describes. How stale the guess is. */
-  readonly fromHours: number;
 }
 
 export function estimateRide(
@@ -108,22 +110,30 @@ export function estimateRide(
   cfg: CampaignConfig,
   toCommanderId: string,
   via: readonly Hex[] = [],
+  fromCommanderId?: string,
 ): Estimate | null {
-  const me = view.commander;
-  const from = view.units[0]?.column[0];
-  if (me === null || from === undefined) return null;
+  const sender = fromCommanderId ?? view.commander?.id;
+  if (sender === undefined) return null;
 
-  const target = view.commanders.find((c) => c.id === toCommanderId);
-  if (target === undefined) return null;
+  const from = placeOf(view, sender);
+  const to = placeOf(view, toCommanderId);
+  if (from === null || to === null) return null;
 
-  // The last thing he heard about where that formation was. Not where it is.
-  const report = view.reports.find((r) => r.unitId === target.unitId);
-  if (report === undefined) return null;
+  const route = planRide(world, cfg, from, to, via);
+  return route === null ? null : { hours: rideHours(world, cfg, route) };
+}
 
-  const route = planRide(world, cfg, from, report.head, via);
-  if (route === null) return null;
-
-  return { hours: rideHours(world, cfg, route), fromHours: report.atHours };
+/**
+ * Where a commander's formation actually stands.
+ *
+ * Live units only, and null for anything the view does not carry one of. That is the whole
+ * of the restriction: a commander's view holds exactly one live unit — his own — so he can
+ * estimate nothing, and the referee's holds them all.
+ */
+function placeOf(view: ClientView, commanderId: string): Hex | null {
+  const commander = view.commanders.find((c) => c.id === commanderId);
+  if (commander === undefined) return null;
+  return view.units.find((u) => u.id === commander.unitId)?.column[0] ?? null;
 }
 
 /** The inbox, newest information first — by the hour described, not the hour it landed. */

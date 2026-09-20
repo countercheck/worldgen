@@ -72,7 +72,7 @@ function unit(id: string, faction: string, at: Hex, kind: UnitKind = 'infantry')
     name: id,
     faction,
     kind,
-    effectives: 4000,
+    paperStrength: 4000,
     fatigue: 0,
     experience: 0,
     morale: 30,
@@ -89,6 +89,7 @@ function unit(id: string, faction: string, at: Hex, kind: UnitKind = 'infantry')
     column: [at],
     hoursMarchedToday: 0,
     corps: null,
+    parentUnitId: null,
   };
 }
 

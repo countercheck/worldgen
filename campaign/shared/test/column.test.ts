@@ -17,16 +17,18 @@ import {
   columnIsConnected,
   columnLengthKm,
   effectiveLengthKm,
+  FOOTPRINT,
   occupied,
+  spineHexes,
 } from '../src/column.js';
-import type { Hex } from '../src/hex.js';
+import { distance, unkey, type Hex } from '../src/hex.js';
 import type { Unit } from '../src/unit.js';
 
 const base: Unit = {
   id: 'u',
   faction: 'red',
   kind: 'infantry',
-  effectives: 4000,
+  paperStrength: 4000,
   fatigue: 0,
   experience: 0,
   morale: 30,
@@ -43,6 +45,7 @@ const base: Unit = {
   column: [{ q: 0, r: 0 }],
   hoursMarchedToday: 0,
   corps: null,
+    parentUnitId: null,
 };
 
 /** Rules, "Regular Infantry Division": 4000 at 0.5 m, SM 130%, 6 guns. */
@@ -96,8 +99,8 @@ describe("the rules' worked examples", () => {
 
 describe('columnLengthKm', () => {
   it('scales with the number of men', () => {
-    const small = columnLengthKm({ ...base, effectives: 4000 });
-    const large = columnLengthKm({ ...base, effectives: 8000 });
+    const small = columnLengthKm({ ...base, paperStrength: 4000 });
+    const large = columnLengthKm({ ...base, paperStrength: 8000 });
     expect(large).toBeCloseTo(small * 2, 2);
   });
 
@@ -127,7 +130,7 @@ describe('effectiveLengthKm', () => {
 
 describe('columnHexes', () => {
   it('is at least one — a unit is always somewhere', () => {
-    expect(columnHexes({ ...base, effectives: 1, guns: 0 })).toBe(1);
+    expect(columnHexes({ ...base, paperStrength: 1, guns: 0 })).toBe(1);
   });
 
   it('rounds up, because a column spilling into a hex is in it', () => {
@@ -210,5 +213,128 @@ describe('columnIsConnected', () => {
   it('rejects a column with a gap in it', () => {
     const unit = { ...REGULAR_INFANTRY, column: [{ q: 0, r: 0 }, { q: 9, r: 9 }] };
     expect(columnIsConnected(unit)).toBe(false);
+  });
+});
+
+/**
+ * Footprint.
+ *
+ * A formation is not a marker and it is not always a line either. These pin the fold:
+ * camp is shorter and wider than the column that made it, and the total ground it claims
+ * is smaller, because men off the road stand closer together than men strung along it.
+ */
+describe('occupied, by formation', () => {
+  /** A long stretch of marched road, head first — longer than any column here. */
+  const marched = (u: Unit): Unit => ({
+    ...u,
+    column: Array.from({ length: 30 }, (_, i) => ({ q: -i, r: 0 })),
+  });
+
+  it('is the column itself on the march', () => {
+    const u = marched(GUARDS_CAVALRY);
+    expect(occupied(u)).toEqual(u.column.slice(0, columnHexes(u)));
+  });
+
+  it('gathers a camp into a shorter, thicker line', () => {
+    const march = marched(GUARDS_CAVALRY);
+    const camp = { ...march, formation: 'rest' as const };
+
+    // Eighteen kilometres of cavalry column becomes a camp a quarter as long.
+    expect(spineHexes(march)).toBe(columnHexes(march));
+    expect(spineHexes(camp)).toBe(Math.ceil(columnHexes(march) / 4));
+
+    const body = occupied(camp);
+    expect(body.length).toBeLessThan(occupied(march).length);
+    // Two abreast: the spine, and one flank hex beside each of them.
+    expect(body.length).toBe(spineHexes(camp) * 2);
+  });
+
+  it('keeps the head at the front of the list whatever shape it stands in', () => {
+    const camp = { ...marched(GUARDS_CAVALRY), formation: 'rest' as const };
+    expect(occupied(camp)[0]).toEqual(camp.column[0]);
+  });
+
+  it('puts the camp beside the road it came in on, not across it', () => {
+    const camp = { ...marched(GUARDS_CAVALRY), formation: 'rest' as const };
+    const spine = new Set(camp.column.slice(0, spineHexes(camp)).map((h) => `${h.q},${h.r}`));
+    const flanks = occupied(camp).filter((h) => !spine.has(`${h.q},${h.r}`));
+
+    expect(flanks.length).toBeGreaterThan(0);
+    // Every flank hex touches the spine — a camp is a thick line, not a scatter.
+    for (const f of flanks) {
+      expect([...spine].some((k) => distance(f, unkey(k)) === 1)).toBe(true);
+    }
+  });
+
+  it('never loses a small formation to the fold', () => {
+    // An infantry division folds to a single hex of spine. It must still be somewhere.
+    const camp = { ...marched(REGULAR_INFANTRY), formation: 'rest' as const };
+    expect(spineHexes(camp)).toBe(1);
+    expect(occupied(camp).length).toBe(2);
+  });
+
+  it('deploys at a kilometre of frontage per ten thousand men', () => {
+    // An ordinary division is one hex, whatever arm it is and however long its road was.
+    const foot = { ...marched(REGULAR_INFANTRY), formation: 'battle' as const };
+    const horse = { ...marched(GUARDS_CAVALRY), formation: 'battle' as const };
+
+    expect(occupied(foot)).toEqual([foot.column[0]]);
+    expect(occupied(horse)).toEqual([horse.column[0]]);
+    // Eighteen kilometres of column, one kilometre of line.
+    expect(columnHexes(horse)).toBeGreaterThan(18);
+  });
+
+  it('gives a larger formation a wider front, by strength alone', () => {
+    const corps = {
+      ...marched(REGULAR_INFANTRY),
+      formation: 'battle' as const,
+      paperStrength: 25000,
+    };
+    expect(occupied(corps).length).toBe(3);
+  });
+
+  it('narrows the front as the men who would stand in it fall out', () => {
+    const fresh = {
+      ...marched(REGULAR_INFANTRY),
+      formation: 'battle' as const,
+      paperStrength: 25000,
+    };
+    // Half the division is no longer fit to stand in the line, so it covers half the ground.
+    const worn = { ...fresh, fatigue: 50 };
+    expect(occupied(worn).length).toBe(2);
+    expect(occupied(worn).length).toBeLessThan(occupied(fresh).length);
+  });
+
+  it('never deploys a formation onto no ground at all', () => {
+    const remnant = {
+      ...marched(REGULAR_INFANTRY),
+      formation: 'battle' as const,
+      paperStrength: 40,
+    };
+    expect(occupied(remnant).length).toBe(1);
+  });
+
+  it('takes a campaign table rather than the rules as written', () => {
+    const camp = { ...marched(GUARDS_CAVALRY), formation: 'rest' as const };
+    const tight = { ...FOOTPRINT, rest: { foldsInto: 999, widthHexes: 1, menPerHex: null } };
+    expect(occupied(camp, 'road', tight)).toEqual([camp.column[0]]);
+  });
+
+  it('folds an occupation into a garrison, narrow and short', () => {
+    const held = { ...marched(GUARDS_CAVALRY), formation: 'occupation' as const };
+    expect(occupied(held).length).toBe(Math.ceil(columnHexes(held) / 8));
+  });
+
+  it('gives a newly placed unit with no path behind it a footprint anyway', () => {
+    const fresh = { ...GUARDS_CAVALRY, formation: 'rest' as const, column: [{ q: 4, r: 4 }] };
+    const body = occupied(fresh);
+    expect(body[0]).toEqual({ q: 4, r: 4 });
+    // The flank is arbitrary without a direction of march, but it must be adjacent.
+    for (const h of body.slice(1)) expect(distance(h, { q: 4, r: 4 })).toBe(1);
+  });
+
+  it('covers its flank as well as its spine', () => {
+    const camp = { ...marched(GUARDS_CAVALRY), formation: 'rest' as const };
+    for (const h of occupied(camp)) expect(columnCovers(camp, h)).toBe(true);
   });
 });

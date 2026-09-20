@@ -36,7 +36,7 @@ function division(id: string, faction: string, at: Hex): Unit {
     name: `${id} Division`,
     faction,
     kind: 'infantry',
-    effectives: 5000,
+    paperStrength: 5000,
     fatigue: 0,
     experience: 0,
     morale: 30,
@@ -50,9 +50,11 @@ function division(id: string, faction: string, at: Hex): Unit {
     spacingMultiplier: 1.3,
     traits: [],
     formation: 'march',
+    formationChange: null,
     column: [at],
     hoursMarchedToday: 0,
     corps: null,
+    parentUnitId: null,
   };
 }
 
@@ -199,7 +201,7 @@ describe('the log', () => {
     const s = setUp();
     const out = run(
       s,
-      { kind: 'add_unit', unit: { ...division('r1', 'red', land[0]!), effectives: 100 } },
+      { kind: 'add_unit', unit: { ...division('r1', 'red', land[0]!), paperStrength: 100 } },
       { force: true },
     );
     expect(out.ok).toBe(true);
@@ -395,6 +397,40 @@ describe('snapshot round trip', () => {
       state.knowledge.get('c-r1')!.lastSurveyedHours,
     );
   });
+
+  it('keeps a march and the waypoints it still has to make', () => {
+    const s = withCommander();
+    const far = land[land.length - 1]!;
+    const waypoint = land[Math.floor(land.length / 2)]!;
+    expect(
+      run(s, { kind: 'set_task', unitId: 'r1', destination: far, via: [waypoint] }).ok,
+    ).toBe(true);
+    run(s, { kind: 'advance_clock', hours: 3 });
+
+    const state = s.store.state('c1');
+    const round = deserialise(serialise(state));
+    expect(round.tasks.get('r1')).toEqual(state.tasks.get('r1'));
+  });
+
+  it('reads a snapshot written before waypoints existed as a march with none', () => {
+    // Snapshots are not versioned, and one written by the previous build has neither
+    // field. A march that named no waypoints is exactly what such a task was.
+    const s = withCommander();
+    const far = land[land.length - 1]!;
+    expect(run(s, { kind: 'set_task', unitId: 'r1', destination: far }).ok).toBe(true);
+
+    const doc = JSON.parse(serialise(s.store.state('c1'))) as {
+      tasks: Record<string, unknown>[];
+    };
+    for (const t of doc.tasks) {
+      delete t.via;
+      delete t.viaIndex;
+    }
+
+    const round = deserialise(JSON.stringify(doc));
+    expect(round.tasks.get('r1')!.via).toEqual([]);
+    expect(round.tasks.get('r1')!.viaIndex).toBe(0);
+  });
 });
 
 describe('tokens', () => {
@@ -409,5 +445,207 @@ describe('tokens', () => {
   it('are distinct', () => {
     const seen = new Set(Array.from({ length: 500 }, () => newToken()));
     expect(seen.size).toBe(500);
+  });
+});
+
+describe('a campaign carries its own numbers', () => {
+  it('records the ruleset it was started under', () => {
+    const store = new CampaignStore(openDb());
+    const { campaign } = store.create({
+      id: 'c-brisk',
+      name: 'Brisk',
+      worldDoc,
+      factions: [{ id: 'red', name: 'Red', color: '#f00' }],
+      ruleset: 'brisk',
+    });
+
+    expect(campaign.ruleset).toBe('brisk');
+    expect(campaign.config.maxMarchHoursPerDay).toBe(12);
+  });
+
+  it('reads them back off the row, not off the defaults', () => {
+    const db = openDb();
+    const store = new CampaignStore(db);
+    store.create({
+      id: 'c-brisk',
+      name: 'Brisk',
+      worldDoc,
+      factions: [{ id: 'red', name: 'Red', color: '#f00' }],
+      ruleset: 'brisk',
+      config: { freePatrols: 7 },
+    });
+
+    // A second store over the same database: nothing is carried in memory between them.
+    const reopened = new CampaignStore(db).campaign('c-brisk')!;
+    expect(reopened.ruleset).toBe('brisk');
+    expect(reopened.config.maxMarchHoursPerDay).toBe(12);
+    expect(reopened.config.freePatrols).toBe(7);
+  });
+
+  it('keeps two campaigns on different rules in one database', () => {
+    // The point of naming them. A referee running the book and the house amendments at the
+    // same time must not have one quietly re-tune the other.
+    const db = openDb();
+    const store = new CampaignStore(db);
+    const factions = [{ id: 'red', name: 'Red', color: '#f00' }];
+
+    store.create({ id: 'by-the-book', name: 'A', worldDoc, factions });
+    store.create({ id: 'house', name: 'B', worldDoc, factions, ruleset: 'brisk' });
+
+    expect(store.campaign('by-the-book')!.config.maxMarchHoursPerDay).toBe(20);
+    expect(store.campaign('house')!.config.maxMarchHoursPerDay).toBe(12);
+  });
+
+  it('is not re-tuned by a ruleset edited afterwards', () => {
+    // Resolved at creation and stored. The numbers a campaign has been played under are a
+    // fact about it, and a house rule changed next month must not rewrite its history.
+    const db = openDb();
+    new CampaignStore(db).create({
+      id: 'c1',
+      name: 'A',
+      worldDoc,
+      factions: [{ id: 'red', name: 'Red', color: '#f00' }],
+      ruleset: 'brisk',
+    });
+
+    const row = db
+      .prepare(`SELECT config_json FROM campaigns WHERE id = ?`)
+      .get('c1') as { config_json: string };
+    const stored = JSON.parse(row.config_json) as { maxMarchHoursPerDay: number };
+    expect(stored.maxMarchHoursPerDay).toBe(12);
+  });
+
+  it('falls back to an unknown ruleset rather than refusing to start', () => {
+    const store = new CampaignStore(openDb());
+    const { campaign } = store.create({
+      id: 'c1',
+      name: 'A',
+      worldDoc,
+      factions: [{ id: 'red', name: 'Red', color: '#f00' }],
+      ruleset: 'nonesuch',
+    });
+    expect(campaign.ruleset).toBe('standard');
+  });
+
+  it('gives a row written before rulesets existed the rules as written', () => {
+    // The migration case. An older database has the columns added on open, and its
+    // campaigns have been playing under the standard numbers all along.
+    const db = openDb();
+    const store = new CampaignStore(db);
+    store.create({
+      id: 'c1',
+      name: 'A',
+      worldDoc,
+      factions: [{ id: 'red', name: 'Red', color: '#f00' }],
+    });
+    db.prepare(`UPDATE campaigns SET config_json = NULL WHERE id = ?`).run('c1');
+
+    const loaded = store.campaign('c1')!;
+    expect(loaded.config.maxMarchHoursPerDay).toBe(20);
+    expect(loaded.config.speeds.infantry.road).toBe(3);
+  });
+
+  it("runs commands on the campaign's own numbers", () => {
+    // The whole point. A campaign under a ruleset that halves the day must cap a march at
+    // that, not at the store's.
+    const db = openDb();
+    const store = new CampaignStore(db);
+    const { campaign } = store.create({
+      id: 'c1',
+      name: 'A',
+      worldDoc,
+      factions: [{ id: 'red', name: 'Red', color: '#f00' }],
+      ruleset: 'brisk',
+    });
+
+    expect(
+      store.execute(campaign, { kind: 'add_unit', unit: division('r1', 'red', land[0]!) }, REFEREE_ROLE).ok,
+    ).toBe(true);
+    const far = land[land.length - 1]!;
+    store.execute(campaign, { kind: 'set_task', unitId: 'r1', destination: far }, REFEREE_ROLE);
+    store.execute(campaign, { kind: 'advance_clock', hours: 20 }, REFEREE_ROLE);
+
+    // Twelve hours of marching, not twenty. To a tolerance, because a day is accumulated
+    // out of thirds of an hour and binary floating point does not sum them to exactly
+    // twelve — the cap holds, the last bit does not.
+    expect(store.state('c1').units.get('r1')!.hoursMarchedToday).toBeLessThanOrEqual(12 + 1e-9);
+    expect(store.state('c1').units.get('r1')!.hoursMarchedToday).toBeGreaterThan(11);
+  });
+});
+
+describe('a log written before a field was renamed', () => {
+  it('still folds, because the log is append-only and cannot be rewritten', () => {
+    // `effectives` became `paperStrength`. An event written under the old name is a fact
+    // in the past tense: it cannot be edited, so the rename is honoured on the way in.
+    const db = openDb();
+    const store = new CampaignStore(db);
+    const { campaign } = store.create({
+      id: 'c1',
+      name: 'A',
+      worldDoc,
+      factions: [{ id: 'red', name: 'Red', color: '#f00' }],
+    });
+    expect(
+      store.execute(campaign, { kind: 'add_unit', unit: division('r1', 'red', land[0]!) }, REFEREE_ROLE).ok,
+    ).toBe(true);
+
+    // Rewrite that event as an older build would have written it, and drop the snapshots
+    // so the campaign has to be rebuilt from the log alone.
+    const row = db
+      .prepare(`SELECT seq, payload_json FROM events WHERE campaign_id = ? AND kind = 'unit_added'`)
+      .get('c1') as { seq: number; payload_json: string };
+    const old = JSON.parse(row.payload_json) as { unit: Record<string, unknown> };
+    old.unit['effectives'] = old.unit['paperStrength'];
+    delete old.unit['paperStrength'];
+    db.prepare(`UPDATE events SET payload_json = ? WHERE campaign_id = ? AND seq = ?`)
+      .run(JSON.stringify(old), 'c1', row.seq);
+    db.prepare(`DELETE FROM snapshots WHERE campaign_id = ?`).run('c1');
+
+    const state = new CampaignStore(db).state('c1');
+    expect(state.units.get('r1')!.paperStrength).toBe(5000);
+  });
+
+  it('never undoes an upgrade already applied', () => {
+    // A payload carrying both names — which should not happen, but a half-migrated
+    // database is exactly the case that eats a campaign — keeps the new one.
+    const db = openDb();
+    const store = new CampaignStore(db);
+    const { campaign } = store.create({
+      id: 'c1',
+      name: 'A',
+      worldDoc,
+      factions: [{ id: 'red', name: 'Red', color: '#f00' }],
+    });
+    store.execute(campaign, { kind: 'add_unit', unit: division('r1', 'red', land[0]!) }, REFEREE_ROLE);
+
+    const row = db
+      .prepare(`SELECT seq, payload_json FROM events WHERE campaign_id = ? AND kind = 'unit_added'`)
+      .get('c1') as { seq: number; payload_json: string };
+    const both = JSON.parse(row.payload_json) as { unit: Record<string, unknown> };
+    both.unit['effectives'] = 1;
+    db.prepare(`UPDATE events SET payload_json = ? WHERE campaign_id = ? AND seq = ?`)
+      .run(JSON.stringify(both), 'c1', row.seq);
+    db.prepare(`DELETE FROM snapshots WHERE campaign_id = ?`).run('c1');
+
+    expect(new CampaignStore(db).state('c1').units.get('r1')!.paperStrength).toBe(5000);
+  });
+
+  it('upgrades a snapshot as well as a log', () => {
+    const db = openDb();
+    const store = new CampaignStore(db);
+    const { campaign } = store.create({
+      id: 'c1',
+      name: 'A',
+      worldDoc,
+      factions: [{ id: 'red', name: 'Red', color: '#f00' }],
+    });
+    store.execute(campaign, { kind: 'add_unit', unit: division('r1', 'red', land[0]!) }, REFEREE_ROLE);
+
+    const doc = JSON.parse(serialise(store.state('c1'))) as { units: Record<string, unknown>[] };
+    for (const u of doc.units) {
+      u['effectives'] = u['paperStrength'];
+      delete u['paperStrength'];
+    }
+    expect(deserialise(JSON.stringify(doc)).units.get('r1')!.paperStrength).toBe(5000);
   });
 });

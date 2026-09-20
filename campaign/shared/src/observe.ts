@@ -90,7 +90,7 @@ export function observationEvents(
  * than a rule: it fires once per formation, and from then on that hour only moves when a
  * despatch arrives or the columns close up.
  */
-export function reportEvents(state: CampaignState): EventPayload[] {
+export function reportEvents(state: CampaignState, cfg: CampaignConfig): EventPayload[] {
   const out: EventPayload[] = [];
 
   for (const commanderId of commanderIds(state)) {
@@ -100,7 +100,7 @@ export function reportEvents(state: CampaignState): EventPayload[] {
     for (const unit of formationsUnder(state, commanderId)) {
       const inHand =
         own !== undefined &&
-        (unit.id === own.id || formationsTouch(own, unit));
+        (unit.id === own.id || formationsTouch(own, unit, cfg.footprint));
 
       if (!inHand && held?.has(unit.id) === true) continue;
       out.push({
@@ -121,7 +121,7 @@ export const knowledgeEvents = (
   cfg: CampaignConfig,
 ): EventPayload[] => [
   ...observationEvents(state, world, cfg),
-  ...reportEvents(state),
+  ...reportEvents(state, cfg),
   ...sightingEvents(state, world, cfg),
 ];
 

@@ -107,7 +107,7 @@ describe('the demo scenario', () => {
 
   it('starts every unit fit', () => {
     for (const unit of out.state.units.values()) {
-      expect(presentUnderArms(unit)).toBe(unit.effectives);
+      expect(presentUnderArms(unit)).toBe(unit.paperStrength);
       expect(unit.morale).toBeGreaterThan(0);
       expect(unit.provisions).toBeGreaterThan(0);
     }

@@ -94,13 +94,13 @@ const despatch = (over: Partial<Despatch> = {}): Despatch => ({
   ...over,
 });
 
-function unit(id: string, faction: string, column: Hex[], effectives = 4000): Unit {
+function unit(id: string, faction: string, column: Hex[], paperStrength = 4000): Unit {
   return {
     id,
     name: id,
     faction,
     kind: 'infantry',
-    effectives,
+    paperStrength,
     fatigue: 0,
     experience: 0,
     morale: 30,
@@ -117,6 +117,7 @@ function unit(id: string, faction: string, column: Hex[], effectives = 4000): Un
     column,
     hoursMarchedToday: 0,
     corps: null,
+    parentUnitId: null,
   };
 }
 
@@ -201,7 +202,7 @@ describe('a captor', () => {
     expect(report['head']).toEqual({ q: 5, r: 5 });
     expect(report['atHours']).toBe(4);
     expect(report['echelon']).toBe('division');
-    for (const forbidden of ['unitId', 'effectives', 'fatigue', 'provisions', 'formation']) {
+    for (const forbidden of ['unitId', 'paperStrength', 'fatigue', 'provisions', 'formation']) {
       expect(forbidden in report).toBe(false);
     }
   });
@@ -215,7 +216,7 @@ describe('a captor', () => {
     // that it tells him where III Corps is and what state it is in.
     const report = addresseeCopy(arrived, false).body.unitReport as Record<string, unknown>;
     expect(report['unitId']).toBe('red-1');
-    expect(report['effectives']).toBe(4210);
+    expect(report['paperStrength']).toBe(4210);
   });
 });
 

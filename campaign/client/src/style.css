@@ -178,6 +178,7 @@ header h1 {
 }
 
 .body {
+  position: relative;
   display: flex;
   flex: 1;
   min-height: 0;
@@ -586,6 +587,41 @@ code.link {
   cursor: default;
 }
 
+/* The order being composed: the accent rule ties it to the pointing notice and to the
+   rings on the map, which are the same act shown three ways. */
+.picked-route {
+  margin-top: 7px;
+  padding-left: 8px;
+  border-left: 2px solid var(--accent);
+}
+
+.picked-route ol {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 11px;
+}
+
+.picked-route li {
+  margin: 1px 0;
+  color: var(--muted);
+}
+
+.picked-route li.destination {
+  color: var(--text);
+}
+
+/* Formation sits under the orders it constrains: a division cannot march out of a camp it
+   has not broken, and the two controls belong to the same decision. */
+.formation-control {
+  margin-top: 8px;
+  padding-top: 7px;
+  border-top: 1px solid var(--line);
+}
+
+.formation-control .despatch-actions {
+  flex-wrap: wrap;
+}
+
 /* ---- the composer ---- */
 
 .composer select,
@@ -752,4 +788,193 @@ button.formation:hover {
   background: var(--accent);
   font-weight: 600;
   opacity: 1;
+}
+
+
+/* ---- the order of battle ---------------------------------------------- */
+
+/* A drawer rather than a panel. The question it answers — what is everything doing — is
+   asked in bursts and then dismissed, and a permanent table would take the width the map
+   needs. It slides over the sidebar and stops short of the map's left edge, so the ground
+   a referee is reading about stays visible beside the numbers. */
+.roster {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  width: min(760px, 78vw);
+  background: var(--panel);
+  border-left: 1px solid var(--line);
+  box-shadow: -18px 0 40px rgb(0 0 0 / 45%);
+  animation: roster-in 140ms ease-out;
+}
+
+@keyframes roster-in {
+  from {
+    transform: translateX(14px);
+    opacity: 0;
+  }
+}
+
+/* Honours a reader who has asked the system not to animate things at them. */
+@media (prefers-reduced-motion: reduce) {
+  .roster {
+    animation: none;
+  }
+}
+
+.roster-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 16px;
+  border-bottom: 1px solid var(--line);
+  flex: none;
+}
+
+.roster-head h2 {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.roster-head .dismiss {
+  margin-left: auto;
+}
+
+.roster-body {
+  overflow-y: auto;
+  padding: 4px 16px 18px;
+}
+
+.roster-group h3 {
+  margin: 16px 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.roster-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.roster-table th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+  padding: 4px 8px 4px 0;
+}
+
+.roster-table td {
+  padding: 6px 8px 6px 0;
+  border-bottom: 1px solid rgb(47 51 63 / 55%);
+  vertical-align: top;
+}
+
+.roster-table td.num,
+.roster-table th:nth-child(2),
+.roster-table th:nth-child(3),
+.roster-table th:nth-child(4) {
+  font-variant-numeric: tabular-nums;
+}
+
+.roster-table tbody tr {
+  cursor: pointer;
+}
+
+.roster-table tbody tr:hover {
+  background: var(--panel-2);
+}
+
+.roster-table tbody tr.selected {
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* A remembered row is not a live one, and the table should not let them look alike: this
+   is where a commander is told he is reading the past. */
+.roster-table tbody tr.remembered td {
+  color: var(--muted);
+}
+
+.swatch.small.ghost {
+  opacity: 0.55;
+}
+
+
+/* ---- raising formations ------------------------------------------------ */
+
+/* The editor sits at the top of the order of battle, because it is the same work: you
+   look at what you have, and you add what is missing. */
+.orbat {
+  padding: 10px 0 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.orbat-form {
+  margin-top: 10px;
+  padding: 12px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.orbat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 9px 12px;
+}
+
+.orbat-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.orbat-grid label > span {
+  color: var(--muted);
+}
+
+.orbat-grid input,
+.orbat-grid select,
+.composer select {
+  background: var(--panel);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font: inherit;
+  padding: 4px 7px;
+}
+
+.orbat-grid input:focus,
+.orbat-grid select:focus {
+  outline: 1px solid var(--accent);
+  border-color: var(--accent);
+}
+
+/* A trait is on or off, and the chip says which without a second column of checkboxes. */
+.tag.on {
+  color: #16171d;
+  background: var(--accent);
+  border-color: var(--accent);
+  font-weight: 600;
+}
+
+button.tag {
+  cursor: pointer;
+  font: inherit;
+}
+
+.orbat-problems {
+  margin: 8px 0 0;
+  padding-left: 18px;
 }

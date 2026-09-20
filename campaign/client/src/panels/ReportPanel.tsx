@@ -49,7 +49,7 @@ export function ReportPanel({
         hint="The hour this describes, which is not necessarily the hour it reached you."
       />
       <Row label="Stood at" value={`${report.head.q}, ${report.head.r}`} />
-      <Row label="Effectives" value={report.effectives.toLocaleString()} />
+      <Row label="PaperStrength" value={report.paperStrength.toLocaleString()} />
       <Row label="Fatigue" value={`${Math.round(report.fatigue)} of 100`} />
       <Row label="Provisions" value={String(report.provisions)} />
       <Row label="Formation" value={pretty(report.formation)} />

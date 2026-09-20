@@ -69,6 +69,18 @@ export function neighbors(h: Hex): Hex[] {
   return DIRECTIONS.map((d) => ({ q: h.q + d.q, r: h.r + d.r }));
 }
 
+/**
+ * A direction turned sixty degrees.
+ *
+ * The cube rotation `(x, y, z) -> (-z, -x, -y)`, written in axial. Used to find the flank
+ * of a column: a formation that spreads sideways spreads perpendicular to the road it
+ * came in on, and the only thing that knows where that road ran is the direction between
+ * two consecutive hexes of its path.
+ *
+ * Rotation preserves distance, so a unit direction stays a unit direction.
+ */
+export const rotate60 = (d: Hex): Hex => ({ q: -d.r, r: d.q + d.r });
+
 /** Distance in axial coordinates. */
 export function distance(a: Hex, b: Hex): number {
   return (

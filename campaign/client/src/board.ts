@@ -59,6 +59,8 @@ export interface Board {
   readonly commanders: ReadonlyMap<string, PublicCommander>;
   readonly surveyed: ReadonlySet<HexKey>;
   readonly visible: ReadonlySet<HexKey>;
+  /** Ground being fought over, as far as this viewer knows of it. */
+  readonly battle: ReadonlySet<HexKey>;
 }
 
 export function boardFrom(view: ClientView, theme: Theme): Board {
@@ -81,8 +83,11 @@ export function boardFrom(view: ClientView, theme: Theme): Board {
     // here is that it is a line of ground rather than a counter on a hex.
     ...view.units.map((u) => ({
       id: u.id,
-      column: occupied(u),
+      column: occupied(u, 'road', view.config.footprint),
       kind: 'live' as const,
+      // Drawn as ranks rather than as a ribbon. A deployed division is a kilometre of
+      // front, so its ribbon would be a dot — see `drawDeployed`.
+      deployed: u.formation === 'battle',
       symbol: {
         affiliation: affiliationOf(u.faction),
         kind: u.kind,
@@ -99,6 +104,8 @@ export function boardFrom(view: ClientView, theme: Theme): Board {
       id: r.unitId,
       column: [r.head],
       kind: 'reported' as const,
+      // Never. A despatch says where a formation was, not how it was standing.
+      deployed: false,
       symbol: {
         affiliation: affiliationOf(r.faction),
         // Your own formation, so its arm and size are not in doubt. Only where it is.
@@ -118,6 +125,9 @@ export function boardFrom(view: ClientView, theme: Theme): Board {
       // payload at all. See `PublicContact`.
       id: c.id,
       column: [c.coord],
+      // Never. Whether an enemy has deployed is exactly the thing a sighting does not
+      // carry, and drawing it would answer the question the fog exists to keep open.
+      deployed: false,
       kind: 'contact' as const,
       symbol: {
         affiliation: affiliationOf(c.faction),
@@ -157,6 +167,7 @@ export function boardFrom(view: ClientView, theme: Theme): Board {
     commanders: new Map(view.commanders.map((c) => [c.id, c])),
     surveyed: new Set(view.surveyed),
     visible: new Set(view.visible),
+    battle: new Set(view.battle),
   };
 }
 
@@ -175,6 +186,40 @@ export function ageLabel(atHours: number, clockHours: number): string {
   if (age === 0) return 'now';
   if (age < 1) return `${Math.round(age * 60)} min ago`;
   return `${age.toFixed(age < 10 ? 1 : 0)} h ago`;
+}
+
+/**
+ * The campaign clock as a day and a time of day.
+ *
+ * The engine counts hours from the scenario epoch, which is the right thing for it to
+ * count — arithmetic on a march that crosses midnight should not have to know what a
+ * calendar is. It is the wrong thing to read. "Hour 62" tells a referee nothing about
+ * whether it is dark, and darkness is a rule here: it costs fatigue and it stops convoys.
+ * "Day 3, 14:00" answers that at a glance.
+ *
+ * Day 1 is the first, not the zeroth. Nobody calls the opening day of a campaign day zero.
+ */
+export function dayHour(hours: number): string {
+  return `Day ${dayOf(hours)}, ${timeOfDay(hours)}`;
+}
+
+/**
+ * The clock, snapped to the minute it will be displayed as.
+ *
+ * Both halves round off this rather than each rounding for itself. An hour of 23.9999
+ * reads as midnight, and midnight is tomorrow — a day that stayed on the 15th while the
+ * time said 00:00 would be wrong in the one place a reader checks.
+ */
+const toMinute = (hours: number): number => Math.round(hours * 60) / 60;
+
+export const dayOf = (hours: number): number => Math.floor(toMinute(hours) / 24) + 1;
+
+/** Just the clock face: `14:30`. Minutes rounded, because the engine works in fractions. */
+export function timeOfDay(hours: number): string {
+  const within = ((toMinute(hours) % 24) + 24) % 24;
+  const h = Math.floor(within);
+  const m = Math.round((within - h) * 60);
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
 /** Whether a hex is currently watched, as opposed to merely covered at some point. */

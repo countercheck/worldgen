@@ -11,6 +11,7 @@
 import {
   crossingFor,
   DEFAULT_CONFIG,
+  type CampaignConfig,
   discharge,
   gradeOfHex,
   isWater,
@@ -41,13 +42,15 @@ export function HexPanel({
   hex,
   coord,
   selected,
+  cfg = DEFAULT_CONFIG,
 }: {
   world: World;
   hex: WorldHex;
   coord: Hex;
   selected: Unit | null;
+  /** The campaign's numbers, as the server resolved them. */
+  cfg?: CampaignConfig;
 }) {
-  const cfg = DEFAULT_CONFIG;
   const fog = hex.tags.has('fog');
 
   if (fog) {
@@ -138,7 +141,7 @@ export function HexPanel({
           {hex.tags.has('ford') && !hex.tags.has('bridge') && (
             <Row label="Crossing" value="Ford" />
           )}
-          {selected !== null && <CrossingFor world={world} unit={selected} to={coord} />}
+          {selected !== null && <CrossingFor world={world} unit={selected} to={coord} cfg={cfg} />}
         </Section>
       )}
 
@@ -158,7 +161,17 @@ export function HexPanel({
 }
 
 /** What crossing here would cost the unit currently selected. */
-function CrossingFor({ world, unit, to }: { world: World; unit: Unit; to: Hex }) {
+function CrossingFor({
+  world,
+  unit,
+  to,
+  cfg,
+}: {
+  world: World;
+  unit: Unit;
+  to: Hex;
+  cfg: CampaignConfig;
+}) {
   // Approached from a neighbour that is not itself in the channel, which is what a unit
   // arriving at the bank would be doing.
   const from =
@@ -167,7 +180,7 @@ function CrossingFor({ world, unit, to }: { world: World; unit: Unit; to: Hex })
       return h !== undefined && !h.tags.has('river');
     }) ?? to;
 
-  const c = crossingFor(world, DEFAULT_CONFIG, unit, from, to);
+  const c = crossingFor(world, cfg, unit, from, to);
 
   return (
     <Field label={`For ${unit.id}`}>

@@ -25,8 +25,26 @@ import type { Faction, LoggedEvent, WorldRef } from '../src/events.js';
 import { key, type Hex } from '../src/hex.js';
 import { makeRng, rngFor } from '../src/rng.js';
 import { CODES, RuleViolation } from '../src/ruling.js';
-import { hasSurveyed, replay, type CampaignState } from '../src/state.js';
-import { KIND_DEFAULTS, type Unit } from '../src/unit.js';
+import {
+  engaged,
+  hasSurveyed,
+  isEngaged,
+  parentOf,
+  patrolsOf,
+  reduce,
+  replay,
+  type CampaignState,
+} from '../src/state.js';
+import {
+  isBroken,
+  isDivision,
+  isPatrol,
+  isStarving,
+  KIND_DEFAULTS,
+  PATROL_PAPER_STRENGTH,
+  presentUnderArms,
+  type Unit,
+} from '../src/unit.js';
 import type { Commander } from '../src/commander.js';
 import { parseWorld, type World } from '../src/world.js';
 
@@ -72,13 +90,13 @@ const WELLINGTON: Commander = {
   autoCascade: true,
 };
 
-function division(id: string, faction: string, at: Hex = LAND, effectives = 5000): Unit {
+function division(id: string, faction: string, at: Hex = LAND, paperStrength = 5000): Unit {
   return {
     id,
     name: `${id} Division`,
     faction,
     kind: 'infantry',
-    effectives,
+    paperStrength,
     fatigue: 0,
     experience: 0,
     morale: 30,
@@ -92,9 +110,11 @@ function division(id: string, faction: string, at: Hex = LAND, effectives = 5000
     spacingMultiplier: 1.3,
     traits: [],
     formation: 'march',
+    formationChange: null,
     column: [at],
     hoursMarchedToday: 0,
     corps: null,
+    parentUnitId: null,
   };
 }
 
@@ -262,10 +282,10 @@ describe('tasks and the clock', () => {
 
     const task = out.state.tasks.get('red-1')!;
     expect(task.destination).toEqual(somewhereElse());
-    // A destination, not a path — but the engine has to know which hex is next, and
-    // when the head reaches it, or the clock has nothing to run.
+    // A destination, not a path — but the engine has to know which hex is next, or the
+    // clock has nothing to run. Nothing is walked yet: an order is not a head start.
     expect(task.nextHex).not.toBeNull();
-    expect(task.arrivesAtHours).toBeGreaterThan(state.clockHours);
+    expect(task.progressHours).toBe(0);
     expect(task.complete).toBe(false);
   });
 
@@ -277,6 +297,74 @@ describe('tasks and the clock', () => {
       'lenient',
     );
     expect(out.state.tasks.get('red-1')!.complete).toBe(true);
+  });
+
+  it('does not complete one that stands on its destination but has somewhere to go first', () => {
+    const out = applyOrThrow(
+      { kind: 'set_task', unitId: 'red-1', destination: LAND, via: [somewhereElse()] },
+      setUp(),
+      world,
+      'lenient',
+    );
+    const task = out.state.tasks.get('red-1')!;
+    expect(task.complete).toBe(false);
+    expect(task.nextHex).not.toBeNull();
+    expect(task.viaIndex).toBe(0);
+  });
+
+  it('keeps the waypoints a referee insisted on', () => {
+    const out = applyOrThrow(
+      { kind: 'set_task', unitId: 'red-1', destination: somewhereElse(), via: [LAND] },
+      setUp(),
+      world,
+      'lenient',
+    );
+    expect(out.state.tasks.get('red-1')!.via).toEqual([LAND]);
+  });
+
+  it('names the waypoint it cannot reach, not the destination', () => {
+    // The destination is reachable and the waypoint is not, which is exactly the case a
+    // message about the destination would send a referee looking in the wrong place.
+    const water = [...world.hexes.values()].find((h) => h.terrainClass === 'open_water');
+    if (water === undefined) throw new Error('the fixture world has no water');
+
+    const v = check(
+      { kind: 'set_task', unitId: 'red-1', destination: somewhereElse(), via: [water.coord] },
+      setUp(),
+      world,
+    );
+    const route = v.find((x) => x.code === CODES.NO_MARCH_ROUTE);
+    expect(route?.severity).toBe('soft');
+    expect(route?.message).toContain(key(water.coord));
+  });
+
+  it('still issues a march through a waypoint it cannot reach, when the referee insists', () => {
+    // Soft, so `lenient` lets it stand. The column discovers the problem where it stands,
+    // which is the point of the whole design.
+    const water = [...world.hexes.values()].find((h) => h.terrainClass === 'open_water');
+    if (water === undefined) throw new Error('the fixture world has no water');
+
+    const out = applyOrThrow(
+      { kind: 'set_task', unitId: 'red-1', destination: somewhereElse(), via: [water.coord] },
+      setUp(),
+      world,
+      'lenient',
+    );
+    expect(out.state.tasks.get('red-1')!.via).toEqual([water.coord]);
+  });
+
+  it('refuses a waypoint off the map outright', () => {
+    const v = check(
+      {
+        kind: 'set_task',
+        unitId: 'red-1',
+        destination: somewhereElse(),
+        via: [{ q: -50, r: -50 }],
+      },
+      setUp(),
+      world,
+    );
+    expect(v.filter((x) => x.code === CODES.OFF_MAP).map((x) => x.severity)).toContain('hard');
   });
 
   it('advances the clock by marching, not by fiat', () => {
@@ -588,7 +676,7 @@ describe('referee overrides', () => {
 
     const after = out.state.units.get('red-1')!;
     expect(after.morale).toBe(12);
-    expect(after.effectives).toBe(before.effectives);
+    expect(after.paperStrength).toBe(before.paperStrength);
     expect(after.fatigue).toBe(before.fatigue);
     expect(after.corps).toBe(before.corps);
   });
@@ -771,3 +859,512 @@ function deepFreeze<T>(o: T): T {
   for (const v of Object.values(o as Record<string, unknown>)) deepFreeze(v);
   return Object.freeze(o);
 }
+
+describe('formation, as the referee orders it', () => {
+  /** A land hex some distance from the first, so a march has somewhere to go. */
+  const far = (): Hex => {
+    const land = [...world.hexes.values()].filter((h) => h.terrainClass === 'land');
+    const out = land.find((h) => Math.abs(h.coord.q - LAND.q) + Math.abs(h.coord.r - LAND.r) > 6);
+    if (out === undefined) throw new Error('the fixture world is too small');
+    return out.coord;
+  };
+
+  it('begins a change at the cost the rules give it', () => {
+    const out = applyOrThrow(
+      { kind: 'set_formation', unitId: 'red-1', formation: 'battle' },
+      setUp(),
+      world,
+      'lenient',
+    );
+
+    const change = out.state.units.get('red-1')!.formationChange!;
+    expect(change.to).toBe('battle');
+    // Forming for battle from column of march is an hour, and the unit is still in march
+    // formation until that hour is up.
+    expect(change.completesAtHours - out.state.clockHours).toBe(1);
+    expect(out.state.units.get('red-1')!.formation).toBe('march');
+  });
+
+  it('calls off a march when it orders anything but a march', () => {
+    // A formation told to make camp is no longer going anywhere. Leaving the task standing
+    // would have it break camp again the moment the camp was finished.
+    const marching = applyOrThrow(
+      { kind: 'set_task', unitId: 'red-1', destination: far() },
+      setUp(),
+      world,
+      'lenient',
+    ).state;
+    expect(marching.tasks.get('red-1')!.complete).toBe(false);
+
+    const out = applyOrThrow(
+      { kind: 'set_formation', unitId: 'red-1', formation: 'rest' },
+      marching,
+      world,
+      'lenient',
+    );
+    expect(out.events.map((e) => e.payload.kind)).toContain('task_cleared');
+    expect(out.state.tasks.has('red-1')).toBe(false);
+  });
+
+  it('leaves a march standing when it orders march formation', () => {
+    const resting = applyOrThrow(
+      { kind: 'set_formation', unitId: 'red-1', formation: 'rest' },
+      setUp(),
+      world,
+      'lenient',
+    ).state;
+
+    const marching = applyOrThrow(
+      { kind: 'set_task', unitId: 'red-1', destination: far() },
+      resting,
+      world,
+      'lenient',
+    ).state;
+
+    const out = applyOrThrow(
+      { kind: 'set_formation', unitId: 'red-1', formation: 'march' },
+      marching,
+      world,
+      'lenient',
+    );
+    expect(out.events.map((e) => e.payload.kind)).not.toContain('task_cleared');
+  });
+
+  it('writes nothing when the formation is already what was asked for', () => {
+    const out = applyOrThrow(
+      { kind: 'set_formation', unitId: 'red-1', formation: 'march' },
+      setUp(),
+      world,
+      'lenient',
+    );
+    expect(out.events).toHaveLength(0);
+  });
+
+  it('refuses a formation for a unit that does not exist', () => {
+    const v = check(
+      { kind: 'set_formation', unitId: 'ghost', formation: 'rest' },
+      setUp(),
+      world,
+    );
+    expect(v.map((x) => x.code)).toContain(CODES.NO_SUCH_UNIT);
+  });
+
+  it('will not simply order a routing formation to form up, but can be made to', () => {
+    // Rallying a broken division is an adjudication, not an order. Soft, so a referee who
+    // has decided it rallied may say so.
+    const broken = applyOrThrow(
+      { kind: 'set_unit_stats', unitId: 'red-1', changes: { morale: 0 } },
+      setUp(),
+      world,
+      'lenient',
+    ).state;
+    const routing = reduce(broken, {
+      seq: broken.nextSeq,
+      clockHours: broken.clockHours,
+      actor: { kind: 'referee' },
+      payload: { kind: 'formation_changed', unitId: 'red-1', to: 'rout', atHours: broken.clockHours },
+      forced: false,
+      strictness: 'strict',
+      bypassed: [],
+    });
+
+    const v = check({ kind: 'set_formation', unitId: 'red-1', formation: 'battle' }, routing, world);
+    const found = v.find((x) => x.code === CODES.NOT_IN_COMMAND);
+    expect(found?.severity).toBe('soft');
+
+    const out = applyOrThrow(
+      { kind: 'set_formation', unitId: 'red-1', formation: 'battle' },
+      routing,
+      world,
+      'lenient',
+    );
+    expect(out.ok).toBe(true);
+  });
+});
+
+describe('patrols', () => {
+  const scout = (id: string): Unit => ({
+    ...division(id, 'red'),
+    traits: ['scout'],
+  });
+
+  const withScout = (): CampaignState =>
+    applyOrThrow(
+      { kind: 'add_unit', unit: scout('red-2') },
+      setUp(),
+      world,
+      'lenient',
+    ).state;
+
+  it('detaches twenty troopers, and remembers whose they are', () => {
+    const out = applyOrThrow(
+      { kind: 'detach_patrol', unitId: 'red-2' },
+      withScout(),
+      world,
+      'lenient',
+    );
+
+    const patrol = [...out.state.units.values()].find((u) => u.parentUnitId === 'red-2');
+    expect(patrol).toBeDefined();
+    expect(patrol!.paperStrength).toBe(PATROL_PAPER_STRENGTH);
+    expect(patrol!.faction).toBe('red');
+    // Moves as cavalry and sees as a scout, which is what a patrol is for.
+    expect(patrol!.kind).toBe('cavalry');
+    expect(patrol!.traits).toContain('scout');
+    expect(isPatrol(patrol!)).toBe(true);
+  });
+
+  it('starts where its parent stands, unless told otherwise', () => {
+    const state = withScout();
+    const head = state.units.get('red-2')!.column[0]!;
+
+    const here = applyOrThrow(
+      { kind: 'detach_patrol', unitId: 'red-2' },
+      state,
+      world,
+      'lenient',
+    ).state;
+    expect(patrolsOf(here, 'red-2')[0]!.column[0]).toEqual(head);
+
+    const elsewhere = [...world.hexes.values()].find(
+      (h) => h.terrainClass === 'land' && key(h.coord) !== key(head),
+    )!.coord;
+    const there = applyOrThrow(
+      { kind: 'detach_patrol', unitId: 'red-2', at: elsewhere },
+      state,
+      world,
+      'lenient',
+    ).state;
+    expect(patrolsOf(there, 'red-2')[0]!.column[0]).toEqual(elsewhere);
+  });
+
+  it('costs nothing for the first three, which is the rules allowance', () => {
+    let state = withScout();
+    const before = state.units.get('red-2')!.paperStrength;
+
+    for (let i = 0; i < 3; i++) {
+      const out = applyOrThrow({ kind: 'detach_patrol', unitId: 'red-2' }, state, world, 'strict');
+      expect(out.ok, `patrol ${i + 1}`).toBe(true);
+      state = out.state;
+    }
+
+    expect(patrolsOf(state, 'red-2')).toHaveLength(3);
+    expect(state.units.get('red-2')!.paperStrength).toBe(before);
+  });
+
+  it('takes a hundred men off the rolls for the fourth, permanently', () => {
+    let state = withScout();
+    for (let i = 0; i < 3; i++) {
+      state = applyOrThrow({ kind: 'detach_patrol', unitId: 'red-2' }, state, world, 'lenient').state;
+    }
+    const before = state.units.get('red-2')!.paperStrength;
+
+    // Soft, and it says what it will cost before it costs it.
+    const v = check({ kind: 'detach_patrol', unitId: 'red-2' }, state, world);
+    const warned = v.find((x) => x.code === CODES.UNIT_TOO_SMALL);
+    expect(warned?.severity).toBe('soft');
+    expect(warned?.message).toContain('100');
+
+    const out = applyOrThrow({ kind: 'detach_patrol', unitId: 'red-2' }, state, world, 'lenient');
+    expect(out.state.units.get('red-2')!.paperStrength).toBe(before - 100);
+    expect(patrolsOf(out.state, 'red-2')).toHaveLength(4);
+  });
+
+  it('will not let a formation without Scout field one as of right', () => {
+    // The rules give patrols to Scout. Soft, so a referee running a scenario where a line
+    // division pushes out vedettes can say so.
+    const v = check({ kind: 'detach_patrol', unitId: 'red-1' }, setUp(), world);
+    const found = v.find((x) => x.code === CODES.NOT_IN_COMMAND);
+    expect(found?.severity).toBe('soft');
+
+    const out = applyOrThrow({ kind: 'detach_patrol', unitId: 'red-1' }, setUp(), world, 'lenient');
+    expect(patrolsOf(out.state, 'red-1')).toHaveLength(1);
+  });
+
+  it('refuses a patrol from a formation that does not exist', () => {
+    const v = check({ kind: 'detach_patrol', unitId: 'ghost' }, setUp(), world);
+    expect(v.map((x) => x.code)).toContain(CODES.NO_SUCH_UNIT);
+  });
+
+  it('gives each patrol a distinct id, and refuses a duplicate', () => {
+    let state = withScout();
+    state = applyOrThrow(
+      { kind: 'detach_patrol', unitId: 'red-2', patrolId: 'vedette' },
+      state,
+      world,
+      'lenient',
+    ).state;
+
+    const v = check(
+      { kind: 'detach_patrol', unitId: 'red-2', patrolId: 'vedette' },
+      state,
+      world,
+    );
+    expect(v.map((x) => x.code)).toContain(CODES.DUPLICATE_ID);
+
+    const second = applyOrThrow({ kind: 'detach_patrol', unitId: 'red-2' }, state, world, 'lenient');
+    const ids = patrolsOf(second.state, 'red-2').map((u) => u.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('carries no morale, no supply and no fatigue', () => {
+    // A patrol is not a formation in miniature. Twenty troopers do not hold a line, do not
+    // run out of food on a two-day ride, and are not worn down by a table written for a
+    // division marching in column.
+    const out = applyOrThrow(
+      { kind: 'detach_patrol', unitId: 'red-2' },
+      withScout(),
+      world,
+      'lenient',
+    );
+    const patrol = patrolsOf(out.state, 'red-2')[0]!;
+
+    expect(patrol.morale).toBe(0);
+    expect(patrol.provisions).toBe(0);
+    expect(patrol.equipment).toBe(0);
+    expect(patrol.fatigue).toBe(0);
+  });
+
+  it('is not broken or starving for carrying none of it', () => {
+    // The zeroes mean "not tracked", and every rule that reads them asks whose detachment
+    // this is before it reads the number. Without that a patrol would be born broken and
+    // starving on the hour it was sent out.
+    const out = applyOrThrow(
+      { kind: 'detach_patrol', unitId: 'red-2' },
+      withScout(),
+      world,
+      'lenient',
+    );
+    const patrol = patrolsOf(out.state, 'red-2')[0]!;
+
+    expect(isBroken(patrol)).toBe(false);
+    expect(isStarving(patrol)).toBe(false);
+    // And all twenty are present, because there is no fatigue to take any of them off.
+    expect(presentUnderArms(patrol)).toBe(PATROL_PAPER_STRENGTH);
+  });
+
+  it('takes no fatigue from a day in the saddle', () => {
+    const state = applyOrThrow(
+      { kind: 'detach_patrol', unitId: 'red-2', patrolId: 'vedette' },
+      withScout(),
+      world,
+      'lenient',
+    ).state;
+
+    const land = [...world.hexes.values()].filter((h) => h.terrainClass === 'land');
+    const start = state.units.get('vedette')!.column[0]!;
+    const goal = land.find(
+      (h) => Math.abs(h.coord.q - start.q) + Math.abs(h.coord.r - start.r) > 6,
+    )!.coord;
+
+    const ordered = applyOrThrow(
+      { kind: 'set_task', unitId: 'vedette', destination: goal },
+      state,
+      world,
+      'lenient',
+    ).state;
+    const out = applyOrThrow({ kind: 'advance_clock', hours: 14 }, ordered, world, 'lenient');
+
+    // It rode — the hours are counted, because the twenty-hour cap still applies to a
+    // horse — but it was charged nothing for them.
+    const rider = out.state.units.get('vedette')!;
+    expect(rider.hoursMarchedToday).toBeGreaterThan(4);
+    expect(rider.fatigue).toBe(0);
+    expect(
+      out.events.filter((e) => e.payload.kind === 'fatigue_accrued'),
+    ).toHaveLength(0);
+  });
+
+  it('is not a division, so nothing treats twenty men as one', () => {
+    const out = applyOrThrow(
+      { kind: 'detach_patrol', unitId: 'red-2' },
+      withScout(),
+      world,
+      'lenient',
+    );
+    expect(isDivision(patrolsOf(out.state, 'red-2')[0]!)).toBe(false);
+  });
+
+  it('marches like any other unit, because it is one', () => {
+    const state = applyOrThrow(
+      { kind: 'detach_patrol', unitId: 'red-2', patrolId: 'vedette' },
+      withScout(),
+      world,
+      'lenient',
+    ).state;
+
+    const land = [...world.hexes.values()].filter((h) => h.terrainClass === 'land');
+    const start = state.units.get('vedette')!.column[0]!;
+    const goal = land.find(
+      (h) => Math.abs(h.coord.q - start.q) + Math.abs(h.coord.r - start.r) > 4,
+    )!.coord;
+
+    const ordered = applyOrThrow(
+      { kind: 'set_task', unitId: 'vedette', destination: goal },
+      state,
+      world,
+      'lenient',
+    ).state;
+    const after = applyOrThrow({ kind: 'advance_clock', hours: 4 }, ordered, world, 'lenient').state;
+
+    expect(key(after.units.get('vedette')!.column[0]!)).not.toBe(key(start));
+    // And it is still its parent's.
+    expect(after.units.get('vedette')!.parentUnitId).toBe('red-2');
+  });
+});
+
+describe('a patrol and the men it came from', () => {
+  const scout = (id: string): Unit => ({ ...division(id, 'red'), traits: ['scout'] });
+
+  const detached = (): CampaignState => {
+    const base = applyOrThrow(
+      { kind: 'add_unit', unit: scout('red-2') },
+      setUp(),
+      world,
+      'lenient',
+    ).state;
+    return applyOrThrow(
+      { kind: 'detach_patrol', unitId: 'red-2', patrolId: 'vedette' },
+      base,
+      world,
+      'lenient',
+    ).state;
+  };
+
+  it('points back at its parent, which is where its condition is read from', () => {
+    const state = detached();
+    const patrol = state.units.get('vedette')!;
+    expect(parentOf(state, patrol)?.id).toBe('red-2');
+    // A formation of its own has no parent to read.
+    expect(parentOf(state, state.units.get('red-1')!)).toBeUndefined();
+  });
+
+  it('stays immune while its parent falls apart', () => {
+    // The parent is wrecked: starving, broken and exhausted. The patrol is twenty troopers
+    // a day's ride away and none of that reaches them — which is the point of the immunity
+    // rather than an oversight in it.
+    const state = applyOrThrow(
+      {
+        kind: 'set_unit_stats',
+        unitId: 'red-2',
+        changes: { morale: 0, provisions: 0, fatigue: 90 },
+      },
+      detached(),
+      world,
+      'lenient',
+    ).state;
+
+    const parent = state.units.get('red-2')!;
+    const patrol = state.units.get('vedette')!;
+
+    expect(isBroken(parent)).toBe(true);
+    expect(isStarving(parent)).toBe(true);
+    expect(isBroken(patrol)).toBe(false);
+    expect(isStarving(patrol)).toBe(false);
+    expect(presentUnderArms(patrol)).toBe(PATROL_PAPER_STRENGTH);
+
+    // And the condition a reader wants is the parent's, live — not a copy taken when the
+    // patrol rode out, which would still be reading full morale and forty provisions.
+    expect(parentOf(state, patrol)!.morale).toBe(0);
+    expect(parentOf(state, patrol)!.fatigue).toBe(90);
+  });
+});
+
+/**
+ * Battlefields.
+ *
+ * Ground rather than an object. The campaign layer does not resolve battles — a division's
+ * frontage is a kilometre and a hex is a kilometre, so everything that makes a battle a
+ * battle happens below this map. What it tracks is only which ground has stopped behaving
+ * like open country, and who is standing on it.
+ */
+describe('declare_battle', () => {
+  it('marks ground as fought over, and gives it back', () => {
+    const state = setUp();
+
+    const declared = applyOrThrow(
+      { kind: 'declare_battle', coords: [LAND] },
+      state,
+      world,
+      'strict',
+    ).state;
+    expect(declared.battle.has(key(LAND))).toBe(true);
+
+    const ended = applyOrThrow(
+      { kind: 'end_battle', coords: [LAND] },
+      declared,
+      world,
+      'strict',
+    ).state;
+    expect(ended.battle.has(key(LAND))).toBe(false);
+  });
+
+  it('refuses a battle nowhere, and a battle off the map', () => {
+    const state = setUp();
+
+    expect(check({ kind: 'declare_battle', coords: [] }, state, world, 'strict')).toContainEqual(
+      expect.objectContaining({ code: CODES.MALFORMED }),
+    );
+    expect(
+      check({ kind: 'declare_battle', coords: [{ q: 999, r: 999 }] }, state, world, 'strict'),
+    ).toContainEqual(expect.objectContaining({ code: CODES.OFF_MAP }));
+  });
+
+  it('is a referee command that bypasses no rule', () => {
+    // Declaring a battle is not an illegal march. There is nothing for `force` to do here,
+    // so the checker has only hard violations to give.
+    const state = setUp();
+    const out = apply({ kind: 'declare_battle', coords: [] }, state, world, 'lenient', {
+      force: true,
+    });
+    expect(out.ok).toBe(false);
+  });
+
+  it('folds the same way on replay', () => {
+    const state = setUp();
+    const log: LoggedEvent[] = [];
+    let s = state;
+    for (const cmd of [
+      { kind: 'declare_battle', coords: [LAND] },
+      { kind: 'end_battle', coords: [LAND] },
+      { kind: 'declare_battle', coords: [LAND] },
+    ] as Command[]) {
+      const out = apply(cmd, s, world, 'strict');
+      expect(out.ok).toBe(true);
+      log.push(...out.events);
+      s = out.state;
+    }
+    expect([...replay(log).battle].sort()).toEqual([...s.battle].sort());
+  });
+
+  it('counts a formation as engaged wherever its footprint touches the fighting', () => {
+    let s = setUp();
+    // Strung out along a road: the head three hexes away from where the fighting is.
+    const path = [0, 1, 2, 3].map((i) => ({ q: LAND.q + i, r: LAND.r }));
+    s = applyOrThrow({ kind: 'teleport_unit', unitId: 'red-1', column: path }, s, world, 'strict')
+      .state;
+
+    // The tail, not the head. A division trailing through a battle has not let go of it.
+    const tail = path[path.length - 1]!;
+    s = applyOrThrow({ kind: 'declare_battle', coords: [tail] }, s, world, 'strict').state;
+
+    const unit = s.units.get('red-1')!;
+    expect(isEngaged(s, unit)).toBe(true);
+    expect(engaged(s).map((u) => u.id)).toEqual(['red-1']);
+
+    // And it disengages by marching out, with no flag for anyone to forget to clear.
+    const away = applyOrThrow(
+      { kind: 'teleport_unit', unitId: 'red-1', column: [LAND] },
+      s,
+      world,
+      'strict',
+    ).state;
+    expect(isEngaged(away, away.units.get('red-1')!)).toBe(false);
+  });
+
+  it('has nobody engaged where there is no fighting', () => {
+    const s = setUp();
+    expect(s.battle.size).toBe(0);
+    expect(engaged(s)).toEqual([]);
+  });
+});
