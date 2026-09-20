@@ -69,7 +69,18 @@ docker run -p 3000:3000 -v campaign-data:/data campaign
 ```
 
 Open <http://localhost:3000>. The volume is the campaign: an append-only event log in
-SQLite, which a referee backs up by copying a file.
+SQLite.
+
+Back it up with `VACUUM INTO` rather than by copying the file. The database runs in WAL
+mode, so the committed state is spread across `campaign.db` and `campaign.db-wal`, and
+copying the first alone gets whatever was last checkpointed — a campaign missing its most
+recent evening, which opens cleanly and so is not noticed until it is restored.
+
+```bash
+node server/dist/backup.js /data/campaign.db /data/backup-2026-09-20.db
+```
+
+For hosting it somewhere rather than running it at home, see `deploy/README.md`.
 
 | Variable | Default | What it does |
 |---|---|---|
@@ -77,6 +88,11 @@ SQLite, which a referee backs up by copying a file.
 | `HOST` | `127.0.0.1` | The image sets `0.0.0.0`, because inside a container the loopback answers nothing |
 | `CAMPAIGN_DB` | `./campaign.db` | The image sets `/data/campaign.db` |
 | `CAMPAIGN_CLIENT` | unset | Where the built client is. Unset means "do not serve it" |
+| `CAMPAIGN_BODY_LIMIT` | `16777216` | The world upload ceiling, in bytes. A 32x32 world is 641 KB and a 64x64 about 2.5 MB |
+| `TRUST_PROXY` | unset | `true` behind a reverse proxy, or a comma-separated list of addresses to believe. Without it every client behind the proxy shares one rate-limit bucket |
+| `CAMPAIGN_RATE_LIMIT` | on | `off` disables rate limiting entirely |
+| `CAMPAIGN_RATE_GLOBAL` | `600` | Requests per minute per address |
+| `CAMPAIGN_RATE_CREATE` | `5` | Campaign creations per minute per address |
 
 ---
 
