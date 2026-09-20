@@ -1103,6 +1103,30 @@ describe('two columns wanting the same ground', () => {
     expect(raised(payloads, 'column_contested')).toHaveLength(0);
   });
 
+  it('gives it to the faster column whichever of the two is looked at first', () => {
+    // The same meeting as above with the identifiers the other way round, so the slower
+    // column is the one the scheduler considers first. Who wins is a fact about the
+    // ground and the pace, not about how the two formations happen to sort.
+    const slow = unit('a-1', 'red', { q: 8, r: 5 });
+    const fast = unit('z-1', 'blue', { q: 10, r: 5 }, {}, 'cavalry');
+    const contested = { q: 9, r: 5 };
+    const state = stateFrom({
+      units: [slow, fast],
+      tasks: [
+        marchTo(slow, { q: 12, r: 5 }, 6, contested),
+        marchTo(fast, { q: 4, r: 5 }, 6, contested),
+      ],
+    });
+
+    const { payloads } = advance(state, world, cfg, clean, { hours: 1 });
+    const after = fold(state, payloads);
+
+    expect(after.units.get('z-1')!.column[0]).toEqual(contested);
+    expect(after.units.get('a-1')!.column[0]).toEqual({ q: 8, r: 5 });
+    // Still no tie. A contest raised here would hold the hex against the winner too.
+    expect(raised(payloads, 'column_contested')).toHaveLength(0);
+  });
+
   it('hands an even contest to the referee, and stops the clock', () => {
     // Two infantry divisions on identical ground: the same half hour into the same hex.
     // This is the common case rather than the rare one.

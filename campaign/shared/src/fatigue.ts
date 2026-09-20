@@ -41,7 +41,9 @@ export function marchFatigueAt(cfg: CampaignConfig, unit: Unit, hours: number): 
 
   // Whole hours: the table has no reading for half an hour, and rounding down is the
   // reading that does not charge a man for time he has not yet spent.
-  const shifted = Math.floor(Math.max(0, hours)) + unit.experience;
+  // Minus, not plus: a veteran reads the table to the left, which is a lower reading for
+  // the same hours on the road.
+  const shifted = Math.floor(Math.max(0, hours)) - unit.experience;
   if (shifted < 0) return curve[0]!;
   if (shifted < curve.length) return curve[shifted]!;
 

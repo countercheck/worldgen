@@ -762,8 +762,19 @@ function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: 
         // Strictly cheaper wins. Equal is the tie the rules hand to the referee, and it is
         // the common case rather than the rare one: two infantry divisions on the same
         // open ground cost exactly the same hour.
-        if (Math.abs(mine - theirs) <= 1e-9 || mine > theirs) {
+        if (Math.abs(mine - theirs) <= 1e-9) {
           stop(rival.unitId, true, 'column_contested');
+          return false;
+        }
+
+        // Strictly slower, so the rules have already settled it and there is nothing to
+        // ask. It waits, and it waits the way a column waits for one that is simply
+        // standing in the road — deliberately not as a contest, because an open contest
+        // holds the hex against everyone, the faster column included. Raising one here
+        // would deadlock the pair whenever the slower column happened to be looked at
+        // first, which is a fact about identifiers rather than about the ground.
+        if (mine > theirs) {
+          stop(rival.unitId, false, 'column_blocked');
           return false;
         }
       }

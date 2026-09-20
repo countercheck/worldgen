@@ -940,6 +940,28 @@ describe('formation, as the referee orders it', () => {
     expect(out.events).toHaveLength(0);
   });
 
+  it('writes nothing when the change already under way is the one asked for', () => {
+    // A second click on the same button is the referee saying the same thing twice.
+    // Restarting the change would charge the hours again from the present hour, so a
+    // formation could be held mid-change indefinitely by repeating the order.
+    const changing = applyOrThrow(
+      { kind: 'set_formation', unitId: 'red-1', formation: 'occupation' },
+      setUp(),
+      world,
+      'lenient',
+    ).state;
+    const completesAt = changing.units.get('red-1')!.formationChange!.completesAtHours;
+
+    const again = applyOrThrow(
+      { kind: 'set_formation', unitId: 'red-1', formation: 'occupation' },
+      changing,
+      world,
+      'lenient',
+    );
+    expect(again.events).toHaveLength(0);
+    expect(again.state.units.get('red-1')!.formationChange!.completesAtHours).toBe(completesAt);
+  });
+
   it('refuses a formation for a unit that does not exist', () => {
     const v = check(
       { kind: 'set_formation', unitId: 'ghost', formation: 'rest' },
@@ -1068,6 +1090,24 @@ describe('patrols', () => {
     const out = applyOrThrow({ kind: 'detach_patrol', unitId: 'red-2' }, state, world, 'lenient');
     expect(out.state.units.get('red-2')!.paperStrength).toBe(before - 100);
     expect(patrolsOf(out.state, 'red-2')).toHaveLength(4);
+  });
+
+  it('does not reuse the identifier of a patrol that is still out', () => {
+    // Two out, the first lost. Numbering the next from the count of those still riding
+    // would name it after the one that is — and quietly overwrite it.
+    let state = withScout();
+    for (let i = 0; i < 2; i++) {
+      state = applyOrThrow({ kind: 'detach_patrol', unitId: 'red-2' }, state, world, 'lenient').state;
+    }
+    expect(patrolsOf(state, 'red-2').map((p) => p.id)).toEqual(['red-2-p1', 'red-2-p2']);
+
+    state = applyOrThrow({ kind: 'remove_unit', unitId: 'red-2-p1' }, state, world, 'lenient').state;
+    state = applyOrThrow({ kind: 'detach_patrol', unitId: 'red-2' }, state, world, 'lenient').state;
+
+    const ids = patrolsOf(state, 'red-2').map((p) => p.id).sort();
+    expect(ids).toEqual(['red-2-p2', 'red-2-p3']);
+    // The survivor is still the survivor, not a fresh patrol wearing its name.
+    expect(state.units.get('red-2-p2')!.name).toBe('red-2 Division patrol 2');
   });
 
   it('will not let a formation without Scout field one as of right', () => {

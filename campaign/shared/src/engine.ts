@@ -669,7 +669,14 @@ export function decide(
       if (unit === undefined) return [];
 
       const hours = cfg.formationChangeHours[unit.formation][cmd.formation];
-      const already = unit.formation === cmd.formation && unit.formationChange == null;
+      // Already there, or already on the way there. A second click on "occupy" is the
+      // referee saying the same thing twice, not a fresh order — and restarting the
+      // change would charge the twenty-four hours again from the present hour, so a
+      // formation could be kept changing forever by a commander who kept asking.
+      const already =
+        unit.formationChange == null
+          ? unit.formation === cmd.formation
+          : unit.formationChange.to === cmd.formation;
       if (already) return [];
 
       const out: EventPayload[] = [];
@@ -706,12 +713,20 @@ export function decide(
       // permanently, because the men do not come back when the patrol does.
       const costPaperStrength = out >= cfg.freePatrols ? cfg.extraPatrolCost : 0;
 
-      const id = cmd.patrolId ?? `${cmd.unitId}-p${out + 1}`;
+      // The first free number rather than the count. A patrol that has been destroyed or
+      // recalled leaves a gap, and numbering from the ones still out would hand the next
+      // detachment an identifier a live patrol is already using — which `check` does not
+      // catch, because it only guards ids the caller named, and which `reduce` would
+      // then silently overwrite.
+      let nth = out + 1;
+      while (state.units.has(`${cmd.unitId}-p${nth}`)) nth += 1;
+
+      const id = cmd.patrolId ?? `${cmd.unitId}-p${nth}`;
       const defaults = cfg.kindDefaults.cavalry;
 
       const patrol: Unit = {
         id,
-        name: cmd.name ?? `${parent.name} patrol ${out + 1}`,
+        name: cmd.name ?? `${parent.name} patrol ${nth}`,
         faction: parent.faction,
         // Cavalry, because the rules move a patrol as cavalry — it is a handful of
         // troopers however the division it came from marches.

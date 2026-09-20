@@ -82,10 +82,10 @@ describe("the rules' fatigue table", () => {
     // make a man march faster, it makes him arrive able to fight.
     const at = (xp: Experience) => marchFatigueAt(cfg, unit('infantry', xp), 9);
     expect(at(0)).toBe(3);
-    expect(at(1)).toBe(4);
-    expect(at(2)).toBe(5);
-    expect(at(-1)).toBe(2);
-    expect(at(-2)).toBe(2);
+    expect(at(1)).toBe(2);
+    expect(at(2)).toBe(2);
+    expect(at(-1)).toBe(4);
+    expect(at(-2)).toBe(5);
   });
 
   it('charges a stretch of road by subtraction, so the bands compose', () => {
