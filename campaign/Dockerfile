@@ -77,10 +77,16 @@ ENV NODE_ENV=production \
     CAMPAIGN_DB=/data/campaign.db \
     CAMPAIGN_CLIENT=/app/client/dist
 
-# The campaign lives here. Without a volume it is inside the container's writable layer and
-# vanishes with the container, which for an append-only log of somebody's evening would be
-# a poor surprise.
-VOLUME ["/data"]
+# No `VOLUME ["/data"]`, though `CAMPAIGN_DB` points inside it and the campaign lives
+# there. Railway refuses to build an image that declares one — "docker VOLUME at Line 83
+# is not supported, use Railway Volumes" — because it attaches its own, and a Dockerfile
+# that asks for a second one is ambiguous about which the data is in.
+#
+# So the mount is the caller's job, and both callers do it: `docker run -v campaign-data:/data`
+# as `docs/CAMPAIGN.md` gives it, and `requiredMountPath` in `railway.json`, which refuses
+# to start the container at all without the volume. What is lost is the anonymous volume
+# Docker would have created for someone who forgot the flag — a safety net that mostly
+# produced volumes nobody could name afterwards.
 
 EXPOSE 3000
 
