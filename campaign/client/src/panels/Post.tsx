@@ -23,9 +23,9 @@
 
 import type { ReceivedDespatch, SentDespatch } from '@campaign/shared';
 
-import { ageLabel } from '../board.js';
+import { ageLabel, dayHour } from '../board.js';
 
-const hour = (h: number): string => `hour ${h % 1 === 0 ? h : h.toFixed(1)}`;
+
 
 export function Post({
   received,
@@ -70,15 +70,14 @@ export function Post({
               >
                 <div className="despatch-head">
                   <span className="despatch-from">{nameOf(d.from)}</span>
-                  <span className="despatch-kind">{d.kind}</span>
                 </div>
 
                 {/* The hour it describes, first and large. Everything else is smaller. */}
                 <div className="despatch-when">
-                  Written {hour(d.sentAtHours)} · {ageLabel(d.sentAtHours, clockHours)}
+                  Written {dayHour(d.sentAtHours)} · {ageLabel(d.sentAtHours, clockHours)}
                 </div>
                 <div className="muted small">
-                  Reached you {hour(d.receivedAtHours)}, after{' '}
+                  Reached you {dayHour(d.receivedAtHours)}, after{' '}
                   {(d.receivedAtHours - d.sentAtHours).toFixed(1)} h on the road
                   {d.forwardedFrom === null ? '' : ` · forwarded from ${nameOf(d.forwardedFrom)}`}
                 </div>
@@ -132,10 +131,9 @@ export function Post({
               <li key={d.id} className={`despatch sent kind-${d.kind}`}>
                 <div className="despatch-head">
                   <span className="despatch-from">To {nameOf(d.to)}</span>
-                  <span className="despatch-kind">{d.kind}</span>
                 </div>
                 <div className="despatch-when">
-                  Written {hour(d.sentAtHours)} · {ageLabel(d.sentAtHours, clockHours)}
+                  Written {dayHour(d.sentAtHours)} · {ageLabel(d.sentAtHours, clockHours)}
                 </div>
 
                 {d.body.text !== undefined && <p className="prose-read">{d.body.text}</p>}

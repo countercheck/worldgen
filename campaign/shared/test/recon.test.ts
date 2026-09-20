@@ -82,7 +82,7 @@ function unit(
     name: id,
     faction,
     kind,
-    effectives: 4000,
+    paperStrength: 4000,
     fatigue: 0,
     experience: 0,
     morale: 30,
@@ -99,6 +99,7 @@ function unit(
     column,
     hoursMarchedToday: 0,
     corps: null,
+    parentUnitId: null,
     ...opts,
   };
 }
@@ -164,7 +165,7 @@ describe('reconZone', () => {
       Array.from({ length: 20 }, (_, i) => ({ q: 10 + i, r: 10 })),
       [],
       'cavalry',
-      { effectives: 4000, spacingM: 3, spacingMultiplier: 1.5 },
+      { paperStrength: 4000, spacingM: 3, spacingMultiplier: 1.5 },
     );
     const zone = reconZone(world, cfg, long);
 

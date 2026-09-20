@@ -16,6 +16,7 @@ export * from './crossing.js';
 export * from './despatch.js';
 export * from './engine.js';
 export * from './events.js';
+export * from './fatigue.js';
 export * from './hex.js';
 export * from './mask.js';
 export * from './movement.js';

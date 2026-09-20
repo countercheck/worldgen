@@ -328,6 +328,15 @@ export interface Mark {
   readonly column: readonly Hex[];
   readonly kind: MarkKind;
   readonly symbol: SymbolSpec;
+  /**
+   * Drawn deployed: three parallel lines rather than a column ribbon.
+   *
+   * Set only for a formation actually observed. How an enemy is standing is intelligence
+   * — a corps in line is about to fight and a corps in column is about to march — and a
+   * sighting carries no such thing, so a reported or contact mark is never deployed here
+   * even when the formation behind it is.
+   */
+  readonly deployed: boolean;
 }
 
 /**
@@ -349,7 +358,38 @@ export interface Rider {
   readonly color: string;
 }
 
-/** Everything that follows the cursor. Redrawn every frame; must stay cheap. */
+/**
+ * Ground being fought over.
+ *
+ * Deliberately not faction-coloured. A battlefield belongs to nobody while it is being
+ * fought over — that is what makes it one — and tinting it with a side's colour would
+ * announce an outcome the map has no business predicting. So it is drawn as heat: a wash
+ * and a hatch, in a colour no faction uses.
+ */
+function drawBattleGround(
+  ctx: CanvasRenderingContext2D,
+  view: View,
+  battle: ReadonlySet<HexKey> | undefined,
+): void {
+  if (battle === undefined || battle.size === 0) return;
+
+  ctx.save();
+  for (const k of battle) {
+    const [q, r] = k.split(',').map(Number);
+    const p = toScreen({ q: q!, r: r! }, view);
+
+    ctx.fillStyle = 'rgba(200,64,40,0.22)';
+    hexPath(ctx, p, view.size * 0.96);
+    ctx.fill();
+
+    ctx.strokeStyle = 'rgba(220,90,60,0.7)';
+    ctx.lineWidth = Math.max(1, view.size * 0.06);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/** Everything that follows the cursor. Redrawn every frame; must stay cheap. *//** Everything that follows the cursor. Redrawn every frame; must stay cheap. */
 export function drawOverlay(
   ctx: CanvasRenderingContext2D,
   view: View,
@@ -362,9 +402,19 @@ export function drawOverlay(
     riders?: readonly Rider[] | undefined;
     /** A hex the referee is about to choose as a destination. */
     picking?: Hex | null | undefined;
+    /** Ground the referee has pointed at so far, in the order he pointed at it. */
+    route?: readonly Hex[] | undefined;
+    /** Where every marching column is going, as the engine would route it now. */
+    plans?: readonly Plan[] | undefined;
+    /** Ground being fought over. */
+    battle?: ReadonlySet<HexKey> | undefined;
   },
 ): void {
   ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+
+  // Under everything. A battlefield is ground, not a thing standing on it, and the
+  // formations in the fighting have to stay readable over the top of it.
+  drawBattleGround(ctx, view, opts.battle);
 
   if (opts.reach !== undefined) {
     ctx.fillStyle = 'rgba(255,255,255,0.16)';
@@ -374,6 +424,11 @@ export function drawOverlay(
       ctx.fill();
     }
   }
+
+  // Under the formations, because they are plans rather than facts: where the columns are
+  // going, and the ground the referee has pointed at but not yet committed.
+  for (const plan of opts.plans ?? []) drawPlan(ctx, view, plan);
+  drawPickedRoute(ctx, view, opts.route ?? []);
 
   // Riders under the formations: a courier is a man on a horse and a division is a corps,
   // and where the two are on the same hex the corps is the thing to see.
@@ -399,6 +454,101 @@ export function drawOverlay(
     hexPath(ctx, toScreen(opts.hovered, view), view.size * 0.94);
     ctx.stroke();
   }
+}
+
+/** A column's route ahead, in its own colour. */
+export interface Plan {
+  readonly unitId: string;
+  readonly color: string;
+  readonly route: readonly Hex[];
+}
+
+/**
+ * Where a column is going.
+ *
+ * Thin, dotted and under everything else. This is the referee's own screen and he has
+ * every column on it at once, so a plan has to be legible as a direction without becoming
+ * the thing the eye lands on — the formations are the map, the routes are an annotation.
+ *
+ * A small square on the destination, because a route that simply stops leaves "is that
+ * where they are going, or is that as far as I drew it" unanswerable.
+ */
+function drawPlan(ctx: CanvasRenderingContext2D, view: View, plan: Plan): void {
+  const points = plan.route.map((h) => toScreen(h, view));
+  if (points.length < 2) return;
+
+  ctx.save();
+  ctx.globalAlpha = 0.55;
+  ctx.strokeStyle = plan.color;
+  ctx.lineWidth = Math.max(1, view.size * 0.08);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.setLineDash([view.size * 0.28, view.size * 0.36]);
+
+  ctx.beginPath();
+  ctx.moveTo(points[0]!.x, points[0]!.y);
+  for (const p of points.slice(1)) ctx.lineTo(p.x, p.y);
+  ctx.stroke();
+
+  const end = points.at(-1)!;
+  const r = Math.max(1.5, view.size * 0.2);
+  ctx.setLineDash([]);
+  ctx.globalAlpha = 0.8;
+  ctx.fillStyle = plan.color;
+  ctx.fillRect(end.x - r, end.y - r, r * 2, r * 2);
+  ctx.restore();
+}
+
+/**
+ * The places a referee has pointed at, in the order he pointed at them.
+ *
+ * Straight segments between the picks rather than the route itself. The route is the
+ * engine's to work out — drawing a guess at it here would be the client claiming to know
+ * ground it has no cost model for, and it would be wrong the moment a road it cannot see
+ * turns out to be quicker. Numbers, because "by way of A then B" and "by way of B then A"
+ * are different orders and an undecorated chain of rings does not say which this is.
+ */
+function drawPickedRoute(ctx: CanvasRenderingContext2D, view: View, route: readonly Hex[]): void {
+  if (route.length === 0) return;
+  const points = route.map((h) => toScreen(h, view));
+
+  ctx.save();
+  ctx.strokeStyle = '#cba135';
+  ctx.lineWidth = Math.max(1.5, view.size * 0.12);
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  if (points.length > 1) {
+    ctx.save();
+    ctx.globalAlpha = 0.7;
+    ctx.setLineDash([view.size * 0.5, view.size * 0.4]);
+    ctx.beginPath();
+    ctx.moveTo(points[0]!.x, points[0]!.y);
+    for (const p of points.slice(1)) ctx.lineTo(p.x, p.y);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  points.forEach((p, i) => {
+    hexPath(ctx, p, view.size * 0.9);
+    ctx.stroke();
+
+    // The last pick is where they are to end up; the rest are only on the way. Labelling
+    // it as such stops a referee counting rings to find his destination.
+    const label = i === points.length - 1 ? '×' : String(i + 1);
+    ctx.font = `${Math.max(8, view.size * 0.9).toFixed(0)}px system-ui, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineWidth = Math.max(2, view.size * 0.22);
+    ctx.strokeStyle = 'rgba(0,0,0,0.65)';
+    ctx.strokeText(label, p.x, p.y);
+    ctx.fillStyle = '#cba135';
+    ctx.fillText(label, p.x, p.y);
+    ctx.strokeStyle = '#cba135';
+    ctx.lineWidth = Math.max(1.5, view.size * 0.12);
+  });
+
+  ctx.restore();
 }
 
 /**
@@ -471,7 +621,9 @@ function drawMark(
 
   const head = toScreen(column[0]!, view);
 
-  if (column.length > 1) {
+  if (mark.deployed) {
+    drawDeployed(ctx, view, mark, emphasised);
+  } else if (column.length > 1) {
     ctx.save();
     ctx.strokeStyle = symbol.color;
     ctx.lineCap = 'round';
@@ -499,6 +651,59 @@ function drawMark(
   }
 
   drawSymbol(ctx, head.x, head.y, symbolSize(view.size), { ...symbol, emphasised });
+}
+
+/**
+ * A formation standing in line of battle: three parallel lines.
+ *
+ * A column ribbon would be wrong here in the most misleading way available. A deployed
+ * division covers about a kilometre — one hex — so its ribbon is a dot, and a reader
+ * would see the formation that is about to fight as the smallest thing on the map. The
+ * three lines say the opposite, and say it in the language the period used for itself:
+ * ranks, drawn across the front rather than along the road.
+ *
+ * They run along the frontage and stack across it. Where the front is a single hex there
+ * is no direction to take from the ground, so they lie flat — the orientation carries no
+ * information the model has, and a made-up facing would imply one it does not.
+ */
+function drawDeployed(
+  ctx: CanvasRenderingContext2D,
+  view: View,
+  mark: Mark,
+  emphasised: boolean,
+): void {
+  const { column, symbol } = mark;
+  const head = toScreen(column[0]!, view);
+  const tail = toScreen(column[column.length - 1]!, view);
+
+  // The axis of the front. A single-hex front has none, so it lies flat.
+  const dx = tail.x - head.x;
+  const dy = tail.y - head.y;
+  const span = Math.hypot(dx, dy);
+  const [ax, ay] = span > 0.5 ? [dx / span, dy / span] : [1, 0];
+  // Perpendicular, which is the direction the ranks stack in.
+  const [px, py] = [-ay, ax];
+
+  const cx = (head.x + tail.x) / 2;
+  const cy = (head.y + tail.y) / 2;
+  const half = Math.max(view.size * 0.55, span / 2 + view.size * 0.3);
+  const gap = Math.max(2.5, view.size * 0.2);
+
+  ctx.save();
+  ctx.strokeStyle = symbol.color;
+  ctx.lineCap = 'round';
+  ctx.globalAlpha = 0.85;
+  ctx.lineWidth = Math.max(1.5, Math.min(6, view.size * (emphasised ? 0.16 : 0.11)));
+
+  for (const rank of [-1, 0, 1]) {
+    const ox = px * gap * rank;
+    const oy = py * gap * rank;
+    ctx.beginPath();
+    ctx.moveTo(cx + ox - ax * half, cy + oy - ay * half);
+    ctx.lineTo(cx + ox + ax * half, cy + oy + ay * half);
+    ctx.stroke();
+  }
+  ctx.restore();
 }
 
 /**

@@ -38,7 +38,7 @@ export function reconZone(
 ): Set<HexKey> {
   const radius = reconRadius(cfg, unit);
   const seen = new Set<HexKey>();
-  for (const c of occupied(unit, grade)) {
+  for (const c of occupied(unit, grade, cfg.footprint)) {
     for (const h of hexRange(c, radius)) {
       if (hexAt(world, h) !== undefined) seen.add(key(h));
     }
@@ -233,7 +233,7 @@ export function spottedBy(
 
   for (const unit of state.units.values()) {
     if (unit.faction === observer.faction) continue;
-    const seenHex = occupied(unit).find((c) => zone.has(key(c)));
+    const seenHex = occupied(unit, 'road', cfg.footprint).find((c) => zone.has(key(c)));
     if (seenHex === undefined) continue;
 
     found.set(unit.id, {

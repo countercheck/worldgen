@@ -32,14 +32,14 @@
  * is the shared engine earning its keep: the same routing code, run over worse data.
  */
 
-import { occupied } from './column.js';
+import { FOOTPRINT, occupied, type FootprintShape } from './column.js';
 import type { CampaignConfig } from './config.js';
 import { crossingAt, riverClass } from './crossing.js';
 import { astar, distance, key, neighbors, type Hex } from './hex.js';
 import { speedKmh } from './movement.js';
 import { publicContact, type PublicContact, type Sighting } from './recon.js';
 import { gradeOf, isPassable, isRiver } from './terrain.js';
-import type { Unit, UnitReport } from './unit.js';
+import type { Formation, Unit, UnitReport } from './unit.js';
 import { hexAt, type World, type WorldHex } from './world.js';
 
 /**
@@ -429,9 +429,13 @@ export function rideHours(
  * a division is eighteen kilometres of road, and its tail is as much part of it as its
  * front.
  */
-export function formationsTouch(a: Unit, b: Unit): boolean {
-  const mine = new Set(occupied(a).map(key));
-  for (const c of occupied(b)) {
+export function formationsTouch(
+  a: Unit,
+  b: Unit,
+  shapes: Readonly<Record<Formation, FootprintShape>> = FOOTPRINT,
+): boolean {
+  const mine = new Set(occupied(a, 'road', shapes).map(key));
+  for (const c of occupied(b, 'road', shapes)) {
     if (mine.has(key(c))) return true;
     for (const n of neighbors(c)) {
       if (mine.has(key(n))) return true;

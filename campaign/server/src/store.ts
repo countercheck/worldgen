@@ -17,6 +17,10 @@ import { createHash, randomBytes } from 'node:crypto';
 import {
   apply,
   DEFAULT_CONFIG,
+  DEFAULT_RULESET,
+  isRuleset,
+  resolveConfig,
+  type ConfigOverrides,
   EMPTY_STATE,
   knowledgeEvents,
   parseWorld,
@@ -28,9 +32,11 @@ import {
   type Command,
   type Contact,
   type Despatch,
+  type EventPayload,
   type LoggedEvent,
   type PendingDecision,
   type Task,
+  type Unit,
   type UnitReport,
   commanderRole,
   REFEREE_ROLE,
@@ -42,6 +48,36 @@ import {
 
 import type { Db } from './db.js';
 
+/**
+ * Bring a stored payload up to the shape the engine now expects.
+ *
+ * The log is the campaign, and it is append-only: an event written last month cannot be
+ * rewritten because a field was renamed this month. So the rename is honoured on the way
+ * in instead — `effectives` became `paperStrength`, and a payload that predates that still
+ * folds to the same state it always did.
+ *
+ * Renames only. Anything that changes what an event *means* is a new event kind, because
+ * a reader of the log has to be able to trust that an old entry still says what it said.
+ */
+const RENAMED_FIELDS: readonly (readonly [string, string])[] = [
+  ['effectives', 'paperStrength'],
+  ['costEffectives', 'costPaperStrength'],
+];
+
+function upgrade<T>(value: T): T {
+  if (Array.isArray(value)) return value.map((v) => upgrade(v)) as unknown as T;
+  if (value === null || typeof value !== 'object') return value;
+
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    const renamed = RENAMED_FIELDS.find(([from]) => from === k)?.[1] ?? k;
+    // A payload already carrying the new name wins: an upgrade must never undo itself.
+    if (renamed !== k && renamed in (value as Record<string, unknown>)) continue;
+    out[renamed] = upgrade(v);
+  }
+  return out as T;
+}
+
 /** How many events between snapshots. Small enough to matter, large enough not to churn. */
 const SNAPSHOT_EVERY = 50;
 
@@ -52,6 +88,16 @@ export interface CampaignRow {
   readonly worldDoc: unknown;
   readonly world: World;
   readonly strictness: Strictness;
+  /** Which named set of rules it was started under. */
+  readonly ruleset: string;
+  /**
+   * The numbers this campaign actually runs on, resolved at creation and stored.
+   *
+   * Stored rather than re-resolved on every read, so that editing a ruleset tomorrow
+   * cannot silently re-tune a game already in progress. The ruleset name beside it says
+   * where the numbers came from; these are what they were.
+   */
+  readonly config: CampaignConfig;
 }
 
 export const sha256 = (s: string): string =>
@@ -64,6 +110,12 @@ export const hashToken = (t: string): string => createHash('sha256').update(t).d
 export class CampaignStore {
   constructor(
     private readonly db: Db,
+    /**
+     * A fallback for a campaign that has no stored numbers of its own.
+     *
+     * Every campaign created since rulesets landed carries its own resolved config, and
+     * that is what runs. This is only what an older row falls back to.
+     */
     private readonly cfg: CampaignConfig = DEFAULT_CONFIG,
   ) {}
 
@@ -86,17 +138,37 @@ export class CampaignStore {
     factions: readonly { id: string; name: string; color: string }[];
     seed?: number;
     strictness?: Strictness;
+    /** A named set of rules. Unknown names fall back to the standard one. */
+    ruleset?: string;
+    /** This campaign's own amendments, on top of the ruleset. */
+    config?: ConfigOverrides;
   }): { campaign: CampaignRow; refereeToken: string } {
     const blob = JSON.stringify(opts.worldDoc);
     const world = parseWorld(opts.worldDoc);
     const strictness = opts.strictness ?? 'strict';
+    const ruleset = opts.ruleset !== undefined && isRuleset(opts.ruleset)
+      ? opts.ruleset
+      : DEFAULT_RULESET;
+    // Built on the store's own numbers rather than on the rules as written, so a server
+    // run with amended defaults hands them to the campaigns it creates.
+    const config = resolveConfig(opts.config, ruleset, this.cfg);
 
     this.db
       .prepare(
-        `INSERT INTO campaigns (id, name, world_hash, world_blob, strictness, created_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO campaigns
+           (id, name, world_hash, world_blob, strictness, ruleset, config_json, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(opts.id, opts.name, sha256(blob), blob, strictness, new Date().toISOString());
+      .run(
+        opts.id,
+        opts.name,
+        sha256(blob),
+        blob,
+        strictness,
+        ruleset,
+        JSON.stringify(config),
+        new Date().toISOString(),
+      );
 
     const refereeToken = newToken();
     this.db
@@ -112,6 +184,8 @@ export class CampaignStore {
       worldDoc: opts.worldDoc,
       world,
       strictness,
+      ruleset,
+      config,
     };
 
     const commands: Command[] = [
@@ -170,13 +244,25 @@ export class CampaignStore {
 
   campaign(id: string): CampaignRow | null {
     const row = this.db
-      .prepare(`SELECT id, name, world_hash, world_blob, strictness FROM campaigns WHERE id = ?`)
+      .prepare(
+        `SELECT id, name, world_hash, world_blob, strictness, ruleset, config_json
+         FROM campaigns WHERE id = ?`,
+      )
       .get(id) as
-      | { id: string; name: string; world_hash: string; world_blob: string; strictness: string }
+      | {
+          id: string;
+          name: string;
+          world_hash: string;
+          world_blob: string;
+          strictness: string;
+          ruleset: string | null;
+          config_json: string | null;
+        }
       | undefined;
     if (row === undefined) return null;
 
     const worldDoc = JSON.parse(row.world_blob) as unknown;
+    const ruleset = row.ruleset ?? DEFAULT_RULESET;
     return {
       id: row.id,
       name: row.name,
@@ -184,6 +270,14 @@ export class CampaignStore {
       worldDoc,
       world: parseWorld(worldDoc),
       strictness: row.strictness as Strictness,
+      ruleset,
+      // A campaign written before rulesets existed has no stored numbers. Resolving them
+      // now gives it the rules as written, which is what it has been playing under all
+      // along — there was nothing else to play under.
+      config:
+        row.config_json === null
+          ? resolveConfig(undefined, ruleset)
+          : (JSON.parse(row.config_json) as CampaignConfig),
     };
   }
 
@@ -219,7 +313,7 @@ export class CampaignStore {
       seq: r.seq,
       clockHours: r.clock_hours,
       actor: JSON.parse(r.actor_json),
-      payload: JSON.parse(r.payload_json),
+      payload: upgrade(JSON.parse(r.payload_json)) as EventPayload,
       forced: r.forced === 1,
       strictness: r.strictness as Strictness,
       bypassed: JSON.parse(r.bypassed_json) as Violation[],
@@ -266,10 +360,14 @@ export class CampaignStore {
         ? ({ kind: 'referee' } as const)
         : ({ kind: 'commander', id: role.id } as const);
 
+    // The campaign's own numbers, not the store's. Two campaigns in one database may be
+    // played under different rules, which is the whole point of naming them.
+    const cfg = campaign.config ?? this.cfg;
+
     let state = this.state(campaign.id);
     const outcome = apply(command, state, campaign.world, campaign.strictness, {
       actor,
-      cfg: this.cfg,
+      cfg,
       ...(opts.force !== undefined ? { force: opts.force } : {}),
       ...(opts.strictness !== undefined ? { strictness: opts.strictness } : {}),
     });
@@ -279,7 +377,7 @@ export class CampaignStore {
     const all = [...outcome.events];
     state = outcome.state;
 
-    for (const payload of knowledgeEvents(state, campaign.world, this.cfg)) {
+    for (const payload of knowledgeEvents(state, campaign.world, cfg)) {
       const event: LoggedEvent = {
         seq: state.nextSeq,
         clockHours: state.clockHours,
@@ -383,11 +481,12 @@ export function serialise(state: CampaignState): string {
     despatches: [...state.despatches.values()],
     tasks: [...state.tasks.values()],
     decisions: [...state.decisions.values()],
+    battle: [...state.battle],
   });
 }
 
 export function deserialise(json: string): CampaignState {
-  const d = JSON.parse(json) as {
+  const d = upgrade(JSON.parse(json)) as {
     name: string;
     world: CampaignState['world'];
     seed: number;
@@ -395,7 +494,10 @@ export function deserialise(json: string): CampaignState {
     nextSeq: number;
     factions: CampaignState['factions'] extends ReadonlyMap<string, infer F> ? F[] : never;
     commanders: Commander[];
-    units: CampaignState['units'] extends ReadonlyMap<string, infer U> ? U[] : never;
+    // `formationChange` and `parentUnitId` postdate the first snapshots, like the task
+    // and decision fields.
+    units: (Omit<Unit, 'formationChange' | 'parentUnitId'> &
+      Partial<Pick<Unit, 'formationChange' | 'parentUnitId'>>)[];
     knowledge: {
       commanderId: string;
       surveyed: string[];
@@ -405,8 +507,15 @@ export function deserialise(json: string): CampaignState {
       nextContactNo?: number;
     }[];
     despatches?: Despatch[];
-    tasks?: Task[];
-    decisions?: PendingDecision[];
+    // Waypoints postdate the first snapshots, so they are optional on the way in even
+    // though `Task` requires them on the way out.
+    tasks?: (Omit<Task, 'via' | 'viaIndex'> & Partial<Pick<Task, 'via' | 'viaIndex'>>)[];
+    // `favouring` postdates the first snapshots, like the task fields above.
+    decisions?: (Omit<PendingDecision, 'favouring'> &
+      Partial<Pick<PendingDecision, 'favouring'>>)[];
+    // Battlefields postdate the first snapshots. Absent means no fighting anywhere, which
+    // is what a campaign written before they existed had.
+    battle?: string[];
   };
 
   return {
@@ -419,7 +528,12 @@ export function deserialise(json: string): CampaignState {
     // Tolerated as absent: a snapshot written before commanders existed still folds, and
     // the events after it will rebuild what it lacks.
     commanders: new Map((d.commanders ?? []).map((c) => [c.id, c])),
-    units: new Map(d.units.map((u) => [u.id, u])),
+    units: new Map(
+      d.units.map((u) => [
+        u.id,
+        { ...u, formationChange: u.formationChange ?? null, parentUnitId: u.parentUnitId ?? null },
+      ]),
+    ),
     knowledge: new Map(
       (d.knowledge ?? []).map((k) => [
         k.commanderId,
@@ -436,7 +550,14 @@ export function deserialise(json: string): CampaignState {
     // Tolerated as absent for the same reason as `commanders`: a snapshot written before
     // riders existed still folds, and the events after it rebuild what it lacks.
     despatches: new Map((d.despatches ?? []).map((x) => [x.id, x])),
-    tasks: new Map((d.tasks ?? []).map((t) => [t.unitId, t])),
-    decisions: new Map((d.decisions ?? []).map((k) => [k.id, k])),
+    // `via`/`viaIndex` likewise: a snapshot written before waypoints existed has neither,
+    // and a march with no waypoints behind it is exactly what such a task was.
+    tasks: new Map(
+      (d.tasks ?? []).map((t) => [t.unitId, { ...t, via: t.via ?? [], viaIndex: t.viaIndex ?? 0 }]),
+    ),
+    decisions: new Map(
+      (d.decisions ?? []).map((k) => [k.id, { ...k, favouring: k.favouring ?? null }]),
+    ),
+    battle: new Set(d.battle ?? []),
   };
 }

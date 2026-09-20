@@ -21,6 +21,7 @@ import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import {
   assertMasked,
   DEFAULT_CONFIG,
+  type ConfigOverrides,
   inboxOf,
   logFor,
   viewFor,
@@ -66,8 +67,14 @@ function tokenFrom(req: FastifyRequest): string | undefined {
 
 export function buildApp(opts: AppOptions = {}): FastifyInstance {
   const db = opts.db ?? openDb();
+  // A fallback only. Every request resolves the campaign's own numbers from the row, so
+  // that two campaigns in one database can be played under different rules.
   const cfg = opts.cfg ?? DEFAULT_CONFIG;
   const store = new CampaignStore(db, cfg);
+
+  /** The numbers this campaign runs on. */
+  const configOf = (campaign: { config?: CampaignConfig }): CampaignConfig =>
+    campaign.config ?? cfg;
 
   const app = Fastify({ logger: opts.logger ?? false });
   app.register(cookie);
@@ -107,6 +114,8 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
       factions?: { id: string; name: string; color: string }[];
       seed?: number;
       strictness?: Strictness;
+      ruleset?: string;
+      config?: ConfigOverrides;
     };
 
     if (body?.world === undefined || !Array.isArray(body.factions) || body.factions.length === 0) {
@@ -122,6 +131,8 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
         factions: body.factions,
         ...(body.seed !== undefined ? { seed: body.seed } : {}),
         ...(body.strictness !== undefined ? { strictness: body.strictness } : {}),
+        ...(body.ruleset !== undefined ? { ruleset: body.ruleset } : {}),
+        ...(body.config !== undefined ? { config: body.config } : {}),
       });
 
       // The only time this token exists in plaintext anywhere. It is not stored and
@@ -129,7 +140,11 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
       //
       // No commander links yet: a link names a seat, and there are no seats until the
       // referee has put formations on the map and appointed men to them.
-      return reply.code(201).send({ id, refereeToken: created.refereeToken });
+      return reply.code(201).send({
+        id,
+        refereeToken: created.refereeToken,
+        ruleset: created.campaign.ruleset,
+      });
     } catch (err) {
       return reply.code(400).send({ error: String((err as Error).message ?? err) });
     }
@@ -147,14 +162,15 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
         state: store.state(auth.campaign.id),
         worldDoc: auth.campaign.worldDoc,
         world: auth.campaign.world,
-        cfg,
+        cfg: configOf(auth.campaign),
+        ruleset: auth.campaign.ruleset,
       },
       auth.role,
     );
 
     // Checked at the boundary as well as guaranteed by construction. A masking bug is
     // exactly the kind that ships quietly, so it fails the request rather than the game.
-    assertMasked(view, cfg);
+    assertMasked(view, configOf(auth.campaign));
     return reply.send(view);
   });
 
@@ -176,11 +192,12 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
         state: store.state(auth.campaign.id),
         worldDoc: auth.campaign.worldDoc,
         world: auth.campaign.world,
-        cfg,
+        cfg: configOf(auth.campaign),
+        ruleset: auth.campaign.ruleset,
       },
       role,
     );
-    assertMasked(view, cfg);
+    assertMasked(view, configOf(auth.campaign));
 
     return reply
       .header('content-type', 'application/json')
@@ -300,7 +317,7 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
     // What stopped the clock, if anything did. The referee's whole workflow is "run it
     // until something needs me", so the answer to *what* needs him belongs in the reply
     // rather than in a second request he has to know to make.
-    const halts = new Set(cfg.haltTriggers);
+    const halts = new Set(configOf(auth.campaign).haltTriggers);
     const halted = result.events
       .map((e) => e.payload)
       .find((p) => p.kind === 'decision_raised' && halts.has(p.decision.trigger));
@@ -354,10 +371,17 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
     // payload to everybody is how a fog-of-war server leaks.
     for (const listener of listeners) {
       const view = viewFor(
-        { campaignId, state, worldDoc: campaign.worldDoc, world: campaign.world, cfg },
+        {
+          campaignId,
+          state,
+          worldDoc: campaign.worldDoc,
+          world: campaign.world,
+          cfg: configOf(campaign),
+          ruleset: campaign.ruleset,
+        },
         listener.role,
       );
-      assertMasked(view, cfg);
+      assertMasked(view, configOf(campaign));
       listener.send(JSON.stringify({ type: 'view', view }));
     }
   }
@@ -385,11 +409,12 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
           state: store.state(id),
           worldDoc: campaign.worldDoc,
           world: campaign.world,
-          cfg,
+          cfg: configOf(campaign),
+          ruleset: campaign.ruleset,
         },
         role,
       );
-      assertMasked(view, cfg);
+      assertMasked(view, configOf(campaign));
       socket.send(JSON.stringify({ type: 'view', view }));
 
       socket.on('close', () => {

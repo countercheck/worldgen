@@ -36,7 +36,7 @@ interface Spec {
   faction: string;
   kind: UnitKind;
   name: string;
-  effectives: number;
+  paperStrength: number;
   experience: -2 | -1 | 0 | 1 | 2;
   traits: Trait[];
   spacingMultiplier: number;
@@ -51,11 +51,12 @@ interface Spec {
 function makeUnit(spec: Spec, at: Hex): Unit {
   const defaults = KIND_DEFAULTS[spec.kind];
   return {
+    parentUnitId: null,
     id: spec.id,
     name: spec.name,
     faction: spec.faction,
     kind: spec.kind,
-    effectives: spec.effectives,
+    paperStrength: spec.paperStrength,
     fatigue: 0,
     experience: spec.experience,
     morale: [10, 20, 30, 40, 50][spec.experience + 2]!,
@@ -69,6 +70,7 @@ function makeUnit(spec: Spec, at: Hex): Unit {
     spacingMultiplier: spec.spacingMultiplier,
     traits: spec.traits,
     formation: 'march',
+    formationChange: null,
     column: [at],
     hoursMarchedToday: 0,
     corps: spec.corps,
@@ -82,7 +84,7 @@ const SPECS: Spec[] = [
     faction: 'red',
     kind: 'infantry',
     name: '1re Division',
-    effectives: 6400,
+    paperStrength: 6400,
     experience: 0,
     traits: ['long_tail'],
     spacingMultiplier: 1.3,
@@ -96,7 +98,7 @@ const SPECS: Spec[] = [
     faction: 'red',
     kind: 'cavalry',
     name: 'Cuirassiers de la Garde',
-    effectives: 4200,
+    paperStrength: 4200,
     experience: 1,
     traits: ['scout', 'heavy'],
     spacingMultiplier: 1.5,
@@ -110,7 +112,7 @@ const SPECS: Spec[] = [
     faction: 'red',
     kind: 'hq',
     name: "Quartier Général",
-    effectives: 900,
+    paperStrength: 900,
     experience: 2,
     traits: ['fast'],
     spacingMultiplier: 1,
@@ -124,7 +126,7 @@ const SPECS: Spec[] = [
     faction: 'blue',
     kind: 'infantry',
     name: '3rd Division',
-    effectives: 5200,
+    paperStrength: 5200,
     experience: 1,
     traits: [],
     spacingMultiplier: 1.2,
@@ -138,7 +140,7 @@ const SPECS: Spec[] = [
     faction: 'blue',
     kind: 'cavalry',
     name: 'Light Brigade',
-    effectives: 4000,
+    paperStrength: 4000,
     experience: 0,
     traits: ['scout'],
     spacingMultiplier: 1.4,

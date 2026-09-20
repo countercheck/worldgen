@@ -15,12 +15,19 @@
  * real. Nothing here writes to the state it was given, and the same call with the same
  * dice produces the same list.
  *
- * ## Ticks, and why they are not the clock
+ * ## Hours, and why they are the clock
  *
- * Time runs in `cfg.tickHours` steps, but the campaign clock only moves when something
- * happens: a quiet tick emits nothing at all. Events are therefore stamped at the hour
- * they occurred rather than at the hour the referee clicked, and a twelve-hour advance
- * through empty country costs one event rather than forty-eight.
+ * Time runs in whole hours and in nothing finer. Every cost in the rules is a whole number
+ * of them, a referee adjudicates by the hour, and a column that arrived at twenty past
+ * would be a precision the rest of the design cannot honour. A column is handed an hour of
+ * movement and spends it — several hexes on a road, part of one in a bog, with the
+ * remainder banked on its task as `progressHours` so that every row of the movement table
+ * still means something.
+ *
+ * The campaign clock only moves when something happens: a quiet hour emits nothing at all.
+ * Events are stamped at the hour they occurred rather than at the hour the referee
+ * clicked, and a twelve-hour advance through empty country costs one event rather than
+ * twelve.
  *
  * ## What a rider does when his man has moved
  *
@@ -31,9 +38,9 @@
  * of which are exactly the things that are supposed to hurt.
  */
 
-import { occupied } from './column.js';
+import { catchupHours, occupied } from './column.js';
 import { directSubordinates, superiors } from './commander.js';
-import type { CampaignConfig } from './config.js';
+import type { CampaignConfig, Grade } from './config.js';
 import {
   courierStepHours,
   formationsTouch,
@@ -45,13 +52,26 @@ import {
 import { REFEREE, type EventPayload, type LoggedEvent } from './events.js';
 import { key, type Hex } from './hex.js';
 import { fileSightings } from './knowledge.js';
-import { hoursToEnter, marchHoursLeftToday, planMarch } from './movement.js';
+import {
+  hoursToEnter,
+  marchHoursLeftToday,
+  planMarch,
+  unitSpeedKmh,
+} from './movement.js';
+import { marchFatigueBetween, nightFatigue } from './fatigue.js';
 import { detectionDice, spottedBy, type Sighting } from './recon.js';
 import { ones, type Rng } from './rng.js';
 import { reduce, type CampaignState } from './state.js';
-import type { DecisionTrigger, PendingDecision, Task } from './task.js';
+import {
+  contestedHex,
+  isOpen,
+  viaAhead,
+  type DecisionTrigger,
+  type PendingDecision,
+  type Task,
+} from './task.js';
 import { gradeOf } from './terrain.js';
-import { reportOf, type Unit } from './unit.js';
+import { isPatrol, reportOf, type Formation, type Unit } from './unit.js';
 import type { World } from './world.js';
 
 export interface AdvanceOptions {
@@ -79,6 +99,16 @@ const envelope = (s: CampaignState, payload: EventPayload): LoggedEvent => ({
 });
 
 const HOURS_PER_DAY = 24;
+
+/**
+ * The grain of the clock, in hours.
+ *
+ * One hour, and not a dial. This game is played in hours: every cost in the rules is a
+ * whole number of them, a referee adjudicates by the hour, and a formation that arrived at
+ * twenty past would be a precision the rest of the design cannot honour. Movement finer
+ * than a hex is banked as progress rather than modelled as a moment.
+ */
+const HOURS_PER_STEP = 1;
 
 /** Progress a rider has made, held through one advance and written back once at the end. */
 interface Rider {
@@ -157,7 +187,7 @@ function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: 
 
   const raise = (
     trigger: DecisionTrigger,
-    commanderId: string,
+    commanderId: string | null,
     unitId: string,
     atHours: number,
     context: Record<string, unknown>,
@@ -172,6 +202,7 @@ function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: 
       context,
       resolvedAtHours: null,
       note: null,
+      favouring: null,
     };
     emit({ kind: 'decision_raised', decision });
     if (halted === null && halts.has(trigger)) halted = decision;
@@ -247,7 +278,7 @@ function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: 
     // Waypoints are an instruction to the rider, so they are obeyed even when they are
     // slower — that is the whole point of insisting on them. Only touching formations
     // skip the ride, and then there is no route to insist on.
-    const handed = via.length === 0 && formationsTouch(fromUnit, toUnit);
+    const handed = via.length === 0 && formationsTouch(fromUnit, toUnit, cfg.footprint);
     // No legal ride — an addressee across water, or a waypoint the rider cannot reach.
     // `check` has already said so as a soft violation, so arriving here means a referee
     // sent him anyway. He sets out and is still out there: `rideTick` re-plans from where
@@ -299,7 +330,7 @@ function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: 
   const interception = (d: Despatch, at: Hex, atHours: number): boolean => {
     const k = key(at);
     const enemies = [...s.units.values()]
-      .filter((u) => u.faction !== d.faction && occupied(u).some((c) => key(c) === k))
+      .filter((u) => u.faction !== d.faction && occupied(u, 'road', cfg.footprint).some((c) => key(c) === k))
       .sort((a, b) => (a.id < b.id ? -1 : 1));
     if (enemies.length === 0) return false;
 
@@ -341,39 +372,25 @@ function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: 
   };
 
   /**
-   * The next leg of a march, or null when there is not one.
+   * The next hex of a march, or null when there is not one.
    *
    * Routed fresh from where the column now stands, because a task names a destination and
    * not a path — so a river that turns out to be unbridged, or a road nobody knew about,
    * changes the march rather than breaking it.
    *
-   * A column that has used up its twenty hours stops until midnight. The rules' cap is a
-   * wall rather than a gradient: fatigue is what actually limits a march, and it is
-   * deferred, so this is the only limit in force.
+   * Waypoints still to make are routed through, and standing on the destination with
+   * waypoints left is not arrival — a route may cross its own destination on the way to a
+   * place the referee insisted on, and ending the march there would halt the column on
+   * ground it was only passing over.
    */
-  const scheduleNext = (
-    unit: Unit,
-    task: Task,
-    from: Hex,
-    atHours: number,
-    lastStepHours: number,
-  ): { nextHex: Hex; arrivesAtHours: number } | null => {
-    if (key(from) === key(task.destination)) return null;
+  const nextLeg = (unit: Unit, task: Task, from: Hex): Hex | null => {
+    const ahead = viaAhead(task, from);
+    if (ahead.length === 0 && key(from) === key(task.destination)) return null;
 
-    const marched = unit.hoursMarchedToday + (Number.isFinite(lastStepHours) ? lastStepHours : 0);
-    const left = marchHoursLeftToday(cfg, { ...unit, hoursMarchedToday: marched });
-
-    const path = planMarch(world, cfg, unit, task.destination, from);
+    const path = planMarch(world, cfg, unit, task.destination, from, ahead);
     const next = path?.[1];
     if (next === undefined) return null;
-
-    const step = hoursToEnter(world, cfg, unit, from, next);
-    if (!Number.isFinite(step)) return null;
-
-    // Out of hours: resume at midnight rather than never. The head sits where it is and
-    // the tail closes up, which is what a halted column actually does.
-    const startAt = left > 0 ? atHours : Math.floor(atHours / HOURS_PER_DAY + 1) * HOURS_PER_DAY;
-    return { nextHex: next, arrivesAtHours: startAt + step };
+    return Number.isFinite(hoursToEnter(world, cfg, unit, from, next)) ? next : null;
   };
 
   /** Move every rider, rolling for interception on each hex he enters. */
@@ -445,67 +462,496 @@ function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: 
    * bug, only like mud. Each step is re-read from the folded state, because `scheduleNext`
    * charges the hours against the day and the next leg depends on what is left of it.
    */
-  const marchTick = (tickEnd: number): void => {
-    const running = [...s.tasks.values()].sort((a, b) => (a.unitId < b.unitId ? -1 : 1));
+  /**
+   * Units whose tail has already been charged for closing up after their last march.
+   *
+   * A column pays for its tail once per stretch of marching, not once per tick it spends
+   * standing: the rear closes up, and then it is in. Cleared the moment the head steps off
+   * again, because then there is a new tail to bring in.
+   */
+  const closedUp = new Set<string>();
 
-    for (const started of running) {
-      let task = started;
+  /**
+   * Charge a unit for what a stretch of road cost it. Silent when it cost nothing.
+   *
+   * Patrols are never charged. The fatigue table is written for a division marching in
+   * column; twenty troopers riding ahead of one are not doing that, and the rules give
+   * them their own consequences — a die that destroys or recoils them — rather than a
+   * share of the column's exhaustion.
+   */
+  const charge = (unitId: string, atHours: number, fromMarching: number, fromNight: number): void => {
+    const unit = s.units.get(unitId);
+    if (unit !== undefined && isPatrol(unit)) return;
+    const total = fromMarching + fromNight;
+    if (total <= 0) return;
+    clockTo(atHours);
+    emit({ kind: 'fatigue_accrued', unitId, atHours, fatigue: total, fromMarching, fromNight });
+  };
 
-      while (!task.complete && task.nextHex !== null && task.arrivesAtHours !== null) {
-        // The same slack `rideTick` allows: an arrival landing exactly on the tick
-        // boundary is this tick's, and accumulated steps rarely land on it exactly.
-        if (task.arrivesAtHours > tickEnd + 1e-9) break;
+  /**
+   * Bring the tail in, and charge for any of it spent in the dark.
+   *
+   * The head halting is not the column halting. A division two kilometres long has men on
+   * the road for `catchupHours` after its tip has stopped, and if the sun went down while
+   * they were walking that is a night march for them whatever the head was doing.
+   */
+  const closeUp = (unit: Unit, atHours: number, speedKmh: number): void => {
+    if (closedUp.has(unit.id)) return;
+    closedUp.add(unit.id);
+    const tail = catchupHours(unit, speedKmh);
+    if (!Number.isFinite(tail) || tail <= 0) return;
+    charge(unit.id, atHours, 0, nightFatigue(cfg, atHours, atHours + tail));
+  };
 
-        const unit = s.units.get(task.unitId);
-        const head = unit?.column[0];
-        if (unit === undefined || head === undefined) break;
+  /** Begin a change of formation, at the rules' cost for that change. */
+  const beginChange = (unit: Unit, to: Formation, atHours: number, reason: string): void => {
+    const hours = cfg.formationChangeHours[unit.formation][to];
+    clockTo(atHours);
+    emit({
+      kind: 'formation_change_began',
+      unitId: unit.id,
+      from: unit.formation,
+      to,
+      atHours,
+      completesAtHours: atHours + hours,
+      reason,
+    });
+  };
 
-        const to = task.nextHex;
-        const atHours = Math.max(task.arrivesAtHours, now);
-        const grade = gradeOf(world, cfg, head, to);
-        const stepHours = hoursToEnter(world, cfg, unit, head, to);
+  /**
+   * Finish every change of formation whose hours have run out.
+   *
+   * Before the columns move, so a formation that finishes breaking camp on the stroke of
+   * the hour marches in the same tick rather than losing a quarter of an hour to the order
+   * the ticks happen to run in.
+   */
+  const formationTick = (tickEnd: number): void => {
+    const units = [...s.units.values()].sort((a, b) => (a.id < b.id ? -1 : 1));
+    for (const unit of units) {
+      const change = unit.formationChange;
+      if (change == null || change.completesAtHours > tickEnd + 1e-9) continue;
+      const atHours = Math.max(change.completesAtHours, now);
+      clockTo(atHours);
+      emit({ kind: 'formation_changed', unitId: unit.id, to: change.to, atHours });
+    }
+  };
 
-        clockTo(atHours);
-        const onward = scheduleNext(unit, task, to, atHours, stepHours);
-        emit({
-          kind: 'unit_marched',
-          unitId: unit.id,
-          to,
+  /**
+   * The column standing on a hex, if any, and whether the hex is its head.
+   *
+   * Read fresh from the folded state each time rather than indexed once a tick: a column
+   * that has just marched has vacated ground, and a stale index would have the next
+   * formation bounce off a road nobody is on any more.
+   */
+  const standingOn = (
+    at: Hex,
+    exceptUnitId: string,
+    ignore: (unitId: string) => boolean = () => false,
+  ): { unitId: string; isHead: boolean } | null => {
+    const k = key(at);
+    for (const unit of [...s.units.values()].sort((a, b) => (a.id < b.id ? -1 : 1))) {
+      if (unit.id === exceptUnitId || ignore(unit.id)) continue;
+      const body = occupied(unit, 'road', cfg.footprint);
+      const i = body.findIndex((c) => key(c) === k);
+      if (i >= 0) return { unitId: unit.id, isHead: i === 0 };
+    }
+    return null;
+  };
+
+  /**
+   * Another column whose head is walking into the same hex.
+   *
+   * No comparison of arrival times, because there are none to compare: the hour is the
+   * smallest thing the clock has, and two columns walking into one hex during the same
+   * hour are walking into it at the same time as far as this game is concerned.
+   */
+  const convergingOn = (
+    at: Hex,
+    exceptUnitId: string,
+    ignore: (unitId: string) => boolean = () => false,
+  ): Task | null => {
+    const k = key(at);
+    for (const t of [...s.tasks.values()].sort((a, b) => (a.unitId < b.unitId ? -1 : 1))) {
+      if (t.unitId === exceptUnitId || ignore(t.unitId) || t.complete || t.nextHex === null) {
+        continue;
+      }
+      if (key(t.nextHex) === k) return t;
+    }
+    return null;
+  };
+
+  /** A decision of this kind already standing over this hex, so the same one is not asked twice. */
+  const openOver = (trigger: DecisionTrigger, unitId: string, at: Hex): boolean => {
+    const k = key(at);
+    for (const d of s.decisions.values()) {
+      if (!isOpen(d) || d.trigger !== trigger || d.unitId !== unitId) continue;
+      const over = contestedHex(d);
+      if (over !== null && key(over) === k) return true;
+    }
+    return false;
+  };
+
+  /** A contest over this hex nobody has settled yet. Nothing enters until somebody does. */
+  const contestStanding = (at: Hex): boolean => {
+    const k = key(at);
+    for (const d of s.decisions.values()) {
+      if (!isOpen(d) || d.trigger !== 'column_contested') continue;
+      const over = contestedHex(d);
+      if (over !== null && key(over) === k) return true;
+    }
+    return false;
+  };
+
+  /** The formation a referee has already given this hex to, if he has ruled on it. */
+  const ruledFor = (at: Hex): string | null => {
+    const k = key(at);
+    let ruling: { atHours: number; unitId: string } | null = null;
+    for (const d of s.decisions.values()) {
+      if (d.trigger !== 'column_contested' || d.favouring === null) continue;
+      const over = contestedHex(d);
+      if (over === null || key(over) !== k) continue;
+      // The latest ruling stands: a hex can be contested, settled, and contested again.
+      if (ruling === null || (d.resolvedAtHours ?? 0) >= ruling.atHours) {
+        ruling = { atHours: d.resolvedAtHours ?? 0, unitId: d.favouring };
+      }
+    }
+    return ruling?.unitId ?? null;
+  };
+
+  /**
+   * One column, one hex, with the traffic rules applied.
+   *
+   * Returns whether the head actually entered. A column that could not spends no hours and
+   * keeps whatever it had already walked; the rules are the two the ruleset gives. A head
+   * meeting any part of a column that is simply standing there stops; two heads walking
+   * into the same ground during the same hour contest it, and the cheaper step wins,
+   * because a formation coming up a highway is moving faster than one in a bog and that is
+   * what "faster" has to mean on ground this varied.
+   */
+  const enterHex = (
+    task: Task,
+    to: Hex,
+    atHours: number,
+    budget: number,
+    blocked: Set<string>,
+  ): boolean => {
+    const unit = s.units.get(task.unitId);
+    const head = unit?.column[0];
+    if (unit === undefined || head === undefined) return false;
+
+    /**
+     * Whether either party to this meeting is a patrol.
+     *
+     * A patrol running into anything is not traffic. The rules resolve it with a pool of
+     * dice that may simply destroy the patrol, and that roll is the referee's — so the
+     * column rules stand aside and he is asked instead. It reads both ways round: twenty
+     * troopers walking into a division and a division walking into twenty troopers are the
+     * same meeting, and only one of them should be reported.
+     */
+    const patrolMeeting = (otherId: string): boolean => {
+      const other = s.units.get(otherId);
+      return isPatrol(unit) || (other !== undefined && isPatrol(other));
+    };
+
+    /**
+     * Whether these two simply ride past each other.
+     *
+     * A patrol is twenty troopers on horseback and its own side's traffic is not an
+     * obstacle to it: it rides down the column, through the halt, and out the far end.
+     * The rule is symmetric, because a division is not stopped by its own vedettes
+     * either — they get out of the road.
+     *
+     * Only its own side. An enemy column is the whole reason the patrol is out there, and
+     * meeting one is a contact rather than a traffic problem.
+     */
+    const ridesPast = (otherId: string): boolean => {
+      const other = s.units.get(otherId);
+      return (
+        other !== undefined && other.faction === unit.faction && patrolMeeting(otherId)
+      );
+    };
+
+    /** What the referee needs to roll the rules' contact dice, gathered for him. */
+    const contactContext = (otherId: string): Record<string, unknown> => {
+      const other = s.units.get(otherId);
+      return {
+        at: to,
+        withUnitId: otherId,
+        destination: task.destination,
+        patrolUnitId: isPatrol(unit) ? unit.id : otherId,
+        hostile: other !== undefined && other.faction !== unit.faction,
+        // The rules' pool: one die to start, and the modifiers for what was met.
+        dice:
+          cfg.interceptDiceBase +
+          (other === undefined ? 0 : detectionDice(cfg, other)),
+      };
+    };
+
+    const stop = (byUnitId: string, contested: boolean, trigger: DecisionTrigger | null): void => {
+      clockTo(atHours);
+      emit({
+        kind: 'march_blocked',
+        unitId: unit.id,
+        byUnitId,
+        at: to,
+        atHours,
+        contested,
+        // What is left of the hour is spent standing in the road rather than walking up
+        // it, and standing formed up is charged like marching once a column has broken
+        // camp. What is left, not a whole hour: a column stopped half an hour into its
+        // hour has already been charged for the half it walked.
+        waitedHours: Math.max(0, Math.min(budget, marchHoursLeftToday(cfg, unit))),
+      });
+      closeUp(unit, atHours, unitSpeedKmh(cfg, unit, gradeOf(world, cfg, head, to)));
+
+      // A meeting involving a patrol is always reported, even where the column rules would
+      // have passed over it in silence — a contested hex nobody has ruled on, say. Twenty
+      // troopers standing off a division is exactly the moment the referee is playing for.
+      const asked = patrolMeeting(byUnitId) ? 'patrol_contact' : trigger;
+      if (asked !== null && !openOver(asked, unit.id, to)) {
+        raise(
+          asked,
+          commanderRiding(unit.id),
+          unit.id,
           atHours,
-          grade,
-          stepHours: Number.isFinite(stepHours) ? stepHours : 0,
-          nextHex: onward?.nextHex ?? null,
-          arrivesAtHours: onward?.arrivesAtHours ?? null,
-        });
+          asked === 'patrol_contact'
+            ? contactContext(byUnitId)
+            : { at: to, withUnitId: byUnitId, destination: task.destination },
+        );
+      }
+      blocked.add(unit.id);
+    };
 
-        if (onward !== null) {
-          const next = s.tasks.get(task.unitId);
-          if (next === undefined) break;
-          task = next;
-          continue;
+    // Ground being fought over is not traffic. Formations in a battle are intermingled by
+    // definition — that is what a battle is — so the rules that keep two columns off one
+    // road have nothing to say about it, and applying them would have brigades bouncing
+    // off each other as though the field were a crossroads. What happens in there is
+    // below the resolution of this map and belongs to whoever adjudicates it.
+    if (s.battle.has(key(to))) return true;
+
+    // A contest nobody has ruled on holds the hex against everyone, including the column
+    // that would otherwise have won it outright once the other was told to wait.
+    //
+    // Except a patrol, which is not party to it. Two divisions arguing over a crossroads
+    // is not a reason twenty troopers cannot ride over it, and holding them there would
+    // be the traffic rules reaching a formation they were never written for. If one of
+    // the two is an enemy the patrol will meet it below, as a contact.
+    if (!isPatrol(unit) && contestStanding(to)) {
+      const other = convergingOn(to, unit.id) ?? standingOn(to, unit.id);
+      stop(other?.unitId ?? unit.id, true, null);
+      return false;
+    }
+
+    const rival = convergingOn(to, unit.id, ridesPast);
+    if (rival !== null) {
+      const ruled = ruledFor(to);
+      if (ruled !== null) {
+        if (ruled !== unit.id) {
+          stop(rival.unitId, true, null);
+          return false;
+        }
+      } else {
+        const other = s.units.get(rival.unitId);
+        const otherHead = other?.column[0];
+        const mine = hoursToEnter(world, cfg, unit, head, to);
+        const theirs =
+          other === undefined || otherHead === undefined
+            ? Infinity
+            : hoursToEnter(world, cfg, other, otherHead, to);
+
+        // Strictly cheaper wins. Equal is the tie the rules hand to the referee, and it is
+        // the common case rather than the rare one: two infantry divisions on the same
+        // open ground cost exactly the same hour.
+        if (Math.abs(mine - theirs) <= 1e-9) {
+          stop(rival.unitId, true, 'column_contested');
+          return false;
         }
 
+        // Strictly slower, so the rules have already settled it and there is nothing to
+        // ask. It waits, and it waits the way a column waits for one that is simply
+        // standing in the road — deliberately not as a contest, because an open contest
+        // holds the hex against everyone, the faster column included. Raising one here
+        // would deadlock the pair whenever the slower column happened to be looked at
+        // first, which is a fact about identifiers rather than about the ground.
+        if (mine > theirs) {
+          stop(rival.unitId, false, 'column_blocked');
+          return false;
+        }
+      }
+    }
+
+    const sitting = standingOn(to, unit.id, ridesPast);
+    if (sitting !== null) {
+      stop(sitting.unitId, false, 'column_blocked');
+      return false;
+    }
+    return true;
+  };
+
+  /**
+   * Give one column its hour of marching.
+   *
+   * The hour is the unit of time and the unit of accounting. A column is handed an hour of
+   * movement and spends it: infantry on a road puts three hexes behind it, a convoy
+   * off-road gets two thirds of the way into one and banks the rest. What it cannot do is
+   * arrive at half past — there is no half past.
+   */
+  const marchHour = (started: Task, atHours: number, blocked: Set<string>): void => {
+    let task = started;
+    const unit0 = s.units.get(task.unitId);
+    if (unit0 === undefined) return;
+
+    // The day's ceiling bites before the hour does: a column with a quarter of an hour of
+    // its twenty left walks for a quarter of an hour and then stops for good. Checked
+    // before the camp, because a formation that has spent its day is not going to break
+    // the camp it just built — it would undo it on the hour and rebuild it on the next.
+    const budgetToday = marchHoursLeftToday(cfg, unit0);
+    if (budgetToday <= 0) return;
+
+    // A formation is not in column of march until it is. A division still building its
+    // camp, or already in it, has to break camp before it steps off — which is what a
+    // march order given to a resting corps actually costs, and the reason a referee thinks
+    // twice before halting one.
+    if (unit0.formationChange != null) {
+      if (unit0.formationChange.to !== 'march') beginChange(unit0, 'march', atHours, 'break_camp');
+      return;
+    }
+    if (unit0.formation !== 'march') {
+      beginChange(unit0, 'march', atHours, 'break_camp');
+      return;
+    }
+
+    let budget = Math.min(HOURS_PER_STEP, budgetToday);
+
+    let moved = false;
+    let lastGrade: Grade = 'road';
+    let lastSpeed = unitSpeedKmh(cfg, unit0, lastGrade);
+
+    while (budget > 1e-9) {
+      const current = s.tasks.get(task.unitId);
+      const unit = s.units.get(task.unitId);
+      const head = unit?.column[0];
+      if (current === undefined || unit === undefined || head === undefined) break;
+      task = current;
+      if (task.complete || task.nextHex === null) break;
+
+      const to = task.nextHex;
+      const cost = hoursToEnter(world, cfg, unit, head, to);
+      if (!Number.isFinite(cost)) break;
+
+      const owing = cost - task.progressHours;
+      if (owing > budget + 1e-9) {
+        // Not enough hour left to finish the hex. What was walked is banked, and the rest
+        // of the walk happens next hour.
+        const grade = gradeOf(world, cfg, head, to);
+        clockTo(atHours);
+        emit({
+          kind: 'march_progressed',
+          unitId: unit.id,
+          atHours,
+          progressHours: task.progressHours + budget,
+          grade,
+          spentHours: budget,
+        });
+        charge(
+          unit.id,
+          atHours,
+          marchFatigueBetween(cfg, unit, unit.hoursMarchedToday, unit.hoursMarchedToday + budget),
+          nightFatigue(cfg, atHours, atHours + budget),
+        );
+        closedUp.delete(unit.id);
+        moved = true;
+        lastGrade = grade;
+        lastSpeed = unitSpeedKmh(cfg, unit, grade);
+        budget = 0;
+        break;
+      }
+
+      if (!enterHex(task, to, atHours, budget, blocked)) break;
+
+      const grade = gradeOf(world, cfg, head, to);
+      const spent = Math.max(0, owing);
+      const before = unit.hoursMarchedToday;
+
+      clockTo(atHours);
+      const onward = nextLeg(unit, task, to);
+      emit({
+        kind: 'unit_marched',
+        unitId: unit.id,
+        to,
+        atHours,
+        grade,
+        stepHours: spent,
+        nextHex: onward,
+        progressHours: 0,
+      });
+
+      closedUp.delete(unit.id);
+      charge(
+        unit.id,
+        atHours,
+        marchFatigueBetween(cfg, unit, before, before + spent),
+        nightFatigue(cfg, atHours, atHours + spent),
+      );
+
+      budget -= spent;
+      moved = true;
+      lastGrade = grade;
+      lastSpeed = unitSpeedKmh(cfg, unit, grade);
+
+      if (onward === null) {
         // Nowhere onward, for one of two very different reasons. Arrived is done. Stopped
         // by ground he cannot cross is *not* done — `task_completed` there would report
         // "the march is finished" for a column standing on the wrong bank of a river, and
         // the referee's own queue would say so while the decision beside it said the
-        // opposite. The task stays open with nowhere to go, which is what a halted column
-        // is, and resolving the decision is what starts it again.
-        const arrived = key(to) === key(task.destination);
+        // opposite. The task stays open with nowhere to go, and resolving the decision is
+        // what starts it again.
+        const arrived =
+          viaAhead(task, to).length === 0 && key(to) === key(task.destination);
         if (arrived) emit({ kind: 'task_completed', unitId: unit.id, atHours });
 
-        const commander = commanderRiding(unit.id);
-        if (commander !== null) {
-          raise(
-            arrived ? 'objective_reached' : 'crossing_impassable',
-            commander,
-            unit.id,
-            atHours,
-            arrived ? { destination: task.destination } : { at: to, destination: task.destination },
-          );
-        }
+        raise(
+          arrived ? 'objective_reached' : 'crossing_impassable',
+          commanderRiding(unit.id),
+          unit.id,
+          atHours,
+          arrived ? { destination: task.destination } : { at: to, destination: task.destination },
+        );
         break;
       }
+    }
+
+    const after = s.units.get(task.unitId);
+    if (after === undefined) return;
+
+    if (moved) {
+      // A formation that has spent its twenty hours is done for the day and builds a camp
+      // where it stands. The rules make this the one change that happens without an order:
+      // nobody decides to stop after twenty hours on the road, they simply stop.
+      if (marchHoursLeftToday(cfg, after) <= 1e-9) {
+        closeUp(after, atHours + HOURS_PER_STEP, lastSpeed);
+        beginChange(after, 'rest', atHours + HOURS_PER_STEP, 'day_spent');
+      } else if (s.tasks.get(task.unitId)?.nextHex == null) {
+        closeUp(after, atHours + HOURS_PER_STEP, lastSpeed);
+      }
+    }
+    void lastGrade;
+  };
+
+  /**
+   * Every column's hour, in one pass.
+   *
+   * Sorted by unit id, which is arbitrary but fixed, so a replay reproduces it. Order only
+   * decides who is asked first; who actually gets a contested hex is settled by the rules
+   * in `enterHex` rather than by who came first in the list.
+   */
+  const marchTick = (atHours: number): void => {
+    const blocked = new Set<string>();
+    const running = [...s.tasks.values()].sort((a, b) => (a.unitId < b.unitId ? -1 : 1));
+    for (const task of running) {
+      if (task.complete || task.nextHex === null) continue;
+      if (blocked.has(task.unitId)) continue;
+      marchHour(task, atHours, blocked);
     }
   };
 
@@ -557,24 +1003,42 @@ function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: 
   // ---- the loop ---------------------------------------------------------
 
   const run = (opts: AdvanceOptions): void => {
-    const target = now + Math.min(Math.max(0, opts.hours), cfg.maxAdvanceHours);
+    // Whole hours, always. A referee who asks for two and a half gets two — there is no
+    // half hour for the extra to happen in, and rounding up would run the clock past what
+    // he asked for.
+    const asked = Math.floor(Math.min(Math.max(0, opts.hours), cfg.maxAdvanceHours));
+    const target = now + asked;
     const stopAtDecision = opts.untilDecision ?? false;
 
     while (now < target) {
-      const tickEnd = Math.min(target, now + cfg.tickHours);
+      const hourStart = now;
+      const hourEnd = hourStart + HOURS_PER_STEP;
       const before = payloads.length;
 
       // Midnight: the day's marching starts again, and provisions will tick here when
-      // they are built. Fired on the tick that crosses it rather than scheduled, which
-      // keeps the loop free of a second notion of time.
-      const midnight = Math.floor(now / HOURS_PER_DAY + 1) * HOURS_PER_DAY;
-      if (tickEnd >= midnight) emit({ kind: 'day_rolled', toHours: midnight });
+      // they are built.
+      //
+      // At the top of the hour that begins the new day, not at the end of the hour that
+      // reaches it. Marching is stamped at `hourStart`, so rolling the day on the hour
+      // from eleven to midnight would credit a column's twenty-third hour of marching to
+      // tomorrow — it would step off again an hour early, every night.
+      if (hourStart > 0 && hourStart % HOURS_PER_DAY === 0) {
+        emit({ kind: 'day_rolled', toHours: hourStart });
+      }
 
-      rideTick(tickEnd);
-      marchTick(tickEnd);
-      if (payloads.length > before) discoveryTick(tickEnd);
+      rideTick(hourEnd);
+      // On the hour it is due, not at the end of the hour it falls in. Completing it at
+      // `hourEnd` while columns march at `hourStart` lets a formation march out of a camp
+      // it has not finished breaking — an hour early, and only visible as an off-by-one in
+      // the log.
+      formationTick(hourStart);
+      // Marching is stamped at the hour it begins: a column given the hour from six to
+      // seven is on the road at six, and the referee reading the log wants the hour the
+      // men stepped off rather than the hour they stopped.
+      marchTick(hourStart);
+      if (payloads.length > before) discoveryTick(hourEnd);
 
-      now = tickEnd;
+      now = hourEnd;
       if (stopAtDecision && halted !== null) break;
     }
 

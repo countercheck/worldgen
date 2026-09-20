@@ -91,7 +91,7 @@ export const hoursToEnter = (
 ): number => stepCost(world, cfg, unit, from, to).hours;
 
 /**
- * The least-*time* route from a unit's head to a goal.
+ * The least-*time* route from a unit's head to a goal, through any waypoints on the way.
  *
  * Least time, not least distance, and the difference is the point: a road that runs the
  * long way round is often quicker than the direct line over broken ground, and a courier
@@ -101,6 +101,10 @@ export const hoursToEnter = (
  * if no step can cost less than an hour — which is false on a highway, where a courier
  * covers ten hexes in one. So the heuristic is scaled by the fastest step available to
  * this unit, keeping it a lower bound and the result optimal.
+ *
+ * `via` chains one search per leg, as `planRide` does for couriers. Null if *any* leg has
+ * no route: a waypoint on the far bank of an unbridged river fails the whole march rather
+ * than being quietly dropped, because a referee who named it meant it.
  */
 export function planMarch(
   world: World,
@@ -108,10 +112,38 @@ export function planMarch(
   unit: Unit,
   goal: Hex,
   from?: Hex,
+  via: readonly Hex[] = [],
 ): Hex[] | null {
   const start = from ?? unit.column[0];
   if (start === undefined) return null;
 
+  const legs = [start, ...via, goal];
+  const route: Hex[] = [start];
+
+  for (let i = 1; i < legs.length; i++) {
+    const leg = marchLeg(world, cfg, unit, legs[i - 1]!, legs[i]!);
+    if (leg === null) return null;
+    // The first hex of each leg is the last of the previous one.
+    route.push(...leg.slice(1));
+  }
+  return route;
+}
+
+/**
+ * One leg of a march: a single least-time search between two named places.
+ *
+ * Kept separate because the legs are searched independently. That is not the same as the
+ * cheapest route through all of them — a waypoint is an instruction, so the detour it
+ * costs is the point of naming it — but each leg is individually optimal, which is what
+ * "and go by way of X" means.
+ */
+function marchLeg(
+  world: World,
+  cfg: CampaignConfig,
+  unit: Unit,
+  start: Hex,
+  goal: Hex,
+): Hex[] | null {
   const perHex = fastestHoursPerHex(cfg, unit);
 
   return astar<WorldHex>(
@@ -234,5 +266,5 @@ export const isStep = (a: Hex, b: Hex): boolean => distance(a, b) === 1;
  */
 export const tailLengthHexes = (unit: Unit, grade: Grade): number => columnHexes(unit, grade) - 1;
 
-/** Whether a unit may field patrols without spending effectives. */
+/** Whether a unit may field patrols without spending men. */
 export const canPatrolFreely = (unit: Unit): boolean => hasTrait(unit, 'scout');

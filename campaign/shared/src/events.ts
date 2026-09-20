@@ -87,6 +87,20 @@ export type EventPayload =
     }
   | { readonly kind: 'unit_added'; readonly unit: Unit }
   | { readonly kind: 'unit_removed'; readonly unitId: string }
+  /**
+   * A formation sent out a patrol.
+   *
+   * The patrol is a unit like any other, carrying `parentUnitId`. `costPaperStrength` is what
+   * detaching it took off the parent's rolls — nothing for the first few, and permanent
+   * for the ones after that, which is the rules' way of saying a division can only spare
+   * so many good horsemen before it starts to feel it.
+   */
+  | {
+      readonly kind: 'patrol_detached';
+      readonly patrol: Unit;
+      readonly parentUnitId: string;
+      readonly costPaperStrength: number;
+    }
   | { readonly kind: 'clock_advanced'; readonly toHours: number }
   /** Referee: put a unit somewhere, no movement rule applying. */
   | { readonly kind: 'unit_teleported'; readonly unitId: string; readonly column: readonly Hex[] }
@@ -96,6 +110,18 @@ export type EventPayload =
       readonly commanderId: string;
       readonly coords: readonly Hex[];
     }
+  /**
+   * Referee: this ground is being fought over.
+   *
+   * Not a battle object, deliberately. A campaign map resolves to a kilometre, and a
+   * division's frontage is a kilometre, so everything that makes a battle a battle
+   * happens below this grid. What the campaign needs to know is only *where* it is, so
+   * that the rules which assume open country stop applying there — who is fighting whom,
+   * and how it goes, belongs to whatever resolves it.
+   */
+  | { readonly kind: 'battle_declared'; readonly coords: readonly Hex[] }
+  /** Referee: the fighting here is over. The ground goes back to being ground. */
+  | { readonly kind: 'battle_ended'; readonly coords: readonly Hex[] }
   /** Referee: take knowledge away, the one thing that shrinks what a man has surveyed. */
   | {
       readonly kind: 'hexes_forgotten';
@@ -194,9 +220,88 @@ export type EventPayload =
       readonly atHours: number;
       readonly grade: Grade;
       readonly stepHours: number;
-      /** The next hex of the march, and when the head reaches it. Null on arrival. */
+      /** The next hex of the march. Null on arrival. */
       readonly nextHex: Hex | null;
-      readonly arrivesAtHours: number | null;
+      /** Hours of this hour's movement left over, banked towards `nextHex`. */
+      readonly progressHours: number;
+    }
+  /**
+   * An hour spent on the road that did not finish a hex.
+   *
+   * A convoy at two thirds of a kilometre an hour takes an hour and a half to cross one,
+   * and the half hour has to go somewhere or it never crosses at all. This is where.
+   */
+  | {
+      readonly kind: 'march_progressed';
+      readonly unitId: string;
+      readonly atHours: number;
+      readonly progressHours: number;
+      readonly grade: Grade;
+      /** Hours of the hour actually spent walking. Charged against the day like a march. */
+      readonly spentHours: number;
+    }
+  /**
+   * A column's head could not enter the hex it was marching into, because another column
+   * was in it or entering it. It stands where it is and tries again.
+   *
+   * Its own event rather than a `unit_marched` that went nowhere: nothing moved, no hours
+   * were spent, and the log should read as an account of a road that was blocked rather
+   * than of a march with a gap in it.
+   */
+  | {
+      readonly kind: 'march_blocked';
+      readonly unitId: string;
+      /** The column in the way. */
+      readonly byUnitId: string;
+      readonly at: Hex;
+      readonly atHours: number;
+      /** Whether both heads were entering it at once, or one was simply standing there. */
+      readonly contested: boolean;
+      /**
+       * Hours spent standing in the road, waiting.
+       *
+       * Charged against the day only if the column had already broken camp — a formation
+       * blocked before it took a single step has not marched, while one halted three hexes
+       * into its day is standing formed up on a road in column of march, which is work.
+       * The reducer decides which of those it was; this is only the duration.
+       */
+      readonly waitedHours: number;
+    }
+  /**
+   * A formation started changing what it is: making camp, forming for battle, breaking
+   * camp to march. It is still the old formation until `formation_changed`.
+   */
+  | {
+      readonly kind: 'formation_change_began';
+      readonly unitId: string;
+      readonly from: Formation;
+      readonly to: Formation;
+      readonly atHours: number;
+      readonly completesAtHours: number;
+      /** Why, for the referee reading the log: 'day_spent' | 'ordered' | 'break_camp'. */
+      readonly reason: string;
+    }
+  | {
+      readonly kind: 'formation_changed';
+      readonly unitId: string;
+      readonly to: Formation;
+      readonly atHours: number;
+    }
+  /**
+   * What a stretch of marching cost the men.
+   *
+   * Its own event rather than a field on `unit_marched`, because the tail goes on paying
+   * after the head has stopped: a column that halts at dusk is still marching in the dark
+   * at the rear, and that arrives as one of these with no march beside it.
+   */
+  | {
+      readonly kind: 'fatigue_accrued';
+      readonly unitId: string;
+      readonly atHours: number;
+      readonly fatigue: number;
+      /** Split out so the log says what it was for rather than only how much. */
+      readonly fromMarching: number;
+      readonly fromNight: number;
     }
   | { readonly kind: 'task_completed'; readonly unitId: string; readonly atHours: number }
   /** Midnight. Every unit's day of marching starts again. */
@@ -208,11 +313,13 @@ export type EventPayload =
       readonly decisionId: string;
       readonly atHours: number;
       readonly note: string | null;
+      /** The formation the referee gave the hex to, on a contest. Null on everything else. */
+      readonly favouring: string | null;
     };
 
 /** The mutable stats a referee may set directly. Deliberately not every field. */
 export interface UnitStatChanges {
-  readonly effectives?: number;
+  readonly paperStrength?: number;
   readonly fatigue?: number;
   readonly morale?: number;
   readonly provisions?: number;

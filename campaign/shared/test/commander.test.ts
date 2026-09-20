@@ -48,7 +48,7 @@ const unit = (id: string, faction: string): Unit => ({
   name: `${id} Division`,
   faction,
   kind: 'infantry',
-  effectives: 5000,
+  paperStrength: 5000,
   fatigue: 0,
   experience: 0,
   morale: 30,
@@ -65,6 +65,7 @@ const unit = (id: string, faction: string): Unit => ({
   column: [{ q: 0, r: 0 }],
   hoursMarchedToday: 0,
   corps: null,
+    parentUnitId: null,
 });
 
 /**

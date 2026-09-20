@@ -38,7 +38,7 @@ function unit(kind: UnitKind, traits: Trait[] = [], at: Hex = { q: 0, r: 0 }): U
     id: 'u',
     faction: 'red',
     kind,
-    effectives: 5000,
+    paperStrength: 5000,
     fatigue: 0,
     experience: 0,
     morale: 30,
@@ -52,9 +52,11 @@ function unit(kind: UnitKind, traits: Trait[] = [], at: Hex = { q: 0, r: 0 }): U
     spacingMultiplier: 1,
     traits,
     formation: 'march',
+    formationChange: null,
     column: [at],
     hoursMarchedToday: 0,
     corps: null,
+    parentUnitId: null,
   };
 }
 
@@ -424,6 +426,55 @@ describe('planMarch', () => {
   it('returns null when the goal cannot be reached', () => {
     const w = grid(5, (q) => (q === 2 ? { terrainClass: 'open_water' as const } : {}));
     expect(planMarch(w, cfg, unit('infantry', [], { q: 0, r: 0 }), { q: 4, r: 0 })).toBeNull();
+  });
+
+  it('goes by way of its waypoints, in the order given', () => {
+    const w = grid(9);
+    const u = unit('infantry', [], { q: 0, r: 0 });
+    const goal = { q: 8, r: 0 };
+    const first = { q: 4, r: 6 };
+    const second = { q: 4, r: 2 };
+
+    const path = planMarch(w, cfg, u, goal, undefined, [first, second])!;
+    expect(path).not.toBeNull();
+
+    const at = (h: Hex): number => path.findIndex((p) => p.q === h.q && p.r === h.r);
+    expect(at(first)).toBeGreaterThan(0);
+    // Order, not mere presence: a router that dropped the waypoints into a set would pass
+    // this test if it only checked that both were visited.
+    expect(at(second)).toBeGreaterThan(at(first));
+    expect(path.at(-1)).toEqual(goal);
+    for (let i = 1; i < path.length; i++) {
+      expect(distance(path[i - 1]!, path[i]!), `step ${i}`).toBe(1);
+    }
+  });
+
+  it('costs more than the direct line, which is the point of insisting on one', () => {
+    const w = grid(9);
+    const u = unit('infantry', [], { q: 0, r: 0 });
+    const goal = { q: 8, r: 0 };
+
+    const direct = planMarch(w, cfg, u, goal)!;
+    const detoured = planMarch(w, cfg, u, goal, undefined, [{ q: 4, r: 6 }])!;
+
+    expect(pathHours(w, cfg, u, detoured)).toBeGreaterThan(pathHours(w, cfg, u, direct));
+  });
+
+  it('is unchanged by an empty waypoint list', () => {
+    const w = grid(9, (q, r) => (q === 3 && r > 2 ? { landCover: 'bog' as LandCover } : {}));
+    const u = unit('infantry', [], { q: 0, r: 0 });
+    const goal = { q: 8, r: 8 };
+    expect(planMarch(w, cfg, u, goal, undefined, [])).toEqual(planMarch(w, cfg, u, goal));
+  });
+
+  it('fails the whole march when a waypoint is unreachable, rather than dropping it', () => {
+    // A waypoint on water. The destination is perfectly reachable, so a router that
+    // skipped what it could not route to would return a plausible path to the wrong
+    // orders.
+    const w = grid(5, (q, r) => (q === 2 && r === 2 ? { terrainClass: 'open_water' as const } : {}));
+    const u = unit('infantry', [], { q: 0, r: 0 });
+    expect(planMarch(w, cfg, u, { q: 4, r: 0 })).not.toBeNull();
+    expect(planMarch(w, cfg, u, { q: 4, r: 0 }, undefined, [{ q: 2, r: 2 }])).toBeNull();
   });
 
   it('scales its heuristic by the fastest step the unit has', () => {

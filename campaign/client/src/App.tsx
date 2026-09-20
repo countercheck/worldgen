@@ -22,21 +22,31 @@ import {
   DEFAULT_THEME,
   key,
   occupied,
+  pathHours,
+  planMarch,
   reachable,
+  viaAhead,
   type ClientView,
 } from '@campaign/shared';
 
 import {
+  addCommander,
+  addUnit,
   advanceClock,
   clearTask,
+  detachPatrol,
   fetchView,
   resolveDecision,
   sendDespatch,
+  setFormation,
   setTask,
   subscribe,
+  teleportUnit,
+  declareBattle,
+  endBattle,
   type Session,
 } from './api.js';
-import { ageLabel, boardFrom } from './board.js';
+import { ageLabel, boardFrom, dayHour, timeOfDay } from './board.js';
 import {
   correspondents as correspondentsOf,
   estimateRide,
@@ -51,9 +61,11 @@ import { Command } from './panels/Command.jsx';
 import { Composer, type Draft } from './panels/Composer.jsx';
 import { ContactPanel } from './panels/ContactPanel.jsx';
 import { HexPanel } from './panels/HexPanel.js';
+import { Orbat } from './panels/Orbat.jsx';
 import { Post } from './panels/Post.jsx';
 import { DecisionQueue, DespatchLog } from './panels/Referee.jsx';
 import { ReportPanel } from './panels/ReportPanel.jsx';
+import { Roster } from './panels/Roster.jsx';
 import { UnitPanel } from './panels/UnitPanel.js';
 import {
   clearSession,
@@ -67,9 +79,53 @@ import {
 
 import type { WashMode } from './map/draw.js';
 
-import type { Hex, PendingDecision, ReceivedDespatch, Task } from '@campaign/shared';
+import type {
+  CampaignConfig,
+  Formation,
+  Hex,
+  PendingDecision,
+  ReceivedDespatch,
+  Task,
+  Unit,
+} from '@campaign/shared';
 
-const cfg = DEFAULT_CONFIG;
+/**
+ * The numbers to compute with, when there is no view yet.
+ *
+ * Everything below reads `view.config` — the campaign's own table, sent by the server —
+ * because a console working out reach and march rates off its own bundled defaults would
+ * quietly disagree with the engine the moment a campaign ran under anything but the
+ * standard rules. This is only what the first paint uses before the view lands.
+ */
+const FALLBACK_CONFIG = DEFAULT_CONFIG;
+
+/**
+ * The pointing mode is normally a unit id — "this formation is to march there".
+ *
+ * Raising one has no unit yet, so it borrows the same machinery under a name no unit can
+ * have. One pointing mode rather than two: the map has exactly one way of asking for a
+ * hex, and a second would be a second set of ways to get stuck in it.
+ */
+const ORDER_OF_BATTLE = '\u0000orbat';
+
+/**
+ * Pointing at ground to put a formation on it, rather than to march it there.
+ *
+ * A teleport breaks every movement rule at once, which is why it is the referee's alone
+ * and why it is logged as what it is. Setting up a scenario and correcting a mistake are
+ * the same act.
+ */
+const PLACE_PREFIX = '\u0000place:';
+
+/**
+ * Painting ground as being fought over.
+ *
+ * Unlike every other pointing mode this one does not end on the first hex. A battlefield
+ * is several hexes more often than it is one, and making the referee re-enter the mode
+ * for each would be a worse version of holding the button down. Pointing at ground
+ * already in the fighting takes it back out, so the same gesture draws and erases.
+ */
+const DECLARE_BATTLE = '\u0000battle';
 
 export default function App() {
   const [joined, setJoined] = useState<Joined | null>(() => {
@@ -140,9 +196,17 @@ function Console({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [postError, setPostError] = useState<string | null>(null);
 
-  // The referee's half: which formation is having its destination pointed at, and what
-  // the clock last stopped for. Both are transient and neither belongs in the view.
+  // The referee's half: which formation is having its destination pointed at, the ground
+  // he has pointed at so far, and what the clock last stopped for. All transient, and none
+  // of it belongs in the view — an order half-composed is not a fact about the campaign.
+  const [roster, setRoster] = useState(false);
+  const [writingAs, setWritingAs] = useState<string | null>(null);
+  // Where a formation being raised is to stand. Collected by the same pointing mode the
+  // march orders use, because a referee setting up a scenario is looking at ground rather
+  // than at coordinates.
+  const [placing, setPlacing] = useState<Hex | null>(null);
   const [ordering, setOrdering] = useState<string | null>(null);
+  const [picked, setPicked] = useState<readonly Hex[]>([]);
   const [halted, setHalted] = useState<PendingDecision | null>(null);
 
   // Fetched once so the page has something immediately, then kept current by the socket.
@@ -179,11 +243,25 @@ function Console({
   useEffect(() => {
     if (ordering === null) return;
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') setOrdering(null);
+      if (e.key !== 'Escape') return;
+      setOrdering(null);
+      setPicked([]);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [ordering]);
+
+  // Escape closes the drawer. Bound separately from the pointing handler, which is only
+  // alive while a destination is being chosen — and pointing wins when both are open,
+  // because the map has silently changed what a click does and that is the trap to leave.
+  useEffect(() => {
+    if (!roster) return;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape' && ordering === null) setRoster(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [roster, ordering]);
 
   // `v` cycles how much of the map is washed. Separate from the Escape handler above,
   // which is only bound while a destination is being pointed at.
@@ -209,7 +287,64 @@ function Console({
     [view],
   );
 
+  // The campaign's own numbers, as the server resolved them. Never the client's copy:
+  // reach, march rates and what a patrol costs all have to agree with the engine.
+  const cfg = view?.config ?? FALLBACK_CONFIG;
+
   const selectedUnit = board?.units.get(selectedId ?? '') ?? null;
+
+  /**
+   * Where every marching column is actually going, worked out rather than stored.
+   *
+   * A task names a destination and the engine re-routes each hex, so there is no path on
+   * the wire to draw — and storing one would be drawing a plan that went stale the moment
+   * the ground turned out not to be what the map said. Recomputing it here from the same
+   * cost model the scheduler uses gives the referee the route his columns will actually
+   * take, as of now.
+   *
+   * Referee only, and it needs no guard: a commander's view carries no `tasks` at all, so
+   * this is empty for him. The map he would compute it on is masked anyway.
+   */
+  const plans = useMemo(() => {
+    if (board === null || view === null) return [];
+    const out: { unitId: string; color: string; route: readonly Hex[]; hours: number }[] = [];
+
+    for (const task of view.tasks) {
+      if (task.complete) continue;
+      const unit = board.units.get(task.unitId);
+      const head = unit?.column[0];
+      if (unit === undefined || head === undefined) continue;
+
+      const route = planMarch(board.world, cfg, unit, task.destination, head, viaAhead(task, head));
+      if (route === null || route.length < 2) continue;
+
+      out.push({
+        unitId: task.unitId,
+        color: board.factions.get(unit.faction)?.color ?? '#888',
+        route,
+        hours: pathHours(board.world, cfg, unit, route),
+      });
+    }
+    return out;
+  }, [board, view]);
+
+  /**
+   * The patrols a formation has in the field.
+   *
+   * Counted off the units the viewer was actually sent, which is the honest answer to the
+   * question being asked: a referee sees every patrol, and a commander sees his own. A
+   * count taken from anywhere else would be a number nobody can check against the map.
+   */
+  const patrolsOf = useCallback(
+    (unitId: string) =>
+      board === null ? [] : [...board.units.values()].filter((u) => u.parentUnitId === unitId),
+    [board],
+  );
+
+  const planFor = useCallback(
+    (unitId: string) => plans.find((p) => p.unitId === unitId),
+    [plans],
+  );
 
   const reach = useMemo(() => {
     if (!showReach || board === null || selectedUnit === null) return undefined;
@@ -240,7 +375,7 @@ function Console({
       to: string,
       despatchKind: 'order' | 'report' | 'acknowledgement',
       body: { text?: string; contacts?: readonly unknown[] },
-      extra: { inReplyTo?: string; forwardedFrom?: string } = {},
+      extra: { inReplyTo?: string; forwardedFrom?: string; from?: string } = {},
     ): Promise<boolean> => {
       setPostError(null);
       const result = await sendDespatch(session, {
@@ -263,12 +398,22 @@ function Console({
     [session],
   );
 
-  /** Point at ground and send a formation to it. The referee's whole job, in one motion. */
+  /**
+   * Send a formation to the last place pointed at, by way of the rest.
+   *
+   * The chain is built by clicking and only sent when the referee says so, because one
+   * click can no longer mean both "and then here" and "go". The common case is unchanged
+   * in substance: point once, press March.
+   */
   const order = useCallback(
-    (unitId: string, destination: Hex) => {
+    (unitId: string, route: readonly Hex[]) => {
+      const destination = route.at(-1);
+      if (destination === undefined) return;
+
       setOrdering(null);
+      setPicked([]);
       setPostError(null);
-      void setTask(session, unitId, destination).then((result) => {
+      void setTask(session, unitId, destination, { via: route.slice(0, -1) }).then((result) => {
         if (!result.ok) {
           setPostError(result.violations?.map((v) => v.message).join('; ') ?? 'refused');
         }
@@ -306,7 +451,13 @@ function Console({
   const shownContact = shownId === null ? null : (board.contacts.get(shownId) ?? null);
   const hoveredHex = hovered === null ? undefined : board.world.hexes.get(key(hovered));
 
-  const correspondents = correspondentsOf(view);
+  // Whose name the referee is currently writing in. A commander has only his own and
+  // never sees the control.
+  const senders = isReferee
+    ? [...view.commanders].sort((a, b) => (a.name < b.name ? -1 : 1))
+    : [];
+  const sender = writingAs ?? senders[0]?.id ?? null;
+  const correspondents = correspondentsOf(view, sender ?? undefined);
   const nameOf = (id: string): string => board.commanders.get(id)?.name ?? id;
   const ownFormation =
     view.commander === null ? null : (board.units.get(view.commander.unitId) ?? null);
@@ -323,7 +474,9 @@ function Console({
       ? null
       : view.task.complete
         ? `Halted at ${view.task.destination.q}, ${view.task.destination.r} — the march is done.`
-        : `Marching on ${view.task.destination.q}, ${view.task.destination.r}, ordered at hour ${view.task.setAtHours}.`;
+        : `Marching on ${view.task.destination.q}, ${view.task.destination.r}, ordered ${dayHour(
+            view.task.setAtHours,
+          )}.`;
 
   /**
    * Every identity this browser actually holds a token for.
@@ -371,6 +524,14 @@ function Console({
           </div>
         )}
 
+        <button
+          className={`wash-toggle${roster ? ' active' : ''}`}
+          onClick={() => setRoster((r) => !r)}
+          title="Every formation, and what it is doing"
+        >
+          Order of battle · {isReferee ? view.units.length : view.reports.length + view.units.length}
+        </button>
+
         <label className="toggle">
           <input
             type="checkbox"
@@ -402,7 +563,7 @@ function Console({
         )}
 
         <div className="clock">
-          Hour {view.campaign.clockHours}
+          {dayHour(view.campaign.clockHours)}
           {isReferee && (
             <span className="clock-controls">
               <button onClick={() => advance(1)}>+1 h</button>
@@ -417,6 +578,20 @@ function Console({
               >
                 Run
               </button>
+              {/* Beside the clock, because declaring a battle is a thing a referee does
+                  the moment the clock stops for a contact. */}
+              <button
+                className={ordering === DECLARE_BATTLE ? 'primary' : undefined}
+                title="Paint the ground being fought over"
+                onClick={() =>
+                  setOrdering((o) => (o === DECLARE_BATTLE ? null : DECLARE_BATTLE))
+                }
+              >
+                {ordering === DECLARE_BATTLE ? 'Done' : 'Battle'}
+                {board.battle.size > 0 && ordering !== DECLARE_BATTLE
+                  ? ` · ${board.battle.size}`
+                  : ''}
+              </button>
             </span>
           )}
         </div>
@@ -428,8 +603,8 @@ function Console({
 
       {isReferee && halted !== null && (
         <div className="notice halted">
-          The clock stopped at hour {halted.atHours}: {nameOf(halted.commanderId)}
-          {"'s "}
+          The clock stopped at {dayHour(halted.atHours)}:{' '}
+          {halted.commanderId === null ? '' : `${nameOf(halted.commanderId)}'s `}
           {board.units.get(halted.unitId)?.name ?? halted.unitId}{' '}
           {halted.trigger.replace(/_/g, ' ')}. It is in the queue below.
           <button className="dismiss" onClick={() => setHalted(null)}>
@@ -438,11 +613,40 @@ function Console({
         </div>
       )}
 
-      {isReferee && ordering !== null && (
+      {isReferee && ordering === DECLARE_BATTLE && (
+        <div className="notice picking">
+          Point at the ground being fought over; point again to take it back out. Traffic
+          rules stop applying there — formations in a battle are intermingled, and this
+          map does not resolve what happens between them. Escape when the field is drawn.
+        </div>
+      )}
+
+      {isReferee && ordering === ORDER_OF_BATTLE && (
+        <div className="notice picking">
+          Point at the ground the new formation is to stand on. Escape to think again.
+        </div>
+      )}
+
+      {isReferee && ordering !== null && ordering.startsWith(PLACE_PREFIX) && (
+        <div className="notice picking">
+          Point at the ground{' '}
+          {board.units.get(ordering.slice(PLACE_PREFIX.length))?.name ?? 'it'} is to stand
+          on. It goes there without marching, and the log records that you moved it.
+          Escape to think again.
+        </div>
+      )}
+
+      {isReferee &&
+        ordering !== null &&
+        ordering !== ORDER_OF_BATTLE &&
+        ordering !== DECLARE_BATTLE &&
+        !ordering.startsWith(PLACE_PREFIX) && (
         <div className="notice picking">
           Point at the ground {board.units.get(ordering)?.name ?? ordering} is to march to.
-          A destination, not a route — they will find their own way, and discover what is in
-          it when they get there. Escape to think again.
+          Point again to insist they go by way of somewhere first — the last place you name
+          is where they are to end up. Places, not a route: between them they will find
+          their own way, and discover what is in it when they get there. Escape to think
+          again.
         </div>
       )}
 
@@ -457,6 +661,73 @@ function Console({
       )}
 
       <div className="body">
+      <Roster
+        open={roster}
+        onClose={() => setRoster(false)}
+        role={isReferee ? 'referee' : 'commander'}
+        units={view.units}
+        reports={isReferee ? [] : view.reports}
+        ownUnitId={view.commander?.unitId ?? null}
+        clockHours={clock}
+        cfg={cfg}
+        factionName={(id) => board.factions.get(id)?.name ?? id}
+        colorOf={(f) => board.factions.get(f)?.color ?? '#888'}
+        selectedId={selectedId}
+        onSelect={setSelectedId}
+        editor={
+          isReferee ? (
+            <Orbat
+              factions={view.factions}
+              units={view.units}
+              commanders={view.commanders}
+              cfg={cfg}
+              placing={placing}
+              busy={sending}
+              error={postError}
+              onPlace={() => {
+                setRoster(false);
+                setOrdering(ORDER_OF_BATTLE);
+                setPicked([]);
+              }}
+              onRaise={(unit) => {
+                setSending(true);
+                setPostError(null);
+                void addUnit(session, unit)
+                  .then((result) => {
+                    if (!result.ok) {
+                      setPostError(
+                        result.violations?.map((v) => v.message).join('; ') ?? 'refused',
+                      );
+                    } else {
+                      setPlacing(null);
+                    }
+                  })
+                  .finally(() => setSending(false));
+              }}
+              onAppoint={(commander) => {
+                setSending(true);
+                setPostError(null);
+                void addCommander(session, commander)
+                  .then((result) => {
+                    if (!result.ok) {
+                      setPostError(
+                        result.violations?.map((v) => v.message).join('; ') ?? 'refused',
+                      );
+                    }
+                  })
+                  .finally(() => setSending(false));
+              }}
+            />
+          ) : undefined
+        }
+        taskOf={(unitId) => {
+          const task = view.tasks.find((t) => t.unitId === unitId);
+          if (task === undefined) return view.task?.unitId === unitId ? taskLine : null;
+          if (task.complete) return `arrived ${task.destination.q}, ${task.destination.r}`;
+          return `marching on ${task.destination.q}, ${task.destination.r}`;
+        }}
+      />
+
         <HexMap
           world={board.world}
           marks={board.marks}
@@ -470,7 +741,54 @@ function Console({
           onSelect={setSelectedId}
           reach={reach}
           riders={board.riders}
-          onPick={ordering === null ? undefined : (hex) => order(ordering, hex)}
+          plans={plans}
+          battle={board.battle}
+          onPick={
+            ordering === null
+              ? undefined
+              : (hex) => {
+                  if (ordering.startsWith(PLACE_PREFIX)) {
+                    const unitId = ordering.slice(PLACE_PREFIX.length);
+                    setOrdering(null);
+                    setPostError(null);
+                    void teleportUnit(session, unitId, [hex]).then((result) => {
+                      if (!result.ok) {
+                        setPostError(
+                          result.violations?.map((v) => v.message).join('; ') ?? 'refused',
+                        );
+                      }
+                    });
+                    return;
+                  }
+                  if (ordering === DECLARE_BATTLE) {
+                    // Stays in the mode: a field is painted, not pointed at once.
+                    const fighting = board.battle.has(key(hex));
+                    setPostError(null);
+                    void (fighting ? endBattle : declareBattle)(session, [hex]).then(
+                      (result) => {
+                        if (!result.ok) {
+                          setPostError(
+                            result.violations?.map((v) => v.message).join('; ') ?? 'refused',
+                          );
+                        }
+                      },
+                    );
+                    return;
+                  }
+                  if (ordering === ORDER_OF_BATTLE) {
+                    setPlacing(hex);
+                    setOrdering(null);
+                    setRoster(true);
+                    return;
+                  }
+                  setPicked((r) =>
+                    // Pointing twice at the same ground is a slip of the hand, not an
+                    // instruction to go there and then go there again.
+                    key(hex) === key(r.at(-1) ?? { q: NaN, r: NaN }) ? r : [...r, hex],
+                  );
+                }
+          }
+          route={picked}
           visible={board.visible}
           surveyed={board.surveyed}
           washMode={washMode}
@@ -493,12 +811,57 @@ function Console({
                 taskOf={(id) => view.tasks.find((t) => t.unitId === id)}
                 orderingUnitId={ordering}
                 onOrder={setOrdering}
-                onResolve={(d) => {
+                onResolve={(d, favouring) => {
                   setBusyId(d.id);
-                  void resolveDecision(session, d.id).finally(() => setBusyId(null));
+                  void resolveDecision(session, d.id, undefined, favouring).finally(() =>
+                    setBusyId(null),
+                  );
                 }}
                 busyId={busyId}
               />
+
+              {writing === null ? (
+                <section className="panel-section">
+                  <h3>Despatches</h3>
+                  <div className="despatch-actions">
+                    <button onClick={() => setWriting({})}>Write on a commander&rsquo;s behalf</button>
+                  </div>
+                  <p className="muted small">
+                    For the men you run yourself, and for a player who hands you an order on
+                    paper. It goes by rider like any other and can be intercepted like any
+                    other.
+                  </p>
+                </section>
+              ) : (
+                <Composer
+                  correspondents={correspondents}
+                  estimateFor={(id) =>
+                    estimateRide(view, board.world, cfg, id, [], sender ?? undefined)
+                  }
+                  clockHours={clock}
+                  busy={sending}
+                  error={postError}
+                  initial={writing}
+                  senders={senders}
+                  {...(sender === null ? {} : { from: sender })}
+                  onFrom={setWritingAs}
+                  onCancel={() => {
+                    setWriting(null);
+                    setPostError(null);
+                  }}
+                  onSend={(draft) => {
+                    if (draft.from === undefined) return;
+                    setSending(true);
+                    void write(draft.to, draft.despatchKind, { text: draft.text }, {
+                      from: draft.from,
+                    })
+                      .then((ok) => {
+                        if (ok) setWriting(null);
+                      })
+                      .finally(() => setSending(false));
+                  }}
+                />
+              )}
 
               <DespatchLog
                 despatches={view.despatches}
@@ -513,7 +876,6 @@ function Console({
               {writing !== null && (
                 <Composer
                   correspondents={correspondents}
-                  estimateFor={(id) => estimateRide(view, board.world, cfg, id)}
                   clockHours={clock}
                   busy={sending}
                   error={postError}
@@ -548,7 +910,7 @@ function Console({
                   void write(
                     d.from,
                     'acknowledgement',
-                    { text: `Received your despatch of hour ${d.sentAtHours}.` },
+                    { text: `Received your despatch of ${dayHour(d.sentAtHours)}.` },
                     { inReplyTo: d.id },
                   ).finally(() => setBusyId(null));
                 }}
@@ -578,15 +940,103 @@ function Console({
               <div className="despatch-actions">
                 <button
                   className={ordering === shownUnit.id ? 'primary' : ''}
-                  onClick={() => setOrdering(shownUnit.id)}
+                  onClick={() => {
+                    setOrdering(shownUnit.id);
+                    setPicked([]);
+                  }}
                 >
                   {ordering === shownUnit.id ? 'Pointing…' : 'March them somewhere'}
                 </button>
                 {view.tasks.some((t) => t.unitId === shownUnit.id) && (
                   <button onClick={() => void clearTask(session, shownUnit.id)}>Halt</button>
                 )}
+                {/* The rules give patrols to Scout. The button says what the next one
+                    costs, because the fourth is not free and the cost is permanent. */}
+                <button
+                  onClick={() => {
+                    setOrdering(PLACE_PREFIX + shownUnit.id);
+                    setPicked([]);
+                  }}
+                  title="Put it there without marching it"
+                >
+                  Place
+                </button>
+                {shownUnit.traits.includes('scout') && shownUnit.parentUnitId == null && (
+                  <button
+                    onClick={() => {
+                      setPostError(null);
+                      void detachPatrol(session, shownUnit.id).then((result) => {
+                        if (!result.ok) {
+                          setPostError(
+                            result.violations?.map((v) => v.message).join('; ') ?? 'refused',
+                          );
+                        }
+                      });
+                    }}
+                  >
+                    Send out a patrol
+                    {patrolsOf(shownUnit.id).length >= cfg.freePatrols
+                      ? ` · ${cfg.extraPatrolCost} men`
+                      : ''}
+                  </button>
+                )}
               </div>
-              <TaskLine task={view.tasks.find((t) => t.unitId === shownUnit.id)} />
+
+              {ordering === shownUnit.id && (
+                <div className="picked-route">
+                  {picked.length === 0 ? (
+                    <p className="muted">Nowhere named yet.</p>
+                  ) : (
+                    <ol>
+                      {picked.map((hex, i) => (
+                        <li key={key(hex)} className={i === picked.length - 1 ? 'destination' : ''}>
+                          {key(hex)}
+                          {i === picked.length - 1 ? ' — where they are to be' : ' — by way of'}
+                        </li>
+                      ))}
+                    </ol>
+                  )}
+                  <div className="despatch-actions">
+                    <button
+                      className="primary"
+                      disabled={picked.length === 0}
+                      onClick={() => order(shownUnit.id, picked)}
+                    >
+                      March
+                    </button>
+                    <button disabled={picked.length === 0} onClick={() => setPicked((r) => r.slice(0, -1))}>
+                      Undo last
+                    </button>
+                    <button
+                      onClick={() => {
+                        setOrdering(null);
+                        setPicked([]);
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              <TaskLine
+                task={view.tasks.find((t) => t.unitId === shownUnit.id)}
+                plan={planFor(shownUnit.id)}
+              />
+
+              <FormationControl
+                unit={shownUnit}
+                clockHours={clock}
+                cfg={cfg}
+                onSet={(formation) => {
+                  setPostError(null);
+                  void setFormation(session, shownUnit.id, formation).then((result) => {
+                    if (!result.ok) {
+                      setPostError(result.violations?.map((v) => v.message).join('; ') ?? 'refused');
+                    }
+                  });
+                }}
+              />
             </section>
           )}
 
@@ -596,6 +1046,15 @@ function Console({
               name={shownUnit.name}
               factionName={board.factions.get(shownUnit.faction)?.name ?? shownUnit.faction}
               color={board.factions.get(shownUnit.faction)?.color ?? '#888'}
+              cfg={cfg}
+              patrolsOut={patrolsOf(shownUnit.id).length}
+              {...(() => {
+                const parent =
+                  shownUnit.parentUnitId == null
+                    ? undefined
+                    : board.units.get(shownUnit.parentUnitId);
+                return parent === undefined ? {} : { parent };
+              })()}
             />
           )}
 
@@ -624,6 +1083,7 @@ function Console({
               hex={hoveredHex}
               coord={hovered}
               selected={selectedUnit}
+              cfg={cfg}
             />
           )}
 
@@ -650,7 +1110,8 @@ function Console({
                       {u.name}
                       <span className="muted">
                         {' '}
-                        · {occupied(u).length} {occupied(u).length === 1 ? 'hex' : 'hexes'}
+                        · {occupied(u, 'road', cfg.footprint).length}{' '}
+                        {occupied(u, 'road', cfg.footprint).length === 1 ? 'hex' : 'hexes'}
                       </span>
                     </button>
                   </li>
@@ -701,7 +1162,68 @@ function Console({
  * piece of prose to a column on a road. A commander sees the same for his own formation
  * and for no other.
  */
-function TaskLine({ task }: { task: Task | undefined }) {
+/**
+ * What a formation is, and what the referee can make it.
+ *
+ * The hours are on the buttons because they are the whole decision. Forming for battle
+ * costs an hour and making camp costs two, and a referee choosing between them with the
+ * numbers hidden is choosing blind — the cost *is* the rule.
+ */
+function FormationControl({
+  unit,
+  clockHours,
+  cfg,
+  onSet,
+}: {
+  unit: Unit;
+  clockHours: number;
+  cfg: CampaignConfig;
+  onSet: (formation: Formation) => void;
+}) {
+  const change = unit.formationChange;
+  const offered: Formation[] = ['march', 'battle', 'rest', 'occupation'];
+
+  return (
+    <div className="formation-control">
+      {change != null && (
+        <p className="muted small">
+          {pretty(unit.formation)} → {pretty(change.to)}, ready at{' '}
+          {timeOfDay(change.completesAtHours)} (
+          {(change.completesAtHours - clockHours).toFixed(1)} h to go).
+        </p>
+      )}
+
+      <div className="despatch-actions">
+        {offered.map((to) => {
+          const hours = cfg.formationChangeHours[unit.formation][to];
+          const current = unit.formation === to && change == null;
+          return (
+            <button
+              key={to}
+              className={current ? 'primary' : ''}
+              disabled={current}
+              onClick={() => onSet(to)}
+              title={current ? 'Already in this formation' : `${hours} h to change`}
+            >
+              {pretty(to)}
+              {current ? '' : ` · ${hours} h`}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+const pretty = (f: Formation): string => f.charAt(0).toUpperCase() + f.slice(1);
+
+function TaskLine({
+  task,
+  plan,
+}: {
+  task: Task | undefined;
+  plan: { route: readonly Hex[]; hours: number } | undefined;
+}) {
   if (task === undefined) {
     return <p className="muted small">No standing task. They stay where they are.</p>;
   }
@@ -712,13 +1234,25 @@ function TaskLine({ task }: { task: Task | undefined }) {
       </p>
     );
   }
+
+  const ahead = task.via.slice(task.viaIndex);
+
   return (
-    <p className="muted small">
-      Marching on {task.destination.q}, {task.destination.r}, ordered at hour{' '}
-      {task.setAtHours}
-      {task.arrivesAtHours === null
-        ? '.'
-        : ` · next hex at hour ${task.arrivesAtHours.toFixed(1)}.`}
-    </p>
+    <>
+      <p className="muted small">
+        Marching on {task.destination.q}, {task.destination.r}, ordered{' '}
+        {dayHour(task.setAtHours)}.
+      </p>
+
+      {/* The route as it stands, not as it was ordered: it is recomputed from where the
+          column is now, so it answers "where will they be" rather than "what did I say". */}
+      {plan !== undefined && (
+        <p className="muted small">
+          {plan.route.length - 1} hexes still to march, about {plan.hours.toFixed(1)} h at
+          the head.
+          {ahead.length > 0 && ` By way of ${ahead.map((h) => `${h.q}, ${h.r}`).join('; then ')}.`}
+        </p>
+      )}
+    </>
   );
 }

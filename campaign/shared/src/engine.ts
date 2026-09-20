@@ -22,9 +22,9 @@
 import { type Commander, mayOrder, mayWriteTo, wouldCycle } from './commander.js';
 import { DEFAULT_CONFIG, type CampaignConfig } from './config.js';
 import { planRide, type DespatchBody, type DespatchKind } from './despatch.js';
-import { planMarch, hoursToEnter } from './movement.js';
+import { planMarch } from './movement.js';
 import { advance, despatchNow } from './scheduler.js';
-import type { Task } from './task.js';
+import { contestants, type Task } from './task.js';
 import type { EventPayload, Faction, LoggedEvent, UnitStatChanges, WorldRef } from './events.js';
 import { byCommander, REFEREE, type Actor } from './events.js';
 import { key, type Hex } from './hex.js';
@@ -39,8 +39,8 @@ import {
   type Strictness,
   type Violation,
 } from './ruling.js';
-import { EMPTY_STATE, reduce, type CampaignState } from './state.js';
-import { MIN_DIVISION_EFFECTIVES, isDivision, type Unit } from './unit.js';
+import { EMPTY_STATE, patrolsOf, reduce, type CampaignState } from './state.js';
+import { hasTrait, isDivision, type Formation, type Unit } from './unit.js';
 import { hexAt, type World } from './world.js';
 
 export type Command =
@@ -90,11 +90,48 @@ export type Command =
       readonly fromDespatchId?: string;
     }
   | { readonly kind: 'clear_task'; readonly unitId: string }
-  | { readonly kind: 'resolve_decision'; readonly decisionId: string; readonly note?: string }
+  | {
+      readonly kind: 'resolve_decision';
+      readonly decisionId: string;
+      readonly note?: string;
+      /**
+       * On a contested hex, the formation the referee gives it to. Ignored elsewhere.
+       *
+       * Optional because most decisions have nothing to rule between, and because a
+       * referee may deliberately deal with a contest without settling it — the columns
+       * then meet again and ask again, which is the honest outcome of not deciding.
+       */
+      readonly favouring?: string;
+    }
+  /**
+   * The referee orders a change of formation: form for battle, make camp, occupy a town.
+   *
+   * Making camp at the end of a day happens by itself, and breaking it to march happens by
+   * itself; everything else is a decision somebody makes, which means the referee.
+   */
+  | { readonly kind: 'set_formation'; readonly unitId: string; readonly formation: Formation }
+  /**
+   * Send a patrol out from a formation.
+   *
+   * The referee's, like every order. A patrol is twenty troopers with a parent, and the
+   * parent is what makes it worth having: what the patrol sees is what that formation's
+   * commander comes to know, and it is recalled to the division it came from.
+   */
+  | {
+      readonly kind: 'detach_patrol';
+      readonly unitId: string;
+      /** Where it starts. Defaults to its parent's head. */
+      readonly at?: Hex;
+      readonly patrolId?: string;
+      readonly name?: string;
+    }
   | { readonly kind: 'teleport_unit'; readonly unitId: string; readonly column: readonly Hex[] }
   | { readonly kind: 'reveal'; readonly commanderId: string; readonly coords: readonly Hex[] }
   | { readonly kind: 'conceal'; readonly commanderId: string; readonly coords: readonly Hex[] }
-  | { readonly kind: 'set_unit_stats'; readonly unitId: string; readonly changes: UnitStatChanges };
+  | { readonly kind: 'set_unit_stats'; readonly unitId: string; readonly changes: UnitStatChanges }
+  /** Referee: this ground is being fought over, and open-country rules stop applying. */
+  | { readonly kind: 'declare_battle'; readonly coords: readonly Hex[] }
+  | { readonly kind: 'end_battle'; readonly coords: readonly Hex[] };
 
 export type CommandKind = Command['kind'];
 
@@ -117,10 +154,14 @@ const REFEREE_ONLY: ReadonlySet<CommandKind> = new Set([
   'reveal',
   'conceal',
   'set_unit_stats',
+  'declare_battle',
+  'end_battle',
   // Tasks are the referee's, always. A commander writes prose; turning prose into a
   // march is the adjudication this whole design exists to keep in human hands.
   'set_task',
   'clear_task',
+  'set_formation',
+  'detach_patrol',
   'resolve_decision',
 ]);
 
@@ -295,12 +336,12 @@ export function check(
       requireOnMap(cmd.unit.column, `unit ${cmd.unit.id} column hex`);
       // Soft: the rules set a floor on a division, but a referee modelling a battered
       // remnant or a scenario's oddity should be able to place one under it.
-      if (isDivision(cmd.unit) && cmd.unit.effectives < MIN_DIVISION_EFFECTIVES) {
+      if (isDivision(cmd.unit) && cmd.unit.paperStrength < cfg.minDivisionPaperStrength) {
         v.push(
           soft(
             CODES.UNIT_TOO_SMALL,
-            `a division is at least ${MIN_DIVISION_EFFECTIVES} effectives; ` +
-              `${cmd.unit.id} has ${cmd.unit.effectives}`,
+            `a division is at least ${cfg.minDivisionPaperStrength} paperStrength; ` +
+              `${cmd.unit.id} has ${cmd.unit.paperStrength}`,
           ),
         );
       }
@@ -336,12 +377,20 @@ export function check(
       requireOnMap(cmd.coords, 'hex');
       break;
 
+    case 'declare_battle':
+    case 'end_battle':
+      if (cmd.coords.length === 0) {
+        v.push(hard(CODES.MALFORMED, 'a battle has to be somewhere'));
+      }
+      requireOnMap(cmd.coords, 'hex');
+      break;
+
     case 'set_unit_stats': {
       const u = requireUnit(cmd.unitId);
       if (u !== undefined) {
         const c = cmd.changes;
-        if (c.effectives !== undefined && c.effectives < 0) {
-          v.push(hard(CODES.MALFORMED, 'effectives cannot be negative'));
+        if (c.paperStrength !== undefined && c.paperStrength < 0) {
+          v.push(hard(CODES.MALFORMED, 'paperStrength cannot be negative'));
         }
         if (c.fatigue !== undefined && (c.fatigue < 0 || c.fatigue > 100)) {
           v.push(hard(CODES.MALFORMED, 'fatigue runs from 0 to 100'));
@@ -416,14 +465,68 @@ export function check(
         // far bank of an unbridged river should be told, and should still be able to
         // order it — the column will discover the problem where it stands, which is the
         // point.
-        if (planMarch(world, cfg, unit, cmd.destination) === null) {
+        const via = cmd.via ?? [];
+        if (planMarch(world, cfg, unit, cmd.destination, undefined, via) === null) {
+          // Naming the waypoint matters: "cannot reach Quatre Bras" sends a referee
+          // looking at the destination when the ground he cannot cross is two legs back.
+          const legs = [...via, cmd.destination];
+          const blocked = legs.find(
+            (leg, i) => planMarch(world, cfg, unit, leg, undefined, legs.slice(0, i)) === null,
+          );
           v.push(
             soft(
               CODES.NO_MARCH_ROUTE,
-              `${cmd.unitId} cannot reach ${key(cmd.destination)} by any route`,
+              `${cmd.unitId} cannot reach ${key(blocked ?? cmd.destination)} by any route`,
             ),
           );
         }
+      }
+      break;
+    }
+
+    case 'set_formation': {
+      const unit = requireUnit(cmd.unitId);
+      if (unit !== undefined && unit.formation === 'rout' && cmd.formation !== 'rout') {
+        // Soft: a broken formation is not re-formed by an order, it is rallied, and what
+        // that costs is the referee's to adjudicate. He may still insist.
+        v.push(
+          soft(
+            CODES.NOT_IN_COMMAND,
+            `${cmd.unitId} is routing and cannot simply be told to form up`,
+          ),
+        );
+      }
+      break;
+    }
+
+    case 'detach_patrol': {
+      const unit = requireUnit(cmd.unitId);
+      if (cmd.patrolId !== undefined && state.units.has(cmd.patrolId)) {
+        v.push(hard(CODES.DUPLICATE_ID, `unit ${cmd.patrolId} already exists`));
+      }
+      if (cmd.at !== undefined) requireOnMap([cmd.at], 'patrol start');
+      if (unit === undefined) break;
+
+      // Soft, both of them. The rules give patrols to formations with Scout and let a
+      // fourth be bought with men; a referee running a scenario where a line division
+      // pushes out vedettes should be able to say so, and be told what it costs.
+      if (!hasTrait(unit, 'scout')) {
+        v.push(
+          soft(
+            CODES.NOT_IN_COMMAND,
+            `${cmd.unitId} has no Scout and cannot field patrols as of right`,
+          ),
+        );
+      }
+      const out = patrolsOf(state, cmd.unitId).length;
+      if (out >= cfg.freePatrols) {
+        v.push(
+          soft(
+            CODES.UNIT_TOO_SMALL,
+            `${cmd.unitId} already has ${out} patrols out; a further one costs ` +
+              `${cfg.extraPatrolCost} paperStrength permanently`,
+          ),
+        );
       }
       break;
     }
@@ -432,11 +535,28 @@ export function check(
       requireUnit(cmd.unitId);
       break;
 
-    case 'resolve_decision':
-      if (!state.decisions.has(cmd.decisionId)) {
+    case 'resolve_decision': {
+      const decision = state.decisions.get(cmd.decisionId);
+      if (decision === undefined) {
         v.push(hard(CODES.NO_SUCH_DECISION, `there is no decision ${cmd.decisionId}`));
+        break;
+      }
+      if (cmd.favouring !== undefined) {
+        // Hard, and checked against the decision rather than against the order of battle:
+        // giving the hex to a formation that was not contesting it would produce a ruling
+        // the scheduler cannot act on.
+        const contesting = [decision.unitId, ...contestants(decision)];
+        if (!contesting.includes(cmd.favouring)) {
+          v.push(
+            hard(
+              CODES.MALFORMED,
+              `${cmd.favouring} is not contesting the hex in decision ${cmd.decisionId}`,
+            ),
+          );
+        }
       }
       break;
+    }
   }
 
   return v;
@@ -519,26 +639,126 @@ export function decide(
 
     case 'set_task': {
       const unit = state.units.get(cmd.unitId);
-      const head = unit?.column[0];
-      const path = unit === undefined ? null : planMarch(world, cfg, unit, cmd.destination);
+      const via = cmd.via ?? [];
+      const path =
+        unit === undefined ? null : planMarch(world, cfg, unit, cmd.destination, undefined, via);
       const next = path?.[1];
 
       const task: Task = {
         unitId: cmd.unitId,
         destination: cmd.destination,
-        via: cmd.via ?? [],
+        via,
         setAtHours: state.clockHours,
         fromDespatchId: cmd.fromDespatchId ?? null,
         nextHex: next ?? null,
-        arrivesAtHours:
-          next === undefined || unit === undefined || head === undefined
-            ? null
-            : state.clockHours + hoursToEnter(world, cfg, unit, head, next),
+        // Nothing walked yet. The first hour of movement the scheduler hands out is what
+        // starts the column moving; a task is an order, not a head start.
+        progressHours: 0,
         // A march to where the column already stands is over before it starts, which is
         // a legitimate thing for a referee to order and should not leave a task running.
+        // Waypoints on other ground are not: there the column has somewhere to go even
+        // though it is standing on its destination, and `next` will have found it.
         complete: next === undefined,
+        viaIndex: 0,
       };
       return [{ kind: 'task_set', task }];
+    }
+
+    case 'set_formation': {
+      const unit = state.units.get(cmd.unitId);
+      if (unit === undefined) return [];
+
+      const hours = cfg.formationChangeHours[unit.formation][cmd.formation];
+      // Already there, or already on the way there. A second click on "occupy" is the
+      // referee saying the same thing twice, not a fresh order — and restarting the
+      // change would charge the twenty-four hours again from the present hour, so a
+      // formation could be kept changing forever by a commander who kept asking.
+      const already =
+        unit.formationChange == null
+          ? unit.formation === cmd.formation
+          : unit.formationChange.to === cmd.formation;
+      if (already) return [];
+
+      const out: EventPayload[] = [];
+      // A march is a thing a formation does in column of march. Told to make camp, form
+      // for battle or occupy a town, it is no longer doing that — so the order is called
+      // off rather than left standing to restart the moment the change completes.
+      if (cmd.formation !== 'march' && state.tasks.get(cmd.unitId)?.complete === false) {
+        out.push({ kind: 'task_cleared', unitId: cmd.unitId });
+      }
+
+      out.push(
+        hours <= 0
+          ? { kind: 'formation_changed', unitId: cmd.unitId, to: cmd.formation, atHours: state.clockHours }
+          : {
+              kind: 'formation_change_began',
+              unitId: cmd.unitId,
+              from: unit.formation,
+              to: cmd.formation,
+              atHours: state.clockHours,
+              completesAtHours: state.clockHours + hours,
+              reason: 'ordered',
+            },
+      );
+      return out;
+    }
+
+    case 'detach_patrol': {
+      const parent = state.units.get(cmd.unitId);
+      const at = cmd.at ?? parent?.column[0];
+      if (parent === undefined || at === undefined) return [];
+
+      const out = patrolsOf(state, cmd.unitId).length;
+      // Free until the rules' allowance is spent, and then paid for out of the rolls —
+      // permanently, because the men do not come back when the patrol does.
+      const costPaperStrength = out >= cfg.freePatrols ? cfg.extraPatrolCost : 0;
+
+      // The first free number rather than the count. A patrol that has been destroyed or
+      // recalled leaves a gap, and numbering from the ones still out would hand the next
+      // detachment an identifier a live patrol is already using — which `check` does not
+      // catch, because it only guards ids the caller named, and which `reduce` would
+      // then silently overwrite.
+      let nth = out + 1;
+      while (state.units.has(`${cmd.unitId}-p${nth}`)) nth += 1;
+
+      const id = cmd.patrolId ?? `${cmd.unitId}-p${nth}`;
+      const defaults = cfg.kindDefaults.cavalry;
+
+      const patrol: Unit = {
+        id,
+        name: cmd.name ?? `${parent.name} patrol ${nth}`,
+        faction: parent.faction,
+        // Cavalry, because the rules move a patrol as cavalry — it is a handful of
+        // troopers however the division it came from marches.
+        kind: 'cavalry',
+        paperStrength: cfg.patrolPaperStrength,
+        // Zero, and meaning "not tracked" rather than "none left". A patrol is not a
+        // formation in miniature: twenty troopers do not hold a line, do not run out of
+        // food on a two-day ride, and are not worn down by a fatigue table written for a
+        // division. `isBroken` and `isStarving` read the parentage before the number, so
+        // nothing takes these zeroes for a crisis.
+        fatigue: 0,
+        experience: parent.experience,
+        morale: 0,
+        provisions: 0,
+        maxProvisions: 0,
+        equipment: 0,
+        maxEquipment: 0,
+        guns: 0,
+        marchSpeedKmh: defaults.marchSpeedKmh,
+        spacingM: defaults.spacingM,
+        spacingMultiplier: 1,
+        // Scout travels with them: a patrol is the parent's eyes, detached.
+        traits: ['scout'],
+        formation: 'march',
+        formationChange: null,
+        column: [at],
+        hoursMarchedToday: 0,
+        corps: parent.corps,
+        parentUnitId: parent.id,
+      };
+
+      return [{ kind: 'patrol_detached', patrol, parentUnitId: parent.id, costPaperStrength }];
     }
 
     case 'clear_task':
@@ -551,6 +771,7 @@ export function decide(
           decisionId: cmd.decisionId,
           atHours: state.clockHours,
           note: cmd.note ?? null,
+          favouring: cmd.favouring ?? null,
         },
       ];
 
@@ -565,6 +786,12 @@ export function decide(
 
     case 'set_unit_stats':
       return [{ kind: 'unit_stat_set', unitId: cmd.unitId, changes: cmd.changes }];
+
+    case 'declare_battle':
+      return [{ kind: 'battle_declared', coords: cmd.coords }];
+
+    case 'end_battle':
+      return [{ kind: 'battle_ended', coords: cmd.coords }];
   }
 }
 

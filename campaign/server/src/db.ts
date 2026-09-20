@@ -52,12 +52,18 @@ const { DatabaseSync } = nodeRequire('node:sqlite') as {
  * a rewind is replaying a prefix.
  */
 const SCHEMA = `
+-- The ruleset and config columns are the campaign's own numbers, written once at creation.
+-- Resolved and stored rather than resolved on read: a house rule edited next month must
+-- not silently re-tune a game already in progress, and a campaign that cannot say what it
+-- was played under cannot be reviewed afterwards.
 CREATE TABLE IF NOT EXISTS campaigns (
   id            TEXT PRIMARY KEY,
   name          TEXT NOT NULL,
   world_hash    TEXT NOT NULL,
   world_blob    TEXT NOT NULL,
   strictness    TEXT NOT NULL DEFAULT 'strict',
+  ruleset       TEXT NOT NULL DEFAULT 'standard',
+  config_json   TEXT,
   created_at    TEXT NOT NULL
 );
 
@@ -101,10 +107,31 @@ CREATE TABLE IF NOT EXISTS roles (
 CREATE INDEX IF NOT EXISTS roles_by_hash ON roles (token_hash);
 `;
 
+/**
+ * Columns added after the first databases were written.
+ *
+ * `CREATE TABLE IF NOT EXISTS` does nothing to a table that already exists, so a new
+ * column needs saying twice: once in the schema for a fresh database and once here for
+ * every database already on disk. Each is attempted and its failure ignored, because the
+ * only expected failure is "duplicate column name" — which means the work is already done.
+ */
+const ADDED_COLUMNS: readonly string[] = [
+  `ALTER TABLE campaigns ADD COLUMN ruleset TEXT NOT NULL DEFAULT 'standard'`,
+  `ALTER TABLE campaigns ADD COLUMN config_json TEXT`,
+];
+
 export function openDb(path = ':memory:'): Db {
   const db = new DatabaseSync(path);
   db.exec('PRAGMA journal_mode = WAL');
   db.exec('PRAGMA foreign_keys = ON');
   db.exec(SCHEMA);
+  for (const sql of ADDED_COLUMNS) {
+    try {
+      db.exec(sql);
+    } catch {
+      // Already there. Adding a column is the only migration this schema has ever needed,
+      // and re-running it is how a database written by an older build catches up.
+    }
+  }
   return db;
 }

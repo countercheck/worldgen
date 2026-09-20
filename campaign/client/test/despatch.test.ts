@@ -137,25 +137,45 @@ describe('who a commander may write to', () => {
   });
 });
 
-describe('a commander’s own estimate', () => {
-  it('is computed from his last report, and carries that hour', () => {
+describe('the ride estimate, which only a referee sees', () => {
+  it('is null for a commander, who cannot know where the man is', () => {
+    // The rule, not an omission. A commander's view carries exactly one live unit — his
+    // own — so there is nothing to measure to. A number here would be a distance, and a
+    // distance is a position.
     const subordinate = correspondents(ney).find((c) => c.mayOrder)!;
-    const estimate = estimateRide(ney, world, DEFAULT_CONFIG, subordinate.id);
-
-    expect(estimate).not.toBeNull();
-    expect(estimate!.hours).toBeGreaterThan(0);
-    // The hour it was computed from is part of the answer, not decoration: it is how a
-    // reader judges whether to believe the number at all.
-    const report = ney.reports.find((r) => r.unitId === subordinate.unitId)!;
-    expect(estimate!.fromHours).toBe(report.atHours);
-  });
-
-  it('is null when he has never heard where the man is', () => {
+    expect(estimateRide(ney, world, DEFAULT_CONFIG, subordinate.id)).toBeNull();
     expect(estimateRide(ney, world, DEFAULT_CONFIG, 'wellington')).toBeNull();
   });
 
-  it('is null for a referee, who has no formation to send a rider from', () => {
+  it('is null for a referee who has not said whose rider it is', () => {
+    // He has no seat of his own to send from.
     expect(estimateRide(view(REFEREE_ROLE), world, DEFAULT_CONFIG, 'ney')).toBeNull();
+  });
+
+  it('measures the real ground when the referee names a sender', () => {
+    const referee = view(REFEREE_ROLE);
+    const subordinate = correspondents(ney).find((c) => c.mayOrder)!;
+    const estimate = estimateRide(
+      referee,
+      world,
+      DEFAULT_CONFIG,
+      subordinate.id,
+      [],
+      'ney',
+    );
+
+    expect(estimate).not.toBeNull();
+    expect(estimate!.hours).toBeGreaterThan(0);
+  });
+
+  it('is null when the sender or the addressee is not on the map', () => {
+    const referee = view(REFEREE_ROLE);
+    expect(
+      estimateRide(referee, world, DEFAULT_CONFIG, 'nobody', [], 'ney'),
+    ).toBeNull();
+    expect(
+      estimateRide(referee, world, DEFAULT_CONFIG, 'ney', [], 'nobody'),
+    ).toBeNull();
   });
 });
 

@@ -11,7 +11,8 @@
 
 import type { DecisionTrigger } from './task.js';
 import type { LandCover } from './world.js';
-import type { Trait, UnitKind } from './unit.js';
+import { FOOTPRINT, type FootprintShape } from './column.js';
+import type { Experience, Formation, Trait, UnitKind } from './unit.js';
 
 /**
  * How hard the ground is to move over.
@@ -116,9 +117,9 @@ export interface CampaignConfig {
   readonly reconRadius: number;
   /** The same, for a unit with the scout trait. */
   readonly scoutReconRadius: number;
-  /** Patrols a scout unit may field without spending effectives. */
+  /** Patrols a scout unit may field without spending men. */
   readonly freePatrols: number;
-  /** Effectives permanently lost per patrol beyond the free ones. */
+  /** PaperStrength permanently lost per patrol beyond the free ones. */
   readonly extraPatrolCost: number;
   /** How far gunfire carries, in km. */
   readonly gunfireRangeKm: number;
@@ -177,17 +178,139 @@ export interface CampaignConfig {
    * every advance on a day anybody was fighting.
    */
   readonly haltTriggers: readonly DecisionTrigger[];
-  /**
-   * The clock's granularity while advancing, in hours.
-   *
-   * Riders and columns are stepped hex by hex, so this only bounds how finely two events
-   * in the same quarter-hour are ordered against each other. Smaller is more faithful and
-   * slower; a quarter of an hour is well under the time anything takes to cross a hex.
-   */
-  readonly tickHours: number;
   /** A ceiling on one advance, so a mistyped `advance 1000` cannot lock the server up. */
   readonly maxAdvanceHours: number;
+
+  // ---- fatigue and formation ------------------------------------------
+  /**
+   * Cumulative fatigue for a day's marching, indexed by whole hours on the road.
+   *
+   * The rules give this as a table of bands rather than a rate, and the shape is the
+   * point: four hours is free, the cost climbs slowly to the twelfth hour and then turns
+   * brutal. Held as a cumulative curve rather than per-hour increments because that is
+   * what makes it composable — the cost of marching from hour *a* to hour *b* is one
+   * subtraction, whatever happened in between.
+   *
+   * Beyond the table, `marchFatiguePerHourBeyond` applies per further hour.
+   */
+  readonly marchFatigue: Readonly<Record<FatigueClass, readonly number[]>>;
+  readonly marchFatiguePerHourBeyond: Readonly<Record<FatigueClass, number>>;
+  /** Which curve each kind of formation reads. */
+  readonly fatigueClass: Readonly<Record<UnitKind, FatigueClass>>;
+  /**
+   * Extra fatigue per hour any part of the column is on the road in the dark.
+   *
+   * Any part, which is why the tail matters: a column is not off the road until its rear
+   * is in, and a march that ends at dusk has men still marching well into the night.
+   */
+  readonly nightFatiguePerHour: number;
+  /**
+   * Hours to change formation, `from` then `to`.
+   *
+   * The rules' own matrix. Making camp is the one that fires by itself — a formation that
+   * has spent its day stops and builds one — and everything else is ordered.
+   */
+  readonly formationChangeHours: Readonly<Record<Formation, Readonly<Record<Formation, number>>>>;
+  /**
+   * The ground each formation stands on, as a fold of its column of march.
+   *
+   * A column is long and thin because it is on a road; everything else gathers it up. See
+   * `FOOTPRINT` in `column.ts` for what the numbers mean and why camp is a thicker line
+   * rather than a disc.
+   */
+  readonly footprint: Readonly<Record<Formation, FootprintShape>>;
+
+  // ---- what a formation is --------------------------------------------
+  /** A division may not be formed or split below this. */
+  readonly minDivisionPaperStrength: number;
+  /** How many troopers ride in a patrol. */
+  readonly patrolPaperStrength: number;
+  /** The highest morale a unit of each experience can hold. */
+  readonly maxMorale: Readonly<Record<Experience, number>>;
+  /** March speed and column spacing each kind starts with, before traits. */
+  readonly kindDefaults: Readonly<Record<UnitKind, { marchSpeedKmh: number; spacingM: number }>>;
 }
+
+/**
+ * Which fatigue curve a formation reads.
+ *
+ * Two, because the rules give two. Horses tire differently from men and the table says so
+ * from the first hour: cavalry starts the day a point down and reaches every band an hour
+ * before the infantry does.
+ */
+export type FatigueClass = 'infantry' | 'cavalry';
+
+/**
+ * The rules' fatigue table, as cumulative totals by hour marched.
+ *
+ * Infantry: nothing to four hours, then 1, 1, 2, 2, 3, 4, 5, 6 through the twelfth, and
+ * +2 an hour after that. Cavalry is the same curve one hour earlier, and starts at 1.
+ */
+/** The rules' morale ceilings, by experience: raw 10 through elite 50. */
+export const DEFAULT_MAX_MORALE: Readonly<Record<Experience, number>> = {
+  [-2]: 10,
+  [-1]: 20,
+  0: 30,
+  1: 40,
+  2: 50,
+};
+
+/**
+ * What each kind of formation is made of, before anything is done to it.
+ *
+ * Spacing is the rules' metres-per-man, and it is why a cavalry division is six times the
+ * length of an infantry one at the same strength.
+ */
+export const DEFAULT_KIND_DEFAULTS: Readonly<
+  Record<UnitKind, { marchSpeedKmh: number; spacingM: number }>
+> = {
+  infantry: { marchSpeedKmh: 3, spacingM: 0.5 },
+  cavalry: { marchSpeedKmh: 5, spacingM: 3 },
+  hq: { marchSpeedKmh: 5, spacingM: 1 },
+  artillery_reserve: { marchSpeedKmh: 3, spacingM: 3 },
+  garrison: { marchSpeedKmh: 3, spacingM: 0.5 },
+  convoy: { marchSpeedKmh: 1, spacingM: 3 },
+};
+
+export const DEFAULT_MARCH_FATIGUE: Readonly<Record<FatigueClass, readonly number[]>> = {
+  //        0  1  2  3  4  5  6  7  8  9 10 11 12
+  infantry: [0, 0, 0, 0, 0, 1, 1, 2, 2, 3, 4, 5, 6],
+  //        0  1  2  3  4  5  6  7  8  9 10 11
+  cavalry: [1, 1, 1, 1, 1, 1, 2, 2, 3, 4, 5, 6],
+};
+
+export const DEFAULT_MARCH_FATIGUE_BEYOND: Readonly<Record<FatigueClass, number>> = {
+  infantry: 2,
+  cavalry: 2,
+};
+
+/** Guns and baggage march with the infantry; a headquarters rides. */
+export const DEFAULT_FATIGUE_CLASS: Readonly<Record<UnitKind, FatigueClass>> = {
+  infantry: 'infantry',
+  cavalry: 'cavalry',
+  hq: 'cavalry',
+  artillery_reserve: 'infantry',
+  garrison: 'infantry',
+  convoy: 'infantry',
+};
+
+/**
+ * The rules' formation change matrix, in hours: `[from][to]`.
+ *
+ * Occupation is a day at either end, which is what makes it a decision rather than a
+ * manoeuvre. Staying put costs nothing, so the diagonal is zero.
+ */
+export const DEFAULT_FORMATION_CHANGE_HOURS: Readonly<
+  Record<Formation, Readonly<Record<Formation, number>>>
+> = {
+  march: { march: 0, battle: 1, rest: 2, occupation: 24, rout: 0 },
+  battle: { march: 2, battle: 0, rest: 1, occupation: 24, rout: 0 },
+  rest: { march: 2, battle: 1, rest: 0, occupation: 24, rout: 0 },
+  occupation: { march: 24, battle: 24, rest: 24, occupation: 0, rout: 0 },
+  // A formation that has broken does not change formation in any orderly sense. Rallying
+  // it is the referee's to adjudicate, and costs whatever he says it costs.
+  rout: { march: 0, battle: 0, rest: 0, occupation: 0, rout: 0 },
+};
 
 export const DEFAULT_CONFIG: CampaignConfig = {
   speeds: DEFAULT_SPEEDS,
@@ -225,9 +348,28 @@ export const DEFAULT_CONFIG: CampaignConfig = {
     'crossing_impassable',
     'objective_reached',
     'despatch_arrived',
+    // A tie for a hex is the referee's to break and nothing moves until he does, so the
+    // clock has to hand back. `column_blocked` is deliberately not here: one column
+    // waiting for another to clear a road settles itself the moment the road clears.
+    'column_contested',
+    // Twenty troopers running into anything is a die roll that may destroy them, and the
+    // rules hand that roll to the referee. Marching the clock past it would be marching
+    // past the one thing a patrol exists to produce.
+    'patrol_contact',
   ],
-  tickHours: 0.25,
   maxAdvanceHours: 24 * 14,
+
+  minDivisionPaperStrength: 4000,
+  patrolPaperStrength: 20,
+  maxMorale: DEFAULT_MAX_MORALE,
+  kindDefaults: DEFAULT_KIND_DEFAULTS,
+
+  marchFatigue: DEFAULT_MARCH_FATIGUE,
+  marchFatiguePerHourBeyond: DEFAULT_MARCH_FATIGUE_BEYOND,
+  fatigueClass: DEFAULT_FATIGUE_CLASS,
+  nightFatiguePerHour: 1,
+  formationChangeHours: DEFAULT_FORMATION_CHANGE_HOURS,
+  footprint: FOOTPRINT,
 };
 
 /** A campaign's overrides, merged onto the defaults. */
@@ -235,6 +377,85 @@ export type ConfigOverrides = {
   readonly [K in keyof CampaignConfig]?: CampaignConfig[K];
 };
 
-export function resolveConfig(overrides?: ConfigOverrides): CampaignConfig {
-  return overrides === undefined ? DEFAULT_CONFIG : { ...DEFAULT_CONFIG, ...overrides };
+/**
+ * A named set of rules, and what it changes.
+ *
+ * Namespaced rather than global because a referee running two campaigns is often running
+ * two different games: one by the book, one with the house amendments he has been arguing
+ * about for a year. A campaign records which ruleset it was started under, so a change to
+ * the house rules tomorrow does not silently re-tune a game already in progress — the
+ * campaign carries its own resolved numbers, and the name is there to say where they came
+ * from.
+ *
+ * `standard` is the rules as written and is the one every other set is expressed against.
+ */
+export interface Ruleset {
+  readonly id: string;
+  readonly name: string;
+  readonly description: string;
+  readonly overrides: ConfigOverrides;
 }
+
+export const RULESETS: Readonly<Record<string, Ruleset>> = {
+  standard: {
+    id: 'standard',
+    name: 'Napoleonic Campaign Rules v4',
+    description: 'The rules as written. Every number here is the document\u2019s own.',
+    overrides: {},
+  },
+  brisk: {
+    id: 'brisk',
+    name: 'Brisk',
+    description:
+      'For a short scenario or a demonstration: columns form up and make camp in half ' +
+      'the time, and a day holds fewer hours of marching so fatigue bites sooner.',
+    overrides: {
+      maxMarchHoursPerDay: 12,
+      formationChangeHours: {
+        march: { march: 0, battle: 1, rest: 1, occupation: 12, rout: 0 },
+        battle: { march: 1, battle: 0, rest: 1, occupation: 12, rout: 0 },
+        rest: { march: 1, battle: 1, rest: 0, occupation: 12, rout: 0 },
+        occupation: { march: 12, battle: 12, rest: 12, occupation: 0, rout: 0 },
+        rout: { march: 0, battle: 0, rest: 0, occupation: 0, rout: 0 },
+      },
+    },
+  },
+  quiet: {
+    id: 'quiet',
+    name: 'Quiet clock',
+    description:
+      'The clock stops for less. Traffic and arrivals go into the queue without halting ' +
+      'an advance, which suits a large campaign with one referee.',
+    overrides: {
+      haltTriggers: ['enemy_contact', 'crossing_impassable', 'patrol_contact'],
+    },
+  },
+};
+
+export const DEFAULT_RULESET = 'standard';
+
+/**
+ * The numbers a campaign actually runs on.
+ *
+ * A ruleset first, then whatever this particular campaign overrides on top — so a referee
+ * can take the house rules and still bend one number for one game without inventing a
+ * fourth ruleset to hold it.
+ *
+ * Shallow: a table given here replaces the table it names rather than merging into it.
+ * Merging a speed table row by row would let a half-specified override produce a table
+ * that is neither the rules' nor the referee's, and no error anywhere to say so.
+ *
+ * `base` is what a deployment starts from — normally the rules as written, but a server
+ * run with its own numbers passes those, and campaigns created on it inherit them.
+ */
+export function resolveConfig(
+  overrides?: ConfigOverrides,
+  rulesetId: string = DEFAULT_RULESET,
+  base: CampaignConfig = DEFAULT_CONFIG,
+): CampaignConfig {
+  const ruleset = RULESETS[rulesetId] ?? RULESETS[DEFAULT_RULESET]!;
+  return { ...base, ...ruleset.overrides, ...(overrides ?? {}) };
+}
+
+/** Whether a name refers to a ruleset this build knows. */
+export const isRuleset = (id: string): boolean => Object.hasOwn(RULESETS, id);

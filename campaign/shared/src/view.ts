@@ -32,7 +32,7 @@
  */
 
 import { formationsUnder, subordinates, type Commander } from './commander.js';
-import { DEFAULT_CONFIG, type CampaignConfig } from './config.js';
+import { DEFAULT_CONFIG, DEFAULT_RULESET, type CampaignConfig } from './config.js';
 import {
   addresseeCopy,
   captorCopy,
@@ -90,7 +90,19 @@ export interface ClientView {
     readonly name: string;
     readonly clockHours: number;
     readonly seq: number;
+    /** Which named set of rules this campaign is played under. */
+    readonly ruleset: string;
   };
+  /**
+   * The numbers this campaign actually runs on.
+   *
+   * Sent, not assumed. The console works out reach, march rates, column lengths and what a
+   * patrol costs, and a client computing those off its own bundled defaults would quietly
+   * disagree with the server the moment a campaign was started under anything but the
+   * standard rules. Not secret: both sides play by the same table and are entitled to read
+   * it, which is what makes it safe to send to a commander.
+   */
+  readonly config: CampaignConfig;
   readonly factions: readonly PublicFaction[];
   /** Commanders this role may know of: everyone on his own side, or all of them. */
   readonly commanders: readonly PublicCommander[];
@@ -117,6 +129,14 @@ export interface ClientView {
   readonly surveyed: readonly HexKey[];
   /** What he can see from where he stands, right now. */
   readonly visible: readonly HexKey[];
+  /**
+   * Ground being fought over.
+   *
+   * A referee sees every battlefield. A commander sees only the ones on ground he can
+   * currently observe — gunfire carries, but this is the campaign map, and a battle he
+   * cannot see is a battle he has to be told about by a rider like anything else.
+   */
+  readonly battle: readonly HexKey[];
 
   // ---- the post -------------------------------------------------------
   /**
@@ -165,6 +185,8 @@ export interface ViewInput {
   readonly worldDoc: unknown;
   readonly world: World;
   readonly cfg?: CampaignConfig;
+  /** The named set of rules this campaign was started under. */
+  readonly ruleset?: string;
 }
 
 /**
@@ -184,6 +206,7 @@ export function viewFor(input: ViewInput, role: Role): ClientView {
     name: state.name,
     clockHours: state.clockHours,
     seq: state.nextSeq,
+    ruleset: input.ruleset ?? DEFAULT_RULESET,
   };
   const factions = [...state.factions.values()]
     .sort((a, b) => (a.id < b.id ? -1 : 1))
@@ -196,6 +219,7 @@ export function viewFor(input: ViewInput, role: Role): ClientView {
       role: 'referee',
       commander: null,
       campaign,
+      config: cfg,
       factions,
       commanders: [...state.commanders.values()].map(publicCommander).sort(byId),
       world: input.worldDoc,
@@ -204,6 +228,7 @@ export function viewFor(input: ViewInput, role: Role): ClientView {
       contacts: [],
       surveyed: [],
       visible: [],
+      battle: [...state.battle].sort(),
       sent: [],
       received: [],
       captured: [],
@@ -229,10 +254,12 @@ export function viewFor(input: ViewInput, role: Role): ClientView {
       role: 'commander',
       commander: null,
       campaign,
+      config: cfg,
       factions,
       commanders: [],
       world: maskedWorld(input, cfg, new Set<HexKey>(), new Set<HexKey>(), role.id),
       units: [],
+      battle: [],
       reports: [],
       contacts: [],
       surveyed: [],
@@ -286,6 +313,7 @@ export function viewFor(input: ViewInput, role: Role): ClientView {
     role: 'commander',
     commander: publicCommander(me),
     campaign,
+    config: cfg,
     factions,
     // His own side's chain of command. Knowing who commands the enemy's II Corps is
     // intelligence, and it arrives by sighting or not at all.
@@ -299,6 +327,7 @@ export function viewFor(input: ViewInput, role: Role): ClientView {
     contacts,
     surveyed: [...surveyed].sort(),
     visible: [...visible].sort(),
+    battle: [...state.battle].filter((k) => visible.has(k)).sort(),
     sent,
     received,
     captured: capturedBy(state, me.faction).map(captorCopy),

@@ -27,6 +27,7 @@ import {
   key,
   knowledgeEvents,
   occupied,
+  presentUnderArms,
   parseWorld,
   reduce,
   REFEREE,
@@ -37,7 +38,7 @@ import {
   type Role,
 } from '@campaign/shared';
 
-import { boardFrom } from '../src/board.js';
+import { boardFrom, dayHour, dayOf, timeOfDay } from '../src/board.js';
 import { washBand } from '../src/map/draw.js';
 
 const world = parseWorld(worldDoc);
@@ -408,5 +409,111 @@ describe('the observation wash', () => {
     // for drawing this at all.
     const kellermann = boardFrom(view(commanderRole('kellermann')), DEFAULT_THEME);
     expect(kellermann.visible.size).toBeGreaterThan(ney.visible.size);
+  });
+});
+
+describe('the campaign clock, as a referee reads it', () => {
+  it('counts the first day as day one', () => {
+    // Nobody calls the opening day of a campaign day zero.
+    expect(dayOf(0)).toBe(1);
+    expect(dayOf(23.99)).toBe(1);
+    expect(dayOf(24)).toBe(2);
+    expect(dayOf(62)).toBe(3);
+  });
+
+  it('reads the hour as a clock face', () => {
+    expect(timeOfDay(0)).toBe('00:00');
+    expect(timeOfDay(6)).toBe('06:00');
+    expect(timeOfDay(14.5)).toBe('14:30');
+    expect(timeOfDay(23.75)).toBe('23:45');
+    // Past midnight, the same face comes round again.
+    expect(timeOfDay(24)).toBe('00:00');
+    expect(timeOfDay(38.25)).toBe('14:15');
+  });
+
+  it('never prints a time that does not exist', () => {
+    // The engine works in fractions of an hour, so rounding to the minute is where a
+    // 13:60 comes from. Rolling the hour is the fix; rolling the last hour of the day
+    // wraps rather than printing 24:00.
+    expect(timeOfDay(13.999)).toBe('14:00');
+    expect(timeOfDay(23.9999)).toBe('00:00');
+    for (let h = 0; h < 48; h += 0.017) {
+      const [hh, mm] = timeOfDay(h).split(':').map(Number);
+      expect(hh, `${h}`).toBeGreaterThanOrEqual(0);
+      expect(hh, `${h}`).toBeLessThan(24);
+      expect(mm, `${h}`).toBeLessThan(60);
+    }
+  });
+
+  it('puts the day and the time together', () => {
+    expect(dayHour(0)).toBe('Day 1, 00:00');
+    expect(dayHour(62.5)).toBe('Day 3, 14:30');
+  });
+
+  it('rolls the day when the minute it rounds to is midnight', () => {
+    // The day and the time are rounded off the same value. Rounding each for itself gives
+    // "Day 1, 00:00" for an hour that is, to the minute, the start of the second day —
+    // wrong in the one place a reader actually checks.
+    expect(dayHour(23.9999)).toBe('Day 2, 00:00');
+    expect(dayOf(23.9999)).toBe(2);
+    expect(dayHour(47.9999)).toBe('Day 3, 00:00');
+  });
+});
+
+/**
+ * Deployment, and the ground it is fought over.
+ *
+ * Two separate things that meet on the map. A formation in line of battle is drawn as
+ * ranks rather than as a column ribbon; a battlefield is ground, drawn under everything
+ * and belonging to nobody.
+ */
+describe('formations drawn deployed', () => {
+  const deployed = (role: Role, unitId: string): ClientView => {
+    const v = view(role);
+    return {
+      ...v,
+      units: v.units.map((u) => (u.id === unitId ? { ...u, formation: 'battle' as const } : u)),
+    };
+  };
+
+  it('draws a formation in line of battle as ranks, not as a ribbon', () => {
+    const anyUnit = [...state.units.values()][0]!;
+    const before = boardFrom(view(REFEREE_ROLE), DEFAULT_THEME);
+    const after = boardFrom(deployed(REFEREE_ROLE, anyUnit.id), DEFAULT_THEME);
+
+    expect(before.marks.find((m) => m.id === anyUnit.id)!.deployed).toBe(false);
+    expect(after.marks.find((m) => m.id === anyUnit.id)!.deployed).toBe(true);
+  });
+
+  it('collapses the deployed footprint to its frontage', () => {
+    const anyUnit = [...state.units.values()][0]!;
+    const before = boardFrom(view(REFEREE_ROLE), DEFAULT_THEME);
+    const after = boardFrom(deployed(REFEREE_ROLE, anyUnit.id), DEFAULT_THEME);
+
+    const marching = before.marks.find((m) => m.id === anyUnit.id)!.column.length;
+    const standing = after.marks.find((m) => m.id === anyUnit.id)!.column.length;
+    expect(standing).toBeLessThanOrEqual(marching);
+    expect(standing).toBe(Math.max(1, Math.ceil(presentUnderArms(anyUnit) / 10000)));
+  });
+
+  it('never draws a reported or sighted formation as deployed', () => {
+    // How an enemy is standing is intelligence. A sighting does not carry it, so the
+    // drawing code is never handed it — not even as a false value it might mistake.
+    const board = boardFrom(view(commanderRole('ney')), DEFAULT_THEME);
+    for (const mark of board.marks) {
+      if (mark.kind === 'live') continue;
+      expect(mark.deployed, `${mark.id} is drawn deployed on hearsay`).toBe(false);
+    }
+  });
+
+  it('carries the ground being fought over onto the board', () => {
+    const v = view(REFEREE_ROLE);
+    const here = [...state.units.values()][0]!.column[0]!;
+    const board = boardFrom({ ...v, battle: [key(here)] }, DEFAULT_THEME);
+    expect(board.battle.has(key(here))).toBe(true);
+  });
+
+  it('has no battlefield where none was declared', () => {
+    expect(boardFrom(view(REFEREE_ROLE), DEFAULT_THEME).battle.size).toBe(0);
   });
 });

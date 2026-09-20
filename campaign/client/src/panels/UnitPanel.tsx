@@ -11,11 +11,14 @@
 import {
   catchupHours,
   columnHexes,
+  occupied,
   columnLengthKm,
   DEFAULT_CONFIG,
+  type CampaignConfig,
   EXPERIENCE_NAMES,
   GRADES,
   isBroken,
+  isPatrol,
   isStarving,
   marchHoursLeftToday,
   maxMorale,
@@ -34,6 +37,17 @@ const GRADE_LABEL: Record<string, string> = {
   bad_going: 'Bad going',
 };
 
+/**
+ * Why the ground a formation stands on is not the length of its column.
+ *
+ * Absent for the formations that *are* the column, so no hint is shown for them.
+ */
+const FOLD_HINT: Partial<Record<string, string>> = {
+  battle: 'deployed at a kilometre of frontage per ten thousand men',
+  rest: 'gathered into camp',
+  occupation: 'gone into quarters',
+};
+
 const pretty = (s: string): string =>
   s.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
 
@@ -42,13 +56,21 @@ export function UnitPanel({
   name,
   factionName,
   color,
+  patrolsOut,
+  parent,
+  cfg = DEFAULT_CONFIG,
 }: {
   unit: Unit;
   name: string;
   factionName: string;
   color: string;
+  /** How many patrols this formation has in the field. Undefined where it is not known. */
+  patrolsOut?: number;
+  /** The formation this one was detached from, for a patrol. Its stats stand in for the patrol's. */
+  parent?: Unit;
+  /** The campaign's numbers, as the server resolved them. */
+  cfg?: CampaignConfig;
 }) {
-  const cfg = DEFAULT_CONFIG;
   const lengthKm = columnLengthKm(unit);
   const speed = unitSpeedKmh(cfg, unit, 'road');
 
@@ -72,26 +94,59 @@ export function UnitPanel({
       </Section>
 
       <Section title="Strength">
-        <Row label="Effectives" value={unit.effectives.toLocaleString()} />
-        <Row
-          label="Present under arms"
-          value={presentUnderArms(unit).toLocaleString()}
-          hint="Effectives reduced by fatigue"
-        />
-        <Row label="Guns" value={String(unit.guns)} />
-        <Bar label="Fatigue" value={unit.fatigue} max={100} invert />
-        <Bar label="Morale" value={unit.morale} max={maxMorale(unit)} />
-        <Bar label="Provisions" value={unit.provisions} max={unit.maxProvisions} />
-        <Bar label="Equipment" value={unit.equipment} max={unit.maxEquipment} />
+        <Row label="PaperStrength" value={unit.paperStrength.toLocaleString()} />
+        {/* A patrol is not a formation in miniature. It carries no morale, no supply and
+            no fatigue, and its zeroes mean "not tracked" — drawn as empty bars they would
+            read as a division on the point of collapse. */}
+        {/* A patrol has none of its own, and is immune to all of it. What is shown is the
+            parent's, read off the parent rather than copied onto the patrol — a copy would
+            be right at the hour it was detached and wrong by the afternoon. */}
+        {isPatrol(unit) ? (
+          parent === undefined ? (
+            <p className="muted small">A detachment. Its parent is out of sight.</p>
+          ) : (
+            <>
+              <p className="muted small">
+                A detachment of {parent.name}, and immune to all of it. These are the
+                parent&rsquo;s.
+              </p>
+              <Bar label="Fatigue" value={parent.fatigue} max={100} invert />
+              <Bar label="Morale" value={parent.morale} max={maxMorale(parent, cfg.maxMorale)} />
+              <Bar label="Provisions" value={parent.provisions} max={parent.maxProvisions} />
+              <Bar label="Equipment" value={parent.equipment} max={parent.maxEquipment} />
+            </>
+          )
+        ) : (
+          <>
+            <Row
+              label="Present under arms"
+              value={presentUnderArms(unit).toLocaleString()}
+              hint="PaperStrength reduced by fatigue"
+            />
+            <Row label="Guns" value={String(unit.guns)} />
+            <Bar label="Fatigue" value={unit.fatigue} max={100} invert />
+            <Bar label="Morale" value={unit.morale} max={maxMorale(unit, cfg.maxMorale)} />
+            <Bar label="Provisions" value={unit.provisions} max={unit.maxProvisions} />
+            <Bar label="Equipment" value={unit.equipment} max={unit.maxEquipment} />
+          </>
+        )}
       </Section>
 
       <Section title="Column">
         <Row
           label="Length"
           value={`${lengthKm.toFixed(1)} km`}
-          hint="Effectives × spacing × multiplier"
+          hint="PaperStrength × spacing × multiplier"
         />
-        <Row label="Occupies" value={`${columnHexes(unit)} hexes`} />
+        {FOLD_HINT[unit.formation] === undefined ? (
+          <Row label="Occupies" value={`${occupied(unit, 'road', cfg.footprint).length} hexes`} />
+        ) : (
+          <Row
+            label="Occupies"
+            value={`${occupied(unit, 'road', cfg.footprint).length} hexes`}
+            hint={`${columnHexes(unit)} strung out on the march, ${FOLD_HINT[unit.formation]}`}
+          />
+        )}
         <Row
           label="Catch-up"
           value={`${catchupHours(unit, speed).toFixed(2)} h`}
@@ -128,8 +183,17 @@ export function UnitPanel({
           value={`${reconRadius(cfg, unit)} hex${reconRadius(cfg, unit) === 1 ? '' : 'es'} from the column`}
         />
         {unit.traits.includes('scout') && (
-          <Row label="Patrols" value={`up to ${cfg.freePatrols} without cost`} />
+          <Row
+            label="Patrols"
+            value={
+              patrolsOut === undefined
+                ? `up to ${cfg.freePatrols} without cost`
+                : `${patrolsOut} out of ${cfg.freePatrols} free` +
+                  (patrolsOut > cfg.freePatrols ? ` · ${patrolsOut - cfg.freePatrols} paid for` : '')
+            }
+          />
         )}
+        {parent !== undefined && <Row label="Detached from" value={parent.name} />}
       </Section>
 
       {unit.traits.length > 0 && (

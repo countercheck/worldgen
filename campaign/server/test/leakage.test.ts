@@ -38,6 +38,7 @@ import {
   key,
   KIND_DEFAULTS,
   parseWorld,
+  unkey,
   type Command,
   type Commander,
   type Hex,
@@ -89,7 +90,7 @@ const [RED_HEX, BLUE_HEX, SUB_HEX] = spreadLand();
  * Distinct strengths and names per formation, on purpose.
  *
  * These tests search the raw response for things that must not be in it, which only
- * discriminates if the value is unique. Giving both sides 5,000 effectives made an early
+ * discriminates if the value is unique. Giving both sides 5,000 paperStrength made an early
  * version of the strength assertion pass against red's own division while proving nothing
  * about blue's.
  */
@@ -107,14 +108,14 @@ function division(
   at: Hex,
   corps: string,
   name: string,
-  effectives: number,
+  paperStrength: number,
 ): Unit {
   return {
     id,
     name,
     faction,
     kind: 'infantry',
-    effectives,
+    paperStrength,
     fatigue: 0,
     experience: 0,
     morale: 30,
@@ -128,6 +129,7 @@ function division(
     spacingMultiplier: 1.3,
     traits: [],
     formation: 'march',
+    formationChange: null,
     column: [at],
     hoursMarchedToday: 0,
     corps,
@@ -291,7 +293,7 @@ describe('the view endpoint', () => {
     expect(raw).not.toContain('blue-1');
     expect(raw).not.toContain(BLUE_NAME);
     expect(raw).not.toContain('Grand Army of the Danube');
-    expect(raw).not.toContain(`"effectives":${BLUE_STRENGTH}`);
+    expect(raw).not.toContain(`"paperStrength":${BLUE_STRENGTH}`);
   });
 
   it('never names the enemy chain of command', async () => {
@@ -324,7 +326,7 @@ describe('the view endpoint', () => {
   it("does not send a subordinate his superior's live column", async () => {
     const raw = (await viewAs(f, f.kellermann)).body;
     expect(raw).not.toContain(RED_NAME);
-    expect(raw).not.toContain(`"effectives":${RED_STRENGTH}`);
+    expect(raw).not.toContain(`"paperStrength":${RED_STRENGTH}`);
   });
 
   it('sends the ground unmasked when terrain fog is off', async () => {
@@ -342,6 +344,29 @@ describe('the view endpoint', () => {
     expect(view.visible.length).toBeGreaterThan(0);
     expect(view.surveyed.length).toBeGreaterThan(0);
     expect(view.visible.length).toBeLessThan(world.hexes.size);
+  });
+
+  it('tells a commander about a battle he can see, and no other', async () => {
+    // Gunfire carries, but this is the campaign map and a battle out of sight is a battle
+    // a rider has to bring word of. A referee sees every field; a commander sees the ones
+    // on ground he is actually looking at.
+    const ney = (await viewAs(f, f.ney)).json();
+    const seen = (ney.visible as string[])[0]!;
+    const unseen = [...world.hexes.keys()].find((k) => !(ney.visible as string[]).includes(k))!;
+
+    await f.app.inject({
+      method: 'POST',
+      url: `/api/campaigns/${f.id}/commands`,
+      headers: { 'x-campaign-token': f.referee },
+      payload: { command: { kind: 'declare_battle', coords: [unkey(seen), unkey(unseen)] } },
+    });
+
+    const after = (await viewAs(f, f.ney)).json();
+    expect(after.battle).toEqual([seen]);
+    expect(after.battle).not.toContain(unseen);
+
+    const ref = (await viewAs(f, f.referee)).json();
+    expect([...(ref.battle as string[])].sort()).toEqual([seen, unseen].sort());
   });
 
   it('does not leak another commander through the log', async () => {
@@ -474,7 +499,7 @@ describe('once an enemy is actually spotted', () => {
     const raw = (await viewAs(f, f.ney)).body;
     expect(raw).not.toContain('II Corps');
     expect(raw).not.toContain(BLUE_NAME);
-    expect(raw).not.toContain(`"effectives":${BLUE_STRENGTH}`);
+    expect(raw).not.toContain(`"paperStrength":${BLUE_STRENGTH}`);
 
     // A contact carries exactly these fields and no others. Not a search of the whole
     // payload for `"morale"` — red's own division has one, so that would pass while
@@ -1013,5 +1038,117 @@ describe('the referee console', () => {
       payload: { hours: 1 },
     });
     expect(res.statusCode).toBe(403);
+  });
+});
+
+describe('a referee writing in a commander’s name', () => {
+  let f: Fixture;
+  beforeEach(async () => {
+    f = await setUp();
+  });
+
+  const post = (token: string, command: Command) =>
+    f.app.inject({
+      method: 'POST',
+      url: `/api/campaigns/${f.id}/commands`,
+      headers: { 'x-campaign-token': token },
+      payload: { command },
+    });
+
+  const viewFor = async (token: string) =>
+    JSON.parse(
+      (
+        await f.app.inject({
+          method: 'GET',
+          url: `/api/campaigns/${f.id}/view`,
+          headers: { 'x-campaign-token': token },
+        })
+      ).body,
+    ) as { despatches: { from: string; body: { text?: string } }[] };
+
+  const logFor = async (token: string) =>
+    JSON.parse(
+      (
+        await f.app.inject({
+          method: 'GET',
+          url: `/api/campaigns/${f.id}/log`,
+          headers: { 'x-campaign-token': token },
+        })
+      ).body,
+    ) as { actor: { kind: string }; payload: Record<string, never> }[];
+
+  it('sends it from the man he named', async () => {
+    // His ordinary work: he runs most of the commanders on the map, and takes dictation
+    // from the players who hold the rest.
+    const res = await post(f.referee, {
+      kind: 'send_despatch',
+      from: 'ney',
+      to: 'kellermann',
+      despatchKind: 'order',
+      body: { text: 'Move on the crossroads.' },
+    });
+    expect(res.statusCode).toBe(200);
+
+    const view = await viewFor(f.referee);
+    const sent = view.despatches.find((d) => d.body.text === 'Move on the crossroads.');
+    expect(sent).toBeDefined();
+    expect(sent!.from).toBe('ney');
+  });
+
+  it('records that it was the referee who wrote it', async () => {
+    // The despatch is from the commander; the event is from the referee. An after-action
+    // review has to be able to tell a man's own order from one written for him.
+    await post(f.referee, {
+      kind: 'send_despatch',
+      from: 'ney',
+      to: 'kellermann',
+      despatchKind: 'order',
+      body: { text: 'By your hand, not mine.' },
+    });
+
+    const log = await logFor(f.referee);
+    const event = log.find((e) => {
+      const p = e.payload as unknown as {
+        kind: string;
+        despatch?: { from: string; body: { text?: string } };
+      };
+      return p.kind === 'despatch_sent' && p.despatch?.body.text === 'By your hand, not mine.';
+    });
+    expect(event).toBeDefined();
+    expect(event!.actor).toEqual({ kind: 'referee' });
+    expect(
+      (event!.payload as unknown as { despatch: { from: string } }).despatch.from,
+    ).toBe('ney');
+  });
+
+  it('still ignores a commander who claims to be somebody else', async () => {
+    // The rule that makes the referee's power safe to grant: a seat writes as itself and
+    // nothing else, whatever the payload says. A forged report would let anyone feed a
+    // commander false intelligence signed by his own subordinate.
+    const res = await post(f.ney, {
+      kind: 'send_despatch',
+      from: 'wellington',
+      to: 'kellermann',
+      despatchKind: 'order',
+      body: { text: 'Fall back at once.' },
+    });
+    expect(res.statusCode).toBe(200);
+
+    const view = await viewFor(f.referee);
+    const sent = view.despatches.find((d) => d.body.text === 'Fall back at once.');
+    expect(sent!.from).toBe('ney');
+  });
+
+  it('refuses to write across the lines, whoever asks', async () => {
+    // Hard, and hard for the referee too: writing to the other side is not a despatch, and
+    // letting it through would produce state neither the inbox nor the fog can describe.
+    const res = await post(f.referee, {
+      kind: 'send_despatch',
+      from: 'ney',
+      to: 'wellington',
+      despatchKind: 'order',
+      body: { text: 'Surrender.' },
+    });
+    expect(res.statusCode).toBe(409);
   });
 });
