@@ -14,9 +14,14 @@
  */
 
 import cookie from '@fastify/cookie';
+import rateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
 import websocket from '@fastify/websocket';
-import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
+import Fastify, {
+  type FastifyInstance,
+  type FastifyRequest,
+  type FastifyServerOptions,
+} from 'fastify';
 
 import {
   assertMasked,
@@ -49,7 +54,52 @@ export interface AppOptions {
    * CORS story to have.
    */
   readonly clientDir?: string;
+
+  /**
+   * The largest request body accepted, in bytes.
+   *
+   * This is a world upload limit and nothing else: a campaign is created by posting a
+   * generated `world.json`, and that document is by far the biggest thing this server is
+   * ever sent. Fastify's own default is 1 MiB, which is under the size of the world the
+   * documentation tells a referee to generate — a 32x32 world is already 641 KB and the
+   * recommended 64x64 is about four times that, so the default refused the ordinary case
+   * with a 413.
+   */
+  readonly bodyLimit?: number;
+
+  /**
+   * Whether to believe `X-Forwarded-For`, and from whom.
+   *
+   * Off by default, because a server that trusts a forwarding header nobody put there is
+   * letting any client claim any address. On behind a reverse proxy — a container
+   * platform's router, or a Caddy in front — where without it every request appears to
+   * come from the proxy and per-address rate limiting collapses into one bucket.
+   *
+   * `true` believes the chain, which is right where the platform is the only way in. A
+   * string or list names the addresses or CIDR ranges to believe and nothing else, which
+   * is better where the server is also reachable directly.
+   */
+  readonly trustProxy?: boolean | string | string[];
+
+  /**
+   * Whether to rate limit, and how hard.
+   *
+   * Off by default so tests and development are not fighting a budget, and set by the
+   * entry point for anything long-running. The limit that matters is on creation: it is
+   * the only unauthenticated write this server has, and each one puts a whole world on
+   * disk. Everything else needs a token first.
+   */
+  readonly rateLimit?: { readonly global: number; readonly create: number } | false;
 }
+
+/**
+ * A quarter of a gibibyte is not a world, so this bounds the upload while clearing the
+ * real ones with room to spare: 64x64 is about 2.5 MB and 128x128 about 10 MB.
+ */
+export const DEFAULT_BODY_LIMIT = 16 * 1024 * 1024;
+
+/** Per minute, per address. Generous, because a referee mid-evening is not an attacker. */
+export const DEFAULT_RATE_LIMITS = { global: 600, create: 5 } as const;
 
 /** Where a request's token may come from, in order of preference. */
 function tokenFrom(req: FastifyRequest): string | undefined {
@@ -65,7 +115,16 @@ function tokenFrom(req: FastifyRequest): string | undefined {
   return req.cookies[TOKEN_COOKIE];
 }
 
-export function buildApp(opts: AppOptions = {}): FastifyInstance {
+/**
+ * Asynchronous because plugins are.
+ *
+ * `app.register` defers: the plugin is loaded when the instance is readied, in a child
+ * context, and a route added synchronously afterwards is in the parent and never sees its
+ * hooks. For a decorator that is invisible — `@fastify/cookie` hoists itself — but a rate
+ * limiter registered that way loads, reports itself loaded, and limits nothing at all.
+ * Awaiting each registration puts the hooks where the routes are.
+ */
+export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> {
   const db = opts.db ?? openDb();
   // A fallback only. Every request resolves the campaign's own numbers from the row, so
   // that two campaigns in one database can be played under different rules.
@@ -76,9 +135,28 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
   const configOf = (campaign: { config?: CampaignConfig }): CampaignConfig =>
     campaign.config ?? cfg;
 
-  const app = Fastify({ logger: opts.logger ?? false });
-  app.register(cookie);
-  app.register(websocket);
+  const limits = opts.rateLimit ?? false;
+
+  // Annotated rather than passed inline. Fastify chooses between its plain-HTTP and
+  // HTTP/2 overloads by reading the options literal, and an object carrying `trustProxy`
+  // resolves to the HTTP/2 one — which then types every request as an
+  // `Http2ServerRequest` and fails against every helper here.
+  const serverOptions: FastifyServerOptions = {
+    logger: opts.logger ?? false,
+    bodyLimit: opts.bodyLimit ?? DEFAULT_BODY_LIMIT,
+    trustProxy: opts.trustProxy ?? false,
+  };
+
+  const app = Fastify(serverOptions);
+  await app.register(cookie);
+  await app.register(websocket);
+  if (limits !== false) {
+    // Registered globally so an unauthenticated flood cannot reach a route handler at
+    // all, and overridden per route where the cost of a request is not the same. The
+    // allowance is per address, which is the reason `trustProxy` has to be right behind
+    // a proxy: without it every player shares one bucket and the first one spends it.
+    await app.register(rateLimit, { max: limits.global, timeWindow: '1 minute' });
+  }
 
   app.decorate('store', store);
 
@@ -106,49 +184,55 @@ export function buildApp(opts: AppOptions = {}): FastifyInstance {
 
   // ---- create -----------------------------------------------------------
 
-  app.post('/api/campaigns', async (req, reply) => {
-    const body = req.body as {
-      id?: string;
-      name?: string;
-      world?: unknown;
-      factions?: { id: string; name: string; color: string }[];
-      seed?: number;
-      strictness?: Strictness;
-      ruleset?: string;
-      config?: ConfigOverrides;
-    };
+  app.post(
+    '/api/campaigns',
+    limits === false
+      ? {}
+      : { config: { rateLimit: { max: limits.create, timeWindow: '1 minute' } } },
+    async (req, reply) => {
+      const body = req.body as {
+        id?: string;
+        name?: string;
+        world?: unknown;
+        factions?: { id: string; name: string; color: string }[];
+        seed?: number;
+        strictness?: Strictness;
+        ruleset?: string;
+        config?: ConfigOverrides;
+      };
 
-    if (body?.world === undefined || !Array.isArray(body.factions) || body.factions.length === 0) {
-      return reply.code(400).send({ error: 'a world and at least one faction are required' });
-    }
+      if (body?.world === undefined || !Array.isArray(body.factions) || body.factions.length === 0) {
+        return reply.code(400).send({ error: 'a world and at least one faction are required' });
+      }
 
-    const id = body.id ?? `c${Date.now().toString(36)}`;
-    try {
-      const created = store.create({
-        id,
-        name: body.name ?? 'Campaign',
-        worldDoc: body.world,
-        factions: body.factions,
-        ...(body.seed !== undefined ? { seed: body.seed } : {}),
-        ...(body.strictness !== undefined ? { strictness: body.strictness } : {}),
-        ...(body.ruleset !== undefined ? { ruleset: body.ruleset } : {}),
-        ...(body.config !== undefined ? { config: body.config } : {}),
-      });
+      const id = body.id ?? `c${Date.now().toString(36)}`;
+      try {
+        const created = store.create({
+          id,
+          name: body.name ?? 'Campaign',
+          worldDoc: body.world,
+          factions: body.factions,
+          ...(body.seed !== undefined ? { seed: body.seed } : {}),
+          ...(body.strictness !== undefined ? { strictness: body.strictness } : {}),
+          ...(body.ruleset !== undefined ? { ruleset: body.ruleset } : {}),
+          ...(body.config !== undefined ? { config: body.config } : {}),
+        });
 
-      // The only time this token exists in plaintext anywhere. It is not stored and
-      // cannot be recovered — a lost link is reissued, not looked up.
-      //
-      // No commander links yet: a link names a seat, and there are no seats until the
-      // referee has put formations on the map and appointed men to them.
-      return reply.code(201).send({
-        id,
-        refereeToken: created.refereeToken,
-        ruleset: created.campaign.ruleset,
-      });
-    } catch (err) {
-      return reply.code(400).send({ error: String((err as Error).message ?? err) });
-    }
-  });
+        // The only time this token exists in plaintext anywhere. It is not stored and
+        // cannot be recovered — a lost link is reissued, not looked up.
+        //
+        // No commander links yet: a link names a seat, and there are no seats until the
+        // referee has put formations on the map and appointed men to them.
+        return reply.code(201).send({
+          id,
+          refereeToken: created.refereeToken,
+          ruleset: created.campaign.ruleset,
+        });
+      } catch (err) {
+        return reply.code(400).send({ error: String((err as Error).message ?? err) });
+      }
+    },
+  );
 
   // ---- the one read path ------------------------------------------------
 

@@ -39,7 +39,14 @@ export interface Db {
   close(): void;
 }
 
-const { DatabaseSync } = nodeRequire('node:sqlite') as {
+/**
+ * The raw handle, exported so the one `node:sqlite` workaround above lives in one file.
+ *
+ * `openDb` is what everything should use. This is for the one caller that must open a
+ * database *without* creating it — a backup that helpfully created an empty campaign and
+ * then copied it would report success and lose the game.
+ */
+export const { DatabaseSync } = nodeRequire('node:sqlite') as {
   DatabaseSync: new (path: string) => Db;
 };
 

@@ -12,8 +12,18 @@
  * because Vite serving the client itself is what gives hot reloading.
  */
 
-import { buildApp } from './app.js';
+import { buildApp, DEFAULT_BODY_LIMIT, DEFAULT_RATE_LIMITS } from './app.js';
 import { openDb } from './db.js';
+
+/**
+ * `TRUST_PROXY=true` believes the forwarding chain; anything else is read as the
+ * addresses or CIDR ranges to believe, comma separated.
+ */
+function trustSetting(v: string): boolean | string[] {
+  if (v === 'true') return true;
+  if (v === 'false') return false;
+  return v.split(',').map((s) => s.trim()).filter((s) => s !== '');
+}
 
 const port = Number(process.env.PORT ?? 3000);
 // Loopback by default: this is a game among people who know each other, and a server that
@@ -23,9 +33,29 @@ const host = process.env.HOST ?? '127.0.0.1';
 const dbPath = process.env.CAMPAIGN_DB ?? './campaign.db';
 const clientDir = process.env.CAMPAIGN_CLIENT;
 
-const app = buildApp({
+// Behind a reverse proxy — a platform's router, or a Caddy in front — the connecting
+// address is the proxy's, so every player would share one rate-limit bucket and the first
+// one would spend it. Off unless asked, because trusting a forwarding header nobody put
+// there lets any client claim any address. Set it to `1` behind exactly one proxy.
+const trustProxy = process.env.TRUST_PROXY;
+
+// Limiting is a property of being long-running, not of being built, so it is switched on
+// here rather than in `buildApp`: the tests and the development server stand the same app
+// up dozens of times a second and should not be fighting a budget to do it.
+const rateLimit =
+  process.env.CAMPAIGN_RATE_LIMIT === 'off'
+    ? false
+    : {
+        global: Number(process.env.CAMPAIGN_RATE_GLOBAL ?? DEFAULT_RATE_LIMITS.global),
+        create: Number(process.env.CAMPAIGN_RATE_CREATE ?? DEFAULT_RATE_LIMITS.create),
+      };
+
+const app = await buildApp({
   db: openDb(dbPath),
   logger: true,
+  bodyLimit: Number(process.env.CAMPAIGN_BODY_LIMIT ?? DEFAULT_BODY_LIMIT),
+  rateLimit,
+  trustProxy: trustProxy === undefined ? false : trustSetting(trustProxy),
   ...(clientDir === undefined ? {} : { clientDir }),
 });
 

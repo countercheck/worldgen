@@ -22,14 +22,14 @@ import { openDb } from '../src/db.js';
 
 const INDEX = '<!doctype html><title>Campaign</title><div id="root"></div>';
 
-function servedApp() {
+async function servedApp() {
   const dir = mkdtempSync(join(tmpdir(), 'campaign-client-'));
   writeFileSync(join(dir, 'index.html'), INDEX);
   writeFileSync(join(dir, 'app.js'), 'export const ok = true;\n');
   return buildApp({ db: openDb(), clientDir: dir });
 }
 
-let app: ReturnType<typeof buildApp> | null = null;
+let app: Awaited<ReturnType<typeof buildApp>> | null = null;
 afterEach(async () => {
   await app?.close();
   app = null;
@@ -37,7 +37,7 @@ afterEach(async () => {
 
 describe('with a client directory', () => {
   it('serves the app at the root', async () => {
-    app = servedApp();
+    app = await servedApp();
     const res = await app.inject({ method: 'GET', url: '/' });
 
     expect(res.statusCode).toBe(200);
@@ -46,14 +46,14 @@ describe('with a client directory', () => {
   });
 
   it('serves its assets', async () => {
-    app = servedApp();
+    app = await servedApp();
     const res = await app.inject({ method: 'GET', url: '/app.js' });
     expect(res.statusCode).toBe(200);
     expect(res.body).toContain('export const ok');
   });
 
   it('sends a deep link to the app rather than a 404', async () => {
-    app = servedApp();
+    app = await servedApp();
     // Join links are URL fragments, so this should never happen in practice — but a link
     // somebody retyped by hand should land on the application, not on an error.
     const res = await app.inject({ method: 'GET', url: '/somewhere/nobody/routed' });
@@ -62,7 +62,7 @@ describe('with a client directory', () => {
   });
 
   it('answers a mistyped API path with JSON, not with the app', async () => {
-    app = servedApp();
+    app = await servedApp();
     const res = await app.inject({ method: 'GET', url: '/api/campaigns/nope/vieww' });
 
     expect(res.statusCode).toBe(404);
@@ -71,7 +71,7 @@ describe('with a client directory', () => {
   });
 
   it('still answers the health check', async () => {
-    app = servedApp();
+    app = await servedApp();
     const res = await app.inject({ method: 'GET', url: '/health' });
     expect(res.json()).toEqual({ ok: true });
   });
@@ -79,7 +79,7 @@ describe('with a client directory', () => {
 
 describe('without a client directory', () => {
   it('serves no application at all', async () => {
-    app = buildApp({ db: openDb() });
+    app = await buildApp({ db: openDb() });
     const res = await app.inject({ method: 'GET', url: '/' });
     // Development's shape: this process is an API and nothing else, and a root that
     // returned something would only ever be a stale copy of the real client.
@@ -87,7 +87,7 @@ describe('without a client directory', () => {
   });
 
   it('still answers the health check', async () => {
-    app = buildApp({ db: openDb() });
+    app = await buildApp({ db: openDb() });
     expect((await app.inject({ method: 'GET', url: '/health' })).json()).toEqual({ ok: true });
   });
 });

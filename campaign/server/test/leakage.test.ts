@@ -164,7 +164,7 @@ interface Fixture {
  * supposed to learn by despatch and not by opening the response.
  */
 async function setUp(opts: { terrainFog?: boolean } = {}): Promise<Fixture> {
-  const app = buildApp({
+  const app = await buildApp({
     db: openDb(),
     cfg: { ...DEFAULT_CONFIG, terrainFog: opts.terrainFog ?? false },
   });

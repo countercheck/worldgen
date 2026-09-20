@@ -1,0 +1,12 @@
+# State names every variable value, and this state names a running campaign. It is not a
+# secret store, but it is not something to commit either.
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+
+# `.terraform.lock.hcl` is NOT ignored, deliberately. It pins each provider to an exact
+# version and checksum, which is the same reason `package-lock.json` and the exact `ruff`
+# pin are committed: a gate that moves on its own is not a gate. An unpinned provider
+# would have a plan differ between a laptop and CI on a release nobody made.
