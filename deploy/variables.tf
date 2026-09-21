@@ -29,15 +29,15 @@ variable "subdomain" {
 }
 
 variable "body_limit_bytes" {
-  description = "Largest accepted request body. This is the world upload limit: a 32x32 world is 641 KB and a 64x64 about 2.5 MB."
+  description = "Largest accepted request body. This is the world upload limit: measured at 3.1 MB for a 64x64 world and 32 MB for a 200x200."
   type        = number
-  default     = 16777216
+  default     = 67108864
 
   validation {
     # Fastify's own default is 1 MiB, which is below the world the documentation tells a
     # referee to generate. Anything at or under it reintroduces the 413 this replaced.
-    condition     = var.body_limit_bytes > 1048576
-    error_message = "A limit of 1 MiB or less refuses the 64x64 world docs/CAMPAIGN.md tells you to generate."
+    condition     = var.body_limit_bytes > 33554432
+    error_message = "A limit of 32 MiB or less refuses a 200x200 world, which is 32 MB as generated."
   }
 }
 

@@ -201,6 +201,79 @@ function parseEdges(raw: unknown, where: string): Map<string, RoadEdge> {
   return out;
 }
 
+/**
+ * The per-hex fields `parseWorld` reads, and therefore the only ones worth sending.
+ *
+ * A generated `world.json` hex carries twenty-four fields. Twelve of them are the
+ * generator's own reasoning — `moisture`, `soil`, `habitability_town`, `territory_cost`
+ * and the rest — which the campaign engine has never read and the client has never drawn.
+ * They were travelling to every browser on every view because `ClientView.world` was typed
+ * `unknown`, so nothing said what a client was owed and the answer drifted to "everything".
+ *
+ * Kept here rather than in `view.ts` so that the list and the parser that defines it sit in
+ * one file. A field added to `parseWorld` and not to this list would be silently dropped
+ * before it ever arrived; `test_projection` fails on exactly that.
+ */
+export const WORLD_HEX_FIELDS = [
+  'q',
+  'r',
+  'elevation',
+  'slope',
+  'relief',
+  'terrain_class',
+  'land_cover',
+  'biome',
+  'river_flow',
+  'catchment_km2',
+  'tags',
+  'road_connections',
+] as const;
+
+/**
+ * How many decimal places a coordinate-free measurement is sent with.
+ *
+ * The generator emits full float precision — `"temperature": 10.000000000000002`, seventeen
+ * significant figures of a number nobody reads past the first three. Three places is a
+ * millimetre on an elevation in metres and a thousandth of a degree on a slope, which is
+ * below anything the rules can distinguish.
+ */
+const SENT_PRECISION = 3;
+
+const rounded = (v: unknown): unknown =>
+  typeof v === 'number' && !Number.isInteger(v)
+    ? Number(v.toFixed(SENT_PRECISION))
+    : v;
+
+/**
+ * A `world.json` document reduced to what a client can actually use.
+ *
+ * `parseWorld(projectWorld(doc))` and `parseWorld(doc)` produce the same `World` — that is
+ * the property this exists to have, and `world.projection.test.ts` asserts it against a
+ * real generated map rather than a fixture shaped to agree.
+ *
+ * On a 200x200 world this is 23.6 MB of JSON down to 9.1 MB, and 4.5 MB down to 1.1 MB
+ * once the response is compressed.
+ */
+export function projectWorld(raw: unknown): unknown {
+  if (typeof raw !== 'object' || raw === null) return raw;
+  const d = raw as Record<string, unknown>;
+  if (!Array.isArray(d.hexes)) return raw;
+
+  const hexes = (d.hexes as Record<string, unknown>[]).map((h) => {
+    const out: Record<string, unknown> = {};
+    for (const field of WORLD_HEX_FIELDS) {
+      if (h[field] !== undefined) out[field] = rounded(h[field]);
+    }
+    return out;
+  });
+
+  // Everything above the hex array is kept whole: rivers, settlements, road and sea edges,
+  // ferries, and the metadata block. Together they are under a megabyte on a 200x200 map,
+  // and each of them is read — the roads a column marches on are `road_edges`, not the
+  // `road_connections` on a hex.
+  return { ...d, hexes };
+}
+
 /** Parse a `world.json` document. Throws `WorldParseError` on anything malformed. */
 export function parseWorld(raw: unknown): World {
   if (typeof raw !== 'object' || raw === null) fail('world.json: expected an object');
