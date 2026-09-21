@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@campaign/shared": "*",
+    "@fastify/compress": "9.2.0",
     "@fastify/cookie": "^11.0.2",
     "@fastify/rate-limit": "11.2.0",
     "@fastify/static": "^10.1.3",

@@ -56,7 +56,7 @@ import {
 } from './state.js';
 import type { PendingDecision, Task } from './task.js';
 import type { Unit, UnitReport } from './unit.js';
-import { parseWorld, type World } from './world.js';
+import { parseWorld, projectWorld, type World } from './world.js';
 
 /** Who is asking. */
 export type Role =
@@ -222,7 +222,11 @@ export function viewFor(input: ViewInput, role: Role): ClientView {
       config: cfg,
       factions,
       commanders: [...state.commanders.values()].map(publicCommander).sort(byId),
-      world: input.worldDoc,
+      // Projected, like every other path out of this function. A referee sees the whole
+      // map and no masking applies to him, which is exactly why this line read
+      // `input.worldDoc` and quietly sent twelve fields nobody reads — the saving was
+      // real for commanders and absent for the one role that loads the map most.
+      world: projectWorld(input.worldDoc),
       units: [...state.units.values()].sort(byId),
       reports: [],
       contacts: [],
@@ -353,8 +357,15 @@ function maskedWorld(
   visible: ReadonlySet<HexKey>,
   faction: string,
 ): unknown {
-  if (!cfg.terrainFog) return input.worldDoc;
-  return maskWorld(input.worldDoc as Record<string, unknown>, {
+  // Projected before anything else, so the fields the engine never reads are gone before
+  // they can be masked, serialised, pushed down a socket, or held in a browser. See
+  // `projectWorld`: it is the difference between sending 23.6 MB and sending 9.1 MB.
+  //
+  // Before masking rather than after, because `maskWorld` spreads each hex through and
+  // would happily carry twelve dead fields into the masked copy as well.
+  const doc = projectWorld(input.worldDoc);
+  if (!cfg.terrainFog) return doc;
+  return maskWorld(doc as Record<string, unknown>, {
     seen: surveyed,
     visible,
     faction,

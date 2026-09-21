@@ -13,6 +13,7 @@
  * among people who know each other, and is stated plainly rather than dressed up.
  */
 
+import compress from '@fastify/compress';
 import cookie from '@fastify/cookie';
 import rateLimit from '@fastify/rate-limit';
 import fastifyStatic from '@fastify/static';
@@ -93,10 +94,21 @@ export interface AppOptions {
 }
 
 /**
- * A quarter of a gibibyte is not a world, so this bounds the upload while clearing the
- * real ones with room to spare: 64x64 is about 2.5 MB and 128x128 about 10 MB.
+ * Bounds the upload while clearing the real maps with room to spare.
+ *
+ * Measured, not guessed: a generated `world.json` is 3.1 MB at 64x64 and **32 MB at
+ * 200x200**, which is the size this project needs to handle. The first figure here was
+ * 16 MiB, chosen against an estimate of 2.5 MB for 64x64 and an assumption that nothing
+ * much larger was coming; a 200x200 upload met it as a 413.
+ *
+ * 64 MiB clears 200x200 with most of the room again to spare, and would take a 256x256
+ * map at roughly 50 MB. It is still a bound: this is the only unauthenticated write, and
+ * an unbounded one is a disk-fill waiting for whoever finds the URL.
+ *
+ * Note that the upload is not what the projection shrank. `projectWorld` governs what
+ * leaves the server; what arrives is the generator's document, every field of it.
  */
-export const DEFAULT_BODY_LIMIT = 16 * 1024 * 1024;
+export const DEFAULT_BODY_LIMIT = 64 * 1024 * 1024;
 
 /** Per minute, per address. Generous, because a referee mid-evening is not an attacker. */
 export const DEFAULT_RATE_LIMITS = { global: 600, create: 5 } as const;
@@ -149,7 +161,33 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
 
   const app = Fastify(serverOptions);
   await app.register(cookie);
-  await app.register(websocket);
+  // `@fastify/compress` covers HTTP replies and nothing else — a WebSocket frame never
+  // passes through the reply pipeline. The push is where the repeated cost is: a view goes
+  // out to every connected commander on every clock tick, so an uncompressed socket sends
+  // the map again in full each time the hour advances.
+  //
+  // `permessage-deflate` is the protocol's own answer and the browser negotiates it. The
+  // threshold matches the HTTP one, and `ws` keeps a compressor per connection — which is
+  // memory worth watching at thousands of sockets and irrelevant at the five a referee's
+  // evening actually has.
+  await app.register(websocket, {
+    options: { perMessageDeflate: { threshold: 1024 } },
+  });
+
+  // A world is the largest thing this server sends and the most compressible: tens of
+  // thousands of hexes, each an object with the same dozen keys. On a 200x200 map the view
+  // is 9 MB of JSON and 1.1 MB once deflated, and it is sent on every load and pushed to
+  // every commander on every clock tick.
+  //
+  // `threshold` so that a 200-byte acknowledgement is not wrapped in a gzip header for no
+  // reason. Encodings in preference order: brotli compresses this shape better than gzip
+  // and every browser that will ever open this console supports it, but gzip stays for
+  // `curl` and for anything speaking through a proxy that strips `br`.
+  await app.register(compress, {
+    global: true,
+    threshold: 1024,
+    encodings: ['br', 'gzip', 'deflate'],
+  });
   if (limits !== false) {
     // Registered globally so an unauthenticated flood cannot reach a route handler at
     // all, and overridden per route where the cost of a request is not the same. The

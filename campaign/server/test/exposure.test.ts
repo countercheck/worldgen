@@ -8,6 +8,8 @@
  * every player together, a budget spent by the first arrival.
  */
 
+import { readFileSync } from 'node:fs';
+
 import { describe, expect, it } from 'vitest';
 
 import { buildApp, DEFAULT_BODY_LIMIT, DEFAULT_RATE_LIMITS } from '../src/app.js';
@@ -126,6 +128,57 @@ describe('trusting a proxy', () => {
     expect((await from('10.0.0.1')).statusCode).toBe(429);
     // A different player, behind the same proxy, still has his own allowance.
     expect((await from('10.0.0.2')).statusCode).toBe(200);
+    await app.close();
+  });
+});
+
+describe('compressing what is sent', () => {
+  const FACTIONS = [{ id: 'red', name: 'Red', color: '#c00' }];
+
+  /** The real generated fixture, so this is measured against a world rather than a shape. */
+  const world = (): unknown =>
+    JSON.parse(
+      readFileSync(
+        new URL('../../shared/test/fixtures/world-32x32.json', import.meta.url),
+        'utf8',
+      ),
+    );
+
+  it('deflates a view, because a map is the most compressible thing here', async () => {
+    const app = await buildApp({ db: openDb() });
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/campaigns',
+      payload: { name: 'c', world: world(), factions: FACTIONS },
+    });
+    expect(created.statusCode, created.body.slice(0, 200)).toBe(201);
+    const { id, refereeToken } = created.json() as { id: string; refereeToken: string };
+
+    const plain = await app.inject({
+      method: 'GET',
+      url: `/api/campaigns/${id}/view`,
+      headers: { 'x-campaign-token': refereeToken },
+    });
+    const zipped = await app.inject({
+      method: 'GET',
+      url: `/api/campaigns/${id}/view`,
+      headers: { 'x-campaign-token': refereeToken, 'accept-encoding': 'gzip' },
+    });
+
+    expect(zipped.headers['content-encoding']).toBe('gzip');
+    // Thousands of hexes carrying the same dozen keys: the ratio here is not marginal.
+    expect(zipped.rawPayload.length).toBeLessThan(plain.rawPayload.length / 4);
+    await app.close();
+  });
+
+  it('leaves a small reply alone, rather than framing 11 bytes', async () => {
+    const app = await buildApp({ db: openDb() });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/health',
+      headers: { 'accept-encoding': 'gzip' },
+    });
+    expect(res.headers['content-encoding']).toBeUndefined();
     await app.close();
   });
 });
