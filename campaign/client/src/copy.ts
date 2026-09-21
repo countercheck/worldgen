@@ -73,6 +73,23 @@ export const copy = {
     generateHintAfter: '. A classic world loads, but carries no ford or bridge data, so every major river will be impassable.',
     demoButton: 'Or run the demonstration',
 
+    /**
+     * The campaigns this browser holds a link for.
+     *
+     * The front page is reachable now, which means it has to be worth arriving at: a
+     * player who followed a link once has had the token stripped from their address bar,
+     * and this list is the only way back in that does not involve finding the original
+     * message again.
+     */
+    resumeHeading: 'Campaigns on this browser',
+    resumeBlurb: 'Links you have followed on this browser. Nobody else can open these; the tokens never leave it.',
+    resumeReferee: 'as referee',
+    resumeCommander: 'as a commander',
+    unnamedCampaign: 'Untitled campaign',
+    forget: 'Forget',
+    forgetHint: 'Drop this browser’s link. The campaign itself is untouched, and a referee can issue another.',
+    noSuchCampaign: 'This browser does not hold a link for that campaign. Ask your referee to send you one, or start a campaign of your own.',
+
     joinHeading: 'Join one',
     joinBlurb: "Open the link your referee sent you. It carries your side's token in the URL fragment, which never reaches the server and never appears in its logs.",
 
@@ -125,6 +142,10 @@ export const copy = {
     liveOpen: 'live',
     liveReconnecting: 'reconnecting',
 
+    /** The way back to the front page, and the reason there is one in the header. */
+    home: 'Campaigns',
+    homeHint: 'Back to the front page. This campaign keeps its own address, so you can return to it.',
+
     dismiss: 'Dismiss',
   },
 
@@ -166,7 +187,7 @@ export const copy = {
   },
 
   // -------------------------------------------------------------------------
-  // What a commander has: his own formation, and his memory of the rest
+  // What a commander has: their own formation, and their memory of the rest
   // -------------------------------------------------------------------------
   command: {
     heading: 'Under my command',
@@ -225,16 +246,16 @@ export const copy = {
     orderPlaceholder: 'Move on Quatre Bras with all speed; I expect you astride the crossroads by noon.',
     reportPlaceholder: 'What you have seen, and when you saw it.',
 
-    asReferee: 'Written in his name, and logged as yours. What the addressee makes of it is still a decision when it arrives.',
+    asReferee: 'Written in their name, and logged as yours. What the addressee makes of it is still a decision when it arrives.',
     isOrder: 'This is an order. The referee will read it and decide what your subordinate makes of it.',
     isMessage: 'This is a message. You may write to anyone on your own side; only those beneath you take orders.',
 
     /** A commander is told why there is no estimate, rather than shown an empty space. */
-    noEstimate: 'How long he takes is not yours to know. He will ride until he finds them, and nobody will tell you when he did.',
-    nothingToRideTo: 'Nothing on the map to ride to yet. Send him anyway — he will find them.',
+    noEstimate: 'How long the ride takes is not yours to know. Your rider will go until they find the addressee, and nobody will tell you when they did.',
+    nothingToRideTo: 'Nothing on the map to ride to yet. Send the despatch anyway — your rider will find them.',
     rideLabel: 'The ride:',
     rideEstimate: (hours: string, arrival: string): string =>
-      ` about ${hours} h over the ground as it stands, arriving around ${arrival}. He may be stopped on the way, and the sender is never told whether he was.`,
+      ` about ${hours} h over the ground as it stands, arriving around ${arrival}. Your rider may be stopped on the way, and the sender is never told whether they were.`,
 
     sending: 'Sealing…',
     send: 'Send by rider',
@@ -284,7 +305,7 @@ export const copy = {
     patrolFriendly: 'Friendly',
     patrolSomething: 'column',
     despatchArrived: (from: string, written: string): string =>
-      `From ${from}, written ${written}. Read it in his seat, then tell his formation where to go.`,
+      `From ${from}, written ${written}. Read it in their seat, then tell their formation where to go.`,
     stoppedShort: (aq: number, ar: number, dq: number | undefined, dr: number | undefined): string =>
       `Stopped at ${aq}, ${ar}, short of ${dq}, ${dr}.`,
     somebody: 'somebody',
@@ -297,7 +318,7 @@ export const copy = {
     delivered: (at: string, hours: string): string => `Delivered ${at}, after ${hours} h.`,
     deliveredHanded: ' Handed over on the spot.',
     lost: (by: string, at: string, dice: string): string =>
-      `Rider stopped by ${by} on ${at} — dice [${dice}]. The paper went with him.`,
+      `Rider stopped by ${by} on ${at} — dice [${dice}]. The paper went with them.`,
     capturedLabel: 'Captured',
     captured: (by: string, at: string, dice: string): string =>
       ` by ${by} on ${at} — dice [${dice}]. They have read it; the sender has not been told.`,
@@ -335,7 +356,7 @@ export const copy = {
     place: 'Place',
     placeHint: 'Put it there without marching it',
     sendPatrol: 'Send out a patrol',
-    patrolCost: (men: number): string => ` · ${men} men`,
+    patrolCost: (troopers: number): string => ` · ${troopers} troopers`,
 
     nowhereNamed: 'Nowhere named yet.',
     destinationSuffix: ' — where they are to be',
@@ -423,7 +444,7 @@ export const copy = {
     noSuperior: 'nobody — army command',
     none: '—',
     appoint: 'Appoint',
-    appointBlurb: 'Appointing a man does not give anybody a seat. Issue him a link when you want somebody to play him.',
+    appointBlurb: 'Appointing a commander does not give anybody a seat. Issue a link when you want somebody to play them.',
 
     // What is wrong with a draft, in the order a reader would find it.
     needsName: 'It needs a name.',
@@ -486,7 +507,7 @@ export const copy = {
 
     /** Why the ground a formation stands on is not the length of its column. */
     fold: {
-      battle: 'deployed at a kilometre of frontage per division',
+      battle: 'deployed at a kilometre of frontage per ten thousand troops',
       rest: 'gathered into camp',
       occupation: 'gone into quarters',
     } as Readonly<Record<string, string>>,
@@ -596,6 +617,15 @@ export const copy = {
     contacts: 'Contacts',
     contactLabel: (id: string): string => `Contact ${id}`,
     campaignHeading: 'This campaign',
+    /**
+     * The campaign's own address, which is the thing worth bookmarking.
+     *
+     * Not the join link: that one carries a token and should be sent to one person, once.
+     * This one carries nothing secret and opens only on a browser already holding a link,
+     * so it is the address to keep.
+     */
+    bookmark: 'This campaign’s address:',
+    bookmarkHint: 'Bookmark this. It carries no token, and opens only on a browser that already holds a link.',
     yourLink: 'Your link:',
     leave: 'Leave',
   },

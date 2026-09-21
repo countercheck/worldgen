@@ -1,53 +1,174 @@
 /**
- * Join links.
+ * What this browser holds, and why it is held per campaign.
  *
- * The token in a link is the whole of a player's identity, so where it is carried is a
- * security decision rather than a formatting one. It goes in the URL fragment, which the
- * browser never sends to the server: it stays out of access logs, out of the `Referer`
- * of anything the page later loads, and out of any proxy in between.
+ * Storage used to be one session: whatever was last opened. That is what made the front
+ * page unreachable — the campaign was a property of the browser rather than of the
+ * address, so there was no address that meant "not in a campaign", and a referee running
+ * two games had the second quietly evict the first.
+ *
+ * These are the properties that had to become true for `#/c/<id>` to work at all: a
+ * campaign can be found by its id, two of them coexist, and a browser that was holding a
+ * session under the old scheme still finds it after the upgrade.
  */
 
-import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { joinLink, sessionFromHash } from '../src/session.js';
+import {
+  forgetCampaign,
+  listCampaigns,
+  loadCampaign,
+  rememberCampaign,
+  saveCampaign,
+} from '../src/session.js';
 
-// `joinLink` needs an origin to make an absolute link and nothing else from the DOM, so
-// a stub is enough — pulling in a whole browser environment to read one property would
-// make this suite slower for no additional assurance.
-beforeAll(() => {
-  vi.stubGlobal('location', { origin: 'https://campaign.test' });
+/** A `localStorage` that lives in a Map. The tests run in node, which has none. */
+class FakeStorage {
+  private items = new Map<string, string>();
+  getItem(k: string): string | null {
+    return this.items.get(k) ?? null;
+  }
+  setItem(k: string, v: string): void {
+    this.items.set(k, v);
+  }
+  removeItem(k: string): void {
+    this.items.delete(k);
+  }
+}
+
+let store: FakeStorage;
+
+beforeEach(() => {
+  store = new FakeStorage();
+  vi.stubGlobal('localStorage', store);
 });
 
-describe('reading a join link', () => {
-  it('reads a campaign and a token out of the fragment', () => {
-    expect(sessionFromHash('#/j/c1/abc123')).toEqual({ campaignId: 'c1', token: 'abc123' });
+const held = (campaignId: string, token: string, name?: string) => ({
+  session: { campaignId, token },
+  held: {},
+  ownToken: token,
+  ...(name === undefined ? {} : { name }),
+});
+
+describe('holding a campaign', () => {
+  it('finds one by its id, which is what a campaign address has to do', () => {
+    saveCampaign(held('c1', 'tok1'));
+    expect(loadCampaign('c1')?.session.token).toBe('tok1');
   });
 
-  it('decodes escaped segments, so a token is never truncated', () => {
-    // Tokens are base64url and need no escaping, but a campaign name might, and half a
-    // token silently becomes a wrong token rather than an error.
-    expect(sessionFromHash('#/j/c%201/a-b_c')).toEqual({ campaignId: 'c 1', token: 'a-b_c' });
+  it('holds nothing for a campaign it was never given a link to', () => {
+    expect(loadCampaign('never-heard-of-it')).toBeNull();
   });
 
-  it('ignores anything that is not a join link', () => {
-    for (const hash of ['', '#', '#/j/c1', '#/j/c1/tok/extra', '#/other/c1/tok', '#j/c1/tok']) {
-      expect(sessionFromHash(hash), `${hash} was read as a link`).toBeNull();
-    }
+  it('holds two campaigns at once', () => {
+    // The old single-key store could not: opening the second evicted the first, and a
+    // referee running two games lost the way into one of them by looking at the other.
+    saveCampaign(held('c1', 'tok1'));
+    saveCampaign(held('c2', 'tok2'));
+
+    expect(loadCampaign('c1')?.session.token).toBe('tok1');
+    expect(loadCampaign('c2')?.session.token).toBe('tok2');
+  });
+});
+
+describe('the list the front page shows', () => {
+  it('names each campaign and says which seat this browser holds', () => {
+    saveCampaign({ ...held('c1', 'tok1', 'Waterloo'), held: { ney: 'seat-token' } });
+    saveCampaign(held('c2', 'tok2', 'Austerlitz'));
+
+    expect(listCampaigns()).toEqual([
+      { campaignId: 'c2', name: 'Austerlitz', isReferee: false },
+      { campaignId: 'c1', name: 'Waterloo', isReferee: true },
+    ]);
   });
 
-  it('round-trips a link it produced', () => {
-    // The only property that really matters: what is handed to a player must be readable
-    // by the page they land on.
-    const session = { campaignId: 'c1', token: 'x-Y_z09' };
-    const link = joinLink(session);
-    expect(sessionFromHash(link.slice(link.indexOf('#')))).toEqual(session);
+  it('takes the name and the seat from the last view seen', () => {
+    saveCampaign(held('c1', 'tok1'));
+    expect(listCampaigns()[0]!.name).toBeNull();
+
+    expect(rememberCampaign('c1', { name: 'Waterloo', role: 'commander' })).toBe(true);
+    expect(listCampaigns()[0]!.name).toBe('Waterloo');
+
+    // Nothing to write, so nothing is written — the console calls this on every view.
+    expect(rememberCampaign('c1', { name: 'Waterloo', role: 'commander' })).toBe(false);
   });
 
-  it('puts the token after the fragment marker, never before it', () => {
-    // If this ever produced a query parameter the token would reach the server on every
-    // request and land in its logs, which is exactly what a fragment avoids.
-    const link = joinLink({ campaignId: 'c1', token: 'secret-token' });
-    expect(link.split('#')[0]).not.toContain('secret-token');
-    expect(link).toContain('#/j/c1/secret-token');
+  it('believes the server about the seat, not the seat tokens it happens to hold', () => {
+    // A referee who arrives on their own join link holds no seat tokens: those are minted
+    // once, when the campaign is created. Counting them filed the referee's own link
+    // under "a commander" on the front page.
+    saveCampaign(held('c1', 'ref-token'));
+    expect(listCampaigns()[0]!.isReferee).toBe(false);
+
+    rememberCampaign('c1', { name: 'Waterloo', role: 'referee' });
+    expect(listCampaigns()[0]!.isReferee).toBe(true);
+  });
+
+  it('does not invent a campaign for a name it was never given a link to', () => {
+    expect(rememberCampaign('c1', { name: 'Waterloo', role: 'referee' })).toBe(false);
+    expect(listCampaigns()).toEqual([]);
+  });
+});
+
+describe('forgetting one', () => {
+  it('drops that campaign and leaves the rest', () => {
+    saveCampaign(held('c1', 'tok1'));
+    saveCampaign(held('c2', 'tok2'));
+
+    forgetCampaign('c1');
+
+    expect(loadCampaign('c1')).toBeNull();
+    expect(loadCampaign('c2')?.session.token).toBe('tok2');
+  });
+});
+
+describe('a browser upgraded mid-campaign', () => {
+  it('still finds the session it was holding under the old scheme', () => {
+    // The app is deployed and people hold links to games in progress. Losing those on
+    // the deploy would mean every player having to be sent a new link.
+    store.setItem(
+      'campaign.session',
+      JSON.stringify({
+        session: { campaignId: 'old', token: 'old-token' },
+        held: {},
+        ownToken: 'old-token',
+      }),
+    );
+
+    expect(loadCampaign('old')?.session.token).toBe('old-token');
+    expect(listCampaigns().map((c) => c.campaignId)).toEqual(['old']);
+  });
+
+  it('picks up the seats and tokens the old scheme kept in their own keys', () => {
+    store.setItem(
+      'campaign.session',
+      JSON.stringify({ session: { campaignId: 'old', token: 'ref' }, ownToken: 'ref' }),
+    );
+    store.setItem('campaign.tokens', JSON.stringify({ old: { ney: 'ney-token' } }));
+    store.setItem(
+      'campaign.seats',
+      JSON.stringify({ old: { ney: { name: 'Marshal Ney', faction: 'blue' } } }),
+    );
+
+    const stored = loadCampaign('old');
+    expect(stored?.held).toEqual({ ney: 'ney-token' });
+    expect(stored?.seats).toEqual({ ney: { name: 'Marshal Ney', faction: 'blue' } });
+    expect(listCampaigns()[0]!.isReferee).toBe(true);
+  });
+
+  it('does not resurrect a migrated campaign after it is forgotten', () => {
+    store.setItem(
+      'campaign.session',
+      JSON.stringify({
+        session: { campaignId: 'old', token: 'old-token' },
+        held: {},
+        ownToken: 'old-token',
+      }),
+    );
+    expect(loadCampaign('old')).not.toBeNull();
+
+    forgetCampaign('old');
+
+    expect(loadCampaign('old')).toBeNull();
+    expect(listCampaigns()).toEqual([]);
   });
 });

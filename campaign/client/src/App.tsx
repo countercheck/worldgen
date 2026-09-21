@@ -69,12 +69,22 @@ import { ReportPanel } from './panels/ReportPanel.jsx';
 import { Roster } from './panels/Roster.jsx';
 import { UnitPanel } from './panels/UnitPanel.js';
 import {
-  clearSession,
+  campaignHash,
+  HOME_HASH,
+  navigate,
+  parseRoute,
+  replace,
+  type Route,
+} from './route.js';
+import {
+  campaignLink,
+  forgetCampaign,
   joinLink,
-  loadSession,
+  loadCampaign,
   loadWash,
   nextWash,
-  saveSession,
+  rememberCampaign,
+  saveCampaign,
   saveWash,
 } from './session.js';
 
@@ -128,41 +138,80 @@ const PLACE_PREFIX = '\u0000place:';
  */
 const DECLARE_BATTLE = '\u0000battle';
 
+/**
+ * The router.
+ *
+ * Three addresses, and the whole of the routing is deciding which of them this is and
+ * what the browser holds for it. See `route.ts` for why they are fragments and why only
+ * one of them carries a token.
+ */
 export default function App() {
-  const [joined, setJoined] = useState<Joined | null>(() => {
-    const stored = loadSession();
-    return stored === null
-      ? null
-      : {
-          session: stored.session,
-          held: stored.held,
-          ownToken: stored.ownToken,
-          seats: stored.seats ?? {},
-        };
-  });
+  const [route, setRoute] = useState<Route>(() => parseRoute());
 
-  if (joined === null) {
+  // Back and forward are a hash change, so they land here and the page follows them.
+  useEffect(() => {
+    const onHashChange = (): void => setRoute(parseRoute());
+    window.addEventListener('hashchange', onHashChange);
+    return () => window.removeEventListener('hashchange', onHashChange);
+  }, []);
+
+  /**
+   * A join link is spent on arrival.
+   *
+   * The token goes to storage and the address becomes the campaign's own — replaced
+   * rather than pushed, so Back does not put the token back in the address bar.
+   */
+  useEffect(() => {
+    if (route.kind !== 'join') return;
+    const existing = loadCampaign(route.campaignId);
+    saveCampaign({
+      // A referee returning by their own link keeps the seats they were holding; a
+      // commander has none and gains none.
+      held: existing?.held ?? {},
+      seats: existing?.seats ?? {},
+      ...(existing?.name === undefined ? {} : { name: existing.name }),
+      session: { campaignId: route.campaignId, token: route.token },
+      ownToken: route.token,
+    });
+    replace(campaignHash(route.campaignId));
+    setRoute({ kind: 'campaign', campaignId: route.campaignId });
+  }, [route]);
+
+  if (route.kind === 'join') return null;
+
+  if (route.kind === 'home') {
     return (
       <Join
         onJoined={(j) => {
-          saveSession(j);
-          setJoined(j);
+          saveCampaign(j);
+          navigate(campaignHash(j.session.campaignId));
         }}
       />
     );
   }
 
+  const stored = loadCampaign(route.campaignId);
+
+  // An address for a campaign this browser was never given a link to. The front page
+  // says so and lists the ones it does hold, rather than showing an empty console.
+  if (stored === null) return <Join onJoined={() => undefined} notice={copy.join.noSuchCampaign} />;
+
   return (
     <Console
-      joined={joined}
-      onSwitch={(session) => {
-        const next = { ...joined, session };
-        saveSession(next);
-        setJoined(next);
+      key={route.campaignId}
+      joined={{
+        session: stored.session,
+        held: stored.held,
+        ownToken: stored.ownToken,
+        seats: stored.seats ?? {},
       }}
-      onLeave={() => {
-        clearSession();
-        setJoined(null);
+      onSwitch={(session) => {
+        saveCampaign({ ...stored, session });
+        setRoute({ kind: 'campaign', campaignId: route.campaignId });
+      }}
+      onForget={() => {
+        forgetCampaign(route.campaignId);
+        navigate(HOME_HASH);
       }}
     />
   );
@@ -171,11 +220,12 @@ export default function App() {
 function Console({
   joined,
   onSwitch,
-  onLeave,
+  onForget,
 }: {
   joined: Joined;
   onSwitch: (session: Session) => void;
-  onLeave: () => void;
+  /** Drop this browser's link to the campaign and go back to the front page. */
+  onForget: () => void;
 }) {
   const { session } = joined;
 
@@ -198,7 +248,7 @@ function Console({
   const [postError, setPostError] = useState<string | null>(null);
 
   // The referee's half: which formation is having its destination pointed at, the ground
-  // he has pointed at so far, and what the clock last stopped for. All transient, and none
+  // they have pointed at so far, and what the clock last stopped for. All transient, and none
   // of it belongs in the view — an order half-composed is not a fact about the campaign.
   const [roster, setRoster] = useState(false);
   const [writingAs, setWritingAs] = useState<string | null>(null);
@@ -209,6 +259,16 @@ function Console({
   const [ordering, setOrdering] = useState<string | null>(null);
   const [picked, setPicked] = useState<readonly Hex[]>([]);
   const [halted, setHalted] = useState<PendingDecision | null>(null);
+
+  // The front page lists a campaign by name and says which seat this browser holds.
+  // Neither is known anywhere but here: both arrive with the view.
+  useEffect(() => {
+    if (view === null) return;
+    rememberCampaign(session.campaignId, {
+      name: view.campaign.name,
+      role: view.role === 'referee' ? 'referee' : 'commander',
+    });
+  }, [session.campaignId, view?.campaign.name, view?.role]);
 
   // Fetched once so the page has something immediately, then kept current by the socket.
   // The socket sends a full view on connect too, so this is only about the gap: a first
@@ -300,11 +360,11 @@ function Console({
    * A task names a destination and the engine re-routes each hex, so there is no path on
    * the wire to draw — and storing one would be drawing a plan that went stale the moment
    * the ground turned out not to be what the map said. Recomputing it here from the same
-   * cost model the scheduler uses gives the referee the route his columns will actually
+   * cost model the scheduler uses gives the referee the route their columns will actually
    * take, as of now.
    *
    * Referee only, and it needs no guard: a commander's view carries no `tasks` at all, so
-   * this is empty for him. The map he would compute it on is masked anyway.
+   * this is empty for them. The map they would compute it on is masked anyway.
    */
   const plans = useMemo(() => {
     if (board === null || view === null) return [];
@@ -333,7 +393,7 @@ function Console({
    * The patrols a formation has in the field.
    *
    * Counted off the units the viewer was actually sent, which is the honest answer to the
-   * question being asked: a referee sees every patrol, and a commander sees his own. A
+   * question being asked: a referee sees every patrol, and a commander sees their own. A
    * count taken from anywhere else would be a number nobody can check against the map.
    */
   const patrolsOf = useCallback(
@@ -367,7 +427,7 @@ function Console({
   /**
    * Put a despatch on the road.
    *
-   * A refusal comes back as violations rather than as a thrown error — "he does not
+   * A refusal comes back as violations rather than as a thrown error — "they do not
    * answer to you, so that is a message rather than an order" is the game working — so it
    * is shown in the form the commander is still looking at.
    */
@@ -430,7 +490,7 @@ function Console({
       <div className="join">
         <h1>{copy.console.unreadableTitle}</h1>
         <p className="error">{error}</p>
-        <button onClick={onLeave}>{copy.console.useAnotherLink}</button>
+        <button onClick={onForget}>{copy.console.useAnotherLink}</button>
       </div>
     );
   }
@@ -454,7 +514,7 @@ function Console({
   const shownContact = shownId === null ? null : (board.contacts.get(shownId) ?? null);
   const hoveredHex = hovered === null ? undefined : board.world.hexes.get(key(hovered));
 
-  // Whose name the referee is currently writing in. A commander has only his own and
+  // Whose name the referee is currently writing in. A commander has only their own and
   // never sees the control.
   const senders = isReferee
     ? [...view.commanders].sort((a, b) => (a.name < b.name ? -1 : 1))
@@ -466,11 +526,11 @@ function Console({
     view.commander === null ? null : (board.units.get(view.commander.unitId) ?? null);
 
   /**
-   * What the formation he rides with is doing.
+   * What the formation they ride with is doing.
    *
-   * His own task and nobody else's. A referee's task list is the referee's; a commander
-   * learns what his subordinates were told to do only from the copies of his own orders
-   * — and from whether they turn up where he asked.
+   * Their own task and nobody else's. A referee's task list is the referee's; a commander
+   * learns what their subordinates were told to do only from the copies of their own orders
+   * — and from whether they turn up where they asked.
    */
   const taskLine =
     view.task === null
@@ -501,8 +561,8 @@ function Console({
             color: undefined,
           },
           ...Object.entries(joined.held).map(([commanderId, token]) => {
-            // The man's name, not his id. A referee switching seats is choosing a person
-            // to be, and "kellermann" is the engine's bookkeeping.
+            // The commander's name, not their id. A referee switching seats is choosing a
+            // person to be, and "kellermann" is the engine's bookkeeping.
             const seat = joined.seats[commanderId];
             const faction = seat?.faction ?? board.commanders.get(commanderId)?.faction;
             return {
@@ -517,6 +577,13 @@ function Console({
   return (
     <div className="app">
       <header>
+        <button
+          className="home"
+          title={copy.console.homeHint}
+          onClick={() => navigate(HOME_HASH)}
+        >
+          {copy.console.home}
+        </button>
         <h1>{view.campaign.name}</h1>
 
         {identities.length > 0 && (
@@ -555,7 +622,7 @@ function Console({
         </label>
 
         {/* Only where there is something to wash. A referee is sent no visible set, so
-            offering him the control would be offering him a switch that does nothing. */}
+            offering them the control would be offering them a switch that does nothing. */}
         {!isReferee && (
           <button
             className="wash-toggle"
@@ -923,7 +990,7 @@ function Console({
                 }}
                 onForward={(d: ReceivedDespatch) => {
                   // Opens the composer rather than sending: forwarding is a choice of
-                  // addressee, and the man he wants is rarely the first in the list.
+                  // addressee, and the commander they want is rarely the first in the list.
                   setWriting({ despatchKind: 'report', text: forwardOf(d).text ?? '' });
                 }}
               />
@@ -1110,7 +1177,7 @@ function Console({
               <h3>{copy.idle.heading}</h3>
               <p className="muted">{copy.idle.blurb}</p>
 
-              {/* A commander has his formations above, in the panel that also carries
+              {/* A commander has their formations above, in the panel that also carries
                   their hours. Repeating them here would be the same list twice, once
                   without the thing that makes it mean anything. */}
               {isReferee && <h3>{copy.idle.formations}</h3>}
@@ -1156,10 +1223,14 @@ function Console({
               )}
 
               <h3>{copy.idle.campaignHeading}</h3>
+              <p className="muted" title={copy.idle.bookmarkHint}>
+                {copy.idle.bookmark}{' '}
+                <code className="link">{campaignLink(session.campaignId)}</code>
+              </p>
               <p className="muted">
                 {copy.idle.yourLink} <code className="link">{joinLink(session)}</code>
               </p>
-              <button onClick={onLeave}>{copy.idle.leave}</button>
+              <button onClick={onForget}>{copy.idle.leave}</button>
             </section>
           )}
         </aside>
@@ -1172,7 +1243,7 @@ function Console({
  * What a formation is doing, for the referee's eye.
  *
  * Its destination and the hour it was set, which together are the audit trail from a
- * piece of prose to a column on a road. A commander sees the same for his own formation
+ * piece of prose to a column on a road. A commander sees the same for their own formation
  * and for no other.
  */
 /**
