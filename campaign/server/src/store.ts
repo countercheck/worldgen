@@ -24,6 +24,7 @@ import {
   EMPTY_STATE,
   knowledgeEvents,
   parseWorld,
+  projectWorld,
   reduce,
   replay,
   type CampaignConfig,
@@ -107,7 +108,36 @@ export const sha256 = (s: string): string =>
 export const newToken = (): string => randomBytes(32).toString('base64url');
 export const hashToken = (t: string): string => createHash('sha256').update(t).digest('hex');
 
+/**
+ * How many campaigns keep their parsed world in memory.
+ *
+ * `campaign()` is called on every authenticated request — `authorise` does it before any
+ * route sees the caller — and without a cache each call reads the whole world blob out of
+ * SQLite, `JSON.parse`s it, and rebuilds every hex. On a 200x200 map that is 56 ms and a
+ * fresh allocation of the entire map, per request, per commander watching.
+ *
+ * Bounded because the alternative is a process that has served a thousand campaigns
+ * holding a thousand worlds. Four is the active set of a referee's evening with room over;
+ * raise it for a server running several games at once and a container with the memory for
+ * them.
+ */
+const CACHED_CAMPAIGNS = 4;
+
 export class CampaignStore {
+  /**
+   * Parsed campaigns, most recently used last.
+   *
+   * Safe to hold without invalidation because a campaign row is written once and never
+   * altered: there is no `UPDATE campaigns` or `DELETE FROM campaigns` in this file, and
+   * `cache.test.ts` asserts there is not. Everything that changes about a campaign is an
+   * event, and events are not in this row.
+   *
+   * A `Map` rather than an LRU library: insertion order is iteration order in JavaScript,
+   * so re-inserting on read makes the first key the least recently used one, which is the
+   * whole of the eviction policy.
+   */
+  private readonly cache = new Map<string, CampaignRow>();
+
   constructor(
     private readonly db: Db,
     /**
@@ -181,7 +211,10 @@ export class CampaignStore {
       id: opts.id,
       name: opts.name,
       worldHash: sha256(blob),
-      worldDoc: opts.worldDoc,
+      // Projected here as well as on read, so a campaign is the same object whether it
+      // was just created or just loaded. The full document is already in `blob` and on
+      // its way to disk; what is kept in hand is what a client can use.
+      worldDoc: projectWorld(opts.worldDoc),
       world,
       strictness,
       ruleset,
@@ -214,7 +247,9 @@ export class CampaignStore {
       }
     }
 
-    return { campaign, refereeToken };
+    // Warmed rather than left for the next request to load from disk: the referee is
+    // about to look at the map he has just uploaded.
+    return { campaign: this.remember(campaign), refereeToken };
   }
 
   /**
@@ -242,7 +277,26 @@ export class CampaignStore {
       .run(campaignId, commanderId);
   }
 
+  /** Put a parsed campaign at the fresh end, evicting the stalest if the cache is full. */
+  private remember(row: CampaignRow): CampaignRow {
+    this.cache.delete(row.id);
+    this.cache.set(row.id, row);
+    // One at a time rather than a loop: exactly one has just gone in, so at most one is
+    // now surplus. `keys().next()` is the oldest, insertion order being iteration order.
+    if (this.cache.size > CACHED_CAMPAIGNS) {
+      const stalest = this.cache.keys().next().value;
+      if (stalest !== undefined) this.cache.delete(stalest);
+    }
+    return row;
+  }
+
   campaign(id: string): CampaignRow | null {
+    const cached = this.cache.get(id);
+    // Re-inserted on a hit as well as a miss, so that reading a campaign is what keeps it
+    // warm. Otherwise the four most recently *created* would be held and the one actually
+    // being played would be evicted from under it.
+    if (cached !== undefined) return this.remember(cached);
+
     const row = this.db
       .prepare(
         `SELECT id, name, world_hash, world_blob, strictness, ruleset, config_json
@@ -261,9 +315,17 @@ export class CampaignStore {
       | undefined;
     if (row === undefined) return null;
 
-    const worldDoc = JSON.parse(row.world_blob) as unknown;
+    // Projected on the way in, so what is held is the nine megabytes a client could
+    // actually use rather than the twenty-three the generator wrote. `parseWorld` ignores
+    // everything dropped — `world.projection.test.ts` proves the parsed worlds are equal —
+    // and `viewFor` projects again on the way out, which is idempotent.
+    //
+    // The full document stays in SQLite, unread. Nothing needs it today, and a field that
+    // moves from ignored to read tomorrow is then a cache that reloads rather than a
+    // thousand campaigns that must be uploaded again.
+    const worldDoc = projectWorld(JSON.parse(row.world_blob));
     const ruleset = row.ruleset ?? DEFAULT_RULESET;
-    return {
+    return this.remember({
       id: row.id,
       name: row.name,
       worldHash: row.world_hash,
@@ -278,7 +340,7 @@ export class CampaignStore {
         row.config_json === null
           ? resolveConfig(undefined, ruleset)
           : (JSON.parse(row.config_json) as CampaignConfig),
-    };
+    });
   }
 
   /** Resolve a join token to what it may do. Unknown tokens resolve to nothing. */
