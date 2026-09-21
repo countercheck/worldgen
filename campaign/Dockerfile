@@ -55,7 +55,11 @@ FROM node:22-alpine AS runtime
 # than a useradd. The data directory is created and handed over before the drop, because
 # afterwards there is no permission to create it.
 WORKDIR /app
-RUN mkdir -p /data && chown -R node:node /data
+
+# `su-exec` is how the entrypoint stops being root. Three lines of C in the base image's
+# own repository, and the alternative is `gosu`, which is a Go binary an order of magnitude
+# larger for the same one job.
+RUN apk add --no-cache su-exec && mkdir -p /data && chown node:node /data
 
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/shared/dist ./shared/dist
@@ -65,7 +69,15 @@ COPY --from=build --chown=node:node /app/server/package.json ./server/
 COPY --from=build --chown=node:node /app/client/dist ./client/dist
 COPY --from=build --chown=node:node /app/package.json ./
 
-USER node
+# Deliberately *not* `USER node`, though the server runs as `node` all the same.
+#
+# A platform volume is mounted over `/data` at start, owned by root, hiding the ownership
+# set above. A container that had already dropped privileges could not fix that and would
+# die on its first write. So the entrypoint starts as root, chowns the mount, and execs the
+# server as `node` — see `docker-entrypoint.sh`. Nothing that serves a request is
+# privileged, which is what dropping to `node` was for.
+COPY --chown=root:root campaign/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod 0755 /usr/local/bin/docker-entrypoint.sh
 
 ENV NODE_ENV=production \
     PORT=3000 \
@@ -95,4 +107,5 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT??3000)+'/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["node", "server/dist/index.js"]
