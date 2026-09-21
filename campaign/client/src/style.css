@@ -63,6 +63,22 @@ header h1 {
   overflow-x: auto;
 }
 
+button.home {
+  background: none;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  font: inherit;
+  padding: 4px 10px;
+  margin-right: 12px;
+  cursor: pointer;
+}
+
+button.home:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
 .roles button {
   background: var(--panel-2);
   color: var(--text);
@@ -426,6 +442,37 @@ table.grid td:first-child {
 .join .file {
   display: inline-block;
   margin-bottom: 8px;
+}
+
+/* Campaigns this browser can still get into.
+
+   The front page is an address now, which means somebody can arrive at it holding a game
+   they are in the middle of. The list is how they get back: a player who followed a link
+   had the token stripped from their address bar on arrival, so without this the way back
+   would be finding the original message again. */
+.held {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.held li {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.join button.resume {
+  display: flex;
+  flex: 1;
+  align-items: baseline;
+  gap: 10px;
+  text-align: left;
+}
+
+.resume-name {
+  font-weight: 600;
 }
 
 .busy {

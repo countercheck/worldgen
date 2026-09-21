@@ -18,7 +18,8 @@ import { DEMO_FACTIONS, demoCommands, parseWorld, type Faction } from '@campaign
 
 import { createCampaign, fetchView, issueSeatToken, sendCommand, type Session } from './api.js';
 import { copy } from './copy.js';
-import { joinLink, type HeldTokens } from './session.js';
+import { campaignHash, navigate } from './route.js';
+import { forgetCampaign, joinLink, listCampaigns, type CampaignSummary, type HeldTokens } from './session.js';
 
 export interface Joined {
   readonly session: Session;
@@ -75,9 +76,17 @@ async function startCampaign(
   return { session, held, ownToken: created.refereeToken, seats };
 }
 
-export function Join({ onJoined }: { onJoined: (joined: Joined) => void }) {
+export function Join({
+  onJoined,
+  notice,
+}: {
+  onJoined: (joined: Joined) => void;
+  /** Why they are looking at this page rather than the one they asked for, if they are. */
+  notice?: string;
+}) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [holding, setHolding] = useState<readonly CampaignSummary[]>(() => listCampaigns());
   const [links, setLinks] = useState<{
     referee: string;
     seats: { id: string; label: string; link: string }[];
@@ -161,8 +170,38 @@ export function Join({ onJoined }: { onJoined: (joined: Joined) => void }) {
       <h1>{copy.join.title}</h1>
       <p className="muted">{copy.join.blurb}</p>
 
+      {notice !== undefined && <p className="error">{notice}</p>}
       {busy !== null && <p className="busy">{busy}</p>}
       {error !== null && <p className="error">{error}</p>}
+
+      {holding.length > 0 && (
+        <section>
+          <h3>{copy.join.resumeHeading}</h3>
+          <p className="muted">{copy.join.resumeBlurb}</p>
+          <ul className="held">
+            {holding.map((c) => (
+              <li key={c.campaignId}>
+                <button className="resume" onClick={() => navigate(campaignHash(c.campaignId))}>
+                  <span className="resume-name">{c.name ?? copy.join.unnamedCampaign}</span>
+                  <span className="muted">
+                    {c.isReferee ? copy.join.resumeReferee : copy.join.resumeCommander}
+                  </span>
+                </button>
+                <button
+                  className="dismiss"
+                  title={copy.join.forgetHint}
+                  onClick={() => {
+                    forgetCampaign(c.campaignId);
+                    setHolding(listCampaigns());
+                  }}
+                >
+                  {copy.join.forget}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       <section>
         <h3>{copy.join.startHeading}</h3>
