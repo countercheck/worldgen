@@ -7,8 +7,8 @@
  * second one does not belong there.
  *
  * Placing is done by pointing at the map, not by typing coordinates. A referee setting up
- * a scenario is looking at ground — a river, a road junction, the town he means — and
- * asking him to read a hex off it and type two numbers is asking him to do the map's job.
+ * a scenario is looking at ground — a river, a road junction, the town they mean — and
+ * asking them to read a hex off it and type two numbers is asking them to do the map's job.
  */
 
 import { useState } from 'react';
@@ -79,7 +79,7 @@ export function Orbat({
 }) {
   const [open, setOpen] = useState<'unit' | 'commander' | null>(null);
   const [draft, setDraft] = useState<UnitDraft>(() => emptyDraft(factions[0]?.id ?? 'red'));
-  const [man, setMan] = useState({ name: '', unitId: '', superiorId: '' });
+  const [draftCommander, setDraftCommander] = useState({ name: '', unitId: '', superiorId: '' });
 
   const taken = new Set(units.map((u) => u.id));
   const at = draft.at ?? placing;
@@ -254,9 +254,9 @@ export function Orbat({
             <label>
               <span>{copy.orbat.name}</span>
               <input
-                value={man.name}
+                value={draftCommander.name}
                 placeholder={copy.orbat.commanderNamePlaceholder}
-                onChange={(e) => setMan({ ...man, name: e.target.value })}
+                onChange={(e) => setDraftCommander({ ...draftCommander, name: e.target.value })}
                 disabled={busy}
               />
             </label>
@@ -264,8 +264,8 @@ export function Orbat({
             <label>
               <span>{copy.orbat.ridesWith}</span>
               <select
-                value={man.unitId}
-                onChange={(e) => setMan({ ...man, unitId: e.target.value, superiorId: '' })}
+                value={draftCommander.unitId}
+                onChange={(e) => setDraftCommander({ ...draftCommander, unitId: e.target.value, superiorId: '' })}
                 disabled={busy}
               >
                 <option value="">{copy.orbat.none}</option>
@@ -284,17 +284,17 @@ export function Orbat({
             <label>
               <span>{copy.orbat.answersTo}</span>
               <select
-                value={man.superiorId}
-                onChange={(e) => setMan({ ...man, superiorId: e.target.value })}
-                disabled={busy || man.unitId === ''}
+                value={draftCommander.superiorId}
+                onChange={(e) => setDraftCommander({ ...draftCommander, superiorId: e.target.value })}
+                disabled={busy || draftCommander.unitId === ''}
               >
                 <option value="">{copy.orbat.noSuperior}</option>
-                {/* His own side only. A chain of command that crosses the lines is not a
+                {/* Their own side only. A chain of command that crosses the lines is not a
                     chain of command. */}
                 {commanders
                   .filter(
                     (c) =>
-                      c.faction === units.find((u) => u.id === man.unitId)?.faction,
+                      c.faction === units.find((u) => u.id === draftCommander.unitId)?.faction,
                   )
                   .map((c) => (
                     <option key={c.id} value={c.id}>
@@ -308,21 +308,21 @@ export function Orbat({
           <div className="despatch-actions">
             <button
               className="primary"
-              disabled={busy || man.name.trim() === '' || man.unitId === ''}
+              disabled={busy || draftCommander.name.trim() === '' || draftCommander.unitId === ''}
               onClick={() => {
-                const unit = units.find((u) => u.id === man.unitId);
+                const unit = units.find((u) => u.id === draftCommander.unitId);
                 if (unit === undefined) return;
                 onAppoint({
-                  id: idFor(man.name, new Set(commanders.map((c) => c.id))),
-                  name: man.name.trim(),
+                  id: idFor(draftCommander.name, new Set(commanders.map((c) => c.id))),
+                  name: draftCommander.name.trim(),
                   faction: unit.faction,
-                  unitId: man.unitId,
-                  superiorId: man.superiorId === '' ? null : man.superiorId,
-                  // Run by the referee until a seat is issued for him, so an arriving
+                  unitId: draftCommander.unitId,
+                  superiorId: draftCommander.superiorId === '' ? null : draftCommander.superiorId,
+                  // Run by the referee until a seat is issued for them, so an arriving
                   // order cascades rather than waiting on a player who does not exist yet.
                   autoCascade: true,
                 });
-                setMan({ name: '', unitId: '', superiorId: '' });
+                setDraftCommander({ name: '', unitId: '', superiorId: '' });
               }}
             >
               {copy.orbat.appoint}

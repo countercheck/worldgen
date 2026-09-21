@@ -110,7 +110,7 @@ const stateWith = (...units: Unit[]): CampaignState => ({
   units: new Map(units.map((u) => [u.id, u])),
 });
 
-/** A man for each formation, the first of them commanding the rest of his side. */
+/** A commander for each formation, the first of them commanding the rest of their side. */
 function commanded(...units: Unit[]): CampaignState {
   const base = stateWith(...units);
   const chiefs = new Map<string, string>();
@@ -215,23 +215,23 @@ describe('reconZone', () => {
 });
 
 describe('commanderVisible', () => {
-  it('is what he can see from where he stands, and no further', () => {
-    // The whole point of the model. A man riding with r1 at 5,5 does not see the country
-    // around r2 at 20,20 merely because r2 is his; that arrives by despatch or not at all.
+  it('is what they can see from where they stand, and no further', () => {
+    // The whole point of the model. A commander riding with r1 at 5,5 does not see the country
+    // around r2 at 20,20 merely because r2 is theirs; that arrives by despatch or not at all.
     const state = commanded(
       unit('r1', 'red', [{ q: 5, r: 5 }]),
       unit('r2', 'red', [{ q: 20, r: 20 }]),
       unit('b1', 'blue', [{ q: 30, r: 30 }]),
     );
-    const his = commanderVisible(state, world, cfg, 'c-r1');
-    expect(his.has(key({ q: 5, r: 5 }))).toBe(true);
-    expect(his.has(key({ q: 20, r: 20 })), 'he saw his own subordinate forty km away').toBe(
+    const seen = commanderVisible(state, world, cfg, 'c-r1');
+    expect(seen.has(key({ q: 5, r: 5 }))).toBe(true);
+    expect(seen.has(key({ q: 20, r: 20 })), 'they saw their own subordinate forty km away').toBe(
       false,
     );
-    expect(his.has(key({ q: 30, r: 30 }))).toBe(false);
+    expect(seen.has(key({ q: 30, r: 30 }))).toBe(false);
   });
 
-  it('is exactly his formation\'s recon zone', () => {
+  it('is exactly their formation\'s recon zone', () => {
     const u = unit('r1', 'red', [{ q: 5, r: 5 }]);
     const state = commanded(u);
     expect([...commanderVisible(state, world, cfg, 'c-r1')].sort()).toEqual(
@@ -249,7 +249,7 @@ describe('commanderVisible', () => {
           'ghost',
           {
             id: 'ghost',
-            name: 'A man with no army',
+            name: 'A commander with no army',
             faction: 'red',
             unitId: 'gone',
             superiorId: null,
@@ -263,8 +263,8 @@ describe('commanderVisible', () => {
 });
 
 describe('commandVisible', () => {
-  it('unions everything his formations can see, which is not what he knows', () => {
-    // The observing side of the transaction: the ground his divisions are looking at, from
+  it('unions everything their formations can see, which is not what they know', () => {
+    // The observing side of the transaction: the ground their divisions are looking at, from
     // which reports are made. Distinct from `commanderVisible` on purpose.
     const state = commanded(
       unit('r1', 'red', [{ q: 5, r: 5 }]),
@@ -277,7 +277,7 @@ describe('commandVisible', () => {
     expect(all.has(key({ q: 30, r: 30 }))).toBe(false);
   });
 
-  it('is only his own formation for a man with no subordinates', () => {
+  it('is only their own formation for a commander with no subordinates', () => {
     const state = commanded(
       unit('r1', 'red', [{ q: 5, r: 5 }]),
       unit('r2', 'red', [{ q: 20, r: 20 }]),
@@ -400,7 +400,7 @@ describe('hearsGunfire', () => {
 describe('spottedUnder', () => {
   it('merges what every formation under a commander can see', () => {
     // The interim rule: until riders exist, subordinates report the instant they see
-    // anything. A chief learns of an enemy his cavalry found forty kilometres away.
+    // anything. A chief learns of an enemy their cavalry found forty kilometres away.
     const state = commanded(
       unit('r1', 'red', [{ q: 5, r: 5 }]),
       unit('r2', 'red', [{ q: 20, r: 20 }]),
@@ -408,11 +408,11 @@ describe('spottedUnder', () => {
     );
 
     const chief = spottedUnder(state, world, cfg, 'c-r1');
-    expect(chief.has('b1'), 'the chief never heard from his cavalry').toBe(true);
+    expect(chief.has('b1'), 'the chief never heard from their cavalry').toBe(true);
     expect(chief.get('b1')!.coord).toEqual({ q: 21, r: 20 });
   });
 
-  it('tells a subordinate nothing about what his chief can see', () => {
+  it('tells a subordinate nothing about what their chief can see', () => {
     // Reports travel up the tree and never down it.
     const state = commanded(
       unit('r1', 'red', [{ q: 5, r: 5 }]),

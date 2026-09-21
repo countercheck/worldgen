@@ -44,7 +44,7 @@ interface Spec {
   corps: string | null;
   /** Stated rather than guessed: the Light Brigade is four thousand and still a brigade. */
   echelon: Echelon;
-  /** The man riding with it, and who he answers to. Null superior means army command. */
+  /** The commander riding with it, and who they answer to. Null superior means army command. */
   commander: { id: string; name: string; superiorOf?: readonly string[] };
 }
 
@@ -269,8 +269,8 @@ export function demoCommands(world: World): Command[] {
   const units = SPECS.map((spec, i) => makeUnit(spec, starts[i] ?? starts[0]!));
   const commands: Command[] = units.map((unit) => ({ kind: 'add_unit', unit }));
 
-  // Commanders come after every unit, because a man must have a formation to ride with
-  // before he can be appointed to it, and after the superiors he answers to. Both are
+  // Commanders come after every unit, because a commander must have a formation to ride with
+  // before they can be appointed to it, and after the superiors they answer to. Both are
   // hard violations rather than soft ones — an appointment to nothing is not an
   // irregularity a referee might want, it is a state nothing can read.
   const superiorOf = new Map<string, string>();

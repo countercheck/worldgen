@@ -32,9 +32,9 @@ export const SUPPORTED_CAMPAIGN_VERSIONS = new Set([CAMPAIGN_SCHEMA_VERSION]);
 /**
  * Who caused an event.
  *
- * A commander, not a faction. A side does not decide anything; a man does, and when a
+ * A commander, not a faction. A side does not decide anything; a commander does, and when a
  * campaign is reviewed afterwards the question is always which of them gave the order.
- * The referee is unnamed because he is not in the war.
+ * The referee is unnamed because they are not in the war.
  */
 export type Actor =
   | { readonly kind: 'referee' }
@@ -104,7 +104,7 @@ export type EventPayload =
   | { readonly kind: 'clock_advanced'; readonly toHours: number }
   /** Referee: put a unit somewhere, no movement rule applying. */
   | { readonly kind: 'unit_teleported'; readonly unitId: string; readonly column: readonly Hex[] }
-  /** Ground a commander's formations have surveyed, or a referee has simply given him. */
+  /** Ground a commander's formations have surveyed, or a referee has simply given them. */
   | {
       readonly kind: 'hexes_surveyed';
       readonly commanderId: string;
@@ -122,7 +122,7 @@ export type EventPayload =
   | { readonly kind: 'battle_declared'; readonly coords: readonly Hex[] }
   /** Referee: the fighting here is over. The ground goes back to being ground. */
   | { readonly kind: 'battle_ended'; readonly coords: readonly Hex[] }
-  /** Referee: take knowledge away, the one thing that shrinks what a man has surveyed. */
+  /** Referee: take knowledge away, the one thing that shrinks what a commander has surveyed. */
   | {
       readonly kind: 'hexes_forgotten';
       readonly commanderId: string;
@@ -131,8 +131,8 @@ export type EventPayload =
   /**
    * Word of where a formation was reached a commander.
    *
-   * By rider, by a column marching into sight of his own, or because the formation is the
-   * one he is standing next to. Held rather than recomputed: the hour on it is the whole
+   * By rider, by a column marching into sight of their own, or because the formation is the
+   * one they are standing next to. Held rather than recomputed: the hour on it is the whole
    * of the fog, and a snapshot taken when a client asks would always read "now".
    */
   | {
@@ -143,8 +143,8 @@ export type EventPayload =
   /**
    * A commander has been told where an enemy was.
    *
-   * By his own column seeing it, or by a report reaching him. The contact carries the
-   * label his own staff gave it, minted when the trail was cold and reused while it is
+   * By their own column seeing it, or by a report reaching them. The contact carries the
+   * label their own staff gave it, minted when the trail was cold and reused while it is
    * warm — see `knowledge.ts`, which decides which of those happened.
    */
   | {
@@ -153,9 +153,9 @@ export type EventPayload =
       readonly contact: Contact;
     }
   /**
-   * A column his pickets were watching has gone out of view.
+   * A column their pickets were watching has gone out of view.
    *
-   * The contact stays on his map at the hex he last saw it — losing sight of something
+   * The contact stays on their map at the hex they last saw it — losing sight of something
    * does not unsee it. What changes is that the next sighting will be a *new* contact
    * rather than a continuation of this one.
    */
@@ -179,7 +179,7 @@ export type EventPayload =
    * One of these per rider per advance rather than one per hex: a courier covers ten
    * hexes an hour, and a day's advance would otherwise write two hundred events saying
    * nothing but "still riding". The route travels with it because a rider re-routes when
-   * his man moves, and the log has to carry the path he actually took.
+   * their addressee moves, and the log has to carry the path they actually took.
    */
   | {
       readonly kind: 'despatch_progressed';
@@ -288,7 +288,7 @@ export type EventPayload =
       readonly atHours: number;
     }
   /**
-   * What a stretch of marching cost the men.
+   * What a stretch of marching cost the troops.
    *
    * Its own event rather than a field on `unit_marched`, because the tail goes on paying
    * after the head has stopped: a column that halts at dusk is still marching in the dark

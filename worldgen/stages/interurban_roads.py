@@ -261,7 +261,7 @@ class InterurbanRoadStage(GeneratorStage):
     def _route(self, hexes, origin, dest, net_adj, node_cost, edge_cost, cache, version):
         """The journey from *origin* to *dest*: a new leg, then the road that already goes there.
 
-        A traveller bound for a town does not need a road of his own all the way, he needs
+        A traveller bound for a town does not need a road of their own all the way, they need
         to reach the road that serves it. So the search runs against every hex from which
         *dest* is already reachable along roads that exist, and stops at whichever it
         touches first; the rest of the journey is that road.
@@ -278,7 +278,7 @@ class InterurbanRoadStage(GeneratorStage):
 
         The road home is *costed*, and weighed against the cost of reaching each possible
         join. Stopping at whichever road hex is cheapest to reach is not the same as the
-        cheapest journey: a traveller would join at his own doorstep and follow the network
+        cheapest journey: a traveller would join at their own doorstep and follow the network
         however far round it went, so no road was ever built between two places the network
         already joined badly, and the graph came out very nearly a tree.
 
@@ -290,7 +290,7 @@ class InterurbanRoadStage(GeneratorStage):
         """
         # Every hex from which dest is reachable on the network so far, with the way back
         # and what it costs. Empty for the first traveller, who therefore paths the whole
-        # way and becomes the road that everyone after him joins.
+        # way and becomes the road that everyone after them joins.
         cached = cache.get(dest)
         if cached is not None and cached[0] == version:
             tree, home_cost = cached[1], cached[2]

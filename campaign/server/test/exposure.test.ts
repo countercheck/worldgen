@@ -114,7 +114,7 @@ describe('trusting a proxy', () => {
     await app.close();
   });
 
-  it('does when told to, so a proxied player is limited as himself', async () => {
+  it('does when told to, so a proxied player is limited as themselves', async () => {
     const app = await buildApp({
       db: openDb(),
       trustProxy: true,
@@ -126,7 +126,7 @@ describe('trusting a proxy', () => {
     await from('10.0.0.1');
     await from('10.0.0.1');
     expect((await from('10.0.0.1')).statusCode).toBe(429);
-    // A different player, behind the same proxy, still has his own allowance.
+    // A different player, behind the same proxy, still has their own allowance.
     expect((await from('10.0.0.2')).statusCode).toBe(200);
     await app.close();
   });

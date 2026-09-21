@@ -1,5 +1,5 @@
 /**
- * What a march costs the men.
+ * What a march costs the troops.
  *
  * The table is checked against the rules directly, band by band, because every one of
  * these numbers is a game number somebody will want to argue about — and because the curve
@@ -79,7 +79,7 @@ describe("the rules' fatigue table", () => {
 
   it('shifts the column by experience, left for a veteran and right for a raw one', () => {
     // The rules' own mechanism, and the reason experience is worth having: it does not
-    // make a man march faster, it makes him arrive able to fight.
+    // make troops march faster, it makes them arrive able to fight.
     const at = (xp: Experience) => marchFatigueAt(cfg, unit('infantry', xp), 9);
     expect(at(0)).toBe(3);
     expect(at(1)).toBe(2);
@@ -145,7 +145,7 @@ describe('the tail, and why it matters', () => {
   });
 
   it('makes a march that ends at dusk a night march for the rear', () => {
-    // The head camps in the last of the light and pays nothing. The men at the back are
+    // The head camps in the last of the light and pays nothing. The troops at the back are
     // still walking half an hour later, in the dark, and the rules charge for that.
     const u = unit('infantry');
     const headStopped = cfg.sunsetHour;

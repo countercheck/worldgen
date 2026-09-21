@@ -1,8 +1,8 @@
 /**
- * What a commander has, and how long ago he heard about it.
+ * What a commander has, and how long ago they heard about it.
  *
- * The piece that makes the whole model legible in one glance: one formation he is
- * standing next to, and beneath it a list of his own corps, each with an hour on it and
+ * The piece that makes the whole model legible in one glance: one formation they are
+ * standing next to, and beneath it a list of their own corps, each with an hour on it and
  * most of those hours old. Nothing here is a surprise once the design is understood, and
  * everything here is a surprise the first time somebody expects a wargame.
  *
@@ -30,7 +30,7 @@ export function Command({
   clockHours: number;
   colorOf: (faction: string) => string;
   onSelect: (unitId: string) => void;
-  /** What the formation he rides with is doing, if anything. He set out on it; he knows. */
+  /** What the formation they ride with is doing, if anything. They set out on it; they know. */
   taskLine: string | null;
 }) {
   return (

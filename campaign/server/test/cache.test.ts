@@ -67,7 +67,7 @@ describe('caching a parsed campaign', () => {
     const { campaign } = store.create({
       id: 'c1', name: 'c', worldDoc: world(), factions: FACTIONS,
     });
-    // The referee is about to look at the map he has just uploaded.
+    // The referee is about to look at the map they have just uploaded.
     expect(store.campaign('c1')).toBe(campaign);
   });
 

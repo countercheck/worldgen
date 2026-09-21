@@ -2,7 +2,7 @@
  * What the order-of-battle drawer lists.
  *
  * The interesting part is not the table, it is which facts a role is shown. A commander
- * reading a live position for a formation he has not heard from in six hours would be
+ * reading a live position for a formation they have not heard from in six hours would be
  * reading the thing this whole design exists to withhold.
  */
 
@@ -87,7 +87,7 @@ describe('the referee’s order of battle', () => {
 });
 
 describe('a commander’s order of battle', () => {
-  it('separates what he can see from what he was told', () => {
+  it('separates what they can see from what they were told', () => {
     const groups = rosterGroups({
       role: 'commander',
       units: [unit('red-1', 'red')],
@@ -123,7 +123,7 @@ describe('a commander’s order of battle', () => {
   });
 
   it('never lists a formation twice, once true and once remembered', () => {
-    // His own formation reports itself. Showing both rows would leave a reader with two
+    // Their own formation reports itself. Showing both rows would leave a reader with two
     // positions for one division and no way to tell which to believe.
     const groups = rosterGroups({
       role: 'commander',

@@ -5,13 +5,13 @@
  * join link, and there is no structural difference between the two — handing somebody a
  * token is the whole of putting them in a seat.
  *
- * A commander is not a unit and does not have a position of his own. He rides with a
- * formation, and that formation is three things at once: where he is, what he can see,
- * and where a despatch rider must go to find him. Everything else here follows from
- * keeping those three attached to the unit rather than to the man.
+ * A commander is not a unit and does not have a position of their own. They ride with a
+ * formation, and that formation is three things at once: where they are, what they can see,
+ * and where a despatch rider must go to find them. Everything else here follows from
+ * keeping those three attached to the unit rather than to the commander.
  *
- * The hierarchy is one field. `superiorId` points up; who a man commands is everyone
- * whose `superiorId` leads back to him. A single parent per commander means the structure
+ * The hierarchy is one field. `superiorId` points up; who a commander commands is everyone
+ * whose `superiorId` leads back to them. A single parent per commander means the structure
  * cannot become a graph by accident, and the tree is cheap enough to walk that caching it
  * would only be a second fact to keep in step.
  */
@@ -21,24 +21,24 @@ import type { Unit } from './unit.js';
 
 export interface Commander {
   readonly id: string;
-  /** "Marshal Ney". Shown wherever the man rather than the formation is meant. */
+  /** "Marshal Ney". Shown wherever the commander rather than the formation is meant. */
   readonly name: string;
   readonly faction: string;
   /**
-   * The formation he rides with: his position, his eyes, and his address.
+   * The formation they ride with: their position, their eyes, and their address.
    *
    * More than one commander may ride with the same formation — a corps commander whose
-   * own headquarters has been destroyed falls back on one of his divisions — so this is
+   * own headquarters has been destroyed falls back on one of their divisions — so this is
    * not a key and units are not indexed by it.
    */
   readonly unitId: string;
-  /** Who he answers to. Null for the army commander, and for nobody else. */
+  /** Who they answer to. Null for the army commander, and for nobody else. */
   readonly superiorId: string | null;
   /**
    * Whether an arriving despatch is passed straight down to subordinates.
    *
    * True for a commander the referee is running, so that twenty formations do not become
-   * twenty pieces of paperwork a campaign day. False for a player, who writes his own.
+   * twenty pieces of paperwork a campaign day. False for a player, who writes their own.
    */
   readonly autoCascade: boolean;
 }
@@ -53,7 +53,7 @@ export const directSubordinates = (s: CampaignState, id: string): Commander[] =>
     .sort((a, b) => (a.id < b.id ? -1 : 1));
 
 /**
- * Everyone beneath this commander, at any depth, excluding himself.
+ * Everyone beneath this commander, at any depth, excluding themselves.
  *
  * Breadth-first and guarded against cycles. A cycle should be impossible — `check`
  * refuses to create one — but a state loaded from a log written by an older or buggier
@@ -104,7 +104,7 @@ export const mayOrder = (s: CampaignState, id: string, targetId: string): boolea
 /**
  * Whether `id` may send any despatch at all to `targetId`.
  *
- * Same faction, and not himself. Writing to the enemy is not a despatch, and if it ever
+ * Same faction, and not themselves. Writing to the enemy is not a despatch, and if it ever
  * becomes a mechanic it will be a different one with its own rules.
  */
 export function mayWriteTo(s: CampaignState, id: string, targetId: string): boolean {
@@ -121,7 +121,7 @@ export const formationOf = (s: CampaignState, id: string): Unit | undefined => {
 };
 
 /**
- * The formations a commander is responsible for: his own, and his subordinates'.
+ * The formations a commander is responsible for: their own, and their subordinates'.
  *
  * Sorted and deduplicated, because two commanders riding with the same formation would
  * otherwise list it twice.

@@ -9,12 +9,12 @@
  *
  * The server never sends a delivery estimate, and must not: an estimate is a distance,
  * and a distance is a position. So the *client* computes one — from the commander's own
- * last report of that formation, over the map he actually holds, with the same routing
+ * last report of that formation, over the map they actually hold, with the same routing
  * code the server uses for the real ride.
  *
  * That is the shared engine earning its keep. The number is honestly wrong in exactly the
- * way the commander's knowledge is wrong: if his III Corps has marched twenty kilometres
- * since the report, his estimate is twenty kilometres out, and neither he nor this
+ * way the commander's knowledge is wrong: if their III Corps has marched twenty kilometres
+ * since the report, their estimate is twenty kilometres out, and neither they nor this
  * function has any way to know it. It is labelled as a guess wherever it is shown, and
  * carries the hour it was computed from so a reader can judge how much to trust it.
  */
@@ -31,7 +31,7 @@ import {
   type World,
 } from '@campaign/shared';
 
-/** Somebody a commander may write to, and whether he may give them orders. */
+/** Somebody a commander may write to, and whether they may give them orders. */
 export interface Correspondent {
   readonly id: string;
   readonly name: string;
@@ -74,12 +74,12 @@ export function descendantsOf(
  * Who this commander may write to, in the order a form should offer them.
  *
  * Subordinates first, because most despatches are orders and most orders go down. Then
- * everyone else on his own side. Never himself, and never the enemy.
+ * everyone else on their own side. Never themselves, and never the enemy.
  */
 export function correspondents(view: ClientView, senderId?: string): Correspondent[] {
   // The viewer, normally. A referee writing on a commander's behalf names the sender
-  // explicitly — he has no seat of his own, and the question "who may this man write to"
-  // is about the man, not about who is looking.
+  // explicitly — they have no seat of their own, and the question "who may this commander write
+  // to" is about the commander, not about who is looking.
   const from = senderId ?? view.commander?.id;
   if (from === undefined) return [];
 
@@ -96,8 +96,8 @@ export function correspondents(view: ClientView, senderId?: string): Corresponde
 /**
  * How long a rider would take, over the ground as it actually is.
  *
- * The referee's, and only his. A commander is shown none of this: he does not know where
- * the addressee is, so he cannot know how long the ride will be, and a number — even a
+ * The referee's, and only their. A commander is shown none of this: they do not know where
+ * the addressee is, so they cannot know how long the ride will be, and a number — even a
  * hedged one — is a distance, and a distance is a position.
  */
 export interface Estimate {
@@ -127,7 +127,7 @@ export function estimateRide(
  * Where a commander's formation actually stands.
  *
  * Live units only, and null for anything the view does not carry one of. That is the whole
- * of the restriction: a commander's view holds exactly one live unit — his own — so he can
+ * of the restriction: a commander's view holds exactly one live unit — their own — so they can
  * estimate nothing, and the referee's holds them all.
  */
 function placeOf(view: ClientView, commanderId: string): Hex | null {

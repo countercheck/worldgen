@@ -266,5 +266,5 @@ export const isStep = (a: Hex, b: Hex): boolean => distance(a, b) === 1;
  */
 export const tailLengthHexes = (unit: Unit, grade: Grade): number => columnHexes(unit, grade) - 1;
 
-/** Whether a unit may field patrols without spending men. */
+/** Whether a unit may field patrols without spending troops. */
 export const canPatrolFreely = (unit: Unit): boolean => hasTrait(unit, 'scout');

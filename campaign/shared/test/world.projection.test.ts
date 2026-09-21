@@ -122,7 +122,7 @@ describe('projecting a world for a client', () => {
 
   it('reaches every role, including the referee', () => {
     // The referee's branch of `viewFor` set `world` straight from the stored document,
-    // because no masking applies to him — so a projection wired only into the masking
+    // because no masking applies to them — so a projection wired only into the masking
     // path saved nothing at all for the role that loads the whole map most often. Checked
     // per role rather than once, since each builds its view separately.
     const world = parseWorld(doc());

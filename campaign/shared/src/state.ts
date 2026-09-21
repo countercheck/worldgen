@@ -23,10 +23,10 @@ import type { Formation, Unit, UnitReport } from './unit.js';
 /**
  * One commander's picture of the war.
  *
- * Knowledge belongs to the man, not to his side and not to his formation. A side does not
- * know anything — two of its corps commanders can hold flatly contradictory pictures and
+ * Knowledge belongs to the commander, not to their side and not to their formation. A side does
+ * not know anything — two of its corps commanders can hold flatly contradictory pictures and
  * frequently did. A formation observes, but observing is not knowing: what a division
- * sees becomes knowledge when the man riding with it takes note of it.
+ * sees becomes knowledge when the commander riding with it takes note of it.
  *
  * `surveyed` grows monotonically, the one exception being a referee's `hexes_forgotten`.
  * What is visible *right now* is derived from the formation's position each time it is
@@ -35,16 +35,16 @@ import type { Formation, Unit, UnitReport } from './unit.js';
  */
 export interface CommanderKnowledge {
   readonly commanderId: string;
-  /** Ground his formations have covered. Terrain memory, and nothing about the enemy. */
+  /** Ground their formations have covered. Terrain memory, and nothing about the enemy. */
   readonly surveyed: ReadonlySet<HexKey>;
   /** Campaign hour each hex was last looked at. Drives how stale a memory reads. */
   readonly lastSurveyedHours: ReadonlyMap<HexKey, number>;
   /**
-   * Where he last heard each formation under him was, keyed by unit id.
+   * Where they last heard each formation under them was, keyed by unit id.
    *
    * Held rather than computed, and that is the whole of the fog now that the ground is
    * public. A view that snapshotted these from the units at the moment of asking would
-   * hand him every position live and date them "now" — which is what the console did
+   * hand them every position live and date them "now" — which is what the console did
    * before riders existed, and which made a design about not knowing where your own corps
    * is display a list of exactly where it was.
    *
@@ -53,10 +53,10 @@ export interface CommanderKnowledge {
    */
   readonly reports: ReadonlyMap<string, UnitReport>;
   /**
-   * Enemies he has been told about, keyed by his own label for them.
+   * Enemies they have been told about, keyed by their own label for them.
    *
    * Held, not recomputed — the same correction reports needed. A view that asked
-   * `spottedBy` at the moment a client requested it would show him exactly what his
+   * `spottedBy` at the moment a client requested it would show them exactly what their
    * column can see this instant and nothing else: an enemy would appear the moment it
    * came into view and vanish the moment it left, when what actually happens is that it
    * stops being current and starts being a place somebody was once seen.
@@ -65,7 +65,7 @@ export interface CommanderKnowledge {
    */
   readonly contacts: ReadonlyMap<string, Contact>;
   /**
-   * The number his staff will give the next new contact.
+   * The number their staff will give the next new contact.
    *
    * A counter rather than anything derived from the enemy's identity. A label that could
    * be computed from the observed unit — a hash, say — would be brute-forceable against a
@@ -264,8 +264,8 @@ export function reduce(state: CampaignState, event: LoggedEvent): CampaignState 
     case 'commander_removed': {
       const commanders = new Map(s.commanders);
       commanders.delete(p.commanderId);
-      // Knowledge is deliberately kept. A commander who falls is replaced, and what his
-      // headquarters knew does not evaporate with him — his successor inherits the maps
+      // Knowledge is deliberately kept. A commander who falls is replaced, and what their
+      // headquarters knew does not evaporate with them — their successor inherits the maps
       // and the last despatches on the table. Dropping it here would make succession
       // lose information that a real one does not.
       return { ...s, commanders };
@@ -550,7 +550,7 @@ export const replay = (events: Iterable<LoggedEvent>, from = EMPTY_STATE): Campa
  * The formation a patrol was detached from, if it is a patrol and the parent still exists.
  *
  * The one place to ask. A patrol has no morale, supply or fatigue of its own and is immune
- * to all three; where something needs to know the state of the men it came from — what it
+ * to all three; where something needs to know the state of the troops it came from — what it
  * rejoins as, what its parent can still field — it reads them off the parent through this
  * rather than off a copy stored on the patrol. A copy would be right at the hour it was
  * detached and wrong by the afternoon.
@@ -620,16 +620,16 @@ const byWritten = (a: Despatch, b: Despatch): number =>
 export const despatchesFrom = (s: CampaignState, commanderId: string): Despatch[] =>
   [...s.despatches.values()].filter((d) => d.from === commanderId).sort(byWritten);
 
-/** Everything addressed to a commander — including what never reached him. */
+/** Everything addressed to a commander — including what never reached them. */
 export const despatchesTo = (s: CampaignState, commanderId: string): Despatch[] =>
   [...s.despatches.values()].filter((d) => d.to === commanderId).sort(byWritten);
 
 /**
- * A commander's inbox: what is actually in his hand.
+ * A commander's inbox: what is actually in their hand.
  *
- * Delivered only. Nothing in transit toward him is visible, because a rider still on the
- * road has told him nothing — and showing him a despatch before it arrives would let him
- * read his subordinate's mind at the speed of light.
+ * Delivered only. Nothing in transit toward them is visible, because a rider still on the
+ * road has told them nothing — and showing them a despatch before it arrives would let them
+ * read their subordinate's mind at the speed of light.
  */
 export const inboxOf = (s: CampaignState, commanderId: string): Despatch[] =>
   despatchesTo(s, commanderId).filter((d) => d.fate.kind === 'delivered');
@@ -658,7 +658,7 @@ export const taskFor = (s: CampaignState, unitId: string): Task | undefined =>
  * What a commander knows about the enemy, oldest sighting last.
  *
  * Newest first because a contact's whole meaning is its hour: the top of this list is the
- * least wrong thing he holds.
+ * least wrong thing they hold.
  */
 export const contactsOf = (s: CampaignState, commanderId: string): Contact[] =>
   [...(s.knowledge.get(commanderId)?.contacts.values() ?? [])].sort(

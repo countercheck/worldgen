@@ -1,17 +1,17 @@
 /**
- * The post: what has reached a commander, and what he has sent.
+ * The post: what has reached a commander, and what they have sent.
  *
  * This is where the design either reads or does not, and the whole of it is in which hour
  * is shown first.
  *
  * **A despatch is dated by the hour it describes.** A report that took six hours to
- * arrive is telling him about hour four, not about hour ten. Leading with the arrival
- * time — the natural thing for an inbox to do — would be a lie about what he knows, and
+ * arrive is telling them about hour four, not about hour ten. Leading with the arrival
+ * time — the natural thing for an inbox to do — would be a lie about what they know, and
  * would make a stale report look fresh at exactly the moment it mattered. So the hour
  * written is the headline, the hour it landed is the footnote, and the gap between them
  * is stated rather than left to be worked out.
  *
- * **The outbox is deliberately unhelpful.** It says what he wrote and when, and nothing
+ * **The outbox is deliberately unhelpful.** It says what they wrote and when, and nothing
  * about whether it arrived, because that is the mechanic rather than a missing feature.
  * The one thing that can change is an acknowledgement coming back, which is the only
  * feedback channel in the game and is therefore the loudest thing on a sent despatch.

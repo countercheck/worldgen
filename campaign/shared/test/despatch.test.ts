@@ -1,5 +1,5 @@
 /**
- * Despatches: what a sender is shown, and what he must never be.
+ * Despatches: what a sender is shown, and what they must never be.
  *
  * The assertions here are about *shape* rather than about riding — the scheduler's tests
  * cover the ride. What matters in this file is that the copy a commander receives is
@@ -137,7 +137,7 @@ describe('what a sender is shown', () => {
     ]);
   });
 
-  it('shows his own waypoints, which he chose himself', () => {
+  it('shows their own waypoints, which they chose themselves', () => {
     const via = [{ q: 9, r: 9 }];
     expect(senderCopy(despatch({ via }), false).via).toEqual(via);
   });
@@ -147,7 +147,7 @@ describe('what a sender is shown', () => {
       fate: { kind: 'captured', by: 'blue', atHours: 6, dice: [1, 1] },
     });
     // The whole mechanic in one assertion: a commander whose order was read by the enemy
-    // sees precisely what he saw the moment he sent it.
+    // sees precisely what they saw the moment they sent it.
     expect(senderCopy(taken, false)).toEqual(senderCopy(despatch(), false));
   });
 
@@ -172,7 +172,7 @@ describe('what an addressee is shown', () => {
 });
 
 describe('a captor', () => {
-  it('reads the body and knows when he took it', () => {
+  it('reads the body and knows when they took it', () => {
     const taken = despatch({
       fate: { kind: 'captured', by: 'blue', atHours: 6, dice: [1, 1] },
     });
@@ -184,8 +184,8 @@ describe('a captor', () => {
     expect('route' in copy).toBe(false);
   });
 
-  it('reads where the sender stood, and not his returns', () => {
-    // A despatch carries the sender's own report whether or not he thought to attach one.
+  it('reads where the sender stood, and not their returns', () => {
+    // A despatch carries the sender's own report whether or not they thought to attach one.
     // Taken off a rider it is worth exactly what a good sighting is worth — a position,
     // an hour, and the size of the thing — and no more. The engine's id for the formation
     // is the correlation key these rules make a player buy with a patrol, and the returns
@@ -207,13 +207,13 @@ describe('a captor', () => {
     }
   });
 
-  it('leaves his own side’s report intact for the men entitled to it', () => {
+  it('leaves their own side’s report intact for the commanders entitled to it', () => {
     const arrived = despatch({
       fate: { kind: 'delivered', atHours: 11 },
       body: { unitReport: reportOf(unit('red-1', 'red', [{ q: 5, r: 5 }], 4210), 4) },
     });
-    // The addressee is being written to by his own subordinate: the point of the paper is
-    // that it tells him where III Corps is and what state it is in.
+    // The addressee is being written to by their own subordinate: the point of the paper is
+    // that it tells them where III Corps is and what state it is in.
     const report = addresseeCopy(arrived, false).body.unitReport as Record<string, unknown>;
     expect(report['unitId']).toBe('red-1');
     expect(report['paperStrength']).toBe(4210);
@@ -260,7 +260,7 @@ describe('riding', () => {
   it('goes the long way when the sender insists on a waypoint', () => {
     const direct = ridePath(world, cfg, { q: 2, r: 2 }, { q: 8, r: 2 })!;
     const around = planRide(world, cfg, { q: 2, r: 2 }, { q: 8, r: 2 }, [{ q: 5, r: 10 }])!;
-    // The whole point of `via`: a rider ordered around a wood he thinks holds pickets
+    // The whole point of `via`: a rider ordered around a wood they think holds pickets
     // takes longer, and takes it willingly.
     expect(around.length).toBeGreaterThan(direct.length);
     expect(around.some((h) => h.q === 5 && h.r === 10)).toBe(true);

@@ -17,7 +17,7 @@
  * - The **size marks** appear once you know roughly how big it is, which is 4.
  * - A **dashed frame** means a position that is suspected or reported rather than
  *   observed, which is precisely what a despatch carries and what a commander holds about
- *   every formation but the one he is standing next to.
+ *   every formation but the one they are standing next to.
  *
  * So the symbol degrades in exactly the way the intelligence does, and a reader who knows
  * the standard can tell how good a report is without reading a word.

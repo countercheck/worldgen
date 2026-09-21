@@ -65,7 +65,7 @@ export interface WashStyle {
   readonly observed: number;
   /** Marched over before, watched by nobody now. Terrain remembered, occupants not. */
   readonly surveyed: number;
-  /** Never seen by anybody under his command. */
+  /** Never seen by anybody under their command. */
   readonly unseen: number;
 }
 
@@ -95,7 +95,7 @@ export const DEFAULT_THEME: Theme = {
   fog: FOG_COLOR,
   // Not from `palette.ts`: the Python renderer draws a finished map of a whole country and
   // has no notion of who is looking at it. The wash only means anything on a screen being
-  // read by one man.
+  // read by one person.
   wash: { color: '#0b1020', observed: 0, surveyed: 0.25, unseen: 0.55 },
   // Magenta on purpose. A missing colour should look like a bug, not like terrain — a
   // tasteful grey fallback is how an incomplete palette ships unnoticed.

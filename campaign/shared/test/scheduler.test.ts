@@ -102,7 +102,7 @@ function unit(
     maxEquipment: 30,
     guns: 0,
     marchSpeedKmh: 3,
-    // Half a metre a man over four thousand is two kilometres of road: two hexes, which
+    // Half a metre a soldier over four thousand is two kilometres of road: two hexes, which
     // keeps the column visible in these tests without dominating them.
     spacingM: 0.5,
     spacingMultiplier: 1,
@@ -429,7 +429,7 @@ describe('discovery', () => {
     const { payloads, halted } = advance(marching(), world, cfg, clean, { hours: 12 });
     expect(halted).not.toBeNull();
     const after = fold(marching(), payloads);
-    // The decision was still raised — the referee will see it in his queue — but the
+    // The decision was still raised — the referee will see it in their queue — but the
     // clock ran on, which is the difference between the two controls.
     //
     // It does not reach { q: 20, r: 5 }, and not because the clock stopped: Wellington's
@@ -520,8 +520,8 @@ describe('riders', () => {
     const long = advance(riding, world, cfg, clean, { hours: 4 });
     const delivered = long.payloads.find((p) => p.kind === 'despatch_delivered');
     expect(delivered).toBeDefined();
-    // On the hour: a rider who would have reached his man at half past nine reaches him
-    // at ten, because there is no half past ten for him to arrive at.
+    // On the hour: a rider who would have reached their addressee at half past nine reaches
+    // them at ten, because there is no half past ten for them to arrive at.
     expect(delivered!.kind === 'despatch_delivered' && delivered.atHours).toBe(10);
   });
 
@@ -538,8 +538,8 @@ describe('riders', () => {
     });
 
     // The report is not an extra: every despatch carries word of where its sender stood
-    // when he sealed it, so arriving paper refreshes the recipient's picture of the man
-    // who wrote it as well as delivering what he wrote.
+    // when they sealed it, so arriving paper refreshes the recipient's picture of the commander
+    // who wrote it as well as delivering what they wrote.
     expect(kinds(sent)).toEqual([
       'despatch_sent',
       'despatch_delivered',
@@ -840,7 +840,7 @@ describe('a rider with nowhere to ride', () => {
   const sundered = (): CampaignState =>
     stateFrom({ units: [near, far], commanders: [ney, kellermann] });
 
-  it('does not put the paper in his hand across an ocean', () => {
+  it('does not put the paper in their hand across an ocean', () => {
     const state = sundered();
     const payloads = despatchNow(state, split, cfg, clean, {
       from: 'ney',
@@ -849,8 +849,8 @@ describe('a rider with nowhere to ride', () => {
       body: { text: 'Close on me.' },
     });
 
-    // `check` has already raised this as a soft violation; a referee may send him anyway.
-    // What he must not get is a delivery at the hour it was written.
+    // `check` has already raised this as a soft violation; a referee may send them anyway.
+    // What they must not get is a delivery at the hour it was written.
     expect(kinds(payloads)).not.toContain('despatch_delivered');
     const after = fold(state, payloads);
     const sent = [...after.despatches.values()][0]!;
@@ -858,7 +858,7 @@ describe('a rider with nowhere to ride', () => {
     expect(sent.handed).toBe(false);
   });
 
-  it('is still out there, and finds his man if the ground ever allows it', () => {
+  it('is still out there, and finds their addressee if the ground ever allows it', () => {
     const state = sundered();
     const after = fold(
       state,
@@ -892,7 +892,7 @@ describe('what a despatch says about its sender', () => {
 
   it('is the engine\'s own return, not the one the caller wrote', () => {
     // A forged report is believed — it is filed as knowledge the moment it arrives — so a
-    // body that could overwrite the server's own would let anyone holding a seat feed his
+    // body that could overwrite the server's own would let anyone holding a seat feed their
     // own side false intelligence signed by a real subordinate.
     const state = stateFrom({ units: [near, far], commanders: [ney, kellermann] });
     const payloads = despatchNow(state, world, cfg, clean, {
@@ -922,14 +922,14 @@ describe('what a despatch says about its sender', () => {
     const report = sent?.kind === 'despatch_sent' ? sent.despatch.body.unitReport : undefined;
     expect(report?.unitId).toBe('red-1');
     expect(report?.head).toEqual({ q: 5, r: 5 });
-    // The prose is his own and is left alone.
+    // The prose is their own and is left alone.
     expect(sent?.kind === 'despatch_sent' ? sent.despatch.body.text : null).toBe('All quiet.');
   });
 
   it('is the cascading commander\'s own position, not the original sender\'s', () => {
-    // A rider coming from the corps commander knows where the corps commander was. He has
+    // A rider coming from the corps commander knows where the corps commander was. They have
     // never been near the army headquarters that wrote the order in the first place.
-    // Standing beside him, so the paper is handed over and the cascade happens at once
+    // Standing beside them, so the paper is handed over and the cascade happens at once
     // rather than a rider's journey later.
     const army = unit('red-3', 'red', { q: 4, r: 5 });
     const state = stateFrom({
@@ -960,10 +960,10 @@ describe('what a despatch says about its sender', () => {
 });
 
 describe('who decides for a formation', () => {
-  it('is the senior man riding with it, by depth in the chain', () => {
-    // A corps commander fallen back on one of his own divisions decides for it. Neither
-    // he nor the divisional commander is the army commander, so "has no superior" cannot
-    // tell them apart and alphabetical order would hand it to the junior man.
+  it('is the senior commander riding with it, by depth in the chain', () => {
+    // A corps commander fallen back on one of their own divisions decides for it. Neither
+    // they nor the divisional commander is the army commander, so "has no superior" cannot
+    // tell them apart and alphabetical order would hand it to the junior commander.
     const red = unit('red-1', 'red', { q: 5, r: 5 });
     const army = unit('red-9', 'red', { q: 30, r: 30 });
     const state = stateFrom({
@@ -986,12 +986,12 @@ describe('who decides for a formation', () => {
   });
 });
 
-describe('what the man who saw it keeps', () => {
-  it('files the contact for the observer, not only for his superior', () => {
-    // The store asks every commander what he can see after the whole command, from the
+describe('what the commander who saw it keeps', () => {
+  it('files the contact for the observer, not only for their superior', () => {
+    // The store asks every commander what they can see after the whole command, from the
     // final state. An enemy sighted and lost again during a long advance would never
-    // reach the observer's own contacts at all — his superior would get it by despatch
-    // and he would not, which is precisely backwards.
+    // reach the observer's own contacts at all — their superior would get it by despatch
+    // and they would not, which is precisely backwards.
     const red = unit('red-1', 'red', { q: 5, r: 5 });
     const blue = unit('blue-1', 'blue', { q: 12, r: 5 });
     const soult = commander('soult', 'red', 'red-2');
@@ -1012,7 +1012,7 @@ describe('what the man who saw it keeps', () => {
 
     expect(filed).toContain('ney');
 
-    // And it is his own eyes, so it continues rather than being reminted next time.
+    // And it is their own eyes, so it continues rather than being reminted next time.
     const after = fold(state, payloads);
     const contacts = [...(after.knowledge.get('ney')?.contacts.values() ?? [])];
     expect(contacts).toHaveLength(1);
@@ -1198,7 +1198,7 @@ describe('two columns wanting the same ground', () => {
     expect(decision.decision.commanderId).toBeNull();
   });
 
-  it('lets the column the referee named through, once he has ruled', () => {
+  it('lets the column the referee named through, once they have ruled', () => {
     const red = unit('red-1', 'red', { q: 8, r: 5 });
     const blue = unit('blue-1', 'blue', { q: 10, r: 5 });
     const contested = { q: 9, r: 5 };
@@ -1353,7 +1353,7 @@ describe('what a day on the road costs', () => {
   });
 
   it('charges the rear for the dark it marched in after the head halted', () => {
-    // The head halts in the last of the light and would pay nothing. The men at the back
+    // The head halts in the last of the light and would pay nothing. The troops at the back
     // are still on the road when the sun goes down, and that is the whole point of a
     // column having a length.
     //
@@ -1393,7 +1393,7 @@ describe('what a day on the road costs', () => {
   });
 
   it('never runs past a hundred, which is the whole unit', () => {
-    // Fatigue is read as a percentage of the men no longer fit to stand in the line, so a
+    // Fatigue is read as a percentage of the troops no longer fit to stand in the line, so a
     // number above a hundred is not a worse day, it is a broken scale.
     const wrecked = unit('red-1', 'red', { q: 5, r: 5 }, { fatigue: 99 });
     const { unit: u } = marchFor(20, 2, wrecked);
@@ -1496,7 +1496,7 @@ describe('making and breaking camp', () => {
   });
 
   it('breaks a camp it was only halfway through building', () => {
-    // An order arriving mid-camp does not get the tents back for free: the men have to
+    // An order arriving mid-camp does not get the tents back for free: the troops have to
     // undo what they have done, and the rules charge the change either way.
     const tired = unit('red-1', 'red', { q: 5, r: 5 }, { hoursMarchedToday: 19.5 });
     const state = stateFrom({
@@ -1516,10 +1516,10 @@ describe('making and breaking camp', () => {
   });
 });
 
-describe('telling the referee a formation needs him', () => {
+describe('telling the referee a formation needs them', () => {
   it('reports an arrival even where nobody rides with the column', () => {
     // The referee decides what a formation does next, so a column that has finished its
-    // orders is his business whether or not a man was appointed to it. Without this it
+    // orders is their business whether or not a commander was appointed to it. Without this it
     // stands in a field, orders complete, with nothing in the queue to say so.
     const red = unit('red-1', 'red', { q: 5, r: 5 });
     const state = stateFrom({ units: [red], tasks: [marchTo(red, { q: 8, r: 5 }, 6, { q: 6, r: 5 })] });
@@ -1548,7 +1548,7 @@ describe('the clock runs in whole hours', () => {
 
   it('stamps every event on the hour', () => {
     // The claim the whole model rests on. Nothing happens at twenty past: a referee
-    // adjudicates by the hour and an event he cannot address is an event in the wrong
+    // adjudicates by the hour and an event they cannot address is an event in the wrong
     // place.
     const red = unit('red-1', 'red', { q: 5, r: 5 });
     const blue = unit('blue-1', 'blue', { q: 20, r: 5 }, {}, 'cavalry');
@@ -1633,7 +1633,7 @@ describe('the clock runs in whole hours', () => {
 
   it('gives a referee who asks for part of an hour the whole hours only', () => {
     // There is no half hour for the extra to happen in, and rounding up would run the
-    // clock past what he asked for.
+    // clock past what they asked for.
     const state = stateFrom({ units: [unit('red-1', 'red', { q: 5, r: 5 })] });
     expect(advance(state, world, cfg, clean, { hours: 2.5 }).toHours).toBe(8);
     expect(advance(state, world, cfg, clean, { hours: 0.5 }).toHours).toBe(6);
@@ -1866,7 +1866,7 @@ describe('a battlefield', () => {
 
   it('exempts only the ground declared, not the road up to it', () => {
     // A column walking into a formation short of the fighting is stopped as usual. The
-    // exemption is about where men are intermingled, not about being near a battle.
+    // exemption is about where troops are intermingled, not about being near a battle.
     const holding = unit('blue-1', 'blue', { q: 7, r: 5 });
     const coming = unit('red-1', 'red', { q: 5, r: 5 });
     const state = stateFrom({

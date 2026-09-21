@@ -195,8 +195,8 @@ def astar_to_any(
 ) -> list[HexCoord] | None:
     """`astar`, but it ends at the best hex in *goals* rather than at one named hex.
 
-    What it is for: a traveller bound for a town does not need a road of his own the whole
-    way there, he needs to reach the road that already goes there.  So the search runs
+    What it is for: a traveller bound for a town does not need a road of their own the whole
+    way there, they need to reach the road that already goes there.  So the search runs
     against the set of hexes from which the destination is already reachable, and stops at
     whichever it touches first.
 

@@ -1,8 +1,8 @@
 /**
- * What a march costs the men.
+ * What a march costs the troops.
  *
  * Fatigue is the rules' real limit on movement. The twenty-hour cap is a wall; this is the
- * gradient that makes a commander stop before he hits it. A division that force-marches
+ * gradient that makes a commander stop before they hit it. A division that force-marches
  * through a night arrives, and arrives useless — `presentUnderArms` is `paperStrength`
  * reduced by fatigue, so the cost is paid in the line of battle rather than on the road.
  *
@@ -31,8 +31,8 @@ import type { Unit } from './unit.js';
  *
  * Experience shifts the column: a veteran reads the table an hour to the left and a raw
  * formation an hour to the right, per point. That is the rules' own mechanism and it is
- * the reason experience is worth having — it does not make a man march faster, it makes
- * him arrive able to fight.
+ * the reason experience is worth having — it does not make troops march faster, it makes
+ * them arrive able to fight.
  */
 export function marchFatigueAt(cfg: CampaignConfig, unit: Unit, hours: number): number {
   const curve = cfg.marchFatigue[cfg.fatigueClass[unit.kind]];
@@ -40,7 +40,7 @@ export function marchFatigueAt(cfg: CampaignConfig, unit: Unit, hours: number): 
   if (curve.length === 0) return 0;
 
   // Whole hours: the table has no reading for half an hour, and rounding down is the
-  // reading that does not charge a man for time he has not yet spent.
+  // reading that does not charge troops for time they have not yet spent.
   // Minus, not plus: a veteran reads the table to the left, which is a lower reading for
   // the same hours on the road.
   const shifted = Math.floor(Math.max(0, hours)) - unit.experience;

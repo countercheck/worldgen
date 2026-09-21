@@ -3,7 +3,7 @@
  *
  * Under prose orders the referee's cost is reading everybody's post and turning it into
  * marches, so the one thing this screen has to do is make that **one motion rather than
- * two**. A despatch arrives, he reads it, and the control that sets the addressee's task
+ * two**. A despatch arrives, they read it, and the control that sets the addressee's task
  * is on the same card — not on another tab, not after finding the unit in a list. If that
  * motion is two actions the game is tiring to run, and a game that is tiring to run does
  * not get run.
@@ -13,9 +13,9 @@
  * resolves it: point at the ground, or say it needed nothing.
  *
  * The log below is a reference rather than a workspace. It is the only place in the system
- * where routes and fates are visible — a rider's path betrays where his addressee actually
+ * where routes and fates are visible — a rider's path betrays where their addressee actually
  * is, which is why no commander ever sees one — so it is also the referee's window on the
- * thing his players cannot see and are most curious about.
+ * thing their players cannot see and are most curious about.
  */
 
 import { contestants } from '@campaign/shared';

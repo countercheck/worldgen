@@ -6,10 +6,10 @@
  * a valid recovery, and the tests do exactly that to prove it.
  *
  * The store owns one rule the engine does not: after any command, every commander is
- * asked what he can now see for himself, and anything newly learned is appended as its own
+ * asked what they can now see for themselves, and anything newly learned is appended as its own
  * event. That is what makes knowledge persist rather than being recomputed — without it a
- * man would forget a valley the moment his column marched out of the far side, and a
- * report of his own corps would always read "now".
+ * commander would forget a valley the moment their column marched out of the far side, and a
+ * report of their own corps would always read "now".
  */
 
 import { createHash, randomBytes } from 'node:crypto';
@@ -248,7 +248,7 @@ export class CampaignStore {
     }
 
     // Warmed rather than left for the next request to load from disk: the referee is
-    // about to look at the map he has just uploaded.
+    // about to look at the map they have just uploaded.
     return { campaign: this.remember(campaign), refereeToken };
   }
 
@@ -524,7 +524,7 @@ export class CampaignStore {
  *
  * `Map` and `Set` do not survive `JSON.stringify`, so they are written as arrays and
  * rebuilt on the way in. A snapshot that silently lost what a commander had surveyed
- * would be indistinguishable from a man who forgot the campaign.
+ * would be indistinguishable from a commander who forgot the campaign.
  */
 export function serialise(state: CampaignState): string {
   return JSON.stringify({

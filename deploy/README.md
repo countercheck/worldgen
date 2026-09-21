@@ -2,7 +2,7 @@
 
 One service, one volume, one replica, on Railway. The shape is not a simplification: the
 campaign is a SQLite file only one process may write, and the WebSocket listeners that
-push each player his view live in that process's memory. A second replica is not more
+push each player their view live in that process's memory. A second replica is not more
 capacity — it is a second campaign that half the players are connected to.
 
 ## What lives where

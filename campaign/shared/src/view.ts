@@ -28,7 +28,7 @@
  *
  * The ground is accurate and public. The secrets are where the enemy is, and — the one
  * that carries the game — where your own detached formations are. A commander sees the
- * formation he rides with in full and everything else beneath him only as a dated report.
+ * formation they ride with in full and everything else beneath them only as a dated report.
  */
 
 import { formationsUnder, subordinates, type Commander } from './commander.js';
@@ -73,7 +73,7 @@ export interface PublicFaction {
   readonly color: string;
 }
 
-/** Public facts about a commander: who he is, not what he knows. */
+/** Public facts about a commander: who they are, not what they know. */
 export interface PublicCommander {
   readonly id: string;
   readonly name: string;
@@ -104,58 +104,58 @@ export interface ClientView {
    */
   readonly config: CampaignConfig;
   readonly factions: readonly PublicFaction[];
-  /** Commanders this role may know of: everyone on his own side, or all of them. */
+  /** Commanders this role may know of: everyone on their own side, or all of them. */
   readonly commanders: readonly PublicCommander[];
   /** A `world.json` document. Masked only when `terrainFog` is on. */
   readonly world: unknown;
   /**
    * Formations held in full.
    *
-   * A referee gets every unit on the map. A commander gets exactly one: the formation he
-   * rides with, which is the only thing he can actually look at.
+   * A referee gets every unit on the map. A commander gets exactly one: the formation they
+   * ride with, which is the only thing they can actually look at.
    */
   readonly units: readonly Unit[];
-  /** Formations beneath him, as last reported. Empty for a referee, who has the units. */
+  /** Formations beneath them, as last reported. Empty for a referee, who has the units. */
   readonly reports: readonly UnitReport[];
   /**
    * Enemies, as last heard of and no better. Empty for a referee, who sees units instead.
    *
-   * Each carries his own label and never the observed unit's id — a man who had that
-   * could correlate two sightings hours apart for free, which these rules make him buy
+   * Each carries their own label and never the observed unit's id — a commander who had that
+   * could correlate two sightings hours apart for free, which these rules make them buy
    * with a patrol.
    */
   readonly contacts: readonly PublicContact[];
-  /** Ground his formations have covered. Terrain memory; says nothing about the enemy. */
+  /** Ground their formations have covered. Terrain memory; says nothing about the enemy. */
   readonly surveyed: readonly HexKey[];
-  /** What he can see from where he stands, right now. */
+  /** What they can see from where they stand, right now. */
   readonly visible: readonly HexKey[];
   /**
    * Ground being fought over.
    *
-   * A referee sees every battlefield. A commander sees only the ones on ground he can
-   * currently observe — gunfire carries, but this is the campaign map, and a battle he
-   * cannot see is a battle he has to be told about by a rider like anything else.
+   * A referee sees every battlefield. A commander sees only the ones on ground they can
+   * currently observe — gunfire carries, but this is the campaign map, and a battle they
+   * cannot see is a battle they have to be told about by a rider like anything else.
    */
   readonly battle: readonly HexKey[];
 
   // ---- the post -------------------------------------------------------
   /**
-   * What he has written, as he may see it: no route, and no fate.
+   * What they have written, as they may see it: no route, and no fate.
    *
    * The absence of a fate is the mechanic rather than an omission. A commander who could
-   * see that his rider had been taken would know his order never arrived, and no
+   * see that their rider had been taken would know their order never arrived, and no
    * commander in 1815 knew that without being told. Empty for a referee, who has the
    * despatches themselves.
    */
   readonly sent: readonly SentDespatch[];
-  /** What is actually in his hand. Delivered only — nothing in transit toward him. */
+  /** What is actually in their hand. Delivered only — nothing in transit toward them. */
   readonly received: readonly ReceivedDespatch[];
-  /** Enemy paper his side has taken off a rider. */
+  /** Enemy paper their side has taken off a rider. */
   readonly captured: readonly CapturedDespatch[];
-  /** What the formation he rides with is doing. He set out on it; he knows. */
+  /** What the formation they ride with is doing. They set out on it; they know. */
   readonly task: Task | null;
 
-  // ---- the referee's, and only his ------------------------------------
+  // ---- the referee's, and only their ------------------------------------
   /** Every despatch in the campaign, routes and fates and all. Empty for a commander. */
   readonly despatches: readonly Despatch[];
   /** The queue of things somebody has to decide. Empty for a commander. */
@@ -192,10 +192,10 @@ export interface ViewInput {
 /**
  * Everything, and only everything, this role is entitled to.
  *
- * A referee gets ground truth. A commander gets the formation he rides with, dated
- * reports of everything beneath him, contacts for the enemies his command has actually
+ * A referee gets ground truth. A commander gets the formation they ride with, dated
+ * reports of everything beneath them, contacts for the enemies their command has actually
  * spotted, and nothing else — in particular no record of an enemy nobody has observed and
- * no live position for any formation but his own.
+ * no live position for any formation but their own.
  */
 export function viewFor(input: ViewInput, role: Role): ClientView {
   const cfg = input.cfg ?? DEFAULT_CONFIG;
@@ -223,7 +223,7 @@ export function viewFor(input: ViewInput, role: Role): ClientView {
       factions,
       commanders: [...state.commanders.values()].map(publicCommander).sort(byId),
       // Projected, like every other path out of this function. A referee sees the whole
-      // map and no masking applies to him, which is exactly why this line read
+      // map and no masking applies to them, which is exactly why this line read
       // `input.worldDoc` and quietly sent twelve fields nobody reads — the saving was
       // real for commanders and absent for the one role that loads the map most.
       world: projectWorld(input.worldDoc),
@@ -250,7 +250,7 @@ export function viewFor(input: ViewInput, role: Role): ClientView {
   const me = state.commanders.get(role.id);
   const surveyed = state.knowledge.get(role.id)?.surveyed ?? new Set<HexKey>();
 
-  // A commander who has been removed — killed, captured, relieved — keeps a view so his
+  // A commander who has been removed — killed, captured, relieved — keeps a view so their
   // client does not crash mid-session, but it is empty of everything an appointment
   // carries. Failing open here would be the worst possible direction to fail.
   if (me === undefined) {
@@ -281,20 +281,20 @@ export function viewFor(input: ViewInput, role: Role): ClientView {
   const visible = commanderVisible(state, world, cfg, role.id);
   const own = state.units.get(me.unitId);
 
-  // What he actually holds, not what is true. Taken from his knowledge rather than
+  // What they actually hold, not what is true. Taken from their knowledge rather than
   // snapshotted from the units, which is the difference between a design about not
   // knowing where your own corps is and a list of exactly where it is.
   //
-  // Filtered to formations under him: knowledge accumulates reports of anyone who has
-  // written to him, and a peer's position is his own business.
+  // Filtered to formations under them: knowledge accumulates reports of anyone who has
+  // written to them, and a peer's position is their own business.
   const under = new Set(formationsUnder(state, role.id).map((u) => u.id));
   const filed = state.knowledge.get(role.id)?.reports ?? new Map<string, UnitReport>();
   const reports = [...filed.values()]
     .filter((r) => under.has(r.unitId) && r.unitId !== me.unitId)
     .sort((a, b) => (a.unitId < b.unitId ? -1 : 1));
 
-  // What he has been told, not what his columns can see this instant. Held knowledge,
-  // like his reports and for the same reason: an enemy that walks out of view stops being
+  // What they have been told, not what their columns can see this instant. Held knowledge,
+  // like their reports and for the same reason: an enemy that walks out of view stops being
   // current, it does not stop having been there. `spottedBy` at request time would make a
   // contact blink out the moment a picket looked away.
   //
@@ -303,9 +303,9 @@ export function viewFor(input: ViewInput, role: Role): ClientView {
   // drops the observed unit's id on the way out.
   const contacts = contactsOf(state, role.id).map(publicContact);
 
-  // His outbox, stripped by construction. An acknowledgement that has come back is the
-  // one and only thing he ever learns about a despatch's fate, so it is computed from
-  // his own inbox rather than from the despatch he sent.
+  // Their outbox, stripped by construction. An acknowledgement that has come back is the
+  // one and only thing they ever learn about a despatch's fate, so it is computed from
+  // their own inbox rather than from the despatch they sent.
   const held = inboxOf(state, role.id);
   const acknowledged = new Set(
     held.filter((d) => d.kind === 'acknowledgement').map((d) => d.inReplyTo),
@@ -319,7 +319,7 @@ export function viewFor(input: ViewInput, role: Role): ClientView {
     campaign,
     config: cfg,
     factions,
-    // His own side's chain of command. Knowing who commands the enemy's II Corps is
+    // Their own side's chain of command. Knowing who commands the enemy's II Corps is
     // intelligence, and it arrives by sighting or not at all.
     commanders: [...state.commanders.values()]
       .filter((c) => c.faction === me.faction)
@@ -396,7 +396,7 @@ export function assertMasked(view: ClientView, cfg: CampaignConfig = DEFAULT_CON
 
   const faction = view.commander?.faction ?? null;
 
-  // At most one live formation, and it must be the one he rides with. This is the
+  // At most one live formation, and it must be the one they ride with. This is the
   // assertion that matters now that the ground is public: a second unit here is somebody
   // else's position leaking as fact rather than as a dated report.
   if (view.units.length > 1) {
@@ -483,13 +483,13 @@ export function assertMasked(view: ClientView, cfg: CampaignConfig = DEFAULT_CON
  *
  * The log is the single richest thing in the campaign: every march in order, every
  * rider's path, every contact anyone filed. Filtering it by who *acted* is not enough,
- * because one command produces events that happened to other men — a cascaded order
+ * because one command produces events that happened to other commanders — a cascaded order
  * carries a route to the addressee's subordinate, stamped with the original sender's
  * name — so the filter is on the fact rather than on the actor.
  *
- * What survives is his outbox: the despatches he himself wrote, in the shape `senderCopy`
- * already defines. Everything else is somebody else's business and is dropped rather
- * than trimmed.
+ * What survives is their outbox: the despatches they themselves wrote, in the shape
+ * `senderCopy` already defines. Everything else is somebody else's business and is dropped
+ * rather than trimmed.
  */
 export interface LoggedAction {
   readonly seq: number;

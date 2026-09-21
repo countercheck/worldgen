@@ -88,7 +88,7 @@ function setUp() {
 }
 
 /**
- * A campaign with one formation and one man riding with it.
+ * A campaign with one formation and one commander riding with it.
  *
  * Most of these tests are about knowledge, and knowledge belongs to a commander now, so
  * there is nothing to observe until somebody is appointed to do the observing.
@@ -118,7 +118,7 @@ describe('creating a campaign', () => {
     expect(s.store.roleFor('c1', s.refereeToken)).toEqual({ kind: 'referee' });
   });
 
-  it('mints a distinct link per seat, resolving to that man', () => {
+  it('mints a distinct link per seat, resolving to that commander', () => {
     const s = withCommander();
     const first = s.store.issueToken('c1', 'c-r1');
     const second = s.store.issueToken('c1', 'c-r1');
@@ -304,7 +304,7 @@ describe('state', () => {
 });
 
 describe('observation', () => {
-  it('records what a commander covers once he is appointed', () => {
+  it('records what a commander covers once they are appointed', () => {
     const s = withCommander();
     const surveyed = s.store.state('c1').knowledge.get('c-r1')!.surveyed;
     expect(surveyed.size).toBeGreaterThan(0);
@@ -313,7 +313,7 @@ describe('observation', () => {
 
   it('records nothing for a formation nobody commands', () => {
     // Formations observe, but observing is not knowing: what a division sees becomes
-    // knowledge when there is a man riding with it to take note of it.
+    // knowledge when there is a commander riding with it to take note of it.
     const s = setUp();
     run(s, { kind: 'add_unit', unit: division('r1', 'red', land[0]!) });
     expect(s.store.state('c1').knowledge.size).toBe(0);
@@ -331,7 +331,7 @@ describe('observation', () => {
     expect([...mine].some((k) => theirs.has(k))).toBe(false);
   });
 
-  it('gives a superior what his subordinate covers, and not the reverse', () => {
+  it('gives a superior what their subordinate covers, and not the reverse', () => {
     // The interim rule, stated in observe.ts: every formation reports upward instantly
     // until riders exist. Reports travel up the tree, never down it.
     const s = withCommander();
@@ -347,12 +347,12 @@ describe('observation', () => {
     const junior = state.knowledge.get('c-r2')!.surveyed;
 
     expect(chief.has(key(far)), 'the subordinate never reported in').toBe(true);
-    expect(junior.has(key(land[0]!)), 'a subordinate learned his chief\'s ground').toBe(false);
+    expect(junior.has(key(land[0]!)), 'a subordinate learned their chief\'s ground').toBe(false);
   });
 
   it('remembers ground a formation has left', () => {
-    // The whole point of storing knowledge rather than recomputing it: a man does not
-    // forget a valley the moment his column marches out of the far side.
+    // The whole point of storing knowledge rather than recomputing it: a commander does not
+    // forget a valley the moment their column marches out of the far side.
     const s = withCommander();
     const start = land[0]!;
     const far = land.find((c) => Math.abs(c.q - start.q) + Math.abs(c.r - start.r) > 12)!;
@@ -381,7 +381,7 @@ describe('observation', () => {
 describe('snapshot round trip', () => {
   it('preserves maps and sets, which JSON does not', () => {
     // A snapshot that silently lost what a commander had surveyed would be
-    // indistinguishable from a man who forgot the campaign.
+    // indistinguishable from a commander who forgot the campaign.
     const s = withCommander();
 
     const state = s.store.state('c1');

@@ -1,7 +1,7 @@
 /**
  * The column: a division's physical length on the ground.
  *
- * This is what makes the game unusual. A division of 4,000 at half a metre a man is two
+ * This is what makes the game unusual. A division of 4,000 at half a metre a soldier is two
  * kilometres of road before any baggage; a cavalry division at three metres a horse is
  * twelve. On a 1 km hex grid that means a unit is not a marker on a hex — it is a line of
  * hexes, and its tail is still in the last village when its head reaches the next.
@@ -44,7 +44,7 @@ export const catchupHours = (unit: Unit, speedKmh: number): number =>
  * Highway march halves the column, per the rules' movement table.
  *
  * A metalled road takes a column several abreast where a track takes it in file, so the
- * same men occupy half the distance. Applied when asking how much ground a unit covers,
+ * same troops occupy half the distance. Applied when asking how much ground a unit covers,
  * never stored — the unit has not changed, only the road it is on.
  */
 export const effectiveLengthKm = (unit: Unit, grade: Grade): number =>
@@ -63,7 +63,7 @@ export const columnHexes = (unit: Unit, grade: Grade = 'road'): number =>
  * The ground a formation stands on, as a fold of its column of march.
  *
  * A column is long and thin because it is on a road. Everything it does other than march
- * gathers it up: the same men off the road take less length and more width, which is why
+ * gathers it up: the same troops off the road take less length and more width, which is why
  * the tail needs `catchupHours` to come in before the unit is concentrated. The footprint
  * is that fold expressed on the grid — divide the march length by `foldsInto`, then stand
  * `widthHexes` abreast.
@@ -74,12 +74,12 @@ export interface FootprintShape {
   /** How many hexes across the formation stands. 1 is a file: a line, as marched. */
   readonly widthHexes: number;
   /**
-   * Men per hex of frontage, where the ground comes from the formation's strength rather
+   * Troops per hex of frontage, where the ground comes from the formation's strength rather
    * than from the length of its column. Null to fold the column instead.
    *
    * Deployment does not care how long the road was. A division that arrives strung over
    * eighteen kilometres and one that arrives concentrated form the same line, because
-   * what sets a frontage is how many men there are to stand in it — about a kilometre per
+   * what sets a frontage is how many troops there are to stand in it — about a kilometre per
    * ten thousand. Folding the column would make the cavalry division four times the
    * frontage of the infantry division beside it, which is an artefact of horse spacing on
    * a road and has nothing to do with deploying.
@@ -91,7 +91,7 @@ export interface FootprintShape {
  * What each formation folds into. See `cfg.footprint` for the live table.
  *
  * Camp is the one that matters so far. A division halts and builds one, and the two hours
- * it costs are the men coming off the road and pitching: a quarter the length, twice the
+ * it costs are the troops coming off the road and pitching: a quarter the length, twice the
  * width. Twelve kilometres of cavalry column becomes a camp three hexes long and two
  * across, which is a thicker line than the tail it replaced, and that is what a bivouac
  * looks like from a hilltop.
@@ -100,7 +100,7 @@ export interface FootprintShape {
  * rather than a formation standing in a field.
  *
  * Battle is measured the other way, from strength: a kilometre of frontage per ten
- * thousand men. That makes an ordinary division a single hex, which is why deployment
+ * thousand troops. That makes an ordinary division a single hex, which is why deployment
  * needs no facing — there is no shape on this grid to orient. What happens inside that
  * hex is below the resolution of a 1 km map and belongs to whatever resolves a battle.
  *
@@ -126,7 +126,7 @@ export const spineHexes = (
 ): number => {
   const shape = shapes[unit.formation] ?? FOOTPRINT.march;
 
-  // Frontage is measured in men, not in road. Present under arms rather than paper
+  // Frontage is measured in troops, not in road. Present under arms rather than paper
   // strength, because what sets a frontage is who is standing in the line: the rules
   // already define the fatigued remainder as the number that fights, and a division worn
   // down to half covers half the ground.

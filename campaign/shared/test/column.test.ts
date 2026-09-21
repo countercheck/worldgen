@@ -98,7 +98,7 @@ describe("the rules' worked examples", () => {
 });
 
 describe('columnLengthKm', () => {
-  it('scales with the number of men', () => {
+  it('scales with the number of troops', () => {
     const small = columnLengthKm({ ...base, paperStrength: 4000 });
     const large = columnLengthKm({ ...base, paperStrength: 8000 });
     expect(large).toBeCloseTo(small * 2, 2);
@@ -221,7 +221,7 @@ describe('columnIsConnected', () => {
  *
  * A formation is not a marker and it is not always a line either. These pin the fold:
  * camp is shorter and wider than the column that made it, and the total ground it claims
- * is smaller, because men off the road stand closer together than men strung along it.
+ * is smaller, because troops off the road stand closer together than troops strung along it.
  */
 describe('occupied, by formation', () => {
   /** A long stretch of marched road, head first — longer than any column here. */
@@ -273,7 +273,7 @@ describe('occupied, by formation', () => {
     expect(occupied(camp).length).toBe(2);
   });
 
-  it('deploys at a kilometre of frontage per ten thousand men', () => {
+  it('deploys at a kilometre of frontage per ten thousand troops', () => {
     // An ordinary division is one hex, whatever arm it is and however long its road was.
     const foot = { ...marched(REGULAR_INFANTRY), formation: 'battle' as const };
     const horse = { ...marched(GUARDS_CAVALRY), formation: 'battle' as const };
@@ -293,7 +293,7 @@ describe('occupied, by formation', () => {
     expect(occupied(corps).length).toBe(3);
   });
 
-  it('narrows the front as the men who would stand in it fall out', () => {
+  it('narrows the front as the troops who would stand in it fall out', () => {
     const fresh = {
       ...marched(REGULAR_INFANTRY),
       formation: 'battle' as const,

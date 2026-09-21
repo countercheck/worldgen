@@ -39,7 +39,7 @@ export interface CreateResult {
    * The referee's own link, and the only one that exists yet.
    *
    * A join link names a commander's seat, and there are no seats until formations are on
-   * the map and men appointed to them. The referee sets up the order of battle and then
+   * the map and commanders appointed to them. The referee sets up the order of battle and then
    * calls `issueSeatToken` for each seat somebody is to play.
    */
   readonly refereeToken: string;
@@ -184,11 +184,11 @@ export async function sendCommand(
  *
  * For a commander, `from` is filled in by the server from the token rather than taken from
  * here — a forged *report* would let anyone feed a commander false intelligence signed by
- * his own subordinate — so a value sent by a commander is ignored rather than trusted.
+ * their own subordinate — so a value sent by a commander is ignored rather than trusted.
  *
- * A referee's is honoured, because writing in a commander's name is his ordinary work: he
- * runs most of the men on the map and takes dictation from the players who hold the rest.
- * The despatch is from that commander; the event recording it is from the referee, so the
+ * A referee's is honoured, because writing in a commander's name is their ordinary work: they
+ * run most of the commanders on the map and take dictation from the players who hold the
+ * rest. The despatch is from that commander; the event recording it is from the referee, so the
  * log says who actually put pen to paper.
  */
 export function sendDespatch(
@@ -249,7 +249,7 @@ export function detachPatrol(
 /**
  * Put a formation on the map.
  *
- * The referee's, and the order of battle is his whole preparation for a game: he builds
+ * The referee's, and the order of battle is their whole preparation for a game: they build
  * both sides, places them, and only then issues the links that let anyone see any of it.
  */
 export function addUnit(session: Session, unit: Unit): Promise<CommandResult> {
@@ -296,7 +296,7 @@ export function removeCommander(
   return sendCommand(session, { kind: 'remove_commander', commanderId });
 }
 
-/** Move a man to another formation, or give him a new superior. */
+/** Move a commander to another formation, or give them a new superior. */
 export function reassignCommander(
   session: Session,
   commanderId: string,

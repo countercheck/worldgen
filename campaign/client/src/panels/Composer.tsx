@@ -8,17 +8,17 @@
  *
  * Three things this form has to get right:
  *
- * **Ordering and writing are different acts.** A commander may write to anyone on his own
- * side, but may only *order* those beneath him. The addressee list says which is which
- * before he chooses, rather than letting him discover it on a refusal.
+ * **Ordering and writing are different acts.** A commander may write to anyone on their own
+ * side, but may only *order* those beneath them. The addressee list says which is which
+ * before they choose, rather than letting them discover it on a refusal.
  *
  * **The waypoints are the rider's, not the column's.** "Send my rider via Ligny" and
  * "march on Ligny" are unrelated routes and a form that blurred them would be misread the
- * first time somebody was in a hurry. So they are worded as an instruction to the man
+ * first time somebody was in a hurry. So they are worded as an instruction to the rider
  * carrying the paper, and they live next to the addressee rather than next to the text.
  *
- * **The estimate is his own guess and says so.** It is computed here, from his last
- * report of that formation, over the map he holds — never from the server, which knows
+ * **The estimate is their own guess and says so.** It is computed here, from their last
+ * report of that formation, over the map they hold — never from the server, which knows
  * where the addressee actually is and must never let that leak back through a number.
  */
 
@@ -35,7 +35,7 @@ export interface Draft {
   readonly to: string;
   readonly despatchKind: DespatchKind;
   readonly text: string;
-  /** Who it is from. Absent for a commander, who can only be himself. */
+  /** Who it is from. Absent for a commander, who can only be themselves. */
   readonly from?: string;
 }
 
@@ -56,8 +56,8 @@ export function Composer({
   /**
    * How long a rider would take, where the asker is entitled to know.
    *
-   * Absent for a commander, and that is the rule rather than an omission: he does not know
-   * where the addressee is, so he cannot know how long the ride will be. A number here —
+   * Absent for a commander, and that is the rule rather than an omission: they do not know
+   * where the addressee is, so they cannot know how long the ride will be. A number here —
    * even a hedged one — is a distance, and a distance is a position.
    */
   estimateFor?: (commanderId: string) => Estimate | null;
@@ -70,9 +70,9 @@ export function Composer({
   /**
    * Whose name this may be written in.
    *
-   * Only a referee has more than one. He runs most of the commanders on the map and takes
-   * dictation from the players who hold the rest, so writing as a man is his ordinary work
-   * rather than an impersonation — and the log records that he did it.
+   * Only a referee has more than one. They run most of the commanders on the map and takes
+   * dictation from the players who hold the rest, so writing as a commander is their ordinary
+   * work rather than an impersonation — and the log records that they did it.
    */
   senders?: readonly { id: string; name: string }[];
   from?: string;
@@ -81,15 +81,15 @@ export function Composer({
   const [to, setTo] = useState(initial?.to ?? correspondents[0]?.id ?? '');
   const [text, setText] = useState(initial?.text ?? '');
 
-  // The addressee list changes with the sender: a man may write to his own side only, and
-  // order only those beneath him. Keeping a stale addressee would send Ney's order to
+  // The addressee list changes with the sender: a commander may write to their own side only,
+  // and order only those beneath them. Keeping a stale addressee would send Ney's order to
   // Wellington the moment the referee switched seats.
   useEffect(() => {
     if (!correspondents.some((c) => c.id === to)) setTo(correspondents[0]?.id ?? '');
   }, [correspondents, to]);
 
   const addressee = correspondents.find((c) => c.id === to) ?? null;
-  // An order if he may give one, a message if he may not. Not a control: making the
+  // An order if they may give one, a message if they may not. Not a control: making the
   // reader choose between two words for the same box would only invite the wrong one.
   const despatchKind: DespatchKind =
     initial?.despatchKind ?? (addressee?.mayOrder === true ? 'order' : 'report');

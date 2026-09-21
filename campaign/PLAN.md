@@ -10,15 +10,15 @@ despatch rider.
 | Question | Decision |
 |---|---|
 | Who has a commander | **Every formation.** Most are run by the referee; some are players |
-| What a commander sees | Through the formation he rides with |
+| What a commander sees | Through the formation they ride with |
 | Chain of command | A tree of commanders, not a list of units |
 | Terrain fog | **Off.** The ground is fully and accurately visible to everyone |
 | What is hidden | Enemy positions, your own detached formations, despatches in transit |
 | What an order is | **Prose.** The referee reads it and sets the march |
-| A despatch's fate | **Never known to the sender.** Only an acknowledgement tells him |
+| A despatch's fate | **Never known to the sender.** Only an acknowledgement tells them |
 | A despatch's route | **Referee only.** See below — this one is load-bearing |
 | A despatch's delivery estimate | **Never shown.** An ETA is a distance is a position |
-| A commander's inbox | **Delivered only.** Nothing in transit toward him is visible |
+| A commander's inbox | **Delivered only.** Nothing in transit toward them is visible |
 | Rider routing | Least-time path to the target's **actual** position |
 | Rider routing, overridden | The sender may insist on waypoints — around pickets, say |
 | Couriers available | **Unlimited.** Time and interception are the whole cost |
@@ -33,8 +33,8 @@ despatch rider.
 
 It is the least interesting fog here. The tension the period turns on is *where is the
 enemy* and *where is my own III Corps*, not *what does the ground look like* — a commander
-in 1815 had a map. And with sight limited to the formation he rides with, terrain fog
-would leave him a two-hex bubble of ground and black everywhere else, unable to plan a
+in 1815 had a map. And with sight limited to the formation they ride with, terrain fog
+would leave them a two-hex bubble of ground and black everywhere else, unable to plan a
 march at all.
 
 **The machinery stays, switched off.** `terrainFog` is campaign config defaulting to
@@ -92,9 +92,9 @@ interface Commander {
   readonly id: string
   readonly name: string             // "Marshal Ney"
   readonly faction: string
-  /** The formation he rides with: his position, his eyes, and where riders find him. */
+  /** The formation they ride with: their position, their eyes, and where riders find them. */
   readonly unitId: string
-  /** Who he answers to. The chain of command is this relation and no other. */
+  /** Who they answer to. The chain of command is this relation and no other. */
   readonly superiorId: string | null
   /** Passes an arriving despatch straight down. True for referee-run, false for players. */
   readonly autoCascade: boolean
@@ -102,25 +102,25 @@ interface Commander {
 ```
 
 Two fields carry the whole hierarchy. "A human who also commands the corps" needs no
-special case: he is the commander of 1re Division — `unitId` points at it — and the other
-divisional commanders have him as their `superiorId`. One man, two appointments, one
+special case: they are the commander of 1re Division — `unitId` points at it — and the other
+divisional commanders have them as their `superiorId`. One commander, two appointments, one
 record. `Unit.corps` becomes a label; the chain is derived from the tree.
 
-He may send a message to anyone in his own faction — lateral coordination between corps
+They may send a message to anyone in their own faction — lateral coordination between corps
 commanders was real, and mattered enormously — but an **order** only travels downward.
 
 ### Units observe; commanders know
 
 What is seen is a property of the formation: its column, its scouts, the ground it covers.
-What is *known* is a property of the man. So observation is computed from the unit and
+What is *known* is a property of the commander. So observation is computed from the unit and
 recorded against its commander:
 
 ```ts
 interface CommanderKnowledge {
   readonly commanderId: string
-  /** Enemies his own formation has seen, plus every one reported to him. */
+  /** Enemies their own formation has seen, plus every one reported to them. */
   readonly contacts: ReadonlyMap<ContactId, Contact>
-  /** Where he last heard each formation under him was. */
+  /** Where they last heard each formation under them was. */
   readonly reports: ReadonlyMap<string, UnitReport>
   readonly surveyed: ReadonlySet<HexKey>   // recorded, not yet consumed
 }
@@ -132,7 +132,7 @@ everything else is blocked on. Unpicking it is contained: `recon.ts`, `state.ts`
 
 ### Your own corps is where you last heard it was
 
-Only the formation a commander rides with is live to him. Everything else beneath him is a
+Only the formation a commander rides with is live to them. Everything else beneath them is a
 dated snapshot:
 
 ```ts
@@ -151,9 +151,9 @@ With terrain fog gone this is *the* fog of the game rather than one layer of thr
 
 ### What the tree gives away for free
 
-A commander may write past a subordinate — Napoleon did it constantly — and when he does,
-**the skipped commander does not know.** He holds a stale and confidently wrong picture of
-his own corps, and nothing had to be built to make that happen.
+A commander may write past a subordinate — Napoleon did it constantly — and when they do,
+**the skipped commander does not know.** They hold a stale and confidently wrong picture of
+their own corps, and nothing had to be built to make that happen.
 
 The referee gains something too. Every NPC formation has a commander with a real, limited
 view, so adjudicating what III Corps does on contact is done **from III Corps' own
@@ -174,7 +174,7 @@ interface Despatch {
   readonly to: string                    // commander id
   readonly sentAtHours: number
   readonly body: DespatchBody
-  /** Waypoints the sender insists on — around a wood he thinks holds enemy pickets. */
+  /** Waypoints the sender insists on — around a wood they think holds enemy pickets. */
   readonly via?: readonly Hex[]
   /** A report being passed on. Two lags stack, which is very much the period. */
   readonly forwardedFrom?: string
@@ -198,7 +198,7 @@ interface DespatchBody {
 ```
 
 An order is text only. An automatic contact report is data only. A commander writing up a
-sighting himself may send both.
+sighting themselves may send both.
 
 | Ledger | Derived from | Visible to |
 |---|---|---|
@@ -207,25 +207,25 @@ sighting himself may send both.
 | Reports I have sent | from me, kind `report` | me — never their fate or route |
 | Reports I have received | to me, kind `report`, **delivered** | me |
 
-A commander sees his own outbox in full, because he wrote it. What he never learns is
+A commander sees their own outbox in full, because they wrote it. What they never learn is
 whether any of it arrived.
 
 ### The route is the leak
 
 Riders take the least-time path to the target's **actual** position, so the route is
 computed from ground truth — which means **the route betrays where the target is.** Show a
-commander where his rider went and you have told him exactly where his detached corps is,
-destroying the one thing this design exists to model: he would never need a report again,
-he would read his own outbox.
+commander where their rider went and you have told them exactly where their detached corps is,
+destroying the one thing this design exists to model: they would never need a report again,
+they would read their own outbox.
 
-So `route` is referee-only, absolutely. He sees *sent 0400, to Ney, via the Charleroi
-road* — his own `via`, which he chose — and never a hex of what the rider actually did.
+So `route` is referee-only, absolutely. They see *sent 0400, to Ney, via the Charleroi
+road* — their own `via`, which they chose — and never a hex of what the rider actually did.
 The route exists server-side to resolve interception and arrival, and for nothing else.
 
 **The same reasoning bans a delivery estimate.** "Expected 0700" is a distance, and a
 distance is a position. No despatch ever carries an ETA.
 
-What the *client* may do instead is compute the commander's own guess from his last report
+What the *client* may do instead is compute the commander's own guess from their last report
 of that formation and label it as such: *"if they stand where they did at 0400, this
 reaches them about 0700."* Stale, possibly wrong, and honest about it. This is the first
 time the shared-engine decision from the original plan earns its keep — the client running
@@ -238,7 +238,7 @@ had something to draw: a field that has to exist for the mechanic to work, one c
 ### The rule that makes it a fog-of-war mechanic
 
 **A sender never learns the fate of a despatch.** `courier_intercepted` is an event, and
-the moment a commander's log renders events he knows his order was taken. So fate is
+the moment a commander's log renders events they know their order was taken. So fate is
 masked in `viewFor` exactly as a hex used to be: the sender sees *sent 0400, no
 acknowledgement*, and nothing more, ever, unless an acknowledgement arrives.
 
@@ -255,7 +255,7 @@ type Fate =
 ```
 
 Masking, per role: the **sender** gets everything but `fate` and `route`. The **addressee**
-sees it only once delivered. A **captor** sees the body and that he took it. The
+sees it only once delivered. A **captor** sees the body and that they took it. The
 **referee** sees all of it, which is what a referee is for.
 
 With terrain fog off this is the primary thing the fog architecture protects, and the
@@ -276,7 +276,7 @@ nothing to compare it against.
 
 ### Interception now carries the whole weight
 
-Riders are unlimited, they always find their man, and NPC orders cascade without delay.
+Riders are unlimited, they always find their addressee, and NPC orders cascade without delay.
 Travel time and interception are therefore the *only* things that make command imperfect —
 so if the game feels too reliable, the interception rules are the dial, not the courier
 economy. Worth knowing before it is tuned in the wrong place.
@@ -284,7 +284,7 @@ economy. Worth knowing before it is tuned in the wrong place.
 ### Contacts become reported, not computed
 
 `spotted()` recomputes contacts live from current positions, which under this model is
-wrong twice: it hands a commander what his divisions can see this instant, with no rider
+wrong twice: it hands a commander what their divisions can see this instant, with no rider
 involved. Contacts are recorded when a **formation** observes them, and reach a superior
 only by report.
 
@@ -302,10 +302,10 @@ on: concentrate and command well, disperse and forage well.
 
 ### Cascading
 
-An NPC commander passes an arriving despatch straight down to his subordinates,
+An NPC commander passes an arriving despatch straight down to their subordinates,
 immediately, as fresh despatches with fresh riders — so the copies can still be
 intercepted individually even though the decision cost nothing. The text passes down
-verbatim; a referee who wants his divisions doing different things writes them himself.
+verbatim; a referee who wants their divisions doing different things writes them personally.
 `autoCascade` is false for player-held commanders, who write their own.
 
 ### Tasks and decision points
@@ -330,8 +330,8 @@ interface PendingDecision {
 }
 ```
 
-Raised against the **commander**, not the unit, because deciding is something a man does
-and the referee should decide from that man's information. Triggers are config-listed.
+Raised against the **commander**, not the unit, because deciding is something a commander does
+and the referee should decide from that commander's information. Triggers are config-listed.
 
 The scheduler's primary control is **advance until something needs a human** — the clock
 runs forward and halts at the first decision. This is also the hook for sub-commander
@@ -439,19 +439,19 @@ decision queue from step 1.
 
 Contacts became knowledge, like reports: filed by event, persisting after the enemy walks
 away, dated when they were actually seen. A contact that vanished the moment a picket
-looked elsewhere would mean a commander's map could only ever show what his men can see
+looked elsewhere would mean a commander's map could only ever show what their troops can see
 this second, which is the opposite of a fog-of-war map.
 
-**A contact carries his own label and never the observed unit's id.** `PublicContact` is
+**A contact carries their own label and never the observed unit's id.** `PublicContact` is
 built by construction rather than by deletion, and the leakage suite asserts on the
 serialised bytes that no enemy unit id reaches a commander at all. The engine still holds
 it — it must, or it could not tell this evening's column from this morning's — so the only
 thing between that and the wire is one function, and there is a test that says it ran.
 
-**Identity turns on eyes on, not on elapsed time.** A column his men have not lost sight of
+**Identity turns on eyes on, not on elapsed time.** A column their troops have not lost sight of
 is one contact however long the watch lasts. One that goes out of view is marked lost, and
 a later sighting of it gets a new number with the old mark left standing — whether the two
-are the same corps is his judgement, which is the judgement the period turned on.
+are the same corps is their judgement, which is the judgement the period turned on.
 
 The first attempt got this wrong in a way worth recording. It compared *hours since the
 contact was last filed* against a window, which measures when somebody clicked rather than
@@ -460,7 +460,7 @@ step, for an enemy standing still in front of a division that had never once sto
 looking at it. Found by driving the running server rather than by a test, because every
 test filed at a single hour.
 
-**Word from somebody else always starts its own contact**, even when his own pickets are
+**Word from somebody else always starts its own contact**, even when their own pickets are
 watching the same column. A headquarters told of an enemy on its flank has no way to know
 it is the same body of troops its screen can see, and deciding that they are is the work
 of a staff rather than of a reducer.
@@ -474,7 +474,7 @@ of a staff rather than of a reducer.
 - **Run until something happens** is the clock control that matters, and the reply says
   *what* stopped it rather than making the referee ask again.
 - **Riders are drawn, for the referee alone.** Not by filtering: a commander's payload has
-  no route in it, so his board has nothing to build a rider from. Watching a courier cross
+  no route in it, so their board has nothing to build a rider from. Watching a courier cross
   the country between two armies, and seeing it about to pass a picket before the dice do,
   is the best thing on the screen and it costs nothing to draw.
 - **Two modes on one map**, which is usually a mistake. The alternative was a coordinate
@@ -483,12 +483,12 @@ of a staff rather than of a reducer.
   change — and by Escape leaving it, since a map that has silently changed what a click
   does is a trap.
 - **Resolved decisions are kept, with the referee's note.** The queue is a history as well
-  as a workload, and why he decided something is the most interesting line in a review.
+  as a workload, and why they decided something is the most interesting line in a review.
 
 ### What step 3 found
 
 Building the formations panel exposed that **reports were still snapshotted live**. Every
-subordinate read "now", beside a caption explaining that the hour was when he last heard —
+subordinate read "now", beside a caption explaining that the hour was when they last heard —
 a design about not knowing where your own corps is, displaying a list of exactly where it
 was. The delay step 2 built never reached the one place it mattered most.
 
@@ -496,30 +496,30 @@ So reports became **held knowledge** rather than a computed view:
 
 - `CommanderKnowledge.reports`, filed by a `report_filed` event and replaced only by a
   *later* one, because riders overtake each other.
-- Every despatch carries `unitReport` — where its sender stood when he sealed it — so
-  arriving paper refreshes the picture of the man who wrote it. Silence from a corps is
+- Every despatch carries `unitReport` — where its sender stood when they sealed it — so
+  arriving paper refreshes the picture of the commander who wrote it. Silence from a corps is
   not merely a missing order; it is a stale map.
-- Three cases need no rider: the formation he is standing next to, one whose column is
-  touching his own, and a one-off seed for a formation he has never had word of, because
-  he wrote the order of battle. Everything else waits.
+- Three cases need no rider: the formation they are standing next to, one whose column is
+  touching their own, and a one-off seed for a formation they have never had word of, because
+  they wrote the order of battle. Everything else waits.
 
-And **contacts were merged across every formation under him**, which handed him whatever a
+And **contacts were merged across every formation under them**, which handed them whatever a
 division forty kilometres away was looking at, this instant. `viewFor` now uses
-`spottedBy` on his own formation alone. What his subordinates see reaches him as sightings
+`spottedBy` on their own formation alone. What their subordinates see reaches them as sightings
 attached to a report, hours late.
 
 Contacts got the same treatment shortly afterwards — see below.
 
 ### What step 2 settled that the design had left open
 
-- **A rider re-plans when his man has moved.** The route is laid to where the addressee
-  stood when the rider left; reaching the end and finding the corps gone, he routes again
-  from where he is. That is what makes "riders always find their man" a rule rather than
-  an approximation, and the cost is his time — which is the thing meant to hurt.
+- **A rider re-plans when their addressee has moved.** The route is laid to where the addressee
+  stood when the rider left; reaching the end and finding the corps gone, they routes again
+  from where they are. That is what makes "riders always find their addressee" a rule rather than
+  an approximation, and the cost is their time — which is the thing meant to hurt.
 - **One event per rider per advance, not per hex.** A courier covers ten hexes an hour, so
   a day's advance would otherwise write two hundred events saying "still riding".
-  `despatch_progressed` carries his position and the path he is on, and is written when
-  the clock stops or when he re-plans.
+  `despatch_progressed` carries their position and the path they are on, and is written when
+  the clock stops or when they re-plans.
 - **The clock only moves when something happens.** Ticks are `cfg.tickHours`; a quiet tick
   emits nothing, so events are stamped at the hour they occurred rather than the hour the
   referee clicked, and a twelve-hour advance through empty country costs one event.
@@ -528,7 +528,7 @@ Contacts got the same treatment shortly afterwards — see below.
   was a real bug, caught by asserting that six one-hour advances land where one six-hour
   advance does.
 - **The sender is whoever holds the token**, never the `from` in the payload. A forged
-  *report* would let anyone feed a commander false intelligence signed by his own
+  *report* would let anyone feed a commander false intelligence signed by their own
   subordinate, which is worse than forging an order.
 - **A courier crosses a major river in an hour** rather than being stopped by it. Not from
   the rules, which are silent; a communication system in which one river ends
