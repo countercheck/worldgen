@@ -8,9 +8,9 @@
  *
  * The three kinds, and why they must not collapse into each other:
  *
- * - **A unit** is live and complete. A commander has exactly one: the formation he rides
+ * - **A unit** is live and complete. A commander has exactly one: the formation they ride
  *   with. A referee has all of them.
- * - **A report** is a formation of his own as he last heard of it. It has an hour on it,
+ * - **A report** is a formation of their own as they last heard of it. It has an hour on it,
  *   and that hour is usually not now.
  * - **A contact** is an enemy somebody saw. It carries almost nothing, by design.
  *
@@ -47,7 +47,7 @@ export interface Board {
    * Despatch riders in flight.
    *
    * Always empty for a commander, and not because the console filters them out: the route
-   * is never in his payload at all, so there is nothing here to build one from. That is
+   * is never in their payload at all, so there is nothing here to build one from. That is
    * the difference between a display rule and a fog rule, and it is why this is derived
    * from `view.despatches` — which only a referee ever receives.
    */
@@ -75,7 +75,7 @@ export function boardFrom(view: ClientView, theme: Theme): Board {
   const contacts = new Map(view.contacts.map((c) => [c.id, c]));
 
   // Whose side a thing is on, from the viewpoint of whoever is looking. A referee has no
-  // side, so nothing is hostile to him and every formation is drawn as a known unit.
+  // side, so nothing is hostile to them and every formation is drawn as a known unit.
   const mine = view.commander?.faction ?? null;
   const affiliationOf = (faction: string): SymbolSpec['affiliation'] =>
     mine !== null && faction !== mine ? 'hostile' : 'friend';
@@ -123,7 +123,7 @@ export function boardFrom(view: ClientView, theme: Theme): Board {
     // nulls straight through is deliberate — the drawing code is never given a fact it
     // has been told not to draw.
     ...view.contacts.map((c) => ({
-      // His own label for the sighting, not the observed unit's id — which is not in the
+      // Their own label for the sighting, not the observed unit's id — which is not in the
       // payload at all. See `PublicContact`.
       id: c.id,
       column: [c.coord],
@@ -143,7 +143,7 @@ export function boardFrom(view: ClientView, theme: Theme): Board {
   ];
 
   // Where each rider has actually got to. `progress` is fractional — the whole part is
-  // the last hex he passed — so it is floored to a hex rather than interpolated: a rider
+  // the last hex they passed — so it is floored to a hex rather than interpolated: a rider
   // drawn between hexes would imply a precision the interception rules do not have.
   const riders: Rider[] = view.despatches
     .filter((d) => d.fate.kind === 'in_transit' && d.route.length > 1)

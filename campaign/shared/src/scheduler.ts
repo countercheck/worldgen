@@ -29,12 +29,12 @@
  * clicked, and a twelve-hour advance through empty country costs one event rather than
  * twelve.
  *
- * ## What a rider does when his man has moved
+ * ## What a rider does when their addressee has moved
  *
- * The route is planned to where the addressee stood when the rider left. When he gets
- * there and finds the corps gone, he re-plans from where he is and rides on — which is
- * what a real despatch rider did, and why "riders always find their man" is a rule rather
- * than an approximation. The cost is his time and the extra ground he has to cross, both
+ * The route is planned to where the addressee stood when the rider left. When they get
+ * there and finds the corps gone, they re-plans from where they are and rides on — which is
+ * what a real despatch rider did, and why "riders always find their addressee" is a rule rather
+ * than an approximation. The cost is their time and the extra ground they have to cross, both
  * of which are exactly the things that are supposed to hurt.
  */
 
@@ -76,7 +76,7 @@ import type { World } from './world.js';
 
 export interface AdvanceOptions {
   readonly hours: number;
-  /** Stop at the first discovery a referee has said he wants to see. */
+  /** Stop at the first discovery a referee has said they want to see. */
   readonly untilDecision?: boolean;
 }
 
@@ -136,7 +136,7 @@ export interface SendSpec {
  * machinery: a handed-over despatch is delivered, an arriving order is cascaded, and each
  * of those raises the same decisions with the same ids however it was triggered. Writing
  * that twice — once in `decide` for a send, once here for an arrival — is exactly how the
- * two paths drift, and it would drift in the direction of a commander seeing something he
+ * two paths drift, and it would drift in the direction of a commander seeing something they
  * should not.
  */
 function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: Rng) {
@@ -222,7 +222,7 @@ function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: 
     riding.delete(d.id);
 
     // The rider came from somewhere and knows where that was. Every despatch refreshes
-    // the recipient's picture of the man who sent it — dated when it was written, not
+    // the recipient's picture of the commander who sent it — dated when it was written, not
     // when it arrived, which is exactly the lag the design is about.
     if (d.body.unitReport !== undefined) {
       emit({ kind: 'report_filed', commanderId: d.to, report: d.body.unitReport });
@@ -230,7 +230,7 @@ function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: 
 
     // Sightings attached to the paper, filed under the *recipient's* own labels. Two
     // commanders who both hear about the same column hold two contacts with two different
-    // numbers, and nothing in either man's payload says they are the same thing — which
+    // numbers, and nothing in either commander's payload says they are the same thing — which
     // is the correlation these rules make you buy with a patrol.
     if (d.body.contacts !== undefined && d.body.contacts.length > 0) {
       const filed = fileSightings(s, cfg, d.to, d.body.contacts, d.sentAtHours, 'reported');
@@ -248,8 +248,8 @@ function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: 
     });
 
     if (d.kind !== 'order' || !to.autoCascade) return;
-    // The text passes down verbatim. A referee who wants his divisions doing different
-    // things writes to them himself — cascading is a convenience, not a judgement.
+    // The text passes down verbatim. A referee who wants their divisions doing different
+    // things writes to them personally — cascading is a convenience, not a judgement.
     for (const sub of directSubordinates(s, d.to)) {
       send({ from: d.to, to: sub.id, kind: 'order', body: d.body, inReplyTo: d.id }, atHours);
     }
@@ -281,9 +281,9 @@ function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: 
     const handed = via.length === 0 && formationsTouch(fromUnit, toUnit, cfg.footprint);
     // No legal ride — an addressee across water, or a waypoint the rider cannot reach.
     // `check` has already said so as a soft violation, so arriving here means a referee
-    // sent him anyway. He sets out and is still out there: `rideTick` re-plans from where
-    // he stands on every tick, so he finds his man if the ground ever allows it and never
-    // if it does not. Standing him on the origin hex and calling that a delivery would
+    // sent them anyway. They set out and is still out there: `rideTick` re-plans from where
+    // they stand on every tick, so they find their addressee if the ground ever allows it and
+    // never if it does not. Standing them on the origin hex and calling that a delivery would
     // put the paper in the addressee's hand at the hour it was written, across an ocean.
     const route = handed ? [origin] : (planRide(world, cfg, origin, destination, via) ?? [origin]);
 
@@ -295,12 +295,12 @@ function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: 
       to: spec.to,
       faction: sender.faction,
       sentAtHours: atHours,
-      // Where he stood when he sealed it, attached whether or not he thought to say so —
+      // Where they stood when they sealed it, attached whether or not they thought to say so —
       // and written last, so it is the ground truth about the sender rather than whatever
       // a client put in the field. A body that could override it is a forged report, and
       // a forged report is believed: it is filed as knowledge the moment it arrives. It
       // also makes a cascaded order carry the cascading commander's position rather than
-      // the original sender's, which is the one a rider coming from him would know.
+      // the original sender's, which is the one a rider coming from them would know.
       body: { ...spec.body, unitReport: reportOf(fromUnit, atHours) },
       via,
       forwardedFrom: spec.forwardedFrom ?? null,
@@ -334,7 +334,7 @@ function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: 
       .sort((a, b) => (a.id < b.id ? -1 : 1));
     if (enemies.length === 0) return false;
 
-    // The formation best placed to stop him decides it. A rider slipping between two
+    // The formation best placed to stop them decides it. A rider slipping between two
     // columns is caught by the more watchful, not by both in turn.
     const best = enemies.reduce((a, b) => (detectionDice(cfg, b) > detectionDice(cfg, a) ? b : a));
     const dice = rng.pool(cfg.interceptDiceBase + detectionDice(cfg, best));
@@ -358,10 +358,10 @@ function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: 
   /**
    * The commander who rides with a formation, preferring the senior one.
    *
-   * Seniority is depth in the chain of command: the fewer men above him, the senior. A
-   * corps commander fallen back on one of his own divisions decides for it, and the
-   * divisional commander does not. Ties — two men of equal depth on one formation — break
-   * on id, which is arbitrary but stable, and is the only part of this that ever was.
+   * Seniority is depth in the chain of command: the fewer commanders above them, the senior. A
+   * corps commander fallen back on one of their own divisions decides for it, and the
+   * divisional commander does not. Ties — two commanders of equal depth on one formation —
+   * break on id, which is arbitrary but stable, and is the only part of this that ever was.
    */
   const commanderRiding = (unitId: string): string | null => {
     const riders = [...s.commanders.values()]
@@ -393,7 +393,7 @@ function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: 
     return Number.isFinite(hoursToEnter(world, cfg, unit, from, next)) ? next : null;
   };
 
-  /** Move every rider, rolling for interception on each hex he enters. */
+  /** Move every rider, rolling for interception on each hex they enter. */
   const rideTick = (tickEnd: number): void => {
     for (const [id, rider] of [...riding]) {
       const d = s.despatches.get(id);
@@ -406,8 +406,8 @@ function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: 
         if (at === undefined) break;
 
         if (rider.route[i + 1] === undefined) {
-          // End of the planned route. Either his man is here, or the corps has marched
-          // on and he has to find it — which is a fresh ride from where he now stands.
+          // End of the planned route. Either their addressee is here, or the corps has marched
+          // on and they have to find it — which is a fresh ride from where they now stand.
           const addressee = s.commanders.get(d.to);
           const toUnit = addressee === undefined ? undefined : s.units.get(addressee.unitId);
           const head = toUnit?.column[0];
@@ -421,7 +421,7 @@ function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: 
           if (replanned === null || replanned.length <= 1) break;
 
           // Recorded as it happens rather than at the end, so the log carries the path
-          // the rider actually took rather than only the last one he was on.
+          // the rider actually took rather than only the last one they were on.
           clockTo(tickEnd);
           rider.route = replanned;
           rider.progress = 0;
@@ -491,7 +491,7 @@ function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: 
   /**
    * Bring the tail in, and charge for any of it spent in the dark.
    *
-   * The head halting is not the column halting. A division two kilometres long has men on
+   * The head halting is not the column halting. A division two kilometres long has troops on
    * the road for `catchupHours` after its tip has stopped, and if the sun went down while
    * they were walking that is a night march for them whatever the head was doing.
    */
@@ -602,7 +602,7 @@ function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: 
     return false;
   };
 
-  /** The formation a referee has already given this hex to, if he has ruled on it. */
+  /** The formation a referee has already given this hex to, if they have ruled on it. */
   const ruledFor = (at: Hex): string | null => {
     const k = key(at);
     let ruling: { atHours: number; unitId: string } | null = null;
@@ -644,7 +644,7 @@ function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: 
      *
      * A patrol running into anything is not traffic. The rules resolve it with a pool of
      * dice that may simply destroy the patrol, and that roll is the referee's — so the
-     * column rules stand aside and he is asked instead. It reads both ways round: twenty
+     * column rules stand aside and they are asked instead. It reads both ways round: twenty
      * troopers walking into a division and a division walking into twenty troopers are the
      * same meeting, and only one of them should be reported.
      */
@@ -671,7 +671,7 @@ function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: 
       );
     };
 
-    /** What the referee needs to roll the rules' contact dice, gathered for him. */
+    /** What the referee needs to roll the rules' contact dice, gathered for them. */
     const contactContext = (otherId: string): Record<string, unknown> => {
       const other = s.units.get(otherId);
       return {
@@ -901,7 +901,7 @@ function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: 
 
       if (onward === null) {
         // Nowhere onward, for one of two very different reasons. Arrived is done. Stopped
-        // by ground he cannot cross is *not* done — `task_completed` there would report
+        // by ground they cannot cross is *not* done — `task_completed` there would report
         // "the march is finished" for a column standing on the wrong bank of a river, and
         // the referee's own queue would say so while the decision beside it said the
         // opposite. The task stays open with nowhere to go, and resolving the decision is
@@ -958,7 +958,7 @@ function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: 
   /**
    * Ask every formation what it can see that it could not before.
    *
-   * A new sighting does two things at once: it raises a decision for the man riding with
+   * A new sighting does two things at once: it raises a decision for the commander riding with
    * the formation, and it sends a report up the chain — automatically, because a division
    * that sees an enemy corps does not wait to be asked. The report is a despatch like any
    * other, so it takes a rider, takes time, and can be intercepted; unless the two
@@ -984,10 +984,10 @@ function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: 
         contacts: fresh.map((c) => ({ coord: c.coord, intelLevel: c.intelLevel })),
       });
 
-      // Filed for the man who saw it, here rather than only in the store's pass after the
+      // Filed for the commander who saw it, here rather than only in the store's pass after the
       // whole command. That pass looks at the final state, so an enemy sighted and lost
       // again during a long advance never reached the observer's own contacts at all —
-      // his superior got it by despatch and he did not, which is precisely backwards.
+      // their superior got it by despatch and they did not, which is precisely backwards.
       for (const payload of fileSightings(s, cfg, commanderId, fresh, tickEnd)) emit(payload);
 
       const commander = s.commanders.get(commanderId);
@@ -1005,7 +1005,7 @@ function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: 
   const run = (opts: AdvanceOptions): void => {
     // Whole hours, always. A referee who asks for two and a half gets two — there is no
     // half hour for the extra to happen in, and rounding up would run the clock past what
-    // he asked for.
+    // they asked for.
     const asked = Math.floor(Math.min(Math.max(0, opts.hours), cfg.maxAdvanceHours));
     const target = now + asked;
     const stopAtDecision = opts.untilDecision ?? false;
@@ -1034,7 +1034,7 @@ function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: 
       formationTick(hourStart);
       // Marching is stamped at the hour it begins: a column given the hour from six to
       // seven is on the road at six, and the referee reading the log wants the hour the
-      // men stepped off rather than the hour they stopped.
+      // troops stepped off rather than the hour they stopped.
       marchTick(hourStart);
       if (payloads.length > before) discoveryTick(hourEnd);
 
@@ -1057,7 +1057,7 @@ function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: 
     }
 
     // Only a halt the referee asked for truncates the clock. A decision raised during a
-    // plain `advance 12h` goes into his queue and the clock runs on regardless — that is
+    // plain `advance 12h` goes into their queue and the clock runs on regardless — that is
     // the entire difference between the two controls, and reading `halted` here without
     // `stopAtDecision` would silently collapse them into one.
     clockTo(

@@ -824,7 +824,7 @@ class WorldConfig:
     # level going, which is about what the real road would measure.
     #
     # Anchored on `travel_ascent_per_hex` (125, Naismith's rule for a walker), divided by
-    # about five because a laden cart is far more sensitive to gradient than a man on foot.
+    # about five because a laden cart is far more sensitive to gradient than a traveller on foot.
     # Symmetric in up and down, unlike the walker's: a road pays for both, being cut-and-
     # fill, and a steep descent needs braking and washes out.
     #

@@ -13,7 +13,7 @@
  * looks at. So the tests take the raw payload string and search it for things that must
  * not be in it.
  *
- * **They assert absence, not presence.** It is easy to check that Ney sees his own
+ * **They assert absence, not presence.** It is easy to check that Ney sees their own
  * division. The bug that ends the game is Wellington's division being in the payload too,
  * in some field nobody thought to look at.
  *
@@ -22,7 +22,7 @@
  * Terrain fog is off by default, so the ground is public and accurate. That does not
  * shrink this file — it moves it. The secrets are the enemy's positions and, carrying the
  * whole design, **the live position of any formation but the one a commander rides with**.
- * His own corps reaches him as a dated report or not at all, and a `Unit` where a
+ * Their own corps reaches them as a dated report or not at all, and a `Unit` where a
  * `UnitReport` belongs is the leak this suite now exists to catch.
  *
  * The masking machinery is still exercised, under `describe('with terrain fog on')`, so
@@ -160,7 +160,7 @@ interface Fixture {
  * A campaign with a chain of command on one side.
  *
  * Two red commanders rather than one, because the interesting leak is no longer only
- * between sides — it is between a man and his own subordinate, whose position he is
+ * between sides — it is between a commander and their own subordinate, whose position they are
  * supposed to learn by despatch and not by opening the response.
  */
 async function setUp(opts: { terrainFog?: boolean } = {}): Promise<Fixture> {
@@ -262,7 +262,7 @@ describe('the view endpoint', () => {
     expect(view.reports).toEqual([]);
   });
 
-  it('serves a commander exactly one live formation: the one he rides with', async () => {
+  it('serves a commander exactly one live formation: the one they ride with', async () => {
     // The assertion this whole step exists for. A second live unit here is somebody
     // else's position arriving as fact when it should arrive as a dated report.
     const view = (await viewAs(f, f.ney)).json();
@@ -271,11 +271,11 @@ describe('the view endpoint', () => {
     expect(view.units.map((u: Unit) => u.id)).toEqual(['red-1']);
   });
 
-  it('gives him his subordinate as a report, not as a unit', async () => {
+  it('gives them their subordinate as a report, not as a unit', async () => {
     const view = (await viewAs(f, f.ney)).json();
     const report = (view.reports as UnitReport[]).find((r) => r.unitId === 'red-2');
 
-    expect(report, 'Ney should hear about his own cavalry').toBeDefined();
+    expect(report, 'Ney should hear about their own cavalry').toBeDefined();
     expect(report!.atHours).toBe(0);
     // A report carries what a despatch would carry and no more. If any of these ever
     // appear, somebody has widened it toward a Unit and the distinction has collapsed.
@@ -315,15 +315,15 @@ describe('the view endpoint', () => {
     expect(kellermann.units.map((u: Unit) => u.id)).toEqual(['red-2']);
 
     expect((ney.reports as UnitReport[]).map((r) => r.unitId)).toEqual(['red-2']);
-    // A subordinate reports upward and is told nothing about his superior's column.
+    // A subordinate reports upward and is told nothing about their superior's column.
     expect(kellermann.reports).toEqual([]);
 
     expect(ney.visible).not.toEqual(kellermann.visible);
-    const his = new Set<string>(kellermann.visible);
-    expect((ney.visible as string[]).some((k) => his.has(k))).toBe(false);
+    const kellermannSees = new Set<string>(kellermann.visible);
+    expect((ney.visible as string[]).some((k) => kellermannSees.has(k))).toBe(false);
   });
 
-  it("does not send a subordinate his superior's live column", async () => {
+  it("does not send a subordinate their superior's live column", async () => {
     const raw = (await viewAs(f, f.kellermann)).body;
     expect(raw).not.toContain(RED_NAME);
     expect(raw).not.toContain(`"paperStrength":${RED_STRENGTH}`);
@@ -339,17 +339,17 @@ describe('the view endpoint', () => {
     }
   });
 
-  it('still reports what he can see and what he has surveyed', async () => {
+  it('still reports what they can see and what they have surveyed', async () => {
     const view = (await viewAs(f, f.ney)).json();
     expect(view.visible.length).toBeGreaterThan(0);
     expect(view.surveyed.length).toBeGreaterThan(0);
     expect(view.visible.length).toBeLessThan(world.hexes.size);
   });
 
-  it('tells a commander about a battle he can see, and no other', async () => {
+  it('tells a commander about a battle they can see, and no other', async () => {
     // Gunfire carries, but this is the campaign map and a battle out of sight is a battle
     // a rider has to bring word of. A referee sees every field; a commander sees the ones
-    // on ground he is actually looking at.
+    // on ground they are actually looking at.
     const ney = (await viewAs(f, f.ney)).json();
     const seen = (ney.visible as string[])[0]!;
     const unseen = [...world.hexes.keys()].find((k) => !(ney.visible as string[]).includes(k))!;
@@ -389,11 +389,11 @@ describe('the view endpoint', () => {
     expect(res.body).toContain('blue-1');
   });
 
-  it('does not hand a sender his own rider’s route back through the log', async () => {
+  it('does not hand a sender their own rider’s route back through the log', async () => {
     // The total, invisible leak. A `despatch_sent` event carries the whole `Despatch`,
     // route included, and the route is planned to where the addressee actually stands —
-    // so a commander who could read his own outbox in the log would never need a report
-    // again. Filtering the log by actor does not remove it: the event is his.
+    // so a commander who could read their own outbox in the log would never need a report
+    // again. Filtering the log by actor does not remove it: the event is theirs.
     const sent = await f.app.inject({
       method: 'POST',
       url: `/api/campaigns/${f.id}/commands`,
@@ -416,9 +416,9 @@ describe('the view endpoint', () => {
       headers: { 'x-campaign-token': f.ney },
     });
 
-    // He sees that he wrote it, and what he wrote.
+    // They see that they wrote it, and what they wrote.
     expect(res.body).toContain('Close on Ligny.');
-    // And nothing about where the rider is going, or whether he got there.
+    // And nothing about where the rider is going, or whether they got there.
     for (const forbidden of ['route', 'fate', 'progress', 'in_transit']) {
       expect(res.body).not.toContain(forbidden);
     }
@@ -427,7 +427,7 @@ describe('the view endpoint', () => {
     expect(res.body).not.toContain('red-2');
   });
 
-  it('shows a commander nothing of the despatches other men wrote', async () => {
+  it('shows a commander nothing of the despatches other commanders wrote', async () => {
     const sent = await f.app.inject({
       method: 'POST',
       url: `/api/campaigns/${f.id}/commands`,
@@ -449,8 +449,8 @@ describe('the view endpoint', () => {
       url: `/api/campaigns/${f.id}/log`,
       headers: { 'x-campaign-token': f.kellermann },
     });
-    // The order is Ney's. Kellermann learns of it by its arrival, in his inbox, at the
-    // hour the rider reaches him — and the log is not a second way in.
+    // The order is Ney's. Kellermann learns of it by its arrival, in their inbox, at the
+    // hour the rider reaches them — and the log is not a second way in.
     expect(res.json()).toEqual([]);
     expect(res.body).not.toContain('Close on Ligny.');
   });
@@ -475,9 +475,9 @@ describe('once an enemy is actually spotted', () => {
     expect(res.statusCode, res.body).toBe(200);
 
     const view = (await viewAs(f, f.ney)).json();
-    // Found by where it was seen, because that is all he has. There is deliberately no
+    // Found by where it was seen, because that is all they have. There is deliberately no
     // way to ask "which contact is blue-2?" from inside a commander's payload — that
-    // question is the correlation the rules make him buy with a patrol.
+    // question is the correlation the rules make them buy with a patrol.
     const contact = (
       view.contacts as {
         id: string;
@@ -508,7 +508,7 @@ describe('once an enemy is actually spotted', () => {
     // `unitId` is the field this list exists to keep out. A contact naming the formation
     // it is a sighting of would let a commander correlate two marks hours apart as the
     // same corps, which is top-level intelligence in these rules and is meant to cost a
-    // patrol. `id` in its place is his own staff's label and means nothing to anybody
+    // patrol. `id` in its place is their own staff's label and means nothing to anybody
     // else — two commanders watching the same column hold two different numbers.
     expect(Object.keys(contact!).sort()).toEqual(
       ['corps', 'coord', 'echelon', 'faction', 'id', 'intelLevel', 'kind', 'seenAtHours'].sort(),
@@ -565,7 +565,7 @@ describe('once an enemy is actually spotted', () => {
 
     const after = (await viewAs(f, f.ney)).json().contacts;
     // Still there, and still saying where it was. A contact that vanished when the enemy
-    // walked away would mean a commander's map could only ever show what his pickets can
+    // walked away would mean a commander's map could only ever show what their pickets can
     // see this second — which is the opposite of a fog-of-war map.
     expect(after).toHaveLength(1);
     expect(after[0].coord).toEqual(beside);
@@ -696,7 +696,7 @@ describe('authorisation', () => {
     expect(res.statusCode).toBe(403);
   });
 
-  it("does not let a commander export through another man's eyes", async () => {
+  it("does not let a commander export through another commander's eyes", async () => {
     const res = await f.app.inject({
       method: 'GET',
       url: `/api/campaigns/${f.id}/export?commander=wellington`,
@@ -744,9 +744,9 @@ describe('authorisation', () => {
 /**
  * The despatch surface, where a leak would now be both invisible and total.
  *
- * A rider takes the least-time path to where the addressee **actually** is, so his route
- * is computed from ground truth. Show a commander that route and you have told him where
- * his detached corps stands — and he would never read a report again, because his own
+ * A rider takes the least-time path to where the addressee **actually** is, so their route
+ * is computed from ground truth. Show a commander that route and you have told them where
+ * their detached corps stands — and they would never read a report again, because their own
  * outbox would be a better source than any of them.
  */
 describe('despatches', () => {
@@ -808,7 +808,7 @@ describe('despatches', () => {
 
     const after = (await viewAs(f, f.ney)).json().sent;
     // Whatever became of the rider — delivered, lost, or read by the enemy — Ney's
-    // outbox says exactly what it said the moment he sealed it. That is the mechanic.
+    // outbox says exactly what it said the moment they sealed it. That is the mechanic.
     expect(after).toEqual(before);
     expect(after[0].acknowledged).toBe(false);
   });
@@ -819,7 +819,7 @@ describe('despatches', () => {
     const res = await viewAs(f, f.kellermann);
     expect(res.json().received).toEqual([]);
     // Not merely absent from the ledger — absent from the payload. A commander must not
-    // be able to read his orders early by opening the developer tools.
+    // be able to read their orders early by opening the developer tools.
     expect(res.body).not.toContain('Quatre Bras');
   });
 
@@ -856,7 +856,7 @@ describe('despatches', () => {
 
   it('writes in the name of the token, not the name in the payload', async () => {
     // Kellermann, claiming to be Ney. Forgery would be bad enough; a forged *report*
-    // would let anyone feed a commander false intelligence signed by his own subordinate.
+    // would let anyone feed a commander false intelligence signed by their own subordinate.
     const res = await write(f.kellermann, 'ney', 'kellermann', 'Fall back at once.');
     expect(res.statusCode).toBe(409);
 
@@ -879,12 +879,12 @@ describe('despatches', () => {
   /**
    * The fog that carries the game, now that the ground is public.
    *
-   * A commander's picture of his own detached corps has to be capable of being *wrong* —
+   * A commander's picture of their own detached corps has to be capable of being *wrong* —
    * not merely delayed in some abstract sense, but showing a hex the formation is no
    * longer standing on. If this ever passes trivially, the reports have gone back to being
    * snapshotted live and the design has quietly stopped working.
    */
-  it('lets a commander’s picture of his own corps go stale, and wrong', async () => {
+  it('lets a commander’s picture of their own corps go stale, and wrong', async () => {
     const far = [...world.hexes.values()]
       .filter((h) => h.terrainClass === 'land')
       .map((h) => h.coord)
@@ -905,20 +905,20 @@ describe('despatches', () => {
 
     expect(report.atHours).toBe(0);
     expect(report.head).toEqual(SUB_HEX);
-    // The whole of it: he is looking at a hex his division left hours ago, and nothing in
-    // his payload tells him where it actually is.
+    // The whole of it: they are looking at a hex their division left hours ago, and nothing in
+    // their payload tells them where it actually is.
     expect(report.head).not.toEqual(actual);
-    // Nothing else in his payload knows better either: the report is his only record of
+    // Nothing else in their payload knows better either: the report is their only record of
     // that formation, and there is no live unit beside it to contradict it.
     expect(ney.units.map((u: Unit) => u.id)).toEqual(['red-1']);
   });
 
-  it('refreshes that picture when a despatch arrives from the man himself', async () => {
+  it('refreshes that picture when a despatch arrives from the commander themselves', async () => {
     await post(f.referee, { kind: 'set_task', unitId: 'red-2', destination: SUB_HEX });
     await advance(6);
 
-    // Kellermann writes to Ney. The rider carries word of where Kellermann stood when he
-    // sealed it, whether or not he thought to mention it.
+    // Kellermann writes to Ney. The rider carries word of where Kellermann stood when they
+    // sealed it, whether or not they thought to mention it.
     // A report, not an order: Kellermann does not command Ney, and writing upward is
     // exactly what a report is for.
     const sent = await write(f.kellermann, 'kellermann', 'ney', 'All quiet here.', 'report');
@@ -945,7 +945,7 @@ describe('despatches', () => {
  * The referee's two controls, over the wire.
  *
  * "Run until something needs me" is the one a referee actually uses, and the answer to
- * *what* needs him belongs in the reply rather than in a second request he has to know to
+ * *what* needs them belongs in the reply rather than in a second request they have to know to
  * make. The rest of this file is about what must not be sent; this is about the one role
  * that is entitled to all of it.
  */
@@ -1001,7 +1001,7 @@ describe('the referee console', () => {
 
     const res = await run(12, false);
     expect(res.json().clockHours).toBe(12);
-    // The decision was still raised — it is in his queue — but the clock did not care.
+    // The decision was still raised — it is in their queue — but the clock did not care.
     expect(res.json().halted).toBeNull();
     expect((await viewAs(f, f.referee)).json().decisions.length).toBeGreaterThan(0);
   });
@@ -1077,8 +1077,8 @@ describe('a referee writing in a commander’s name', () => {
       ).body,
     ) as { actor: { kind: string }; payload: Record<string, never> }[];
 
-  it('sends it from the man he named', async () => {
-    // His ordinary work: he runs most of the commanders on the map, and takes dictation
+  it('sends it from the commander they named', async () => {
+    // Their ordinary work: they run most of the commanders on the map, and takes dictation
     // from the players who hold the rest.
     const res = await post(f.referee, {
       kind: 'send_despatch',
@@ -1097,7 +1097,7 @@ describe('a referee writing in a commander’s name', () => {
 
   it('records that it was the referee who wrote it', async () => {
     // The despatch is from the commander; the event is from the referee. An after-action
-    // review has to be able to tell a man's own order from one written for him.
+    // review has to be able to tell a commander's own order from one written for them.
     await post(f.referee, {
       kind: 'send_despatch',
       from: 'ney',
@@ -1124,7 +1124,7 @@ describe('a referee writing in a commander’s name', () => {
   it('still ignores a commander who claims to be somebody else', async () => {
     // The rule that makes the referee's power safe to grant: a seat writes as itself and
     // nothing else, whatever the payload says. A forged report would let anyone feed a
-    // commander false intelligence signed by his own subordinate.
+    // commander false intelligence signed by their own subordinate.
     const res = await post(f.ney, {
       kind: 'send_despatch',
       from: 'wellington',

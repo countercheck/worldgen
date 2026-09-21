@@ -1617,12 +1617,12 @@ weight[d] = population[d] / dist[d] ^ road_gravity_exponent      (default 2.5)
 prob[d]   = weight[d] / sum(weight)        # excluding origin
 ```
 Then routes to that destination — but **to the network, not to the hex**. A
-traveller bound for a town does not need a road of his own all the way there;
-he needs to reach the road that already goes there. So the search
+traveller bound for a town does not need a road of their own all the way there;
+they need to reach the road that already goes there. So the search
 (`astar_to_any`) runs against every hex from which the destination is already
 reachable along roads that exist, and stops at whichever it touches first. The
 rest of the journey is that road. The first traveller finds nothing and paths
-the whole way, becoming the road everyone after him joins.
+the whole way, becoming the road everyone after them joins.
 
 This is what stops the network being a mat. Pathing all the way to the seat
 had each route find its own line, and A* — whose heuristic assumes 1.0 per
@@ -2384,7 +2384,7 @@ Slope cost is a rational function of grade percent — zero below `free_pct`, sa
 
 | Param | Type | Default | Effect |
 |---|---|---|---|
-| `road_delta_elevation_per_hex` | `float` | `25.0` | Metres of elevation change costing as much as one hex of level going — **the switchback, priced**. At 1 hex = 1 km a road climbing 200 m is not a straight ramp but several kilometres of zigzag folded inside that hex, and this is the exchange rate that says so. Anchored on `travel_ascent_per_hex` (125, Naismith's rule for a walker) divided by about five, a laden cart being far more sensitive to gradient than a man on foot. Symmetric in up and down, unlike the walker's: a road is cut-and-fill, and a steep descent needs braking and washes out. Validated `> 0` |
+| `road_delta_elevation_per_hex` | `float` | `25.0` | Metres of elevation change costing as much as one hex of level going — **the switchback, priced**. At 1 hex = 1 km a road climbing 200 m is not a straight ramp but several kilometres of zigzag folded inside that hex, and this is the exchange rate that says so. Anchored on `travel_ascent_per_hex` (125, Naismith's rule for a walker) divided by about five, a laden cart being far more sensitive to gradient than a commander on foot. Symmetric in up and down, unlike the walker's: a road is cut-and-fill, and a steep descent needs braking and washes out. Validated `> 0` |
 | `road_switchback_grade_pct` | `float` | `10.0` | A road edge at or above this grade tags both its hexes `"switchback"`. The zigzag is priced but cannot be drawn at this scale — a switchback is a hundred-metre feature and a hex is a kilometre — so the tag is how a reader, or a wargame counting movement, knows the segment is slow. Validated in `(0, road_slope_cap_pct]` |
 | `road_slope_cap_pct` | `float` | `25.0` | Grade % at which the penalty saturates. Validated `> road_slope_free_pct` |
 

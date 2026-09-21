@@ -18,7 +18,7 @@ export type UnitKind = 'infantry' | 'cavalry' | 'hq' | 'artillery_reserve' | 'ga
 export type Formation = 'march' | 'battle' | 'rest' | 'occupation' | 'rout';
 
 export type Trait =
-  /** Wider recon zone, and may field patrols without spending men. */
+  /** Wider recon zone, and may field patrols without spending troops. */
   | 'scout'
   /** Advantage in combat. */
   | 'heavy'
@@ -64,7 +64,7 @@ export const MAX_MORALE: Readonly<Record<Experience, number>> = {
 export const MIN_DIVISION_PAPER_STRENGTH = 4000;
 
 /**
- * A patrol's strength, in men.
+ * A patrol's strength, in troops.
  *
  * Small enough to be a handful of troopers and large enough to be worth counting. The
  * rules do not give a number — patrols are free until the fourth — so this is what a
@@ -109,7 +109,7 @@ export interface Unit {
   readonly kind: UnitKind;
 
   /**
-   * Men on the rolls: what the returns say the formation has.
+   * Troops on the rolls: what the returns say the formation has.
    *
    * Paper strength rather than strength, because it is not what would stand in a line
    * tomorrow — `presentUnderArms` is, and the gap between the two is fatigue. A
@@ -168,7 +168,7 @@ export interface Unit {
   /**
    * The formation this was detached from, for a patrol or picket.
    *
-   * Null for everything that stands on its own. A patrol is twenty men off a division's
+   * Null for everything that stands on its own. A patrol is twenty troops off a division's
    * strength and it stays that division's — it reports to it, it is recalled to it, and
    * what it sees is what that division's commander comes to know. Kept on the patrol
    * rather than as a list on the parent so that there is one place a patrol's parentage
@@ -273,7 +273,7 @@ export function echelonOf(u: Unit): Echelon {
  * belief this design exists to deny. Everything here is what a despatch would carry.
  *
  * It lives beside `Unit` rather than beside `viewFor` because a commander's *knowledge*
- * holds these: what he last heard is state, folded from the log like anything else, not
+ * holds these: what they last heard is state, folded from the log like anything else, not
  * something computed when a client happens to ask.
  */
 export interface UnitReport {
@@ -293,7 +293,7 @@ export interface UnitReport {
   readonly corps: string | null;
 }
 
-/** Snapshot a formation as of a given hour. What a rider would carry away with him. */
+/** Snapshot a formation as of a given hour. What a rider would carry away with them. */
 export const reportOf = (unit: Unit, atHours: number): UnitReport => ({
   unitId: unit.id,
   name: unit.name,

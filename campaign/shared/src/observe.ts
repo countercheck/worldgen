@@ -3,9 +3,9 @@
  *
  * A commander's knowledge has to be *remembered*, not recomputed. What a division can see
  * right now follows from where it stands, but what its commander knows follows from
- * everywhere his formations have ever stood — and that is history, so it belongs in the
- * log like any other fact. Recomputing it from current positions would mean a man forgot
- * a valley the moment his column marched out of it.
+ * everywhere their formations have ever stood — and that is history, so it belongs in the
+ * log like any other fact. Recomputing it from current positions would mean a commander forgot
+ * a valley the moment their column marched out of it.
  *
  * So after every command the server asks what each commander has now covered, and appends
  * a `hexes_surveyed` event for anything new. Nothing is emitted when nothing was learned,
@@ -21,9 +21,9 @@
  * `knowledge.ts`, which decides whether a fresh sighting continues a contact or starts one.
  *
  * `reportEvents` records **formations**, which is the fog that carries the game. It fires
- * only where a commander needs no rider: the formation he is standing next to, one whose
- * column is touching his own, and a one-off seed for a formation he has never had word of
- * — because he wrote the order of battle and knows where he put his divisions. Everything
+ * only where a commander needs no rider: the formation they are standing next to, one whose
+ * column is touching their own, and a one-off seed for a formation they have never had word of
+ * — because they wrote the order of battle and knows where they put their divisions. Everything
  * else arrives by despatch, hours late, or never.
  *
  * Both are the store's job rather than the engine's, because both are consequences of a
@@ -80,11 +80,11 @@ export function observationEvents(
 /**
  * Reports a commander does not need a rider for.
  *
- * Three cases, and no others. He is standing next to the formation, so he sees it. His own
- * column is touching it, so word crosses in minutes — the same free traffic that lets two
- * touching formations hand despatches over. Or he has never had a report of it at all, in
- * which case he is given one at the current hour, because he wrote the order of battle and
- * knows where he put his divisions before anybody marched anywhere.
+ * Three cases, and no others. They are standing next to the formation, so they see it. Their
+ * own column is touching it, so word crosses in minutes — the same free traffic that lets two
+ * touching formations hand despatches over. Or they have never had a report of it at all, in
+ * which case they are given one at the current hour, because they wrote the order of battle and
+ * knows where they put their divisions before anybody marched anywhere.
  *
  * Everything else waits for a rider, which is the point. The third case is a seed rather
  * than a rule: it fires once per formation, and from then on that hour only moves when a

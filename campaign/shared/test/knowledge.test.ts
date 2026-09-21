@@ -1,9 +1,9 @@
 /**
  * Filing sightings: one contact or two?
  *
- * The whole of this module is one judgement made on a commander's behalf, because he is
- * not allowed the information it needs. The engine knows which formation was seen; he
- * must not, or he could correlate two sightings hours apart for free. So identity is
+ * The whole of this module is one judgement made on a commander's behalf, because they are
+ * not allowed the information it needs. The engine knows which formation was seen; they
+ * must not, or they could correlate two sightings hours apart for free. So identity is
  * decided here, by continuity, and these tests are about where that line falls.
  */
 
@@ -182,7 +182,7 @@ describe('continuity is eyes on, not elapsed time', () => {
   const ney = commander('ney', 'red', 'red-1');
   const observer = unit('red-1', 'red', { q: 5, r: 5 });
 
-  /** A pass of the real thing: what his own formation can see, right now. */
+  /** A pass of the real thing: what their own formation can see, right now. */
   const look = (s: CampaignState): CampaignState =>
     fold(s, sightingEvents(s, world, cfg));
 
@@ -229,7 +229,7 @@ describe('continuity is eyes on, not elapsed time', () => {
     }[];
     expect(held).toHaveLength(1);
     expect(held[0]!.inSight).toBe(false);
-    // Still at the hex he last saw it, and still dated then. Losing sight of something
+    // Still at the hex they last saw it, and still dated then. Losing sight of something
     // does not unsee it.
     expect(held[0]!.coord).toEqual({ q: 6, r: 5 });
     expect(held[0]!.seenAtHours).toBe(0);
@@ -241,8 +241,8 @@ describe('continuity is eyes on, not elapsed time', () => {
     s = look(withEnemyAt(s, { q: 5, r: 4 }, 9));
 
     const held = contactsOf(s, 'ney') as { id: string; coord: Hex }[];
-    // Two marks. Whether they are the same corps is a judgement he has to make, and the
-    // numbering deliberately does not make it for him.
+    // Two marks. Whether they are the same corps is a judgement they have to make, and the
+    // numbering deliberately does not make it for them.
     expect(held).toHaveLength(2);
     expect(new Set(held.map((c) => c.id))).toEqual(new Set(['c1', 'c2']));
   });
@@ -278,7 +278,7 @@ describe('word from somebody else', () => {
   const observer = unit('red-1', 'red', { q: 5, r: 5 });
   const enemy = unit('blue-1', 'blue', { q: 6, r: 5 });
 
-  it('starts its own contact even when his own pickets are watching the same column', () => {
+  it('starts its own contact even when their own pickets are watching the same column', () => {
     let s = fold(
       stateWith([observer, enemy], [ney], 0),
       sightingEvents(stateWith([observer, enemy], [ney], 0), world, cfg),
@@ -301,7 +301,7 @@ describe('word from somebody else', () => {
 });
 
 describe('what a commander’s own eyes file', () => {
-  it('records only what the formation he rides with can see', () => {
+  it('records only what the formation they ride with can see', () => {
     const near = unit('red-1', 'red', { q: 5, r: 5 });
     const detached = unit('red-2', 'red', { q: 25, r: 25 });
     const enemyByHim = unit('blue-1', 'blue', { q: 6, r: 5 });
@@ -314,8 +314,8 @@ describe('what a commander’s own eyes file', () => {
     const after = fold(s, sightingEvents(s, world, cfg));
 
     const held = contactsOf(after, 'ney') as { unitId: string }[];
-    // His own column sees one of them. What his detached division is looking at reaches
-    // him by rider or not at all — merging the two is the telepathy this design denies.
+    // Their own column sees one of them. What their detached division is looking at reaches
+    // them by rider or not at all — merging the two is the telepathy this design denies.
     expect(held.map((c) => c.unitId)).toEqual(['blue-1']);
   });
 

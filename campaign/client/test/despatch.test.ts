@@ -88,7 +88,7 @@ const state: CampaignState = knowledgeEvents(built.state, world, DEFAULT_CONFIG)
 const view = (role: Role): ClientView =>
   viewFor({ campaignId: 'c1', state, worldDoc, world }, role);
 
-/** Ney: the army commander, riding with 1re Division, with two men beneath him. */
+/** Ney: the army commander, riding with 1re Division, with two commanders beneath them. */
 const ney = view(commanderRole('ney'));
 
 describe('who a commander may write to', () => {
@@ -114,7 +114,7 @@ describe('who a commander may write to', () => {
     expect(list.length).toBeGreaterThan(0);
     expect(list.every((c) => c.id !== 'ney')).toBe(true);
 
-    // Everyone he may order comes before everyone he may merely write to, so the common
+    // Everyone they may order comes before everyone they may merely write to, so the common
     // case is the default and the exception has to be chosen deliberately.
     const firstMessageOnly = list.findIndex((c) => !c.mayOrder);
     const lastOrderable = list.map((c) => c.mayOrder).lastIndexOf(true);
@@ -122,7 +122,7 @@ describe('who a commander may write to', () => {
   });
 
   it('never offers the enemy', () => {
-    // The list comes from `view.commanders`, which the server has already limited to his
+    // The list comes from `view.commanders`, which the server has already limited to their
     // own side. Asserting it here as well is cheap and catches the day somebody widens
     // that for a legitimate-looking reason.
     for (const c of correspondents(ney)) {
@@ -138,8 +138,8 @@ describe('who a commander may write to', () => {
 });
 
 describe('the ride estimate, which only a referee sees', () => {
-  it('is null for a commander, who cannot know where the man is', () => {
-    // The rule, not an omission. A commander's view carries exactly one live unit — his
+  it('is null for a commander, who cannot know where the commander is', () => {
+    // The rule, not an omission. A commander's view carries exactly one live unit — their
     // own — so there is nothing to measure to. A number here would be a distance, and a
     // distance is a position.
     const subordinate = correspondents(ney).find((c) => c.mayOrder)!;
@@ -148,7 +148,7 @@ describe('the ride estimate, which only a referee sees', () => {
   });
 
   it('is null for a referee who has not said whose rider it is', () => {
-    // He has no seat of his own to send from.
+    // They have no seat of their own to send from.
     expect(estimateRide(view(REFEREE_ROLE), world, DEFAULT_CONFIG, 'ney')).toBeNull();
   });
 
@@ -194,7 +194,7 @@ describe('the ledgers', () => {
         received('d3', 1, 12),
       ],
     };
-    // By what it tells him about, not by when it landed. `d2` arrived before `d1` but
+    // By what it tells them about, not by when it landed. `d2` arrived before `d1` but
     // describes a later hour, and the later hour is the more useful thing to read first.
     expect(inbox(withPost).map((d) => d.id)).toEqual(['d2', 'd1', 'd3']);
   });

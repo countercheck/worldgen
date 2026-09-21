@@ -2,24 +2,24 @@
  * Filing what a commander has been told about the enemy.
  *
  * One question, and everything here exists to answer it: when word of an enemy column
- * arrives, is it the contact he is already holding, or a new one?
+ * arrives, is it the contact they are already holding, or a new one?
  *
  * ## Why that is not obvious
  *
  * The engine knows which formation was seen. The commander must not — a contact carries
- * his own label and never the observed unit's id, because a man who could correlate two
- * sightings hours apart has been handed for free what these rules make him buy with a
- * patrol. So identity has to be decided *here*, on his behalf, and the decision has to be
- * one his staff could plausibly have made.
+ * their own label and never the observed unit's id, because a commander who could correlate two
+ * sightings hours apart has been handed for free what these rules make them buy with a
+ * patrol. So identity has to be decided *here*, on their behalf, and the decision has to be
+ * one their staff could plausibly have made.
  *
  * ## The rule is eyes on, not elapsed time
  *
- * A column his own men have not lost sight of is one contact, and each fresh look updates
- * it in place: that is a picket keeping watch, and nothing is being given away because he
+ * A column their own troops have not lost sight of is one contact, and each fresh look updates
+ * it in place: that is a picket keeping watch, and nothing is being given away because they
  * watched it happen. The moment it goes out of view the contact is marked lost, and if it
- * reappears later it gets a **new** label — with the old sighting left on his map as a
- * separate mark. Whether the two are the same corps is then his judgement, which is the
- * judgement the period turned on and exactly what a contact number must not make for him.
+ * reappears later it gets a **new** label — with the old sighting left on their map as a
+ * separate mark. Whether the two are the same corps is then their judgement, which is the
+ * judgement the period turned on and exactly what a contact number must not make for them.
  *
  * An earlier version of this compared *hours since the contact was last filed* against a
  * window. That measured the wrong thing entirely. Filing happens when a command is
@@ -45,9 +45,9 @@ import type { World } from './world.js';
 
 /** Where a sighting came from, which decides whether it may continue a contact. */
 export type Provenance =
-  /** His own formation is looking at it. May continue a contact still in sight. */
+  /** Their own formation is looking at it. May continue a contact still in sight. */
   | 'own_eyes'
-  /** Somebody wrote to him about it. Always a fresh label — see the module comment. */
+  /** Somebody wrote to them about it. Always a fresh label — see the module comment. */
   | 'reported';
 
 /**
@@ -109,8 +109,8 @@ function contactInSight(
 /**
  * Whether a fresh look is worth writing down.
  *
- * It moved, or he learned more about it, or enough time has passed that the hour on his
- * map has drifted from the hour he is actually looking at it. `contactRefreshHours` is a
+ * It moved, or they learned more about it, or enough time has passed that the hour on their
+ * map has drifted from the hour they are actually looking at it. `contactRefreshHours` is a
  * logging cadence and nothing else — no rule keys off it, and changing it changes only how
  * chatty the log is and how stale a watched contact's hour is allowed to read.
  */
@@ -122,11 +122,11 @@ function worthFiling(held: Contact, fresh: Contact, cfg: CampaignConfig): boolea
 }
 
 /**
- * What each commander's own formation can see, filed under his own labels — and what it
+ * What each commander's own formation can see, filed under their own labels — and what it
  * has just lost sight of.
  *
- * His own eyes only. What his subordinates see reaches him as sightings attached to a
- * report, hours later or never; merging their vision into his here is the telepathy this
+ * Their own eyes only. What their subordinates see reaches them as sightings attached to a
+ * report, hours later or never; merging their vision into their here is the telepathy this
  * design exists to deny.
  */
 export function sightingEvents(
@@ -147,9 +147,9 @@ export function sightingEvents(
     const sightings = [...seen.values()].sort((a, b) => (a.unitId < b.unitId ? -1 : 1));
     out.push(...fileSightings(state, cfg, commanderId, sightings, state.clockHours));
 
-    // Anything he was watching and can no longer see. The contact stays on his map at the
-    // hex he last saw it; what changes is that a later sighting will be a new contact
-    // rather than a continuation, because he did lose it.
+    // Anything they were watching and can no longer see. The contact stays on their map at the
+    // hex they last saw it; what changes is that a later sighting will be a new contact
+    // rather than a continuation, because they did lose it.
     const held = state.knowledge.get(commanderId)?.contacts;
     for (const contact of [...(held?.values() ?? [])].sort((a, b) => (a.id < b.id ? -1 : 1))) {
       if (!contact.inSight || seen.has(contact.unitId)) continue;

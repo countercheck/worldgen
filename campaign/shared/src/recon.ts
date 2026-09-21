@@ -1,5 +1,5 @@
 /**
- * What a formation can see, and therefore what the man riding with it knows.
+ * What a formation can see, and therefore what the commander riding with it knows.
  *
  * The rules keep this deliberately simple: a unit observes a zone extending one hex from
  * its march column in all directions, or two hexes if it has the Scout trait. There is no
@@ -47,16 +47,16 @@ export function reconZone(
 }
 
 /**
- * What the commander himself can see, from where he stands.
+ * What the commander themselves can see, from where they stand.
  *
- * The formation he rides with, and nothing else. Not his corps, not his side — a man on a
- * horse at Fleurus can see about a kilometre, whatever else is marching under his name
- * forty kilometres away. Everything beyond this reaches him by despatch or not at all,
- * which is the whole subject of the ruleset.
+ * The formation they ride with, and nothing else. Not their corps, not their side — a
+ * rider on a horse at Fleurus can see about a kilometre, whatever else is marching under
+ * their name forty kilometres away. Everything beyond this reaches them by despatch or
+ * not at all, which is the whole subject of the ruleset.
  *
  * Derived from the column's position every time it is asked, never stored. A stored copy
  * is a second fact that can disagree with where the unit actually stands, and the one
- * thing a fog-of-war engine cannot afford is two answers to "what can he see".
+ * thing a fog-of-war engine cannot afford is two answers to "what can they see".
  */
 export function commanderVisible(
   state: CampaignState,
@@ -75,7 +75,7 @@ export function commanderVisible(
  * Everything the formations under a commander can currently see between them.
  *
  * Emphatically **not** what the commander knows — that is `commanderVisible` plus what
- * has been reported to him. This is the observing side of the transaction: the ground his
+ * has been reported to them. This is the observing side of the transaction: the ground their
  * divisions are actually looking at, from which reports are generated. Keeping the two
  * functions distinct, and distinctly named, is what stops the second quietly becoming the
  * first the next time somebody needs "what can this command see".
@@ -134,22 +134,22 @@ export interface Sighting {
 }
 
 /**
- * A sighting once a commander has filed it, with the label his staff gave it.
+ * A sighting once a commander has filed it, with the label their staff gave it.
  *
- * The id is his own — *the column reported by 1re Division, contact 4* — and means
+ * The id is their own — *the column reported by 1re Division, contact 4* — and means
  * nothing to anybody else. Two commanders watching the same enemy hold two contacts with
  * two different labels, which is correct: nothing about their two reports says they are
- * looking at the same corps until a man decides they are.
+ * looking at the same corps until a commander decides they are.
  */
 export interface Contact extends Sighting {
   readonly id: string;
   /**
-   * Whether his own men still have eyes on it.
+   * Whether their own troops still have eyes on it.
    *
    * The whole of contact identity turns on this. A column never lost sight of stays one
    * contact however long the watch lasts; one that goes out of view is marked lost, and a
    * later sighting of it is a new contact with a new number, because deciding the two are
-   * the same body of troops is his job rather than the engine's.
+   * the same body of troops is their job rather than the engine's.
    */
   readonly inSight: boolean;
 }

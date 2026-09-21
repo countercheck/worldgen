@@ -99,7 +99,7 @@ CREATE TABLE IF NOT EXISTS snapshots (
 -- out the ability to play, and nothing ever needs the token back — it arrives in a request
 -- and is hashed to be compared.
 --
--- A link names a commander, not a side. Two men on the same side see different wars, which
+-- A link names a commander, not a side. Two commanders on the same side see different wars, which
 -- is the point of the whole design, so a per-faction token could not express who is asking.
 -- Commanders cannot exist until there are units for them to ride with, so these rows are
 -- written after creation rather than during it.

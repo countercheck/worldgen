@@ -1,8 +1,8 @@
 /**
  * Despatches: the paper, the rider, and the fate of both.
  *
- * Everything a commander knows beyond his own horizon arrives here. A despatch runs from
- * one man to another — the formation is only the address a rider must find — and it takes
+ * Everything a commander knows beyond their own horizon arrives here. A despatch runs from
+ * one commander to another — the formation is only the address a rider must find — and it takes
  * real hours to get there, may be intercepted on the way, and is never acknowledged
  * unless a second despatch makes the return trip.
  *
@@ -19,16 +19,16 @@
  *
  * A rider takes the least-time path to the addressee's **actual** position, so the route
  * is computed from ground truth — which means the route betrays that position. Show a
- * commander where his rider went and you have told him exactly where his detached corps
- * is, and he need never read a report again: he would read his own outbox instead.
+ * commander where their rider went and you have told them exactly where their detached corps
+ * is, and they need never read a report again: they would read their own outbox instead.
  *
  * So `route` is referee-only, absolutely, and so is anything derived from it. A delivery
  * estimate is a distance, and a distance is a position, so no despatch carries an ETA
  * either. `senderCopy` below is the only shape a sender is ever shown, and the leakage
  * suite asserts against the serialised bytes that nothing else escapes.
  *
- * The client may still show a commander *his own* guess — routed from his last report of
- * that formation, over the map he actually holds, and labelled as the guess it is. That
+ * The client may still show a commander *their own* guess — routed from their last report of
+ * that formation, over the map they actually hold, and labelled as the guess it is. That
  * is the shared engine earning its keep: the same routing code, run over worse data.
  */
 
@@ -55,7 +55,7 @@ export type DespatchKind = 'order' | 'report' | 'acknowledgement';
  * What is written on the paper.
  *
  * An order is text and nothing else. An automatic contact report is data and nothing
- * else. A commander writing up a sighting himself may send both, which is why these are
+ * else. A commander writing up a sighting themselves may send both, which is why these are
  * optional fields rather than a union.
  */
 export interface DespatchBody {
@@ -70,12 +70,12 @@ export interface DespatchBody {
    */
   readonly contacts?: readonly Sighting[];
   /**
-   * Where the sender's own formation stood when he sealed it.
+   * Where the sender's own formation stood when they sealed it.
    *
    * Attached to every despatch, whether or not anybody asked for it: a rider who has come
-   * from III Corps knows where III Corps was when he left, and that is most of what a
+   * from III Corps knows where III Corps was when they left, and that is most of what a
    * despatch was actually for. It is why an order arriving also refreshes the recipient's
-   * picture of the man who sent it — and why silence from a corps is not merely a missing
+   * picture of the commander who sent it — and why silence from a corps is not merely a missing
    * order but a stale map.
    */
   readonly unitReport?: UnitReport;
@@ -84,14 +84,14 @@ export interface DespatchBody {
 /**
  * What became of a rider.
  *
- * Known to the referee always, to the addressee once it has arrived, to a captor when he
- * takes it — and to the sender never. That last is not an oversight to be tidied up
+ * Known to the referee always, to the addressee once it has arrived, to a captor when they
+ * take it — and to the sender never. That last is not an oversight to be tidied up
  * later: it is the mechanic.
  */
 export type Fate =
   | { readonly kind: 'in_transit' }
   | { readonly kind: 'delivered'; readonly atHours: number }
-  /** The rider was stopped and the paper lost with him. */
+  /** The rider was stopped and the paper lost with them. */
   | {
       readonly kind: 'lost';
       readonly by: string;
@@ -109,14 +109,14 @@ export type Fate =
 export interface Despatch {
   readonly id: string;
   readonly kind: DespatchKind;
-  /** Commander id. Despatches run man to man; the formation is only the address. */
+  /** Commander id. Despatches run commander to commander; the formation is only the address. */
   readonly from: string;
   readonly to: string;
   readonly faction: string;
   /** The hour it was written, which is the hour its contents describe. */
   readonly sentAtHours: number;
   readonly body: DespatchBody;
-  /** Waypoints the sender insisted on — around a wood he thinks holds pickets. */
+  /** Waypoints the sender insisted on — around a wood they think holds pickets. */
   readonly via: readonly Hex[];
   /** A report being passed on. Two lags stack, which is very much the period. */
   readonly forwardedFrom: string | null;
@@ -150,8 +150,8 @@ export const deliveredAt = (d: Despatch): number | null =>
 /**
  * A despatch as its **sender** may see it.
  *
- * Everything he wrote, and not one thing more. No route, because the route is where the
- * addressee is; no fate, because learning that his rider was taken would tell him his
+ * Everything they wrote, and not one thing more. No route, because the route is where the
+ * addressee is; no fate, because learning that their rider was taken would tell them their
  * order never arrived, which no commander in 1815 could know without being told.
  *
  * Built by construction rather than by deletion. A `delete d.route` would leak the day
@@ -163,10 +163,10 @@ export interface SentDespatch {
   readonly to: string;
   readonly sentAtHours: number;
   readonly body: PublicBody;
-  /** His own waypoints, which he chose and therefore already knows. */
+  /** Their own waypoints, which they chose and therefore already knows. */
   readonly via: readonly Hex[];
   readonly inReplyTo: string | null;
-  /** Whether it was handed over on the spot. He watched that happen. */
+  /** Whether it was handed over on the spot. They watched that happen. */
   readonly handed: boolean;
   /**
    * Whether an acknowledgement has come back for it.
@@ -177,14 +177,14 @@ export interface SentDespatch {
   readonly acknowledged: boolean;
 }
 
-/** A despatch as its **addressee** sees it: only once it is actually in his hand. */
+/** A despatch as its **addressee** sees it: only once it is actually in their hand. */
 export interface ReceivedDespatch {
   readonly id: string;
   readonly kind: DespatchKind;
   readonly from: string;
-  /** The hour it describes. Shown first, because it is what he now knows about. */
+  /** The hour it describes. Shown first, because it is what they now know about. */
   readonly sentAtHours: number;
-  /** The hour it reached him. The gap between the two is the fog. */
+  /** The hour it reached them. The gap between the two is the fog. */
   readonly receivedAtHours: number;
   readonly body: PublicBody;
   readonly forwardedFrom: string | null;
@@ -198,7 +198,7 @@ export interface ReceivedDespatch {
   readonly superseded: boolean;
 }
 
-/** A despatch as a **captor** sees it: the body, and the fact that he took it. */
+/** A despatch as a **captor** sees it: the body, and the fact that they took it. */
 export interface CapturedDespatch {
   readonly id: string;
   readonly kind: DespatchKind;
@@ -215,7 +215,7 @@ export interface CapturedDespatch {
  *
  * The prose unchanged — it is what somebody wrote — and the sightings stripped of the
  * formation they name. A captured despatch is intelligence about *where* the enemy
- * believes things are, not a key to his order of battle.
+ * believes things are, not a key to their order of battle.
  */
 export interface PublicBody {
   readonly text?: string;
@@ -224,11 +224,11 @@ export interface PublicBody {
 }
 
 /**
- * The sender's own return, as the man who took the paper off the rider reads it.
+ * The sender's own return, as the commander who took the paper off the rider reads it.
  *
  * Where the formation stood and what hour it is speaking about — the thing a captured
  * despatch was actually worth — and not one field of its internal state. A letter signed
- * by a marshal names his corps, so the name and the echelon stay; its returns do not
+ * by a marshal names their corps, so the name and the echelon stay; its returns do not
  * travel with it, and neither does the engine's id for it, which is the one field that
  * would let a captor correlate every later sighting for free. See `recon.ts` on why that
  * correlation is meant to cost a patrol.
@@ -254,7 +254,7 @@ export const capturedReport = (r: UnitReport): CapturedReport => ({
 });
 
 /**
- * `report` says whose side is reading it: his own man's return travels intact, a
+ * `report` says whose side is reading it: their own commander's return travels intact, a
  * captured one is cut down to `capturedReport`.
  */
 const publicBody = (b: DespatchBody, report: 'own' | 'captured' = 'own'): PublicBody => ({
@@ -338,11 +338,11 @@ export function isSuperseded(d: Despatch, held: readonly Despatch[]): boolean {
 /**
  * What a lone rider pays to cross water, where a division would be stopped.
  *
- * A courier is one man on one horse: he fords where a column cannot, finds the boat, or
- * swims the animal. So a major river costs him an hour rather than being impassable —
+ * A courier is one rider on one horse: they ford where a column cannot, finds the boat, or
+ * swims the animal. So a major river costs them an hour rather than being impassable —
  * the rules do not say so explicitly, but a courier system in which one river ends
  * communication altogether is not the period, and the whole point of the rider is that
- * he gets through or is caught trying.
+ * they get through or is caught trying.
  */
 function courierCrossingHours(cfg: CampaignConfig, world: World, from: Hex, to: Hex): number {
   const target = hexAt(world, to);
@@ -355,7 +355,7 @@ function courierCrossingHours(cfg: CampaignConfig, world: World, from: Hex, to: 
   return riverClass(target, world) === 'major' ? cfg.courierMajorCrossingHours : cfg.fordHours;
 }
 
-/** Hours for a rider to enter one hex from an adjacent one. `Infinity` if he cannot. */
+/** Hours for a rider to enter one hex from an adjacent one. `Infinity` if they cannot. */
 export function courierStepHours(world: World, cfg: CampaignConfig, from: Hex, to: Hex): number {
   if (!isPassable(world, to)) return Infinity;
   const grade = gradeOf(world, cfg, from, to);

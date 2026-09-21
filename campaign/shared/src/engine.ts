@@ -68,14 +68,14 @@ export type Command =
       /** Stop at the first discovery a referee wants to see, rather than at the hour. */
       readonly untilDecision?: boolean;
     }
-  /** The one command a commander issues himself. Everything else is the referee's. */
+  /** The one command a commander issues themselves. Everything else is the referee's. */
   | {
       readonly kind: 'send_despatch';
       readonly from: string;
       readonly to: string;
       readonly despatchKind: DespatchKind;
       readonly body: DespatchBody;
-      /** Waypoints the sender insists his rider takes — around pickets, say. */
+      /** Waypoints the sender insists their rider takes — around pickets, say. */
       readonly via?: readonly Hex[];
       readonly inReplyTo?: string;
       readonly forwardedFrom?: string;
@@ -86,7 +86,7 @@ export type Command =
       readonly unitId: string;
       readonly destination: Hex;
       readonly via?: readonly Hex[];
-      /** The despatch he was reading. The paper trail from prose to march. */
+      /** The despatch they were reading. The paper trail from prose to march. */
       readonly fromDespatchId?: string;
     }
   | { readonly kind: 'clear_task'; readonly unitId: string }
@@ -267,9 +267,9 @@ export function check(
       if (!state.units.has(c.unitId)) {
         v.push(hard(CODES.NO_SUCH_UNIT, `there is no unit ${c.unitId} for ${c.id} to ride with`));
       } else if (state.units.get(c.unitId)!.faction !== c.faction) {
-        // A man cannot ride with the enemy's baggage. This one is hard because the state
+        // A commander cannot ride with the enemy's baggage. This one is hard because the state
         // it would produce is not merely irregular, it is unreadable: every question
-        // about what he can see would have two contradictory answers.
+        // about what they can see would have two contradictory answers.
         v.push(
           hard(
             CODES.WRONG_FACTION,
@@ -468,7 +468,7 @@ export function check(
         const via = cmd.via ?? [];
         if (planMarch(world, cfg, unit, cmd.destination, undefined, via) === null) {
           // Naming the waypoint matters: "cannot reach Quatre Bras" sends a referee
-          // looking at the destination when the ground he cannot cross is two legs back.
+          // looking at the destination when the ground they cannot cross is two legs back.
           const legs = [...via, cmd.destination];
           const blocked = legs.find(
             (leg, i) => planMarch(world, cfg, unit, leg, undefined, legs.slice(0, i)) === null,
@@ -488,7 +488,7 @@ export function check(
       const unit = requireUnit(cmd.unitId);
       if (unit !== undefined && unit.formation === 'rout' && cmd.formation !== 'rout') {
         // Soft: a broken formation is not re-formed by an order, it is rallied, and what
-        // that costs is the referee's to adjudicate. He may still insist.
+        // that costs is the referee's to adjudicate. They may still insist.
         v.push(
           soft(
             CODES.NOT_IN_COMMAND,
@@ -508,7 +508,7 @@ export function check(
       if (unit === undefined) break;
 
       // Soft, both of them. The rules give patrols to formations with Scout and let a
-      // fourth be bought with men; a referee running a scenario where a line division
+      // fourth be bought with troops; a referee running a scenario where a line division
       // pushes out vedettes should be able to say so, and be told what it costs.
       if (!hasTrait(unit, 'scout')) {
         v.push(
@@ -710,7 +710,7 @@ export function decide(
 
       const out = patrolsOf(state, cmd.unitId).length;
       // Free until the rules' allowance is spent, and then paid for out of the rolls —
-      // permanently, because the men do not come back when the patrol does.
+      // permanently, because the troops do not come back when the patrol does.
       const costPaperStrength = out >= cfg.freePatrols ? cfg.extraPatrolCost : 0;
 
       // The first free number rather than the count. A patrol that has been destroyed or

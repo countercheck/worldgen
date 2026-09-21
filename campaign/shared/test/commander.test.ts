@@ -111,7 +111,7 @@ describe('the tree', () => {
     expect(directSubordinates(s, 'girard')).toEqual([]);
   });
 
-  it('reports everyone beneath a man, at any depth', () => {
+  it('reports everyone beneath a commander, at any depth', () => {
     expect(subordinates(s, 'ney').map((c) => c.id).sort()).toEqual([
       'girard',
       'kellermann',
@@ -120,7 +120,7 @@ describe('the tree', () => {
     expect(subordinates(s, 'soult').map((c) => c.id)).toEqual(['girard']);
   });
 
-  it('never counts a man among his own subordinates', () => {
+  it('never counts a commander among their own subordinates', () => {
     expect(subordinates(s, 'ney').some((c) => c.id === 'ney')).toBe(false);
   });
 
@@ -133,7 +133,7 @@ describe('the tree', () => {
 describe('who may be written to', () => {
   const s = army();
 
-  it('lets a man order anyone beneath him, at any depth', () => {
+  it('lets a commander order anyone beneath them, at any depth', () => {
     expect(mayOrder(s, 'ney', 'kellermann')).toBe(true);
     // Past a level: Napoleon wrote directly to divisions constantly, and the skipped
     // commander simply does not find out.
@@ -146,13 +146,13 @@ describe('who may be written to', () => {
     expect(mayOrder(s, 'ney', 'ney')).toBe(false);
   });
 
-  it('lets a man write to anyone on his own side', () => {
+  it('lets a commander write to anyone on their own side', () => {
     // Lateral coordination between corps commanders was real and mattered enormously.
     expect(mayWriteTo(s, 'kellermann', 'soult')).toBe(true);
     expect(mayWriteTo(s, 'girard', 'ney')).toBe(true);
   });
 
-  it('refuses a despatch to the enemy or to himself', () => {
+  it('refuses a despatch to the enemy or to themselves', () => {
     expect(mayWriteTo(s, 'ney', 'wellington')).toBe(false);
     expect(mayWriteTo(s, 'ney', 'ney')).toBe(false);
     expect(mayWriteTo(s, 'ney', 'nobody')).toBe(false);
@@ -162,12 +162,12 @@ describe('who may be written to', () => {
 describe('formations', () => {
   const s = army();
 
-  it('finds the one a man rides with', () => {
+  it('finds the one a commander rides with', () => {
     expect(formationOf(s, 'ney')?.id).toBe('red-1');
     expect(formationOf(s, 'nobody')).toBeUndefined();
   });
 
-  it('collects his own and every subordinate\'s', () => {
+  it('collects their own and every subordinate\'s', () => {
     expect(formationsUnder(s, 'ney').map((u) => u.id)).toEqual([
       'red-1',
       'red-2',
@@ -177,9 +177,9 @@ describe('formations', () => {
     expect(formationsUnder(s, 'soult').map((u) => u.id)).toEqual(['red-3', 'red-4']);
   });
 
-  it('lists a formation once when two men ride with it', () => {
-    // A corps commander whose headquarters has been destroyed falls back on one of his
-    // divisions, and both he and its own commander are then with the same column.
+  it('lists a formation once when two commanders ride with it', () => {
+    // A corps commander whose headquarters has been destroyed falls back on one of their
+    // divisions, and both they and its own commander are then with the same column.
     const shared: CampaignState = {
       ...s,
       commanders: new Map(s.commanders).set(
@@ -201,7 +201,7 @@ describe('cycles', () => {
   const s = army();
 
   it('sees the loop a reassignment would close', () => {
-    // Making Ney answer to his own subordinate closes the chain on itself.
+    // Making Ney answer to their own subordinate closes the chain on itself.
     expect(wouldCycle(s, 'ney', 'girard')).toBe(true);
     expect(wouldCycle(s, 'ney', 'ney')).toBe(true);
   });

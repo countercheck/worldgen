@@ -7,9 +7,9 @@
  * ceiling is a bug nobody notices until a column turns out to be eighteen kilometres long.
  *
  * Everything derivable is derived. A referee raising a division says what it is and how
- * many men it has; the speed it marches at, the space it takes on a road and the morale it
- * can hold all follow from the rules, and asking him for them would be asking him to
- * restate the tables he is already playing under.
+ * many troops it has; the speed it marches at, the space it takes on a road and the morale it
+ * can hold all follow from the rules, and asking them for them would be asking them to
+ * restate the tables they are already playing under.
  */
 
 import {

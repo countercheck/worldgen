@@ -18,7 +18,7 @@ npm run dev          # server on :3000, client on :5173
 Open <http://localhost:5173>. Upload a `world.json`, or click through to the
 demonstration, which creates a campaign and posts the scenario's commands through the
 same API a referee uses. The referee is then handed **one join link per seat** — a link
-names a man, not a side — and sends each commander his own.
+names a person, not a side — and sends each commander their own.
 
 ```bash
 npm run build
@@ -45,11 +45,11 @@ from the country they actually know about.
 
 ## The three things worth knowing
 
-**Every formation has a commander, and he sees through the one he rides with.** A role is
-a seat, not a side: two men on the same side see different wars. His own formation is
-live; everything else beneath him is a dated report, and the enemy is wherever somebody
+**Every formation has a commander, and they see through the one they ride with.** A role is
+a seat, not a side: two commanders on the same side see different wars. Their own formation is
+live; everything else beneath them is a dated report, and the enemy is wherever somebody
 last said they saw them. `superiorId` carries the whole chain of command, and writing past
-a subordinate leaves that man with a confidently wrong picture of his own corps — which
+a subordinate leaves that commander with a confidently wrong picture of their own corps — which
 nothing had to be built to achieve.
 
 **The fog is enforced, not drawn.** Exactly one function — `viewFor` in

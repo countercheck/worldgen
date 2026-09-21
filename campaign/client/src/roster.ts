@@ -3,7 +3,7 @@
  *
  * Kept out of the component so it can be tested, because the interesting part is not the
  * table — it is the decision about *which* facts a given role is shown. A referee reads
- * formations; a commander reads his own formation and his memory of everyone else's, and
+ * formations; a commander reads their own formation and their memory of everyone else's, and
  * the two must never be built by filtering one list, because a filtered list is how the
  * remembered rows quietly become live ones.
  */
@@ -62,7 +62,7 @@ const fromReport = (r: UnitReport): RosterLine => ({
 
 export function rosterGroups(input: {
   role: 'referee' | 'commander';
-  /** Live formations: all of them for a referee, his own for a commander. */
+  /** Live formations: all of them for a referee, their own for a commander. */
   units: readonly Unit[];
   /** Dated reports. Empty for a referee, who has no need of them. */
   reports: readonly UnitReport[];

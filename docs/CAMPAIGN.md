@@ -1,7 +1,7 @@
 # The campaign layer
 
 A refereed Napoleonic campaign played on a generated world. One referee runs the clock;
-each commander is sent a link and sees only what his own men have told him.
+each commander is sent a link and sees only what their own troops have told them.
 
 The ruleset is the **Napoleonic Campaign Rules (1 km hexes) v4**, a simplification of
 *Vol de l'Aigle*. `worldgen` generates at 1 hex = 1 km and the rules are written at 1 hex =
@@ -19,13 +19,13 @@ grid is also hexes per hour.
 Almost everything here exists to make one thing true: **a commander does not know where
 anything is.**
 
-| He can see | How |
+| They can see | How |
 |---|---|
-| The formation he rides with | It is in front of him |
+| The formation they ride with | It is in front of them |
 | The ground | Everybody has a map — terrain fog is off by default |
-| His own corps | Where he *last heard* it was, by rider, hours ago |
-| The enemy | Where somebody saw a column, labelled by his own staff |
-| Whether his orders arrived | Only if an acknowledgement comes back |
+| Their own corps | Where they *last heard* it was, by rider, hours ago |
+| The enemy | Where somebody saw a column, labelled by their own staff |
+| Whether their orders arrived | Only if an acknowledgement comes back |
 
 That last row is the mechanic rather than a missing feature. A despatch takes real time,
 can be intercepted, and its sender is never told what became of it.
@@ -33,7 +33,7 @@ can be intercepted, and its sender is never told what became of it.
 ### Orders are prose
 
 The engine executes nothing on its own. A commander writes *"Move on Quatre Bras with all
-speed"*; the referee reads it, decides what that man's subordinate makes of it, and sets a
+speed"*; the referee reads it, decides what that commander's subordinate makes of it, and sets a
 march. Two consequences worth knowing before playing:
 
 - **A captured despatch is intelligence**, not a coordinate dump.
@@ -114,7 +114,7 @@ For hosting it somewhere rather than running it at home, see `deploy/README.md`.
    referee's link, and it is shown once — the token is stored only as a hash, so a lost
    link is reissued rather than recovered.
 
-3. **Put formations on the map, and appoint men to them.** A join link names a *seat*, and
+3. **Put formations on the map, and appoint troops to them.** A join link names a *seat*, and
    there are no seats until there are commanders, which is also the order a real game is
    prepared in.
 
@@ -134,11 +134,11 @@ The referee's controls, in the order they get used:
 - **The queue** — what stopped the clock, and who it belongs to. Each row can march its
   formation somewhere or be marked dealt with.
 - **The post** — every despatch, with routes and fates. The only place either is visible.
-- **Seat switching** — a referee holds every link, so he can read the game through any
-  commander's eyes and adjudicate from *that man's* information rather than from the map.
+- **Seat switching** — a referee holds every link, so they can read the game through any
+  commander's eyes and adjudicate from *that commander's* information rather than from the map.
 
-A commander's screen is his post, his formations with an hour against each, and the ground.
-He writes prose, acknowledges what arrives, and forwards what somebody else should see.
+A commander's screen is their post, their formations with an hour against each, and the ground.
+They write prose, acknowledges what arrives, and forwards what somebody else should see.
 
 ---
 
@@ -193,16 +193,16 @@ a client may see — `viewFor` — and no route may reach for state directly.
 The tests that matter most are `server/test/leakage.test.ts`. They assert against the
 **serialised response bytes** rather than the object graph, because a getter or an
 accidentally-enumerable field sails straight past a structural assertion, and they assert
-*absence*: not that Ney can see his own division, but that Wellington's is nowhere in the
+*absence*: not that Ney can see their own division, but that Wellington's is nowhere in the
 payload.
 
 Three redactions are load-bearing enough to name:
 
 - **A despatch's route** is the path to where its addressee actually is, so showing a
-  sender his own rider's route would tell him exactly where his detached corps stands. It
+  sender their own rider's route would tell them exactly where their detached corps stands. It
   is referee-only, and so is anything derived from it — a delivery estimate is a distance,
   and a distance is a position.
-- **A despatch's fate** is never shown to its sender. He learns it arrived only if an
+- **A despatch's fate** is never shown to its sender. They learns it arrived only if an
   acknowledgement comes back, and that is itself a despatch that can be lost.
 - **A contact never names the formation it is a sighting of.** It carries the observing
   commander's own label, so two sightings hours apart cannot be correlated for free — that

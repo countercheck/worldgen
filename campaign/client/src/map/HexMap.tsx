@@ -83,7 +83,7 @@ export function HexMap({
   /** Ground being fought over. */
   battle?: ReadonlySet<HexKey> | undefined;
   /**
-   * Ground under observation from the formation the viewer rides with, and ground his
+   * Ground under observation from the formation the viewer rides with, and ground their
    * command has covered at some point. Both empty for a referee, who sees everything.
    */
   visible?: ReadonlySet<HexKey> | undefined;
@@ -269,7 +269,7 @@ export function HexMap({
       }}
     >
       <canvas ref={terrainRef} style={{ width: box.w, height: box.h }} />
-      {/* Between the ground and the men on it: the wash dims terrain, never a symbol. */}
+      {/* Between the ground and the troops on it: the wash dims terrain, never a symbol. */}
       <canvas ref={washRef} style={{ width: box.w, height: box.h }} />
       <canvas ref={overlayRef} style={{ width: box.w, height: box.h }} />
       <div className={`map-hint${onPick === undefined ? '' : ' picking'}`}>

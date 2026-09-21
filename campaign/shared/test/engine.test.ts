@@ -1074,7 +1074,7 @@ describe('patrols', () => {
     expect(state.units.get('red-2')!.paperStrength).toBe(before);
   });
 
-  it('takes a hundred men off the rolls for the fourth, permanently', () => {
+  it('takes a hundred troopers off the rolls for the fourth, permanently', () => {
     let state = withScout();
     for (let i = 0; i < 3; i++) {
       state = applyOrThrow({ kind: 'detach_patrol', unitId: 'red-2' }, state, world, 'lenient').state;
@@ -1215,7 +1215,7 @@ describe('patrols', () => {
     ).toHaveLength(0);
   });
 
-  it('is not a division, so nothing treats twenty men as one', () => {
+  it('is not a division, so nothing treats twenty troopers as one', () => {
     const out = applyOrThrow(
       { kind: 'detach_patrol', unitId: 'red-2' },
       withScout(),
@@ -1253,7 +1253,7 @@ describe('patrols', () => {
   });
 });
 
-describe('a patrol and the men it came from', () => {
+describe('a patrol and the troops it came from', () => {
   const scout = (id: string): Unit => ({ ...division(id, 'red'), traits: ['scout'] });
 
   const detached = (): CampaignState => {

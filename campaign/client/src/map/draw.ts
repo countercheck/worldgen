@@ -206,11 +206,11 @@ export type WashMode = 'three' | 'two' | 'off';
  *
  * Three claims a commander's map has to keep apart:
  *
- * - `observed` — somebody of his is looking at it now. What is drawn here is true.
- * - `surveyed` — his men have covered it. He knows the ground; he knows nothing about
+ * - `observed` — somebody of their is looking at it now. What is drawn here is true.
+ * - `surveyed` — their troops have covered it. They know the ground; they know nothing about
  *   who is standing on it, and the map is silent rather than empty.
  * - `unseen` — never covered. The terrain is drawn because `terrainFog` is off, which is
- *   a convenience of this campaign's settings and not something he has earned.
+ *   a convenience of this campaign's settings and not something they have earned.
  */
 export type WashBand = 'observed' | 'surveyed' | 'unseen';
 
@@ -219,12 +219,12 @@ export type WashBand = 'observed' | 'surveyed' | 'unseen';
  *
  * Pure, and separated from the drawing so the classification can be tested without a
  * canvas. `visible` wins over `surveyed` unconditionally: the two sets are maintained
- * independently, and a hex he is looking at right now is observed whether or not the
+ * independently, and a hex they are looking at right now is observed whether or not the
  * survey bookkeeping has caught up with it.
  *
  * An empty `visible` means the viewer has no eyes on the map at all — a referee, who is
- * sent no sets because he is not standing anywhere. It must read as *wash nothing*, not
- * as *he sees nothing*, or the one screen meant to see everything goes black. The guard
+ * sent no sets because they are not standing anywhere. It must read as *wash nothing*, not
+ * as *they see nothing*, or the one screen meant to see everything goes black. The guard
  * lives here rather than in the renderer so the two cannot come to different conclusions.
  */
 export function washBand(
@@ -303,8 +303,8 @@ export function drawWash(
  * Three kinds, and they must be told apart at a glance, because on a commander's map they
  * are three different claims about the world:
  *
- * - `live` — a formation he is standing next to. This is true now.
- * - `reported` — one of his own, where a despatch says it stood. True at an hour that has
+ * - `live` — a formation they are standing next to. This is true now.
+ * - `reported` — one of their own, where a despatch says it stood. True at an hour that has
  *   passed, and the older it is the less it means.
  * - `contact` — an enemy somebody saw. Barely anything is known and it may have marched.
  *
@@ -343,12 +343,12 @@ export interface Mark {
  * A despatch rider, on the referee's map and on nobody else's.
  *
  * The route is where the addressee actually is, so drawing it for a commander would hand
- * him the position of his own detached corps and end the game. For a referee it is the
- * best thing on the screen: he can watch a rider cross the country between two armies and
+ * them the position of their own detached corps and end the game. For a referee it is the
+ * best thing on the screen: they can watch a rider cross the country between two armies and
  * see, before the dice do, that the order is about to pass a picket.
  *
- * `ridden` is the ground behind him and `ahead` the ground in front — different weights,
- * because where a rider has got to is the fact and where he is going is a plan.
+ * `ridden` is the ground behind them and `ahead` the ground in front — different weights,
+ * because where a rider has got to is the fact and where they are going is a plan.
  */
 export interface Rider {
   readonly id: string;
@@ -402,7 +402,7 @@ export function drawOverlay(
     riders?: readonly Rider[] | undefined;
     /** A hex the referee is about to choose as a destination. */
     picking?: Hex | null | undefined;
-    /** Ground the referee has pointed at so far, in the order he pointed at it. */
+    /** Ground the referee has pointed at so far, in the order they pointed at it. */
     route?: readonly Hex[] | undefined;
     /** Where every marching column is going, as the engine would route it now. */
     plans?: readonly Plan[] | undefined;
@@ -430,7 +430,7 @@ export function drawOverlay(
   for (const plan of opts.plans ?? []) drawPlan(ctx, view, plan);
   drawPickedRoute(ctx, view, opts.route ?? []);
 
-  // Riders under the formations: a courier is a man on a horse and a division is a corps,
+  // Riders under the formations: a courier is one rider on a horse and a division is a corps,
   // and where the two are on the same hex the corps is the thing to see.
   for (const rider of opts.riders ?? []) drawRider(ctx, view, rider);
 
@@ -466,7 +466,7 @@ export interface Plan {
 /**
  * Where a column is going.
  *
- * Thin, dotted and under everything else. This is the referee's own screen and he has
+ * Thin, dotted and under everything else. This is the referee's own screen and they have
  * every column on it at once, so a plan has to be legible as a direction without becoming
  * the thing the eye lands on — the formations are the map, the routes are an annotation.
  *
@@ -500,7 +500,7 @@ function drawPlan(ctx: CanvasRenderingContext2D, view: View, plan: Plan): void {
 }
 
 /**
- * The places a referee has pointed at, in the order he pointed at them.
+ * The places a referee has pointed at, in the order they pointed at them.
  *
  * Straight segments between the picks rather than the route itself. The route is the
  * engine's to work out — drawing a guess at it here would be the client claiming to know
@@ -534,7 +534,7 @@ function drawPickedRoute(ctx: CanvasRenderingContext2D, view: View, route: reado
     ctx.stroke();
 
     // The last pick is where they are to end up; the rest are only on the way. Labelling
-    // it as such stops a referee counting rings to find his destination.
+    // it as such stops a referee counting rings to find their destination.
     const label = i === points.length - 1 ? '×' : String(i + 1);
     ctx.font = `${Math.max(8, view.size * 0.9).toFixed(0)}px system-ui, sans-serif`;
     ctx.textAlign = 'center';
@@ -552,12 +552,12 @@ function drawPickedRoute(ctx: CanvasRenderingContext2D, view: View, route: reado
 }
 
 /**
- * One rider: the road behind him solid and thin, the road ahead dotted, and a small mark
- * where he has actually got to.
+ * One rider: the road behind them solid and thin, the road ahead dotted, and a small mark
+ * where they have actually got to.
  *
  * Small on purpose. There may be a dozen of these on a busy evening and they must not
  * compete with the formations — a rider is a fact about communication rather than about
- * ground, and the eye should find him only when it goes looking.
+ * ground, and the eye should find them only when it goes looking.
  */
 function drawRider(ctx: CanvasRenderingContext2D, view: View, rider: Rider): void {
   const line = (path: readonly Hex[], dash: boolean, alpha: number): void => {
@@ -584,7 +584,7 @@ function drawRider(ctx: CanvasRenderingContext2D, view: View, rider: Rider): voi
 
   // A pale ring rather than a dark one. The column ribbons are faction-coloured lines
   // too, so a faction-coloured dot on a faction-coloured trail disappears into it; the
-  // ring is what separates "a man on a horse" from "eighteen kilometres of cavalry".
+  // ring is what separates "one rider on a horse" from "eighteen kilometres of cavalry".
   const p = toScreen(rider.at, view);
   const r = Math.max(3.5, view.size * 0.3);
   ctx.save();

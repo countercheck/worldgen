@@ -3,7 +3,7 @@
  *
  * A task is the other half of the split that phase 2 rests on. A despatch is prose a
  * commander wrote; a task is a march the engine is running. The referee is the bridge
- * between them — he reads the paper, decides what the addressee makes of it, and sets a
+ * between them — they read the paper, decides what the addressee makes of it, and sets a
  * task. Nothing here is ever created by an arriving despatch on its own.
  *
  * ## A destination, not a path
@@ -26,8 +26,8 @@
  * A formation continues its task until it discovers something, and then stops. That is
  * the whole of "a unit with no new orders follows its last one" — the task never ended,
  * so nothing had to continue it. What ends it is a `PendingDecision`, raised against the
- * **commander** rather than the unit, because deciding is something a man does and the
- * referee should decide from that man's information rather than from the map.
+ * **commander** rather than the unit, because deciding is something a commander does and the
+ * referee should decide from that commander's information rather than from the map.
  *
  * Traffic is the exception, and it is the exception because it is not about belief: two
  * columns cannot both be in the same hex whatever anyone knows. Those decisions carry no
@@ -64,7 +64,7 @@ export interface Task {
   /** Waypoints the referee insisted on. The march is routed through them in order. */
   readonly via: readonly Hex[];
   readonly setAtHours: number;
-  /** The despatch the referee was reading when he set it. The audit trail of an order. */
+  /** The despatch the referee was reading when they set it. The audit trail of an order. */
   readonly fromDespatchId: string | null;
   /** The hex the head is marching into, or null when the column has arrived. */
   readonly nextHex: Hex | null;
@@ -92,11 +92,11 @@ export interface Task {
  * Why a formation stopped and asked.
  *
  * Config lists which of these actually halt the clock, so a referee running a large
- * campaign can let his columns march through a distant sighting and stop only for what
- * he cares about.
+ * campaign can let their columns march through a distant sighting and stop only for what
+ * they care about.
  */
 export type DecisionTrigger =
-  /** An enemy came into view of a formation that could not see him before. */
+  /** An enemy came into view of a formation that could not see them before. */
   | 'enemy_contact'
   /** The route ahead cannot be marched: an unbridged river, or ground gone impassable. */
   | 'crossing_impassable'
@@ -127,7 +127,7 @@ export const DECISION_TRIGGERS: readonly DecisionTrigger[] = [
 ];
 
 /**
- * A formation has stopped, and a man has to decide what it does next.
+ * A formation has stopped, and a commander has to decide what it does next.
  *
  * `context` is a plain record rather than a union: it exists to be shown to the referee
  * beside the decision, and every trigger wants to say something different. Typing it as a
@@ -137,7 +137,7 @@ export const DECISION_TRIGGERS: readonly DecisionTrigger[] = [
 export interface PendingDecision {
   readonly id: string;
   /**
-   * The man the referee should decide as, or null when there is nobody to decide as.
+   * The commander the referee should decide as, or null when there is nobody to decide as.
    *
    * Traffic is the case: two columns meeting on a road is a fact about the ground rather
    * than about what anyone believes, and it needs settling even where neither formation
@@ -146,7 +146,7 @@ export interface PendingDecision {
    * being asked.
    */
   readonly commanderId: string | null;
-  /** The formation that ran into it. Usually, but not always, the one he rides with. */
+  /** The formation that ran into it. Usually, but not always, the one they ride with. */
   readonly unitId: string;
   readonly atHours: number;
   readonly trigger: DecisionTrigger;
@@ -158,8 +158,8 @@ export interface PendingDecision {
    * The formation the referee ruled in favour of, where the decision was a contest.
    *
    * Only `column_contested` uses it: two heads entering one hex at the same cost is a tie
-   * the rules hand to the referee, and this is his ruling. Null on every other trigger,
-   * and on a contest he dealt with without naming anyone — which re-asks, because nothing
+   * the rules hand to the referee, and this is their ruling. Null on every other trigger,
+   * and on a contest they dealt with without naming anyone — which re-asks, because nothing
    * about the ground has changed.
    */
   readonly favouring: string | null;

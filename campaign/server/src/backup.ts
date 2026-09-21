@@ -14,7 +14,7 @@
  * `VACUUM INTO` is SQLite's own answer. It writes a new database holding the committed
  * state as of one point in time, from inside the engine, with no cooperation needed from
  * the running server and no pause in play. The result is a single file with no sidecars —
- * which is what a referee thought he was copying in the first place.
+ * which is what a referee thought they were copying in the first place.
  */
 
 import { existsSync } from 'node:fs';

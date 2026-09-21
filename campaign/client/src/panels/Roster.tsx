@@ -7,8 +7,8 @@
  *
  * ## Two very different lists
  *
- * A referee gets every formation as it is. A commander gets his own as it is, and every
- * other one *as he last heard*: a `UnitReport` carries the hour it describes, not the hour
+ * A referee gets every formation as it is. A commander gets their own as it is, and every
+ * other one *as they last heard*: a `UnitReport` carries the hour it describes, not the hour
  * it arrived, and half the design is that those are different. So a commander's rows are
  * dated and a referee's are not, and the two are built from different data rather than one
  * filtered — a filtered list is how the dated ones quietly become live ones.
@@ -53,7 +53,7 @@ export function Roster({
   open: boolean;
   onClose: () => void;
   role: 'referee' | 'commander';
-  /** Live formations: all of them for a referee, his own for a commander. */
+  /** Live formations: all of them for a referee, their own for a commander. */
   units: readonly Unit[];
   /** Dated reports. Empty for a referee, who has no need of them. */
   reports: readonly UnitReport[];

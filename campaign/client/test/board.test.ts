@@ -122,14 +122,14 @@ describe('a commander board', () => {
   const raw = view(commanderRole('ney'));
   const board = boardFrom(raw, DEFAULT_THEME);
 
-  it('holds exactly one live formation: the one he rides with', () => {
+  it('holds exactly one live formation: the one they ride with', () => {
     expect(board.units.size).toBe(1);
     const [only] = [...board.units.values()];
     expect(only!.id).toBe(raw.commander!.unitId);
     expect(only!.faction).toBe('red');
   });
 
-  it('holds his subordinates as dated reports rather than units', () => {
+  it('holds their subordinates as dated reports rather than units', () => {
     expect(board.reports.size).toBeGreaterThan(0);
     for (const report of board.reports.values()) {
       expect(report.faction).toBe('red');
@@ -176,8 +176,8 @@ describe('a commander board', () => {
   });
 
   it('sees far less ground than it has covered', () => {
-    // What he can see from where he stands, against everywhere his command has been. If
-    // these ever converged, sight has stopped being limited to his own formation.
+    // What they can see from where they stand, against everywhere their command has been. If
+    // these ever converged, sight has stopped being limited to their own formation.
     expect(board.visible.size).toBeGreaterThan(0);
     expect(board.visible.size).toBeLessThan(board.surveyed.size);
   });
@@ -193,11 +193,11 @@ describe('the symbols a commander is given', () => {
   const board = boardFrom(view(commanderRole('ney')), DEFAULT_THEME);
   const symbolOf = (id: string) => board.marks.find((m) => m.id === id)!.symbol;
 
-  it('frames his own formation as friendly and solid', () => {
+  it('frames their own formation as friendly and solid', () => {
     const [own] = [...board.units.values()];
     const symbol = symbolOf(own!.id);
     expect(symbol.affiliation).toBe('friend');
-    expect(symbol.dashed, 'a formation he is standing next to was drawn as reported').toBe(
+    expect(symbol.dashed, 'a formation they are standing next to was drawn as reported').toBe(
       false,
     );
     expect(symbol.kind).toBe(own!.kind);
@@ -221,7 +221,7 @@ describe('the symbols a commander is given', () => {
     // what an empty frame means in the standard.
     //
     // Taken from whichever commander's own formation is actually in contact: a commander
-    // sees through the column he rides with and no other, so which of them has a sighting
+    // sees through the column they ride with and no other, so which of them has a sighting
     // is a fact about the scenario rather than something to assume.
     const seeing = ['ney', 'kellermann', 'soult']
       .map((id) => boardFrom(view(commanderRole(id)), DEFAULT_THEME))
@@ -247,7 +247,7 @@ describe('the symbols a commander is given', () => {
 describe('the symbols a referee is given', () => {
   const board = boardFrom(view(REFEREE_ROLE), DEFAULT_THEME);
 
-  it('frames every formation as known, because he has no side to be hostile to', () => {
+  it('frames every formation as known, because they have no side to be hostile to', () => {
     expect(board.marks.length).toBeGreaterThan(0);
     for (const mark of board.marks) {
       expect(mark.symbol.affiliation).toBe('friend');
@@ -272,9 +272,9 @@ describe('the symbols a referee is given', () => {
  * Riders in flight, which only a referee ever sees.
  *
  * The negative half is the one that matters. A commander's board has no riders not because
- * the console filters them out but because the route is never in his payload — a rider's
- * path runs to where his addressee actually stands, so drawing one for the sender would
- * hand him the position of his own detached corps and end the game.
+ * the console filters them out but because the route is never in their payload — a rider's
+ * path runs to where their addressee actually stands, so drawing one for the sender would
+ * hand them the position of their own detached corps and end the game.
  */
 describe('riders on the map', () => {
   const riding = (() => {
@@ -305,31 +305,31 @@ describe('riders on the map', () => {
     expect(board.riders).toHaveLength(1);
 
     const rider = board.riders[0]!;
-    // An hour of riding is several hexes at courier pace, so he is neither at the start
-    // nor at the end: the whole value of the overlay is seeing him in the country between.
+    // An hour of riding is several hexes at courier pace, so they are neither at the start
+    // nor at the end: the whole value of the overlay is seeing them in the country between.
     expect(rider.ridden.length).toBeGreaterThan(1);
     expect(rider.ahead.length).toBeGreaterThan(1);
-    // The two halves meet at the hex he is on, and nowhere else.
+    // The two halves meet at the hex they are on, and nowhere else.
     expect(rider.ridden.at(-1)).toEqual(rider.at);
     expect(rider.ahead[0]).toEqual(rider.at);
   });
 
-  it('gives the sender no rider at all, because he was sent no route', () => {
+  it('gives the sender no rider at all, because they were sent no route', () => {
     const ney = asRole(commanderRole('ney'));
     expect(ney.despatches).toEqual([]);
     expect(boardFrom(ney, DEFAULT_THEME).riders).toEqual([]);
-    // And the outbox says he wrote it, without a hint of where it is.
+    // And the outbox says they wrote it, without a hint of where it is.
     expect(ney.sent).toHaveLength(1);
     expect(JSON.stringify(ney.sent)).not.toContain('route');
   });
 
-  it('gives the addressee no rider either, and nothing in his hand yet', () => {
+  it('gives the addressee no rider either, and nothing in their hand yet', () => {
     const kellermann = asRole(commanderRole('kellermann'));
     expect(boardFrom(kellermann, DEFAULT_THEME).riders).toEqual([]);
     expect(kellermann.received).toEqual([]);
   });
 
-  it('stops drawing a rider once he has arrived', () => {
+  it('stops drawing a rider once they have arrived', () => {
     const arrived = applyAll(
       [{ kind: 'advance_clock', hours: 200 }],
       riding,
@@ -349,7 +349,7 @@ describe('riders on the map', () => {
  *
  * Classification only. What it looks like is a matter of taste and lives in the theme;
  * what it *claims* is not, and getting that wrong would either hide ground a commander is
- * entitled to see or, worse, imply he is watching ground he is not.
+ * entitled to see or, worse, imply they are watching ground they are not.
  */
 describe('the observation wash', () => {
   const ney = boardFrom(view(commanderRole('ney')), DEFAULT_THEME);
@@ -385,15 +385,15 @@ describe('the observation wash', () => {
     }
   });
 
-  it('counts a hex he is looking at as observed even if the survey lags', () => {
+  it('counts a hex they are looking at as observed even if the survey lags', () => {
     // The two sets are maintained independently, and sight is the stronger claim.
     expect(washBand(watched, new Set([watched]), new Set(), 'three')).toBe('observed');
   });
 
   /**
    * The regression that would black out the one screen meant to see everything. A referee
-   * is sent `visible: []` because he is not on the map, and that must read as "wash
-   * nothing" rather than as "he can see nothing".
+   * is sent `visible: []` because they are not on the map, and that must read as "wash
+   * nothing" rather than as "they can see nothing".
    */
   it('leaves the referee an unwashed map', () => {
     expect(referee.visible.size).toBe(0);
@@ -403,7 +403,7 @@ describe('the observation wash', () => {
     }
   });
 
-  it('gives a scouting column more ground to watch than the man it reports to', () => {
+  it('gives a scouting column more ground to watch than the commander it reports to', () => {
     // Kellermann's cavalry is eighteen kilometres of column with the scout trait, so it
     // sweeps a corridor where Ney's infantry sees a patch. That gap is the whole reason
     // for drawing this at all.

@@ -101,11 +101,11 @@ export interface CampaignConfig {
   // ---- reconnaissance -------------------------------------------------
   /** Hexes either side of the march column a unit observes. */
   /**
-   * Whether ground a commander's formations have not covered is hidden from him.
+   * Whether ground a commander's formations have not covered is hidden from them.
    *
    * Off. The tension the ruleset turns on is where the enemy is and where one's own
    * detached corps is, not what the country looks like — a commander in 1815 had a map.
-   * And with sight limited to the formation he rides with, terrain fog would leave him a
+   * And with sight limited to the formation they ride with, terrain fog would leave them a
    * two-hex bubble and darkness beyond it, unable to plan a march at all.
    *
    * The masking machinery is unchanged and still tested in both positions, so turning
@@ -117,7 +117,7 @@ export interface CampaignConfig {
   readonly reconRadius: number;
   /** The same, for a unit with the scout trait. */
   readonly scoutReconRadius: number;
-  /** Patrols a scout unit may field without spending men. */
+  /** Patrols a scout unit may field without spending troops. */
   readonly freePatrols: number;
   /** PaperStrength permanently lost per patrol beyond the free ones. */
   readonly extraPatrolCost: number;
@@ -131,7 +131,7 @@ export interface CampaignConfig {
    * once an hour, which is also how stale the hour on a watched contact may read.
    *
    * Contact *identity* does not use this. Whether a sighting continues a contact or starts
-   * a new one turns on whether his men ever lost sight of it, which is a fact about the
+   * a new one turns on whether their troops ever lost sight of it, which is a fact about the
    * world rather than about elapsed time — see `knowledge.ts`.
    */
   readonly contactRefreshHours: number;
@@ -152,7 +152,7 @@ export interface CampaignConfig {
   readonly interceptDiceCavalry: number;
   readonly interceptDiceScout: number;
   readonly interceptDiceDivision: number;
-  /** The die every rider throws when he passes an enemy column, before modifiers. */
+  /** The die every rider throws when they pass an enemy column, before modifiers. */
   readonly interceptDiceBase: number;
   /** Ones that lose the rider, and ones that lose the paper as well. */
   readonly interceptLoseOnes: number;
@@ -201,7 +201,7 @@ export interface CampaignConfig {
    * Extra fatigue per hour any part of the column is on the road in the dark.
    *
    * Any part, which is why the tail matters: a column is not off the road until its rear
-   * is in, and a march that ends at dusk has men still marching well into the night.
+   * is in, and a march that ends at dusk has troops still marching well into the night.
    */
   readonly nightFatiguePerHour: number;
   /**
@@ -234,7 +234,7 @@ export interface CampaignConfig {
 /**
  * Which fatigue curve a formation reads.
  *
- * Two, because the rules give two. Horses tire differently from men and the table says so
+ * Two, because the rules give two. Horses tire differently from troops and the table says so
  * from the first hour: cavalry starts the day a point down and reaches every band an hour
  * before the infantry does.
  */
@@ -258,7 +258,7 @@ export const DEFAULT_MAX_MORALE: Readonly<Record<Experience, number>> = {
 /**
  * What each kind of formation is made of, before anything is done to it.
  *
- * Spacing is the rules' metres-per-man, and it is why a cavalry division is six times the
+ * Spacing is the rules' metres-per-soldier, and it is why a cavalry division is six times the
  * length of an infantry one at the same strength.
  */
 export const DEFAULT_KIND_DEFAULTS: Readonly<
@@ -308,7 +308,7 @@ export const DEFAULT_FORMATION_CHANGE_HOURS: Readonly<
   rest: { march: 2, battle: 1, rest: 0, occupation: 24, rout: 0 },
   occupation: { march: 24, battle: 24, rest: 24, occupation: 0, rout: 0 },
   // A formation that has broken does not change formation in any orderly sense. Rallying
-  // it is the referee's to adjudicate, and costs whatever he says it costs.
+  // it is the referee's to adjudicate, and costs whatever they say it costs.
   rout: { march: 0, battle: 0, rest: 0, occupation: 0, rout: 0 },
 };
 
@@ -348,7 +348,7 @@ export const DEFAULT_CONFIG: CampaignConfig = {
     'crossing_impassable',
     'objective_reached',
     'despatch_arrived',
-    // A tie for a hex is the referee's to break and nothing moves until he does, so the
+    // A tie for a hex is the referee's to break and nothing moves until they do, so the
     // clock has to hand back. `column_blocked` is deliberately not here: one column
     // waiting for another to clear a road settles itself the moment the road clears.
     'column_contested',
@@ -381,7 +381,7 @@ export type ConfigOverrides = {
  * A named set of rules, and what it changes.
  *
  * Namespaced rather than global because a referee running two campaigns is often running
- * two different games: one by the book, one with the house amendments he has been arguing
+ * two different games: one by the book, one with the house amendments they have been arguing
  * about for a year. A campaign records which ruleset it was started under, so a change to
  * the house rules tomorrow does not silently re-tune a game already in progress — the
  * campaign carries its own resolved numbers, and the name is there to say where they came

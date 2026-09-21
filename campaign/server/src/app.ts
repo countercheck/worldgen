@@ -256,7 +256,7 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
         (req as { releaseCreate?: () => void }).releaseCreate?.();
       },
       onRequestAbort: async (req) => {
-        // A referee who closes the tab mid-upload must not hold the gate shut behind him.
+        // A referee who closes the tab mid-upload must not hold the gate shut behind them.
         (req as { releaseCreate?: () => void }).releaseCreate?.();
       },
     },
@@ -293,7 +293,7 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
         // cannot be recovered — a lost link is reissued, not looked up.
         //
         // No commander links yet: a link names a seat, and there are no seats until the
-        // referee has put formations on the map and appointed men to them.
+        // referee has put formations on the map and appointed commanders to them.
         return reply.code(201).send({
           id,
           refereeToken: created.refereeToken,
@@ -335,7 +335,7 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
     if (auth === null) return;
 
     const asCommander = (req.query as { commander?: string }).commander;
-    // A referee may look through any commander's eyes; a commander only through his own.
+    // A referee may look through any commander's eyes; a commander only through their own.
     const role: Role =
       auth.role.kind === 'referee' && asCommander !== undefined
         ? { kind: 'commander', id: asCommander }
@@ -427,10 +427,10 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
       if (command.kind !== 'send_despatch') {
         return reply.code(403).send({ error: 'a commander may only send despatches' });
       }
-      // The sender is who the token says he is, never who the payload claims. Trusting
-      // `from` would let anyone holding any seat write in another man's name, which is
+      // The sender is who the token says they are, never who the payload claims. Trusting
+      // `from` would let anyone holding any seat write in another commander's name, which is
       // both forgery and — since a forged report would be believed — a way to feed the
-      // enemy's commander false intelligence signed by his own subordinate.
+      // enemy's commander false intelligence signed by their own subordinate.
       command = { ...command, from: auth.role.id };
     }
 
@@ -470,8 +470,8 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
     broadcast(auth.campaign.id);
     const state = store.state(auth.campaign.id);
     // What stopped the clock, if anything did. The referee's whole workflow is "run it
-    // until something needs me", so the answer to *what* needs him belongs in the reply
-    // rather than in a second request he has to know to make.
+    // until something needs me", so the answer to *what* needs them belongs in the reply
+    // rather than in a second request they have to know to make.
     const halts = new Set(configOf(auth.campaign).haltTriggers);
     const halted = result.events
       .map((e) => e.payload)
@@ -496,10 +496,10 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
     const events = store.events(auth.campaign.id);
     if (auth.role.kind === 'referee') return reply.send(events);
 
-    // A commander gets his outbox, rebuilt from the log rather than filtered out of it.
+    // A commander gets their outbox, rebuilt from the log rather than filtered out of it.
     // The raw events are a rich source of exactly what the fog exists to withhold — every
     // march in order, and every rider's route, which is a position — and filtering by
-    // actor does not remove them: a cascaded order is stamped with the name of the man
+    // actor does not remove them: a cascaded order is stamped with the name of the commander
     // who started the chain but carries a route to somebody else's subordinate. See
     // `logFor`, which builds by construction for the same reason `senderCopy` does.
     const mine = auth.role.id;
