@@ -46,6 +46,35 @@ def test_every_npm_command_it_names_is_a_real_script(doc):
     assert not missing, f"docs/CAMPAIGN.md runs scripts that do not exist: {missing}"
 
 
+def test_every_worldgen_option_it_names_is_a_real_option(doc):
+    """`python3 -m worldgen.cli <command> --flag`, checked against click itself.
+
+    This is the first command a referee setting up a campaign types, and it was wrong: the
+    document said `--output world.json` for a year after the option became `--output-dir`
+    and started naming a directory. Nothing failed anywhere — the CLI's own tests passed,
+    the campaign layer's passed, and the only person who found out was whoever followed
+    the instructions.
+    """
+    from worldgen.cli import cli
+
+    invocations = re.findall(r"python3? -m worldgen\.cli (\w+)((?:[^`]|\n)*?)(?:```|\n\n)", doc)
+    assert invocations, "no worldgen.cli commands found — has the document changed shape?"
+
+    wrong: list[str] = []
+    for name, tail in invocations:
+        command = cli.commands.get(name)
+        if command is None:
+            wrong.append(f"no such command: {name}")
+            continue
+
+        real = {opt for param in command.params for opt in param.opts}
+        for flag in re.findall(r"(--[a-z][a-z0-9-]*)", tail):
+            if flag not in real:
+                wrong.append(f"{name} has no option {flag}")
+
+    assert not wrong, "docs/CAMPAIGN.md types options that do not exist: " + "; ".join(wrong)
+
+
 def test_it_documents_every_environment_variable_the_server_reads(doc):
     """The server's whole configuration surface is four `process.env` reads.
 
