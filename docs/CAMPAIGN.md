@@ -104,10 +104,13 @@ For hosting it somewhere rather than running it at home, see `deploy/README.md`.
 
    ```bash
    python3 -m worldgen.cli generate --seed 42 --width 64 --height 64 \
-       --model organic --output world.json
+       --model organic --output-dir ./output
    ```
 
-2. **Create the campaign** in the browser, uploading that file. You are handed the
+   The world lands at `./output/world.json`, alongside the rendered plates. At 64x64 that
+   file is about 2.5 MB, which is why `CAMPAIGN_BODY_LIMIT` is what it is.
+
+2. **Create the campaign** in the browser, uploading `./output/world.json`. You are handed the
    referee's link, and it is shown once — the token is stored only as a hash, so a lost
    link is reissued rather than recovered.
 
