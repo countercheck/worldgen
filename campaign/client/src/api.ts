@@ -78,16 +78,51 @@ async function request<T>(path: string, init: RequestInit = {}, token?: string):
   return body as T;
 }
 
-export function createCampaign(opts: {
+/**
+ * Compress a request body, where the browser can and the saving is worth having.
+ *
+ * `CompressionStream` is the platform's own gzip and needs nothing installed. It is not
+ * universal — an older browser, or any page not served over a secure context — so this
+ * returns the string unchanged when it is missing and the server accepts either. A
+ * capability test rather than a version test: the feature is present or it is not.
+ */
+async function gzipped(body: string): Promise<BodyInit> {
+  if (typeof CompressionStream === 'undefined') return body;
+  try {
+    const stream = new Blob([body]).stream().pipeThrough(new CompressionStream('gzip'));
+    return await new Response(stream).blob();
+  } catch {
+    // Compressing is an optimisation and never the point. A browser that has the class
+    // but fails on it should still be able to start a campaign.
+    return body;
+  }
+}
+
+/**
+ * The one request worth compressing.
+ *
+ * A create carries a generated world and nothing else here comes close: 32 MB for a
+ * 200x200 map against a few hundred bytes for an order. Gzipped that is 4.6 MB, which on
+ * a domestic upstream is the difference between a few seconds and most of a minute.
+ *
+ * The server reads either. `@fastify/compress` decompresses the request when the header
+ * says to, and enforces the body limit against the *decompressed* size — checked with a
+ * 0.29 MB body declaring 300 MB, which is refused with a 413 rather than allocated.
+ */
+export async function createCampaign(opts: {
   name: string;
   world: unknown;
   factions: readonly Faction[];
   seed?: number;
   strictness?: Strictness;
 }): Promise<CreateResult> {
+  const json = JSON.stringify(opts);
+  const body = await gzipped(json);
+
   return request<CreateResult>('/api/campaigns', {
     method: 'POST',
-    body: JSON.stringify(opts),
+    body,
+    ...(typeof body === 'string' ? {} : { headers: { 'content-encoding': 'gzip' } }),
   });
 }
 
