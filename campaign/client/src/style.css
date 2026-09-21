@@ -419,10 +419,9 @@ table.grid td:first-child {
   cursor: default;
 }
 
-.join button.primary {
-  border-color: var(--accent);
-  color: var(--accent);
-}
+/* The filled `button.primary` below owns this button's background. An earlier outline
+   treatment here set only the colour, which left accent text on the accent fill and a
+   button with nothing readable on it. */
 
 .join .file {
   display: inline-block;
