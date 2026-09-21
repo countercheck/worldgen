@@ -38,6 +38,7 @@ import {
 } from '@campaign/shared';
 
 import { openDb, type Db } from './db.js';
+import { gate } from './gate.js';
 import { CampaignStore, type CampaignRow } from './store.js';
 
 export const TOKEN_COOKIE = 'campaign_token';
@@ -91,6 +92,17 @@ export interface AppOptions {
    * disk. Everything else needs a token first.
    */
   readonly rateLimit?: { readonly global: number; readonly create: number } | false;
+
+  /**
+   * How many campaign creations may be in flight at once.
+   *
+   * One by default, because a create holds a whole generated world in memory twice — as
+   * uploaded bytes and as the parsed object graph — and on a 200x200 map that is a
+   * quarter of a gigabyte per request. Raising this multiplies the peak; it is the number
+   * to change if the container is given more memory, and the number to leave alone
+   * otherwise. See `gate.ts`.
+   */
+  readonly createConcurrency?: number;
 }
 
 /**
@@ -222,11 +234,32 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
 
   // ---- create -----------------------------------------------------------
 
+  // Taken before the body is read, released when the reply is done or the client gives
+  // up. `onRequest` is the only hook early enough to matter: a gate around the handler
+  // would let every concurrent upload buffer and parse first and then queue them once the
+  // memory had already been spent.
+  const creating = gate(opts.createConcurrency ?? 1);
+
   app.post(
     '/api/campaigns',
-    limits === false
-      ? {}
-      : { config: { rateLimit: { max: limits.create, timeWindow: '1 minute' } } },
+    {
+      ...(limits === false
+        ? {}
+        : { config: { rateLimit: { max: limits.create, timeWindow: '1 minute' } } }),
+      onRequest: async (req) => {
+        const done = await creating.enter();
+        // Hung on the request so both exits can find it, and so a release cannot be
+        // missed by a path that returns early.
+        (req as { releaseCreate?: () => void }).releaseCreate = done;
+      },
+      onResponse: async (req) => {
+        (req as { releaseCreate?: () => void }).releaseCreate?.();
+      },
+      onRequestAbort: async (req) => {
+        // A referee who closes the tab mid-upload must not hold the gate shut behind him.
+        (req as { releaseCreate?: () => void }).releaseCreate?.();
+      },
+    },
     async (req, reply) => {
       const body = req.body as {
         id?: string;

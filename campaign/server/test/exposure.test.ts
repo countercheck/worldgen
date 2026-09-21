@@ -182,3 +182,91 @@ describe('compressing what is sent', () => {
     await app.close();
   });
 });
+
+describe('one create at a time', () => {
+  const FACTIONS = [{ id: 'red', name: 'Red', color: '#c00' }];
+  const world = (): unknown =>
+    JSON.parse(
+      readFileSync(
+        new URL('../../shared/test/fixtures/world-32x32.json', import.meta.url),
+        'utf8',
+      ),
+    );
+
+  it('serialises creations, so two worlds are never parsed at once', async () => {
+    // The measurement behind this: one 200x200 create takes resident memory from 93 MB to
+    // 348 MB, and three at once reach 677 MB. On a container with a fixed limit that is
+    // not a slow request, it is the process dying and every socket with it.
+    const app = await buildApp({ db: openDb() });
+
+    let inFlight = 0;
+    let peak = 0;
+    app.addHook('preHandler', async (req) => {
+      if (req.url !== '/api/campaigns') return;
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      await new Promise((r) => setTimeout(r, 15));
+      inFlight -= 1;
+    });
+
+    const results = await Promise.all(
+      [1, 2, 3].map((n) =>
+        app.inject({
+          method: 'POST',
+          url: '/api/campaigns',
+          payload: { name: `c${n}`, world: world(), factions: FACTIONS },
+        }),
+      ),
+    );
+
+    expect(results.map((r) => r.statusCode)).toEqual([201, 201, 201]);
+    expect(peak, 'two creates were in flight together').toBe(1);
+    await app.close();
+  });
+
+  it('opens again after a create fails, rather than shutting for good', async () => {
+    // A release reached only on the happy path is the classic form of this bug, and it
+    // presents as creation hanging forever with nothing in the log.
+    const app = await buildApp({ db: openDb() });
+
+    const bad = await app.inject({
+      method: 'POST',
+      url: '/api/campaigns',
+      payload: { name: 'no world here' },
+    });
+    expect(bad.statusCode).toBe(400);
+
+    const good = await app.inject({
+      method: 'POST',
+      url: '/api/campaigns',
+      payload: { name: 'c', world: world(), factions: FACTIONS },
+    });
+    expect(good.statusCode, 'the gate stayed shut after a failure').toBe(201);
+    await app.close();
+  });
+
+  it('can be widened for a container with memory to spare', async () => {
+    const app = await buildApp({ db: openDb(), createConcurrency: 3 });
+    let inFlight = 0;
+    let peak = 0;
+    app.addHook('preHandler', async (req) => {
+      if (req.url !== '/api/campaigns') return;
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      await new Promise((r) => setTimeout(r, 15));
+      inFlight -= 1;
+    });
+
+    await Promise.all(
+      [1, 2, 3].map((n) =>
+        app.inject({
+          method: 'POST',
+          url: '/api/campaigns',
+          payload: { name: `c${n}`, world: world(), factions: FACTIONS },
+        }),
+      ),
+    );
+    expect(peak).toBe(3);
+    await app.close();
+  });
+});
