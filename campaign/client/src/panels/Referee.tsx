@@ -23,22 +23,7 @@ import { contestants } from '@campaign/shared';
 import type { Despatch, PendingDecision, Task, Unit } from '@campaign/shared';
 
 import { ageLabel, dayHour } from '../board.js';
-
-
-
-/** What each trigger means, in the referee's language rather than the engine's. */
-const TRIGGERS: Readonly<Record<string, string>> = {
-  enemy_contact: 'has come into contact',
-  crossing_impassable: 'cannot get across',
-  gunfire_heard: 'hears guns',
-  objective_reached: 'has arrived',
-  despatch_arrived: 'has received a despatch',
-  out_of_provisions: 'is out of provisions',
-  attacked: 'is under attack',
-  column_blocked: 'has run into a column in its way',
-  column_contested: 'is contesting a hex, and neither is the faster',
-  patrol_contact: 'has run into something',
-};
+import { copy, triggerLabel } from '../copy.js';
 
 export function DecisionQueue({
   decisions,
@@ -66,12 +51,10 @@ export function DecisionQueue({
 
   return (
     <section className="panel-section">
-      <h3>Wants a decision</h3>
+      <h3>{copy.referee.queueHeading}</h3>
 
       {open.length === 0 ? (
-        <p className="muted">
-          Nothing is waiting on you. Run the clock until something is.
-        </p>
+        <p className="muted">{copy.referee.queueEmpty}</p>
       ) : (
         <ul className="post">
           {open.map((d) => {
@@ -85,21 +68,22 @@ export function DecisionQueue({
                   {/* Traffic carries no commander: two columns meeting on a road is a
                       fact about the ground rather than about what anyone believes. */}
                   <span className="despatch-from">
-                    {d.commanderId === null ? 'The ground' : nameOf(d.commanderId)}
+                    {d.commanderId === null ? copy.referee.theGround : nameOf(d.commanderId)}
                   </span>
                   <span className="despatch-kind">{d.trigger.replace(/_/g, ' ')}</span>
                 </div>
 
                 <div className="despatch-when">
-                  {unit?.name ?? d.unitId} {TRIGGERS[d.trigger] ?? 'needs a decision'}
+                  {unit?.name ?? d.unitId}{' '}
+                  {triggerLabel(d.trigger)}
                 </div>
                 <div className="muted small">
                   {dayHour(d.atHours)} · {ageLabel(d.atHours, clockHours)}
                   {task === undefined
-                    ? ' · no standing task'
+                    ? copy.referee.noStandingTask
                     : task.complete
-                      ? ' · halted'
-                      : ` · marching on ${task.destination.q}, ${task.destination.r}`}
+                      ? copy.referee.taskHalted
+                      : copy.referee.taskMarching(task.destination.q, task.destination.r)}
                 </div>
 
                 <Context decision={d} />
@@ -117,7 +101,7 @@ export function DecisionQueue({
                         disabled={busyId === d.id}
                         onClick={() => onResolve(d, id)}
                       >
-                        Give it to {unitOf(id)?.name ?? id}
+                        {copy.referee.giveItTo(unitOf(id)?.name ?? id)}
                       </button>
                     ))}
                   </div>
@@ -129,10 +113,10 @@ export function DecisionQueue({
                     disabled={unit === undefined}
                     onClick={() => onOrder(d.unitId)}
                   >
-                    {ordering ? 'Pointing…' : 'March them somewhere'}
+                    {ordering ? copy.referee.pointing : copy.referee.march}
                   </button>
                   <button disabled={busyId === d.id} onClick={() => onResolve(d)}>
-                    Dealt with
+                    {copy.referee.dealtWith}
                   </button>
                 </div>
               </li>
@@ -167,8 +151,10 @@ function Context({ decision }: { decision: PendingDecision }) {
   if (c.contacts !== undefined && c.contacts.length > 0) {
     return (
       <p className="muted small">
-        {c.contacts.length === 1 ? 'A column' : `${c.contacts.length} columns`} seen at{' '}
-        {c.contacts.map((x) => `${x.coord.q}, ${x.coord.r}`).join(' · ')}
+        {copy.referee.columnsSeen(
+          c.contacts.length,
+          c.contacts.map((x) => `${x.coord.q}, ${x.coord.r}`).join(' · '),
+        )}
       </p>
     );
   }
@@ -179,11 +165,13 @@ function Context({ decision }: { decision: PendingDecision }) {
   if (decision.trigger === 'patrol_contact') {
     return (
       <p className="muted small">
-        {c.hostile === true ? 'Enemy' : 'Friendly'} {c.withUnitId ?? 'column'} at {c.at?.q},{' '}
-        {c.at?.r}.
-        {c.dice === undefined
-          ? ''
-          : ` Roll ${c.dice}d6: any 1 and the patrol is lost, otherwise it recoils 2 km.`}
+        {copy.referee.patrolMet(
+          c.hostile === true ? copy.referee.patrolHostile : copy.referee.patrolFriendly,
+          c.withUnitId ?? copy.referee.patrolSomething,
+          c.at?.q,
+          c.at?.r,
+        )}
+        {c.dice === undefined ? '' : copy.referee.patrolRoll(c.dice)}
       </p>
     );
   }
@@ -191,8 +179,10 @@ function Context({ decision }: { decision: PendingDecision }) {
   if (decision.trigger === 'despatch_arrived') {
     return (
       <p className="muted small">
-        From {c.from ?? 'somebody'}, written {dayHour(c.sentAtHours ?? decision.atHours)}.
-        Read it in his seat, then tell his formation where to go.
+        {copy.referee.despatchArrived(
+          c.from ?? copy.referee.somebody,
+          dayHour(c.sentAtHours ?? decision.atHours),
+        )}
       </p>
     );
   }
@@ -200,7 +190,7 @@ function Context({ decision }: { decision: PendingDecision }) {
   if (c.at !== undefined) {
     return (
       <p className="muted small">
-        Stopped at {c.at.q}, {c.at.r}, short of {c.destination?.q}, {c.destination?.r}.
+        {copy.referee.stoppedShort(c.at.q, c.at.r, c.destination?.q, c.destination?.r)}
       </p>
     );
   }
@@ -231,9 +221,9 @@ export function DespatchLog({
 
   return (
     <section className="panel-section">
-      <h3>The post</h3>
+      <h3>{copy.referee.logHeading}</h3>
       {ordered.length === 0 ? (
-        <p className="muted">Nobody has written to anybody.</p>
+        <p className="muted">{copy.referee.logEmpty}</p>
       ) : (
         <ul className="post">
           {ordered.map((d) => (
@@ -265,31 +255,32 @@ function Fate({ d }: { d: Despatch }) {
       const done = Math.floor(d.progress);
       return (
         <>
-          Riding — {done} of {d.route.length - 1} hexes.{' '}
-          {d.handed ? 'Handed over.' : 'The sender has no idea.'}
+          {copy.referee.riding(done, d.route.length - 1)}{' '}
+          {d.handed ? copy.referee.ridingHanded : copy.referee.ridingBlind}
         </>
       );
     }
     case 'delivered':
       return (
         <>
-          Delivered {dayHour(fate.atHours)}, after{' '}
-          {(fate.atHours - d.sentAtHours).toFixed(1)} h.
-          {d.handed ? ' Handed over on the spot.' : ''}
+          {copy.referee.delivered(
+            dayHour(fate.atHours),
+            (fate.atHours - d.sentAtHours).toFixed(1),
+          )}
+          {d.handed ? copy.referee.deliveredHanded : ''}
         </>
       );
     case 'lost':
       return (
         <>
-          Rider stopped by {fate.by} on {dayHour(fate.atHours)} — dice [{fate.dice.join(', ')}].
-          The paper went with him.
+          {copy.referee.lost(fate.by, dayHour(fate.atHours), fate.dice.join(', '))}
         </>
       );
     case 'captured':
       return (
         <>
-          <strong className="bad">Captured</strong> by {fate.by} on {dayHour(fate.atHours)} —
-          dice [{fate.dice.join(', ')}]. They have read it; the sender has not been told.
+          <strong className="bad">{copy.referee.capturedLabel}</strong>
+          {copy.referee.captured(fate.by, dayHour(fate.atHours), fate.dice.join(', '))}
         </>
       );
   }

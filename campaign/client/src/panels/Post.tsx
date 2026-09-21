@@ -24,6 +24,7 @@
 import type { ReceivedDespatch, SentDespatch } from '@campaign/shared';
 
 import { ageLabel, dayHour } from '../board.js';
+import { copy } from '../copy.js';
 
 
 
@@ -51,16 +52,13 @@ export function Post({
   return (
     <>
       <section className="panel-section">
-        <h3>In my hand</h3>
+        <h3>{copy.post.inboxHeading}</h3>
         <button className="primary wide" onClick={onWrite}>
-          Write a despatch
+          {copy.post.write}
         </button>
 
         {received.length === 0 ? (
-          <p className="muted">
-            Nothing has reached you. Anything on the road toward you is invisible until a
-            rider puts it in your hand.
-          </p>
+          <p className="muted">{copy.post.emptyInbox}</p>
         ) : (
           <ul className="post">
             {received.map((d) => (
@@ -74,27 +72,26 @@ export function Post({
 
                 {/* The hour it describes, first and large. Everything else is smaller. */}
                 <div className="despatch-when">
-                  Written {dayHour(d.sentAtHours)} · {ageLabel(d.sentAtHours, clockHours)}
+                  {copy.post.written(
+                    dayHour(d.sentAtHours),
+                    ageLabel(d.sentAtHours, clockHours),
+                  )}
                 </div>
                 <div className="muted small">
-                  Reached you {dayHour(d.receivedAtHours)}, after{' '}
-                  {(d.receivedAtHours - d.sentAtHours).toFixed(1)} h on the road
-                  {d.forwardedFrom === null ? '' : ` · forwarded from ${nameOf(d.forwardedFrom)}`}
+                  {copy.post.reached(
+                    dayHour(d.receivedAtHours),
+                    (d.receivedAtHours - d.sentAtHours).toFixed(1),
+                  )}
+                  {d.forwardedFrom === null ? '' : copy.post.forwardedFrom(nameOf(d.forwardedFrom))}
                 </div>
 
-                {d.superseded && (
-                  <div className="flag">
-                    Overtaken by a later order you already hold. Disregarded.
-                  </div>
-                )}
+                {d.superseded && <div className="flag">{copy.post.superseded}</div>}
 
                 {d.body.text !== undefined && <p className="prose-read">{d.body.text}</p>}
 
                 {d.body.contacts !== undefined && d.body.contacts.length > 0 && (
                   <div className="muted small">
-                    {d.body.contacts.length === 1
-                      ? '1 sighting attached'
-                      : `${d.body.contacts.length} sightings attached`}
+                    {copy.post.sightingsAttached(d.body.contacts.length)}
                     {d.body.contacts.map((c) => (
                       <span key={`${c.coord.q},${c.coord.r}`} className="tag">
                         {c.coord.q}, {c.coord.r}
@@ -105,14 +102,14 @@ export function Post({
 
                 <div className="despatch-actions">
                   {acknowledged(d.id) ? (
-                    <span className="muted small">Acknowledged</span>
+                    <span className="muted small">{copy.post.acknowledged}</span>
                   ) : (
                     <button disabled={busyId === d.id} onClick={() => onAcknowledge(d)}>
-                      Acknowledge
+                      {copy.post.acknowledge}
                     </button>
                   )}
                   <button disabled={busyId === d.id} onClick={() => onForward(d)}>
-                    Forward
+                    {copy.post.forward}
                   </button>
                 </div>
               </li>
@@ -122,29 +119,32 @@ export function Post({
       </section>
 
       <section className="panel-section">
-        <h3>Sent</h3>
+        <h3>{copy.post.sentHeading}</h3>
         {sent.length === 0 ? (
-          <p className="muted">You have written nothing yet.</p>
+          <p className="muted">{copy.post.emptyOutbox}</p>
         ) : (
           <ul className="post">
             {sent.map((d) => (
               <li key={d.id} className={`despatch sent kind-${d.kind}`}>
                 <div className="despatch-head">
-                  <span className="despatch-from">To {nameOf(d.to)}</span>
+                  <span className="despatch-from">{copy.post.to(nameOf(d.to))}</span>
                 </div>
                 <div className="despatch-when">
-                  Written {dayHour(d.sentAtHours)} · {ageLabel(d.sentAtHours, clockHours)}
+                  {copy.post.written(
+                    dayHour(d.sentAtHours),
+                    ageLabel(d.sentAtHours, clockHours),
+                  )}
                 </div>
 
                 {d.body.text !== undefined && <p className="prose-read">{d.body.text}</p>}
 
                 <div className="muted small">
                   {d.handed
-                    ? 'Handed over on the spot — their column was touching yours.'
+                    ? copy.post.handed
                     : d.acknowledged
-                      ? 'Acknowledged. It arrived.'
-                      : 'No acknowledgement. You have no way of knowing whether it arrived.'}
-                  {d.via.length > 0 && ` · Rider sent via ${d.via.length} waypoint(s) of yours.`}
+                      ? copy.post.arrived
+                      : copy.post.unknownFate}
+                  {d.via.length > 0 && copy.post.viaWaypoints(d.via.length)}
                 </div>
               </li>
             ))}

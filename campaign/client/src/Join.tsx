@@ -17,6 +17,7 @@ import { useState } from 'react';
 import { DEMO_FACTIONS, demoCommands, parseWorld, type Faction } from '@campaign/shared';
 
 import { createCampaign, fetchView, issueSeatToken, sendCommand, type Session } from './api.js';
+import { copy } from './copy.js';
 import { joinLink, type HeldTokens } from './session.js';
 
 export interface Joined {
@@ -41,27 +42,27 @@ async function startCampaign(
   populate: boolean,
   onProgress: (message: string) => void,
 ): Promise<Joined> {
-  onProgress('Uploading the world…');
+  onProgress(copy.join.uploadingWorld);
   const created = await createCampaign({ name, world: worldDoc, factions, seed: 20260906 });
   const session: Session = { campaignId: created.id, token: created.refereeToken };
 
   if (populate) {
     const commands = demoCommands(parseWorld(worldDoc));
     for (const [i, command] of commands.entries()) {
-      onProgress(`Forming the army… ${i + 1} of ${commands.length}`);
+      onProgress(copy.join.formingArmy(i + 1, commands.length));
       const result = await sendCommand(session, command);
       if (!result.ok) {
         // A refusal is worth showing rather than swallowing: it means the engine
         // disagrees with the scenario, which is a real answer about the world.
         throw new Error(
-          result.violations?.map((v) => v.message).join('; ') ?? 'a command was refused',
+          result.violations?.map((v) => v.message).join('; ') ?? copy.join.commandRefused,
         );
       }
     }
   }
 
   // One link per seat, so the referee can hand any of them to a player.
-  onProgress('Issuing join links…');
+  onProgress(copy.join.issuingLinks);
   const view = await fetchView(session);
   const held: HeldTokens = {};
   const seats: Record<string, { name: string; faction: string }> = {};
@@ -108,17 +109,17 @@ export function Join({ onJoined }: { onJoined: (joined: Joined) => void }) {
   };
 
   const startDemo = (): void => {
-    setBusy('Loading the demonstration world…');
+    setBusy(copy.join.loadingDemoWorld);
     void run(async () => {
       const { default: worldDoc } = await import(
         '../../shared/test/fixtures/world-32x32.json'
       );
-      return startCampaign('Demonstration', worldDoc, DEMO_FACTIONS, true, setBusy);
+      return startCampaign(copy.join.demoCampaignName, worldDoc, DEMO_FACTIONS, true, setBusy);
     });
   };
 
   const startFromFile = (file: File): void => {
-    setBusy('Reading the world…');
+    setBusy(copy.join.readingWorld);
     void run(async () => {
       const worldDoc: unknown = JSON.parse(await file.text());
       return startCampaign(
@@ -134,15 +135,11 @@ export function Join({ onJoined }: { onJoined: (joined: Joined) => void }) {
   if (links !== null && pending !== null) {
     return (
       <div className="join">
-        <h1>Campaign created</h1>
-        <p className="muted">
-          One link per seat. Send each man his own and keep the referee's — they are minted
-          once and stored only as hashes, so a lost link is reissued rather than looked up.
-          Two commanders on the same side see different wars, which is the point.
-        </p>
+        <h1>{copy.join.createdTitle}</h1>
+        <p className="muted">{copy.join.createdBlurb}</p>
         <ul className="links">
           <li>
-            <strong>Referee</strong>
+            <strong>{copy.join.refereeSeat}</strong>
             <code>{links.referee}</code>
           </li>
           {links.seats.map((seat) => (
@@ -153,7 +150,7 @@ export function Join({ onJoined }: { onJoined: (joined: Joined) => void }) {
           ))}
         </ul>
         <button className="primary" onClick={() => onJoined(pending)}>
-          Enter as referee
+          {copy.join.enterAsReferee}
         </button>
       </div>
     );
@@ -161,18 +158,14 @@ export function Join({ onJoined }: { onJoined: (joined: Joined) => void }) {
 
   return (
     <div className="join">
-      <h1>Campaign</h1>
-      <p className="muted">
-        A refereed Napoleonic campaign on a generated map. Each commander sees only what
-        their own troops have seen, and the map they are sent is masked on the server
-        before it leaves it.
-      </p>
+      <h1>{copy.join.title}</h1>
+      <p className="muted">{copy.join.blurb}</p>
 
       {busy !== null && <p className="busy">{busy}</p>}
       {error !== null && <p className="error">{error}</p>}
 
       <section>
-        <h3>Start a campaign</h3>
+        <h3>{copy.join.startHeading}</h3>
         <label className="file">
           <input
             type="file"
@@ -183,24 +176,20 @@ export function Join({ onJoined }: { onJoined: (joined: Joined) => void }) {
               if (file !== undefined) startFromFile(file);
             }}
           />
-          <span>Upload a world.json</span>
+          <span>{copy.join.uploadLabel}</span>
         </label>
         <p className="muted">
-          Generate one with <code>worldgen generate --model organic</code>. A classic
-          world loads, but carries no ford or bridge data, so every major river will be
-          impassable.
+          {copy.join.generateHintBefore} <code>{copy.join.generateCommand}</code>
+          {copy.join.generateHintAfter}
         </p>
         <button onClick={startDemo} disabled={busy !== null}>
-          Or run the demonstration
+          {copy.join.demoButton}
         </button>
       </section>
 
       <section>
-        <h3>Join one</h3>
-        <p className="muted">
-          Open the link your referee sent you. It carries your side's token in the URL
-          fragment, which never reaches the server and never appears in its logs.
-        </p>
+        <h3>{copy.join.joinHeading}</h3>
+        <p className="muted">{copy.join.joinBlurb}</p>
       </section>
     </div>
   );

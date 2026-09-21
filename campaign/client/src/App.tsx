@@ -47,6 +47,7 @@ import {
   type Session,
 } from './api.js';
 import { ageLabel, boardFrom, dayHour, timeOfDay } from './board.js';
+import { copy, hexes, prettify, triggerLabel } from './copy.js';
 import {
   correspondents as correspondentsOf,
   estimateRide,
@@ -415,7 +416,9 @@ function Console({
       setPostError(null);
       void setTask(session, unitId, destination, { via: route.slice(0, -1) }).then((result) => {
         if (!result.ok) {
-          setPostError(result.violations?.map((v) => v.message).join('; ') ?? 'refused');
+          setPostError(
+            result.violations?.map((v) => v.message).join('; ') ?? copy.orders.refused,
+          );
         }
       });
     },
@@ -425,9 +428,9 @@ function Console({
   if (error !== null) {
     return (
       <div className="join">
-        <h1>Cannot read that campaign</h1>
+        <h1>{copy.console.unreadableTitle}</h1>
         <p className="error">{error}</p>
-        <button onClick={onLeave}>Use a different link</button>
+        <button onClick={onLeave}>{copy.console.useAnotherLink}</button>
       </div>
     );
   }
@@ -435,8 +438,8 @@ function Console({
   if (view === null || board === null) {
     return (
       <div className="join">
-        <h1>Campaign</h1>
-        <p className="busy">Fetching your map…</p>
+        <h1>{copy.console.loadingTitle}</h1>
+        <p className="busy">{copy.console.loading}</p>
       </div>
     );
   }
@@ -473,10 +476,12 @@ function Console({
     view.task === null
       ? null
       : view.task.complete
-        ? `Halted at ${view.task.destination.q}, ${view.task.destination.r} — the march is done.`
-        : `Marching on ${view.task.destination.q}, ${view.task.destination.r}, ordered ${dayHour(
-            view.task.setAtHours,
-          )}.`;
+        ? copy.command.halted(view.task.destination.q, view.task.destination.r)
+        : copy.command.marchingOn(
+            view.task.destination.q,
+            view.task.destination.r,
+            dayHour(view.task.setAtHours),
+          );
 
   /**
    * Every identity this browser actually holds a token for.
@@ -489,7 +494,12 @@ function Console({
     Object.keys(joined.held).length === 0
       ? []
       : [
-          { id: 'referee', label: 'Referee', token: joined.ownToken, color: undefined },
+          {
+            id: 'referee',
+            label: copy.console.refereeSeat,
+            token: joined.ownToken,
+            color: undefined,
+          },
           ...Object.entries(joined.held).map(([commanderId, token]) => {
             // The man's name, not his id. A referee switching seats is choosing a person
             // to be, and "kellermann" is the engine's bookkeeping.
@@ -527,9 +537,11 @@ function Console({
         <button
           className={`wash-toggle${roster ? ' active' : ''}`}
           onClick={() => setRoster((r) => !r)}
-          title="Every formation, and what it is doing"
+          title={copy.console.orderOfBattleHint}
         >
-          Order of battle · {isReferee ? view.units.length : view.reports.length + view.units.length}
+          {copy.console.orderOfBattle(
+            isReferee ? view.units.length : view.reports.length + view.units.length,
+          )}
         </button>
 
         <label className="toggle">
@@ -539,7 +551,7 @@ function Console({
             onChange={(e) => setShowReach(e.target.checked)}
             disabled={selectedUnit === null}
           />
-          Reach of selected, 10 h
+          {copy.console.reachToggle}
         </label>
 
         {/* Only where there is something to wash. A referee is sent no visible set, so
@@ -547,7 +559,7 @@ function Console({
         {!isReferee && (
           <button
             className="wash-toggle"
-            title="What is under observation right now (v)"
+            title={copy.console.washHint}
             onClick={() => {
               const next = nextWash(washMode);
               saveWash(next);
@@ -555,10 +567,10 @@ function Console({
             }}
           >
             {washMode === 'three'
-              ? 'Watched · marched · unknown'
+              ? copy.console.washThree
               : washMode === 'two'
-                ? 'Watched only'
-                : 'No shading'}
+                ? copy.console.washTwo
+                : copy.console.washNone}
           </button>
         )}
 
@@ -566,28 +578,28 @@ function Console({
           {dayHour(view.campaign.clockHours)}
           {isReferee && (
             <span className="clock-controls">
-              <button onClick={() => advance(1)}>+1 h</button>
-              <button onClick={() => advance(6)}>+6 h</button>
+              <button onClick={() => advance(1)}>{copy.console.advanceHour}</button>
+              <button onClick={() => advance(6)}>{copy.console.advanceSix}</button>
               {/* The control a referee actually uses: run forward and stop the moment
                   something needs a human, rather than guessing at an interval and finding
                   out afterwards that two corps met each other ninety minutes in. */}
               <button
                 className="primary"
-                title="Advance until something needs a decision"
+                title={copy.console.runHint}
                 onClick={() => advance(48, true)}
               >
-                Run
+                {copy.console.run}
               </button>
               {/* Beside the clock, because declaring a battle is a thing a referee does
                   the moment the clock stops for a contact. */}
               <button
                 className={ordering === DECLARE_BATTLE ? 'primary' : undefined}
-                title="Paint the ground being fought over"
+                title={copy.console.battleHint}
                 onClick={() =>
                   setOrdering((o) => (o === DECLARE_BATTLE ? null : DECLARE_BATTLE))
                 }
               >
-                {ordering === DECLARE_BATTLE ? 'Done' : 'Battle'}
+                {ordering === DECLARE_BATTLE ? copy.console.battleDone : copy.console.battle}
                 {board.battle.size > 0 && ordering !== DECLARE_BATTLE
                   ? ` · ${board.battle.size}`
                   : ''}
@@ -596,43 +608,38 @@ function Console({
           )}
         </div>
 
-        <span className={`live live-${live}`} title={`Live updates ${live}`}>
-          {live === 'open' ? 'live' : 'reconnecting'}
+        <span className={`live live-${live}`} title={copy.console.liveHint(live)}>
+          {live === 'open' ? copy.console.liveOpen : copy.console.liveReconnecting}
         </span>
       </header>
 
       {isReferee && halted !== null && (
         <div className="notice halted">
-          The clock stopped at {dayHour(halted.atHours)}:{' '}
-          {halted.commanderId === null ? '' : `${nameOf(halted.commanderId)}'s `}
-          {board.units.get(halted.unitId)?.name ?? halted.unitId}{' '}
-          {halted.trigger.replace(/_/g, ' ')}. It is in the queue below.
+          {copy.notices.clockStopped(
+            dayHour(halted.atHours),
+            halted.commanderId === null ? '' : `${nameOf(halted.commanderId)}'s `,
+            board.units.get(halted.unitId)?.name ?? halted.unitId,
+            triggerLabel(halted.trigger),
+          )}
           <button className="dismiss" onClick={() => setHalted(null)}>
-            Dismiss
+            {copy.console.dismiss}
           </button>
         </div>
       )}
 
       {isReferee && ordering === DECLARE_BATTLE && (
-        <div className="notice picking">
-          Point at the ground being fought over; point again to take it back out. Traffic
-          rules stop applying there — formations in a battle are intermingled, and this
-          map does not resolve what happens between them. Escape when the field is drawn.
-        </div>
+        <div className="notice picking">{copy.notices.pickBattle}</div>
       )}
 
       {isReferee && ordering === ORDER_OF_BATTLE && (
-        <div className="notice picking">
-          Point at the ground the new formation is to stand on. Escape to think again.
-        </div>
+        <div className="notice picking">{copy.notices.pickForRaise}</div>
       )}
 
       {isReferee && ordering !== null && ordering.startsWith(PLACE_PREFIX) && (
         <div className="notice picking">
-          Point at the ground{' '}
-          {board.units.get(ordering.slice(PLACE_PREFIX.length))?.name ?? 'it'} is to stand
-          on. It goes there without marching, and the log records that you moved it.
-          Escape to think again.
+          {copy.notices.pickForPlace(
+            board.units.get(ordering.slice(PLACE_PREFIX.length))?.name ?? 'it',
+          )}
         </div>
       )}
 
@@ -642,21 +649,17 @@ function Console({
         ordering !== DECLARE_BATTLE &&
         !ordering.startsWith(PLACE_PREFIX) && (
         <div className="notice picking">
-          Point at the ground {board.units.get(ordering)?.name ?? ordering} is to march to.
-          Point again to insist they go by way of somewhere first — the last place you name
-          is where they are to end up. Places, not a route: between them they will find
-          their own way, and discover what is in it when they get there. Escape to think
-          again.
+          {copy.notices.pickForMarch(board.units.get(ordering)?.name ?? ordering)}
         </div>
       )}
 
       {!isReferee && view.commander !== null && (
         <div className="notice">
-          You are {view.commander.name}, riding with{' '}
-          {board.units.get(view.commander.unitId)?.name ?? view.commander.unitId}. You can
-          see {board.visible.size} hexes from where you stand, and the enemy only within
-          them. Every other formation below — your own corps included — is where it was
-          when you last had word, which is not where it is now.
+          {copy.notices.whoYouAre(
+            view.commander.name,
+            board.units.get(view.commander.unitId)?.name ?? view.commander.unitId,
+            board.visible.size,
+          )}
         </div>
       )}
 
@@ -696,7 +699,8 @@ function Console({
                   .then((result) => {
                     if (!result.ok) {
                       setPostError(
-                        result.violations?.map((v) => v.message).join('; ') ?? 'refused',
+                        result.violations?.map((v) => v.message).join('; ') ??
+                          copy.orders.refused,
                       );
                     } else {
                       setPlacing(null);
@@ -711,7 +715,8 @@ function Console({
                   .then((result) => {
                     if (!result.ok) {
                       setPostError(
-                        result.violations?.map((v) => v.message).join('; ') ?? 'refused',
+                        result.violations?.map((v) => v.message).join('; ') ??
+                          copy.orders.refused,
                       );
                     }
                   })
@@ -723,8 +728,10 @@ function Console({
         taskOf={(unitId) => {
           const task = view.tasks.find((t) => t.unitId === unitId);
           if (task === undefined) return view.task?.unitId === unitId ? taskLine : null;
-          if (task.complete) return `arrived ${task.destination.q}, ${task.destination.r}`;
-          return `marching on ${task.destination.q}, ${task.destination.r}`;
+          if (task.complete) {
+            return copy.orders.taskArrived(task.destination.q, task.destination.r);
+          }
+          return copy.orders.taskMarching(task.destination.q, task.destination.r);
         }}
       />
 
@@ -754,7 +761,8 @@ function Console({
                     void teleportUnit(session, unitId, [hex]).then((result) => {
                       if (!result.ok) {
                         setPostError(
-                          result.violations?.map((v) => v.message).join('; ') ?? 'refused',
+                          result.violations?.map((v) => v.message).join('; ') ??
+                            copy.orders.refused,
                         );
                       }
                     });
@@ -768,7 +776,8 @@ function Console({
                       (result) => {
                         if (!result.ok) {
                           setPostError(
-                            result.violations?.map((v) => v.message).join('; ') ?? 'refused',
+                            result.violations?.map((v) => v.message).join('; ') ??
+                              copy.orders.refused,
                           );
                         }
                       },
@@ -822,15 +831,13 @@ function Console({
 
               {writing === null ? (
                 <section className="panel-section">
-                  <h3>Despatches</h3>
+                  <h3>{copy.referee.despatchesHeading}</h3>
                   <div className="despatch-actions">
-                    <button onClick={() => setWriting({})}>Write on a commander&rsquo;s behalf</button>
+                    <button onClick={() => setWriting({})}>
+                      {copy.referee.writeOnBehalf}
+                    </button>
                   </div>
-                  <p className="muted small">
-                    For the men you run yourself, and for a player who hands you an order on
-                    paper. It goes by rider like any other and can be intercepted like any
-                    other.
-                  </p>
+                  <p className="muted small">{copy.referee.writeOnBehalfBlurb}</p>
                 </section>
               ) : (
                 <Composer
@@ -910,7 +917,7 @@ function Console({
                   void write(
                     d.from,
                     'acknowledgement',
-                    { text: `Received your despatch of ${dayHour(d.sentAtHours)}.` },
+                    { text: copy.post.acknowledgementText(dayHour(d.sentAtHours)) },
                     { inReplyTo: d.id },
                   ).finally(() => setBusyId(null));
                 }}
@@ -936,7 +943,7 @@ function Console({
             <section className="panel-section">
               {/* Not the unit's name: the panel below already carries that, and a heading
                   repeated twice reads as two sections about different things. */}
-              <h3>Orders</h3>
+              <h3>{copy.orders.heading}</h3>
               <div className="despatch-actions">
                 <button
                   className={ordering === shownUnit.id ? 'primary' : ''}
@@ -945,10 +952,12 @@ function Console({
                     setPicked([]);
                   }}
                 >
-                  {ordering === shownUnit.id ? 'Pointing…' : 'March them somewhere'}
+                  {ordering === shownUnit.id ? copy.orders.pointing : copy.orders.march}
                 </button>
                 {view.tasks.some((t) => t.unitId === shownUnit.id) && (
-                  <button onClick={() => void clearTask(session, shownUnit.id)}>Halt</button>
+                  <button onClick={() => void clearTask(session, shownUnit.id)}>
+                    {copy.orders.halt}
+                  </button>
                 )}
                 {/* The rules give patrols to Scout. The button says what the next one
                     costs, because the fourth is not free and the cost is permanent. */}
@@ -957,9 +966,9 @@ function Console({
                     setOrdering(PLACE_PREFIX + shownUnit.id);
                     setPicked([]);
                   }}
-                  title="Put it there without marching it"
+                  title={copy.orders.placeHint}
                 >
-                  Place
+                  {copy.orders.place}
                 </button>
                 {shownUnit.traits.includes('scout') && shownUnit.parentUnitId == null && (
                   <button
@@ -968,15 +977,16 @@ function Console({
                       void detachPatrol(session, shownUnit.id).then((result) => {
                         if (!result.ok) {
                           setPostError(
-                            result.violations?.map((v) => v.message).join('; ') ?? 'refused',
+                            result.violations?.map((v) => v.message).join('; ') ??
+                              copy.orders.refused,
                           );
                         }
                       });
                     }}
                   >
-                    Send out a patrol
+                    {copy.orders.sendPatrol}
                     {patrolsOf(shownUnit.id).length >= cfg.freePatrols
-                      ? ` · ${cfg.extraPatrolCost} men`
+                      ? copy.orders.patrolCost(cfg.extraPatrolCost)
                       : ''}
                   </button>
                 )}
@@ -985,13 +995,15 @@ function Console({
               {ordering === shownUnit.id && (
                 <div className="picked-route">
                   {picked.length === 0 ? (
-                    <p className="muted">Nowhere named yet.</p>
+                    <p className="muted">{copy.orders.nowhereNamed}</p>
                   ) : (
                     <ol>
                       {picked.map((hex, i) => (
                         <li key={key(hex)} className={i === picked.length - 1 ? 'destination' : ''}>
                           {key(hex)}
-                          {i === picked.length - 1 ? ' — where they are to be' : ' — by way of'}
+                          {i === picked.length - 1
+                            ? copy.orders.destinationSuffix
+                            : copy.orders.waypointSuffix}
                         </li>
                       ))}
                     </ol>
@@ -1002,10 +1014,13 @@ function Console({
                       disabled={picked.length === 0}
                       onClick={() => order(shownUnit.id, picked)}
                     >
-                      March
+                      {copy.orders.confirmMarch}
                     </button>
-                    <button disabled={picked.length === 0} onClick={() => setPicked((r) => r.slice(0, -1))}>
-                      Undo last
+                    <button
+                      disabled={picked.length === 0}
+                      onClick={() => setPicked((r) => r.slice(0, -1))}
+                    >
+                      {copy.orders.undoLast}
                     </button>
                     <button
                       onClick={() => {
@@ -1013,7 +1028,7 @@ function Console({
                         setPicked([]);
                       }}
                     >
-                      Cancel
+                      {copy.orders.cancel}
                     </button>
                   </div>
                 </div>
@@ -1032,7 +1047,10 @@ function Console({
                   setPostError(null);
                   void setFormation(session, shownUnit.id, formation).then((result) => {
                     if (!result.ok) {
-                      setPostError(result.violations?.map((v) => v.message).join('; ') ?? 'refused');
+                      setPostError(
+                        result.violations?.map((v) => v.message).join('; ') ??
+                          copy.orders.refused,
+                      );
                     }
                   });
                 }}
@@ -1089,16 +1107,13 @@ function Console({
 
           {hovered === null && shownId === null && (
             <section className="panel-section">
-              <h3>Nothing under the cursor</h3>
-              <p className="muted">
-                Move over the map to read the ground, or over a column to read the unit
-                standing on it. Click a unit to keep it in view.
-              </p>
+              <h3>{copy.idle.heading}</h3>
+              <p className="muted">{copy.idle.blurb}</p>
 
               {/* A commander has his formations above, in the panel that also carries
                   their hours. Repeating them here would be the same list twice, once
                   without the thing that makes it mean anything. */}
-              {isReferee && <h3>Formations</h3>}
+              {isReferee && <h3>{copy.idle.formations}</h3>}
               <ul className="unit-list">
                 {(isReferee ? [...board.units.values()] : []).map((u) => (
                   <li key={u.id}>
@@ -1110,8 +1125,7 @@ function Console({
                       {u.name}
                       <span className="muted">
                         {' '}
-                        · {occupied(u, 'road', cfg.footprint).length}{' '}
-                        {occupied(u, 'road', cfg.footprint).length === 1 ? 'hex' : 'hexes'}
+                        · {hexes(occupied(u, 'road', cfg.footprint).length)}
                       </span>
                     </button>
                   </li>
@@ -1120,7 +1134,7 @@ function Console({
 
               {board.contacts.size > 0 && (
                 <>
-                  <h3>Contacts</h3>
+                  <h3>{copy.idle.contacts}</h3>
                   <ul className="unit-list">
                     {[...board.contacts.values()].map((c) => (
                       <li key={c.id}>
@@ -1129,7 +1143,7 @@ function Console({
                             className="swatch small ghost"
                             style={{ background: board.factions.get(c.faction)?.color }}
                           />
-                          {c.corps ?? `Contact ${c.id}`}
+                          {c.corps ?? copy.idle.contactLabel(c.id)}
                           <span className="muted">
                             {' '}
                             · {ageLabel(c.seenAtHours, clock)}
@@ -1141,12 +1155,11 @@ function Console({
                 </>
               )}
 
-              <h3>This campaign</h3>
+              <h3>{copy.idle.campaignHeading}</h3>
               <p className="muted">
-                Your link:{' '}
-                <code className="link">{joinLink(session)}</code>
+                {copy.idle.yourLink} <code className="link">{joinLink(session)}</code>
               </p>
-              <button onClick={onLeave}>Leave</button>
+              <button onClick={onLeave}>{copy.idle.leave}</button>
             </section>
           )}
         </aside>
@@ -1187,9 +1200,12 @@ function FormationControl({
     <div className="formation-control">
       {change != null && (
         <p className="muted small">
-          {pretty(unit.formation)} → {pretty(change.to)}, ready at{' '}
-          {timeOfDay(change.completesAtHours)} (
-          {(change.completesAtHours - clockHours).toFixed(1)} h to go).
+          {copy.formation.changing(
+            prettify(unit.formation),
+            prettify(change.to),
+            timeOfDay(change.completesAtHours),
+            (change.completesAtHours - clockHours).toFixed(1),
+          )}
         </p>
       )}
 
@@ -1203,10 +1219,12 @@ function FormationControl({
               className={current ? 'primary' : ''}
               disabled={current}
               onClick={() => onSet(to)}
-              title={current ? 'Already in this formation' : `${hours} h to change`}
+              title={
+                current ? copy.formation.alreadyIn : copy.formation.changeHint(hours)
+              }
             >
-              {pretty(to)}
-              {current ? '' : ` · ${hours} h`}
+              {prettify(to)}
+              {current ? '' : copy.formation.cost(hours)}
             </button>
           );
         })}
@@ -1214,8 +1232,6 @@ function FormationControl({
     </div>
   );
 }
-
-const pretty = (f: Formation): string => f.charAt(0).toUpperCase() + f.slice(1);
 
 function TaskLine({
   task,
@@ -1225,12 +1241,12 @@ function TaskLine({
   plan: { route: readonly Hex[]; hours: number } | undefined;
 }) {
   if (task === undefined) {
-    return <p className="muted small">No standing task. They stay where they are.</p>;
+    return <p className="muted small">{copy.orders.noTask}</p>;
   }
   if (task.complete) {
     return (
       <p className="muted small">
-        Arrived at {task.destination.q}, {task.destination.r}. Nothing further ordered.
+        {copy.orders.arrived(task.destination.q, task.destination.r)}
       </p>
     );
   }
@@ -1240,17 +1256,20 @@ function TaskLine({
   return (
     <>
       <p className="muted small">
-        Marching on {task.destination.q}, {task.destination.r}, ordered{' '}
-        {dayHour(task.setAtHours)}.
+        {copy.orders.marchingOn(
+          task.destination.q,
+          task.destination.r,
+          dayHour(task.setAtHours),
+        )}
       </p>
 
       {/* The route as it stands, not as it was ordered: it is recomputed from where the
           column is now, so it answers "where will they be" rather than "what did I say". */}
       {plan !== undefined && (
         <p className="muted small">
-          {plan.route.length - 1} hexes still to march, about {plan.hours.toFixed(1)} h at
-          the head.
-          {ahead.length > 0 && ` By way of ${ahead.map((h) => `${h.q}, ${h.r}`).join('; then ')}.`}
+          {copy.orders.routeAhead(plan.route.length - 1, plan.hours.toFixed(1))}
+          {ahead.length > 0 &&
+            copy.orders.byWayOf(ahead.map((h) => `${h.q}, ${h.r}`).join('; then '))}
         </p>
       )}
     </>

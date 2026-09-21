@@ -10,6 +10,8 @@
 
 import type { Unit, UnitReport } from '@campaign/shared';
 
+import { copy } from './copy.js';
+
 /** One row, from either source, reduced to what both can say. */
 export interface RosterLine {
   readonly unitId: string;
@@ -86,14 +88,10 @@ export function rosterGroups(input: {
   }
 
   return [
-    { title: 'With you', note: null, lines: live },
+    { title: copy.roster.groupWithYou, note: null, lines: live },
     {
-      title: 'Under your command',
-      note:
-        heard.length === 0
-          ? null
-          : 'As you last heard. Every hour below is when word reached you, not where they ' +
-            'are now.',
+      title: copy.roster.groupUnderCommand,
+      note: heard.length === 0 ? null : copy.roster.groupUnderCommandNote,
       lines: heard,
     },
   ];

@@ -31,6 +31,7 @@ import {
 import type { ReactNode } from 'react';
 
 import { ageLabel, dayHour } from '../board.js';
+import { copy } from '../copy.js';
 import { rosterGroups, type RosterLine } from '../roster.js';
 
 export function Roster({
@@ -72,11 +73,11 @@ export function Roster({
   const groups = rosterGroups({ role, units, reports, factionName });
 
   return (
-    <aside className="roster" aria-label="Order of battle">
+    <aside className="roster" aria-label={copy.roster.label}>
       <header className="roster-head">
-        <h2>Order of battle</h2>
+        <h2>{copy.roster.heading}</h2>
         <button className="dismiss" onClick={onClose}>
-          Close
+          {copy.roster.close}
         </button>
       </header>
 
@@ -92,16 +93,16 @@ export function Roster({
             {group.note !== null && <p className="muted small">{group.note}</p>}
 
             {group.lines.length === 0 ? (
-              <p className="muted small">Nothing here.</p>
+              <p className="muted small">{copy.roster.empty}</p>
             ) : (
               <table className="roster-table">
                 <thead>
                   <tr>
-                    <th>Formation</th>
-                    <th>Where</th>
-                    <th>Strength</th>
-                    <th>Fatigue</th>
-                    <th>Doing</th>
+                    <th>{copy.roster.columnFormation}</th>
+                    <th>{copy.roster.columnWhere}</th>
+                    <th>{copy.roster.columnStrength}</th>
+                    <th>{copy.roster.columnFatigue}</th>
+                    <th>{copy.roster.columnDoing}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -124,7 +125,7 @@ export function Roster({
                           />
                           {line.name}
                           {line.corps !== null && <span className="muted"> · {line.corps}</span>}
-                          {patrol && <span className="muted"> · patrol</span>}
+                          {patrol && <span className="muted">{copy.roster.patrol}</span>}
                         </td>
                         <td className="num">
                           {line.at.q}, {line.at.r}
@@ -138,13 +139,15 @@ export function Roster({
                           {/* A patrol has no strength in the sense this column means, and
                               a zero here would read as a formation destroyed. */}
                           {patrol ? (
-                            <span className="muted">detachment</span>
+                            <span className="muted">{copy.roster.detachment}</span>
                           ) : (
                             <>
                               {line.paperStrength.toLocaleString()}
                               {line.unit !== null && (
                                 <div className="muted small">
-                                  {presentUnderArms(line.unit).toLocaleString()} under arms
+                                  {copy.roster.underArms(
+                                    presentUnderArms(line.unit).toLocaleString(),
+                                  )}
                                 </div>
                               )}
                             </>
@@ -152,13 +155,16 @@ export function Roster({
                         </td>
                         <td className="num">
                           {patrol ? (
-                            <span className="muted">—</span>
+                            <span className="muted">{copy.roster.notTracked}</span>
                           ) : (
                             <>
                               {line.fatigue}
                               {line.unit !== null && (
                                 <div className="muted small">
-                                  morale {line.unit.morale}/{maxMorale(line.unit, cfg.maxMorale)}
+                                  {copy.roster.morale(
+                                    line.unit.morale,
+                                    maxMorale(line.unit, cfg.maxMorale),
+                                  )}
                                 </div>
                               )}
                             </>
@@ -168,7 +174,7 @@ export function Roster({
                           {line.formation}
                           {task !== null && <div className="muted small">{task}</div>}
                           {line.unitId === ownUnitId && (
-                            <div className="muted small">with you</div>
+                            <div className="muted small">{copy.roster.withYou}</div>
                           )}
                         </td>
                       </tr>

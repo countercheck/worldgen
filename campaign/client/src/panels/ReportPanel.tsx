@@ -12,12 +12,11 @@
  */
 
 import { ageHours, ageLabel } from '../board.js';
+import { copy, prettify } from '../copy.js';
 
 import type { PublicFaction, UnitReport } from '@campaign/shared';
 
 import { Row, Section } from './parts.js';
-
-const pretty = (s: string): string => s.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
 
 export function ReportPanel({
   report,
@@ -35,7 +34,7 @@ export function ReportPanel({
       <div className="unit-head">
         <span className="swatch ghost" style={{ background: faction?.color ?? '#888' }} />
         <div>
-          <div className="unit-kind">Last report</div>
+          <div className="unit-kind">{copy.report.lastReport}</div>
           <div className="muted">
             {faction?.name ?? report.faction}
             {report.corps === null ? '' : ` · ${report.corps}`}
@@ -44,22 +43,20 @@ export function ReportPanel({
       </div>
 
       <Row
-        label="Reporting hour"
+        label={copy.report.reportingHour}
         value={`${report.atHours} · ${ageLabel(report.atHours, clockHours)}`}
-        hint="The hour this describes, which is not necessarily the hour it reached you."
+        hint={copy.report.reportingHourHint}
       />
-      <Row label="Stood at" value={`${report.head.q}, ${report.head.r}`} />
-      <Row label="PaperStrength" value={report.paperStrength.toLocaleString()} />
-      <Row label="Fatigue" value={`${Math.round(report.fatigue)} of 100`} />
-      <Row label="Provisions" value={String(report.provisions)} />
-      <Row label="Formation" value={pretty(report.formation)} />
+      <Row label={copy.report.stoodAt} value={`${report.head.q}, ${report.head.r}`} />
+      <Row label={copy.report.paperStrength} value={report.paperStrength.toLocaleString()} />
+      <Row
+        label={copy.report.fatigue}
+        value={copy.report.fatigueValue(Math.round(report.fatigue))}
+      />
+      <Row label={copy.report.provisions} value={String(report.provisions)} />
+      <Row label={copy.report.formation} value={prettify(report.formation)} />
 
-      {age > 0 && (
-        <p className="muted">
-          Where they are now is not something you know. At infantry pace they could be
-          anywhere within {Math.round(age * 3)} km of that hex by now.
-        </p>
-      )}
+      {age > 0 && <p className="muted">{copy.report.drift(Math.round(age * 3))}</p>}
     </Section>
   );
 }

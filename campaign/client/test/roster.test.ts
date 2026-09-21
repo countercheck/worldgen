@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { Unit, UnitReport } from '@campaign/shared';
 
+import { copy } from '../src/copy.js';
 import { rosterGroups } from '../src/roster.js';
 
 const unit = (id: string, faction: string, at = { q: 1, r: 1 }): Unit => ({
@@ -94,7 +95,10 @@ describe('a commander’s order of battle', () => {
       factionName,
     });
 
-    expect(groups.map((g) => g.title)).toEqual(['With you', 'Under your command']);
+    expect(groups.map((g) => g.title)).toEqual([
+      copy.roster.groupWithYou,
+      copy.roster.groupUnderCommand,
+    ]);
     expect(groups[0]!.lines.map((l) => l.unitId)).toEqual(['red-1']);
     expect(groups[1]!.lines.map((l) => l.unitId)).toEqual(['red-2', 'red-3']);
   });

@@ -11,21 +11,11 @@
  * sighting is a presence, and it takes a patrol closing to identify a formation.
  */
 
-import type { PublicContact, IntelLevel } from '@campaign/shared';
+import type { PublicContact } from '@campaign/shared';
+
+import { copy, prettify } from '../copy.js';
 
 import { Row, Section } from './parts.js';
-
-/** What a report at each grade actually told you. Straight from the patrol table. */
-const INTEL_MEANING: Record<IntelLevel, string> = {
-  1: 'Something is there. Nothing more.',
-  2: 'Presence and position.',
-  3: 'Presence, position and the direction of march.',
-  4: 'Rough strength.',
-  5: 'The arm — horse, foot or guns.',
-  6: 'The formation identified by name.',
-};
-
-const pretty = (s: string): string => s.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
 
 export function ContactPanel({
   contact,
@@ -41,36 +31,30 @@ export function ContactPanel({
   const age = Math.max(0, clockHours - contact.seenAtHours);
 
   return (
-    <Section title={`Contact ${contact.id}`}>
+    <Section title={copy.contact.title(contact.id)}>
       <div className="unit-head">
         <span className="swatch" style={{ background: color }} />
         <div>
-          <div className="unit-name">{contact.corps ?? 'Unidentified'}</div>
+          <div className="unit-name">{contact.corps ?? copy.contact.unidentified}</div>
           <div className="muted">{factionName}</div>
         </div>
       </div>
 
-      <Row label="Seen at" value={`${contact.coord.q}, ${contact.coord.r}`} />
-      <Row label="Reported" value={age === 0 ? 'Just now' : `${age.toFixed(1)} h ago`} />
+      <Row label={copy.contact.seenAt} value={`${contact.coord.q}, ${contact.coord.r}`} />
       <Row
-        label="Arm"
-        value={contact.kind === null ? 'Unknown' : pretty(contact.kind)}
-        hint="Only a close patrol reports whether a formation is horse, foot or guns."
+        label={copy.contact.reported}
+        value={age === 0 ? copy.contact.justNow : copy.contact.ago(age.toFixed(1))}
       />
-      <Row label="Report grade" value={`${contact.intelLevel} of 6`} />
+      <Row
+        label={copy.contact.arm}
+        value={contact.kind === null ? copy.contact.armUnknown : prettify(contact.kind)}
+        hint={copy.contact.armHint}
+      />
+      <Row label={copy.contact.grade} value={copy.contact.gradeValue(contact.intelLevel)} />
 
-      <p className="muted">{INTEL_MEANING[contact.intelLevel]}</p>
-      {age > 0 && (
-        <p className="muted">
-          This is where it was, not where it is. At infantry pace it could be anywhere
-          within {Math.round(age * 3)} km of that hex by now.
-        </p>
-      )}
-      <p className="muted small">
-        Your staff&rsquo;s own number for this sighting. Whether it is the same body of
-        troops as any other contact on your map is your judgement, not a fact you have
-        been given.
-      </p>
+      <p className="muted">{copy.contact.intel[contact.intelLevel]}</p>
+      {age > 0 && <p className="muted">{copy.contact.drift(Math.round(age * 3))}</p>}
+      <p className="muted small">{copy.contact.yourOwnNumber}</p>
     </Section>
   );
 }

@@ -15,6 +15,7 @@
 import type { Unit, UnitReport } from '@campaign/shared';
 
 import { ageHours, ageLabel } from '../board.js';
+import { copy } from '../copy.js';
 
 export function Command({
   own,
@@ -34,20 +35,20 @@ export function Command({
 }) {
   return (
     <section className="panel-section">
-      <h3>Under my command</h3>
+      <h3>{copy.command.heading}</h3>
 
       {own !== null && (
         <button className="formation with-me" onClick={() => onSelect(own.id)}>
           <span className="swatch small" style={{ background: colorOf(own.faction) }} />
           <span className="formation-name">{own.name}</span>
-          <span className="formation-age now">with me</span>
+          <span className="formation-age now">{copy.command.withMe}</span>
         </button>
       )}
 
       {taskLine !== null && <p className="muted small">{taskLine}</p>}
 
       {reports.length === 0 ? (
-        <p className="muted">Nobody else answers to you.</p>
+        <p className="muted">{copy.command.nobodyElse}</p>
       ) : (
         <>
           <ul className="unit-list">
@@ -65,9 +66,7 @@ export function Command({
             ))}
           </ul>
           <p className="muted small">
-            Every hour above is when you last heard, not where they are. At infantry pace
-            the oldest of them could be {Math.round(worstDrift(reports, clockHours))} km from
-            the hex you are looking at.
+            {copy.command.drift(Math.round(worstDrift(reports, clockHours)))}
           </p>
         </>
       )}
