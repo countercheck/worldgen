@@ -26,6 +26,7 @@ import {
   type UnitKind,
 } from '@campaign/shared';
 
+import { copy, prettify } from '../copy.js';
 import { draftProblems, emptyDraft, idFor, unitFrom, type UnitDraft } from '../orbat.js';
 
 const KINDS: UnitKind[] = [
@@ -94,13 +95,13 @@ export function Orbat({
           className={open === 'unit' ? 'primary' : ''}
           onClick={() => setOpen(open === 'unit' ? null : 'unit')}
         >
-          Raise a formation
+          {copy.orbat.raiseFormation}
         </button>
         <button
           className={open === 'commander' ? 'primary' : ''}
           onClick={() => setOpen(open === 'commander' ? null : 'commander')}
         >
-          Appoint a commander
+          {copy.orbat.appointCommander}
         </button>
       </div>
 
@@ -108,17 +109,17 @@ export function Orbat({
         <div className="orbat-form">
           <div className="orbat-grid">
             <label>
-              <span>Name</span>
+              <span>{copy.orbat.name}</span>
               <input
                 value={draft.name}
-                placeholder="1re Division"
+                placeholder={copy.orbat.namePlaceholder}
                 onChange={(e) => setDraft({ ...draft, name: e.target.value })}
                 disabled={busy}
               />
             </label>
 
             <label>
-              <span>Side</span>
+              <span>{copy.orbat.side}</span>
               <select
                 value={draft.faction}
                 onChange={(e) => setDraft({ ...draft, faction: e.target.value })}
@@ -133,7 +134,7 @@ export function Orbat({
             </label>
 
             <label>
-              <span>Arm</span>
+              <span>{copy.orbat.arm}</span>
               <select
                 value={draft.kind}
                 onChange={(e) => setDraft({ ...draft, kind: e.target.value as UnitKind })}
@@ -141,14 +142,14 @@ export function Orbat({
               >
                 {KINDS.map((k) => (
                   <option key={k} value={k}>
-                    {k.replace(/_/g, ' ')}
+                    {prettify(k)}
                   </option>
                 ))}
               </select>
             </label>
 
             <label>
-              <span>Paper strength</span>
+              <span>{copy.orbat.paperStrength}</span>
               <input
                 type="number"
                 min={0}
@@ -162,7 +163,7 @@ export function Orbat({
             </label>
 
             <label>
-              <span>Experience</span>
+              <span>{copy.orbat.experience}</span>
               <select
                 value={draft.experience}
                 onChange={(e) =>
@@ -179,10 +180,10 @@ export function Orbat({
             </label>
 
             <label>
-              <span>Corps</span>
+              <span>{copy.orbat.corps}</span>
               <input
                 value={draft.corps ?? ''}
-                placeholder="I Corps"
+                placeholder={copy.orbat.corpsPlaceholder}
                 onChange={(e) =>
                   setDraft({ ...draft, corps: e.target.value === '' ? null : e.target.value })
                 }
@@ -192,7 +193,7 @@ export function Orbat({
           </div>
 
           <div className="field">
-            <div className="row-label">Traits</div>
+            <div className="row-label">{copy.orbat.traits}</div>
             <div className="tags">
               {TRAITS.map((t) => (
                 <button
@@ -208,7 +209,7 @@ export function Orbat({
                     })
                   }
                 >
-                  {t.replace(/_/g, ' ')}
+                  {prettify(t)}
                 </button>
               ))}
             </div>
@@ -216,7 +217,7 @@ export function Orbat({
 
           <div className="despatch-actions">
             <button onClick={onPlace} disabled={busy}>
-              {at === null ? 'Point at the ground' : `Standing at ${at.q}, ${at.r} — move`}
+              {at === null ? copy.orbat.pointAtGround : copy.orbat.standingAt(at.q, at.r)}
             </button>
             <button
               className="primary"
@@ -227,7 +228,7 @@ export function Orbat({
                 setDraft(emptyDraft(draft.faction));
               }}
             >
-              Raise
+              {copy.orbat.raise}
             </button>
           </div>
 
@@ -240,7 +241,8 @@ export function Orbat({
           )}
           {problems.length === 0 && (
             <p className="muted small">
-              It will be raised as <code>{id}</code>, fresh and fully supplied.
+              {copy.orbat.willBeRaisedBefore} <code>{id}</code>
+              {copy.orbat.willBeRaisedAfter}
             </p>
           )}
         </div>
@@ -250,23 +252,23 @@ export function Orbat({
         <div className="orbat-form">
           <div className="orbat-grid">
             <label>
-              <span>Name</span>
+              <span>{copy.orbat.name}</span>
               <input
                 value={man.name}
-                placeholder="Marshal Ney"
+                placeholder={copy.orbat.commanderNamePlaceholder}
                 onChange={(e) => setMan({ ...man, name: e.target.value })}
                 disabled={busy}
               />
             </label>
 
             <label>
-              <span>Rides with</span>
+              <span>{copy.orbat.ridesWith}</span>
               <select
                 value={man.unitId}
                 onChange={(e) => setMan({ ...man, unitId: e.target.value, superiorId: '' })}
                 disabled={busy}
               >
-                <option value="">—</option>
+                <option value="">{copy.orbat.none}</option>
                 {factions.map((f) => (
                   <optgroup key={f.id} label={f.name}>
                     {ofFaction(f.id).map((u) => (
@@ -280,13 +282,13 @@ export function Orbat({
             </label>
 
             <label>
-              <span>Answers to</span>
+              <span>{copy.orbat.answersTo}</span>
               <select
                 value={man.superiorId}
                 onChange={(e) => setMan({ ...man, superiorId: e.target.value })}
                 disabled={busy || man.unitId === ''}
               >
-                <option value="">nobody — army command</option>
+                <option value="">{copy.orbat.noSuperior}</option>
                 {/* His own side only. A chain of command that crosses the lines is not a
                     chain of command. */}
                 {commanders
@@ -323,14 +325,11 @@ export function Orbat({
                 setMan({ name: '', unitId: '', superiorId: '' });
               }}
             >
-              Appoint
+              {copy.orbat.appoint}
             </button>
           </div>
 
-          <p className="muted small">
-            Appointing a man does not give anybody a seat. Issue him a link when you want
-            somebody to play him.
-          </p>
+          <p className="muted small">{copy.orbat.appointBlurb}</p>
         </div>
       )}
 

@@ -27,6 +27,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { DespatchKind } from '@campaign/shared';
 
 import { dayHour } from '../board.js';
+import { copy } from '../copy.js';
 
 import type { Correspondent, Estimate } from '../despatch.js';
 
@@ -100,11 +101,11 @@ export function Composer({
 
   return (
     <section className="panel-section composer">
-      <h3>Write a despatch</h3>
+      <h3>{copy.composer.heading}</h3>
 
       {senders !== undefined && senders.length > 0 && (
         <label className="field">
-          <div className="row-label">From</div>
+          <div className="row-label">{copy.composer.from}</div>
           <select
             value={from ?? senders[0]?.id ?? ''}
             onChange={(e) => onFrom?.(e.target.value)}
@@ -120,12 +121,12 @@ export function Composer({
       )}
 
       <label className="field">
-        <div className="row-label">To</div>
+        <div className="row-label">{copy.composer.to}</div>
         <select value={to} onChange={(e) => setTo(e.target.value)} disabled={busy}>
           {correspondents.map((c) => (
             <option key={c.id} value={c.id}>
               {c.name}
-              {c.mayOrder ? '' : ' — message only'}
+              {c.mayOrder ? '' : copy.composer.messageOnly}
             </option>
           ))}
         </select>
@@ -137,8 +138,8 @@ export function Composer({
         value={text}
         placeholder={
           despatchKind === 'order'
-            ? 'Move on Quatre Bras with all speed; I expect you astride the crossroads by noon.'
-            : 'What you have seen, and when you saw it.'
+            ? copy.composer.orderPlaceholder
+            : copy.composer.reportPlaceholder
         }
         onChange={(e) => setText(e.target.value)}
         disabled={busy}
@@ -146,27 +147,23 @@ export function Composer({
 
       <p className="muted">
         {senders !== undefined
-          ? 'Written in his name, and logged as yours. What the addressee makes of it is ' +
-            'still a decision when it arrives.'
+          ? copy.composer.asReferee
           : despatchKind === 'order'
-            ? 'This is an order. The referee will read it and decide what your subordinate makes of it.'
-            : 'This is a message. You may write to anyone on your own side; only those beneath you take orders.'}
+            ? copy.composer.isOrder
+            : copy.composer.isMessage}
       </p>
 
       {estimateFor === undefined ? (
-        <p className="muted">
-          How long he takes is not yours to know. He will ride until he finds them, and
-          nobody will tell you when he did.
-        </p>
+        <p className="muted">{copy.composer.noEstimate}</p>
       ) : estimate === null ? (
-        <p className="muted">
-          Nothing on the map to ride to yet. Send him anyway — he will find them.
-        </p>
+        <p className="muted">{copy.composer.nothingToRideTo}</p>
       ) : (
         <p className="muted guess">
-          <strong>The ride:</strong> about {estimate.hours.toFixed(1)} h over the ground as
-          it stands, arriving around {dayHour(clockHours + estimate.hours)}. He may be
-          stopped on the way, and the sender is never told whether he was.
+          <strong>{copy.composer.rideLabel}</strong>
+          {copy.composer.rideEstimate(
+            estimate.hours.toFixed(1),
+            dayHour(clockHours + estimate.hours),
+          )}
         </p>
       )}
 
@@ -180,10 +177,10 @@ export function Composer({
             onSend({ to, despatchKind, text, ...(from === undefined ? {} : { from }) })
           }
         >
-          {busy ? 'Sealing…' : 'Send by rider'}
+          {busy ? copy.composer.sending : copy.composer.send}
         </button>
         <button onClick={onCancel} disabled={busy}>
-          Cancel
+          {copy.composer.cancel}
         </button>
       </div>
     </section>

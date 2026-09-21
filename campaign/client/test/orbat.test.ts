@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest';
 
 import { DEFAULT_CONFIG, columnLengthKm, maxMorale } from '@campaign/shared';
 
+import { copy } from '../src/copy.js';
 import { draftProblems, emptyDraft, idFor, unitFrom } from '../src/orbat.js';
 
 const cfg = DEFAULT_CONFIG;
@@ -31,21 +32,21 @@ describe('an id from a name', () => {
   });
 
   it('always produces something, even from nothing', () => {
-    expect(idFor('', new Set())).toBe('formation');
-    expect(idFor('!!!', new Set())).toBe('formation');
+    expect(idFor('', new Set())).toBe(copy.orbat.fallbackId);
+    expect(idFor('!!!', new Set())).toBe(copy.orbat.fallbackId);
   });
 });
 
 describe('what a draft has to say before it can be raised', () => {
   it('wants a name and a place', () => {
     const problems = draftProblems(emptyDraft('red'), cfg, new Set());
-    expect(problems).toContain('It needs a name.');
-    expect(problems).toContain('Point at the ground it stands on.');
+    expect(problems).toContain(copy.orbat.needsName);
+    expect(problems).toContain(copy.orbat.needsGround);
   });
 
   it('refuses an id already on the map', () => {
     const draft = { ...emptyDraft('red'), name: 'Guard', id: 'guard', at };
-    expect(draftProblems(draft, cfg, new Set(['guard']))).toContain('There is already a guard.');
+    expect(draftProblems(draft, cfg, new Set(['guard']))).toContain(copy.orbat.idTaken('guard'));
   });
 
   it('is satisfied by a name and a hex', () => {

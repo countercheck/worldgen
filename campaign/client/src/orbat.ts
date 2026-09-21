@@ -23,6 +23,8 @@ import {
   type UnitKind,
 } from '@campaign/shared';
 
+import { copy } from './copy.js';
+
 export interface UnitDraft {
   readonly id: string;
   readonly name: string;
@@ -65,7 +67,7 @@ export function idFor(name: string, taken: ReadonlySet<string>): string {
       .replace(/[̀-ͯ]/g, '')
       .replace(/[^a-z0-9]+/g, '-')
       .replace(/^-|-$/g, '')
-      .slice(0, 40) || 'formation';
+      .slice(0, 40) || copy.orbat.fallbackId;
 
   if (!taken.has(base)) return base;
   for (let n = 2; ; n++) {
@@ -81,12 +83,12 @@ export function draftProblems(
   taken: ReadonlySet<string>,
 ): string[] {
   const out: string[] = [];
-  if (draft.name.trim() === '') out.push('It needs a name.');
-  if (draft.id !== '' && taken.has(draft.id)) out.push(`There is already a ${draft.id}.`);
+  if (draft.name.trim() === '') out.push(copy.orbat.needsName);
+  if (draft.id !== '' && taken.has(draft.id)) out.push(copy.orbat.idTaken(draft.id));
   if (!Number.isFinite(draft.paperStrength) || draft.paperStrength < 0) {
-    out.push('Paper strength cannot be negative.');
+    out.push(copy.orbat.strengthNegative);
   }
-  if (draft.at === null) out.push('Point at the ground it stands on.');
+  if (draft.at === null) out.push(copy.orbat.needsGround);
   return out;
 }
 

@@ -36,6 +36,8 @@ import {
   type World,
 } from '@campaign/shared';
 
+import { copy } from './copy.js';
+
 import type { Mark, Rider, SymbolSpec } from './map/draw.js';
 
 export interface Board {
@@ -183,9 +185,9 @@ export const ageHours = (atHours: number, clockHours: number): number =>
  */
 export function ageLabel(atHours: number, clockHours: number): string {
   const age = ageHours(atHours, clockHours);
-  if (age === 0) return 'now';
-  if (age < 1) return `${Math.round(age * 60)} min ago`;
-  return `${age.toFixed(age < 10 ? 1 : 0)} h ago`;
+  if (age === 0) return copy.clock.now;
+  if (age < 1) return copy.clock.minutesAgo(Math.round(age * 60));
+  return copy.clock.hoursAgo(age.toFixed(age < 10 ? 1 : 0));
 }
 
 /**
@@ -200,7 +202,7 @@ export function ageLabel(atHours: number, clockHours: number): string {
  * Day 1 is the first, not the zeroth. Nobody calls the opening day of a campaign day zero.
  */
 export function dayHour(hours: number): string {
-  return `Day ${dayOf(hours)}, ${timeOfDay(hours)}`;
+  return copy.clock.dayHour(dayOf(hours), timeOfDay(hours));
 }
 
 /**

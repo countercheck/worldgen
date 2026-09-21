@@ -25,17 +25,9 @@ import {
   type WorldHex,
 } from '@campaign/shared';
 
+import { copy, prettify, prettyOrDash } from '../copy.js';
+
 import { Field, Row, Section } from './parts.js';
-
-const TITLE: Record<string, string> = {
-  highway: 'Highway',
-  road: 'Road',
-  off_road: 'Off-road',
-  bad_going: 'Bad going',
-};
-
-const pretty = (s: string | null): string =>
-  s === null ? '—' : s.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
 
 export function HexPanel({
   world,
@@ -55,11 +47,8 @@ export function HexPanel({
 
   if (fog) {
     return (
-      <Section title={`Hex ${coord.q}, ${coord.r}`}>
-        <p className="muted">
-          Never observed. Nothing is known about this ground — what is stored here are
-          defaults standing in for the unknown, not measurements.
-        </p>
+      <Section title={copy.hex.title(coord.q, coord.r)}>
+        <p className="muted">{copy.hex.neverObserved}</p>
       </Section>
     );
   }
@@ -77,46 +66,48 @@ export function HexPanel({
 
   return (
     <>
-      <Section title={`Hex ${coord.q}, ${coord.r}`}>
-        <Row label="Terrain" value={pretty(hex.terrainClass)} />
-        <Row label="Biome" value={pretty(hex.biome)} />
-        <Row label="Cover" value={pretty(hex.landCover)} />
-        {hex.settlementName !== null && <Row label="Settlement" value={hex.settlementName} />}
+      <Section title={copy.hex.title(coord.q, coord.r)}>
+        <Row label={copy.hex.terrain} value={prettyOrDash(hex.terrainClass)} />
+        <Row label={copy.hex.biome} value={prettyOrDash(hex.biome)} />
+        <Row label={copy.hex.cover} value={prettyOrDash(hex.landCover)} />
+        {hex.settlementName !== null && (
+          <Row label={copy.hex.settlement} value={hex.settlementName} />
+        )}
         {hex.tags.has('remembered') && (
-          <Row label="Status" value="Remembered — not currently observed" />
+          <Row label={copy.hex.status} value={copy.hex.remembered} />
         )}
       </Section>
 
-      <Section title="Relief">
-        <Row label="Elevation" value={`${Math.round(hex.elevation)} m`} />
-        <Row label="Slope" value={`${Math.round(hex.slope)} m / km`} />
-        <Row label="Relief" value={`${Math.round(hex.relief)} m`} />
+      <Section title={copy.hex.reliefHeading}>
+        <Row label={copy.hex.elevation} value={copy.hex.metres(Math.round(hex.elevation))} />
+        <Row label={copy.hex.slope} value={copy.hex.metresPerKm(Math.round(hex.slope))} />
+        <Row label={copy.hex.relief} value={copy.hex.metres(Math.round(hex.relief))} />
       </Section>
 
-      <Section title="Going">
+      <Section title={copy.hex.goingHeading}>
         {water ? (
-          <p className="muted">Water. Impassable to every unit in this ruleset.</p>
+          <p className="muted">{copy.hex.water}</p>
         ) : (
           <>
-            <Row label="Grade" value={TITLE[grade] ?? grade} />
+            <Row label={copy.hex.grade} value={prettify(grade)} />
             {tiers.length > 0 && (
-              <Row label="Roads" value={tiers.map(pretty).join(', ')} />
+              <Row label={copy.hex.roads} value={tiers.map(prettyOrDash).join(', ')} />
             )}
-            <Field label="Hours to enter, by arm">
+            <Field label={copy.hex.hoursToEnter}>
               <table className="grid">
                 <thead>
                   <tr>
                     <th />
-                    <th>Off road</th>
-                    <th>On road</th>
+                    <th>{copy.hex.offRoadColumn}</th>
+                    <th>{copy.hex.onRoadColumn}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {(['infantry', 'cavalry', 'courier'] as const).map((mover) => (
                     <tr key={mover}>
-                      <td>{pretty(mover)}</td>
-                      <td>{(1 / speedKmh(cfg, mover, grade)).toFixed(2)} h</td>
-                      <td>{(1 / speedKmh(cfg, mover, 'road')).toFixed(2)} h</td>
+                      <td>{prettify(mover)}</td>
+                      <td>{copy.hex.hours((1 / speedKmh(cfg, mover, grade)).toFixed(2))}</td>
+                      <td>{copy.hex.hours((1 / speedKmh(cfg, mover, 'road')).toFixed(2))}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -127,26 +118,34 @@ export function HexPanel({
       </Section>
 
       {river !== 'none' && (
-        <Section title="Watercourse">
+        <Section title={copy.hex.watercourseHeading}>
           <Row
-            label="Class"
-            value={river === 'major' ? 'Major — navigable' : 'Minor — fordable'}
+            label={copy.hex.riverClass}
+            value={river === 'major' ? copy.hex.riverMajor : copy.hex.riverMinor}
           />
-          <Row label="Catchment" value={`${Math.round(hex.catchmentKm2)} km²`} />
           <Row
-            label="Discharge"
-            value={`${Math.round(discharge(hex, world)).toLocaleString()} of ${world.config.navigableMinDischarge.toLocaleString()}`}
+            label={copy.hex.catchment}
+            value={copy.hex.catchmentValue(Math.round(hex.catchmentKm2))}
           />
-          {hex.tags.has('bridge') && <Row label="Crossing" value="Bridge" />}
+          <Row
+            label={copy.hex.discharge}
+            value={copy.hex.dischargeValue(
+              Math.round(discharge(hex, world)).toLocaleString(),
+              world.config.navigableMinDischarge.toLocaleString(),
+            )}
+          />
+          {hex.tags.has('bridge') && (
+            <Row label={copy.hex.crossing} value={copy.hex.bridge} />
+          )}
           {hex.tags.has('ford') && !hex.tags.has('bridge') && (
-            <Row label="Crossing" value="Ford" />
+            <Row label={copy.hex.crossing} value={copy.hex.ford} />
           )}
           {selected !== null && <CrossingFor world={world} unit={selected} to={coord} cfg={cfg} />}
         </Section>
       )}
 
       {hex.tags.size > 0 && (
-        <Section title="Tags">
+        <Section title={copy.hex.tagsHeading}>
           <p className="tags">
             {[...hex.tags].sort().map((t) => (
               <span className="tag" key={t}>
@@ -183,14 +182,16 @@ function CrossingFor({
   const c = crossingFor(world, cfg, unit, from, to);
 
   return (
-    <Field label={`For ${unit.id}`}>
+    <Field label={copy.hex.crossingFor(unit.id)}>
       {Number.isFinite(c.hours) ? (
         <span>
-          {c.how === 'none' ? 'No crossing needed' : `${c.how} — ${c.hours} h`}
+          {c.how === 'none'
+            ? copy.hex.noCrossingNeeded
+            : copy.hex.crossingCost(c.how, c.hours)}
         </span>
       ) : (
         <span className="bad">
-          Cannot cross. {c.violations.map((v) => v.message).join(' ')}
+          {copy.hex.cannotCross(c.violations.map((v) => v.message).join(' '))}
         </span>
       )}
     </Field>
