@@ -65,8 +65,16 @@ export const CODES = {
   NO_SUCH_UNIT: 'no_such_unit',
   NO_SUCH_FACTION: 'no_such_faction',
   NO_SUCH_COMMANDER: 'no_such_commander',
-  /** A commander riding with the other side's baggage, or answering to their headquarters. */
+  /**
+   * A commander riding with the other side's baggage, answering to their headquarters, or
+   * writing to them.
+   */
   WRONG_FACTION: 'wrong_faction',
+  /**
+   * A despatch to someone who is neither one link away in the chain of command nor in
+   * sight. Hard: there is no rider to send, so there is nothing for a referee to bend.
+   */
+  OUT_OF_REACH: 'out_of_reach',
   /** A loop in the chain of command: every tree walk in the engine would hang. */
   COMMAND_CYCLE: 'command_cycle',
   DUPLICATE_ID: 'duplicate_id',
@@ -84,7 +92,7 @@ export const CODES = {
   MARCH_LIMIT: 'march_limit',
   NIGHT_MOVE: 'night_move',
   NOT_YOUR_UNIT: 'not_your_unit',
-  /** An order sent sideways or upward. A message, in other words, dressed as an order. */
+  /** A formation told to do what it has no right to: form up from a rout, patrol without Scout. */
   NOT_IN_COMMAND: 'not_in_command',
   NO_COURIER_ROUTE: 'no_courier_route',
   NO_MARCH_ROUTE: 'no_march_route',

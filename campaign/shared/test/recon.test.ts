@@ -124,7 +124,6 @@ function commanded(...units: Unit[]): CampaignState {
       faction: u.faction,
       unitId: u.id,
       superiorId: chief ?? null,
-      autoCascade: true,
     });
     if (chief === undefined) chiefs.set(u.faction, `c-${u.id}`);
   }
@@ -253,7 +252,6 @@ describe('commanderVisible', () => {
             faction: 'red',
             unitId: 'gone',
             superiorId: null,
-            autoCascade: true,
           },
         ],
       ]),

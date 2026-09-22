@@ -142,7 +142,7 @@ const commander = (
   faction: string,
   unitId: string,
   superiorId: string | null,
-): Commander => ({ id, name, faction, unitId, superiorId, autoCascade: true });
+): Commander => ({ id, name, faction, unitId, superiorId });
 
 interface Fixture {
   app: ReturnType<typeof buildApp>;
@@ -409,7 +409,6 @@ describe('the view endpoint', () => {
           kind: 'send_despatch',
           from: 'ney',
           to: 'kellermann',
-          despatchKind: 'order',
           body: { text: 'Close on Ligny.' },
         },
       },
@@ -443,7 +442,6 @@ describe('the view endpoint', () => {
           kind: 'send_despatch',
           from: 'ney',
           to: 'kellermann',
-          despatchKind: 'order',
           body: { text: 'Close on Ligny.' },
         },
       },
@@ -771,13 +769,8 @@ describe('despatches', () => {
 
   const ORDER = 'Move on Quatre Bras with all speed; I expect you astride the crossroads.';
 
-  const write = (
-    token: string,
-    from: string,
-    to: string,
-    text = ORDER,
-    despatchKind: 'order' | 'report' = 'order',
-  ) => post(token, { kind: 'send_despatch', from, to, despatchKind, body: { text } });
+  const write = (token: string, from: string, to: string, text = ORDER) =>
+    post(token, { kind: 'send_despatch', from, to, body: { text } });
 
   const advance = (hours: number) =>
     f.app.inject({
@@ -816,7 +809,7 @@ describe('despatches', () => {
     // Whatever became of the rider — delivered, lost, or read by the enemy — Ney's
     // outbox says exactly what it said the moment they sealed it. That is the mechanic.
     expect(after).toEqual(before);
-    expect(after[0].acknowledged).toBe(false);
+    expect(JSON.stringify(after[0])).not.toContain('acknowledged');
   });
 
   it('keeps a despatch out of the addressee’s hands until it arrives', async () => {
@@ -874,12 +867,105 @@ describe('despatches', () => {
     expect(res.statusCode).toBe(403);
   });
 
-  it('refuses an order sent sideways under strict rules', async () => {
-    // Kellermann does not command Ney. It is a message, not an order — and a referee who
-    // wants it to be one can force it, which is why this is soft rather than hard.
-    const res = await write(f.kellermann, 'kellermann', 'ney');
+  /** Soult, under Kellermann, on the far side of the map from Ney: two links, out of sight. */
+  const addSoult = async () => {
+    await post(f.referee, {
+      kind: 'add_unit',
+      unit: division('red-3', 'red', BLUE_HEX, 'II Corps', 'Division Foy', 4321),
+    });
+    await post(f.referee, {
+      kind: 'add_commander',
+      commander: commander('soult', 'Marshal Soult', 'red', 'red-3', 'kellermann'),
+    });
+  };
+
+  it('refuses a despatch two links away and out of sight, however it is asked', async () => {
+    await addSoult();
+    const res = await write(f.ney, 'ney', 'soult');
     expect(res.statusCode).toBe(409);
-    expect(res.json().violations[0].code).toBe('not_in_command');
+    expect(res.json().violations[0].code).toBe('out_of_reach');
+
+    // Hard, so not even the referee, writing in Ney's name and forcing it.
+    const forced = await f.app.inject({
+      method: 'POST',
+      url: `/api/campaigns/${f.id}/commands`,
+      headers: { 'x-campaign-token': f.referee },
+      payload: {
+        command: { kind: 'send_despatch', from: 'ney', to: 'soult', body: { text: ORDER } },
+        force: true,
+        strictness: 'open',
+      },
+    });
+    expect(forced.statusCode).toBe(409);
+  });
+
+  it('carries it one link at a time instead', async () => {
+    await addSoult();
+    expect((await write(f.ney, 'ney', 'kellermann')).statusCode).toBe(200);
+    expect((await write(f.kellermann, 'kellermann', 'soult')).statusCode).toBe(200);
+  });
+
+  it('sends a commander who they may write to, and nobody else\'s list', async () => {
+    await addSoult();
+    const view = (await viewAs(f, f.ney)).json();
+    expect(view.addressees).toEqual({ ney: ['kellermann'] });
+
+    const ref = (await viewAs(f, f.referee)).json();
+    expect(ref.addressees.soult).toEqual(['kellermann']);
+  });
+
+  it('ignores a commander asking to force past a rule', async () => {
+    // A waypoint in open water: no rider can get there, which is a soft violation — the
+    // kind a referee may bend. A commander sending `force` and `strictness` is held to the
+    // rules anyway; before this, both were passed straight through.
+    const water = [...world.hexes.values()].find((h) => h.terrainClass !== 'land')!.coord;
+    const bent = {
+      command: {
+        kind: 'send_despatch',
+        from: 'ney',
+        to: 'kellermann',
+        body: { text: ORDER },
+        via: [water],
+      },
+      force: true,
+      strictness: 'open',
+    };
+
+    const asCommander = await f.app.inject({
+      method: 'POST',
+      url: `/api/campaigns/${f.id}/commands`,
+      headers: { 'x-campaign-token': f.ney },
+      payload: bent,
+    });
+    expect(asCommander.statusCode).toBe(409);
+    expect(asCommander.json().violations.map((v: { code: string }) => v.code)).toContain(
+      'no_courier_route',
+    );
+
+    const asReferee = await f.app.inject({
+      method: 'POST',
+      url: `/api/campaigns/${f.id}/commands`,
+      headers: { 'x-campaign-token': f.referee },
+      payload: bent,
+    });
+    expect(asReferee.statusCode, asReferee.body).toBe(200);
+  });
+
+  it('puts a note to the referee in their queue, and in nobody else\'s view', async () => {
+    const NOTE = 'Should my cuirassiers not have seen that column at dawn?';
+    // Signed by the token, like a despatch: Kellermann cannot write as Ney.
+    const res = await post(f.kellermann, { kind: 'write_to_referee', from: 'ney', text: NOTE });
+    expect(res.statusCode, res.body).toBe(200);
+
+    const ref = (await viewAs(f, f.referee)).json();
+    const note = ref.decisions.find((d: { trigger: string }) => d.trigger === 'referee_note');
+    expect(note).toMatchObject({ commanderId: 'kellermann', context: { text: NOTE } });
+
+    for (const token of [f.ney, f.kellermann, f.wellington]) {
+      expect((await viewAs(f, token)).body).not.toContain('cuirassiers not have seen');
+    }
+    // And it is not a despatch: nothing rode anywhere.
+    expect(ref.despatches).toEqual([]);
   });
 
   /**
@@ -925,9 +1011,7 @@ describe('despatches', () => {
 
     // Kellermann writes to Ney. The rider carries word of where Kellermann stood when they
     // sealed it, whether or not they thought to mention it.
-    // A report, not an order: Kellermann does not command Ney, and writing upward is
-    // exactly what a report is for.
-    const sent = await write(f.kellermann, 'kellermann', 'ney', 'All quiet here.', 'report');
+    const sent = await write(f.kellermann, 'kellermann', 'ney', 'All quiet here.');
     expect(sent.statusCode, sent.body).toBe(200);
     await advance(200);
 
@@ -1090,7 +1174,6 @@ describe('a referee writing in a commander’s name', () => {
       kind: 'send_despatch',
       from: 'ney',
       to: 'kellermann',
-      despatchKind: 'order',
       body: { text: 'Move on the crossroads.' },
     });
     expect(res.statusCode).toBe(200);
@@ -1108,7 +1191,6 @@ describe('a referee writing in a commander’s name', () => {
       kind: 'send_despatch',
       from: 'ney',
       to: 'kellermann',
-      despatchKind: 'order',
       body: { text: 'By your hand, not mine.' },
     });
 
@@ -1135,7 +1217,6 @@ describe('a referee writing in a commander’s name', () => {
       kind: 'send_despatch',
       from: 'wellington',
       to: 'kellermann',
-      despatchKind: 'order',
       body: { text: 'Fall back at once.' },
     });
     expect(res.statusCode).toBe(200);
@@ -1152,7 +1233,6 @@ describe('a referee writing in a commander’s name', () => {
       kind: 'send_despatch',
       from: 'ney',
       to: 'wellington',
-      despatchKind: 'order',
       body: { text: 'Surrender.' },
     });
     expect(res.statusCode).toBe(409);

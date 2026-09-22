@@ -9,18 +9,23 @@
 
 import { describe, expect, it } from 'vitest';
 
+import type { Commander } from '../src/commander.js';
 import {
   addresseeCopy,
+  addresseesOf,
   captorCopy,
   deliveredAt,
   formationsTouch,
-  isSuperseded,
+  inSight,
+  mayWriteTo,
+  normaliseDespatch,
   planRide,
   ridePath,
   senderCopy,
   type Despatch,
 } from '../src/despatch.js';
 import { DEFAULT_CONFIG } from '../src/config.js';
+import { EMPTY_STATE, type CampaignState } from '../src/state.js';
 import { key, type Hex, type HexKey } from '../src/hex.js';
 import { reportOf, type Unit } from '../src/unit.js';
 import type { World, WorldHex } from '../src/world.js';
@@ -74,7 +79,6 @@ const world = flatWorld();
 
 const despatch = (over: Partial<Despatch> = {}): Despatch => ({
   id: 'd1',
-  kind: 'order',
   from: 'ney',
   to: 'kellermann',
   faction: 'red',
@@ -82,7 +86,6 @@ const despatch = (over: Partial<Despatch> = {}): Despatch => ({
   body: { text: 'Move on Quatre Bras with all speed.' },
   via: [],
   forwardedFrom: null,
-  inReplyTo: null,
   route: [
     { q: 1, r: 1 },
     { q: 2, r: 1 },
@@ -123,23 +126,13 @@ function unit(id: string, faction: string, column: Hex[], paperStrength = 4000):
 
 describe('what a sender is shown', () => {
   it('carries no route, no fate, and no progress', () => {
-    const copy = senderCopy(despatch(), false);
-    expect(Object.keys(copy).sort()).toEqual([
-      'acknowledged',
-      'body',
-      'handed',
-      'id',
-      'inReplyTo',
-      'kind',
-      'sentAtHours',
-      'to',
-      'via',
-    ]);
+    const copy = senderCopy(despatch());
+    expect(Object.keys(copy).sort()).toEqual(['body', 'handed', 'id', 'sentAtHours', 'to', 'via']);
   });
 
   it('shows their own waypoints, which they chose themselves', () => {
     const via = [{ q: 9, r: 9 }];
-    expect(senderCopy(despatch({ via }), false).via).toEqual(via);
+    expect(senderCopy(despatch({ via })).via).toEqual(via);
   });
 
   it('says nothing different when the rider was captured', () => {
@@ -148,26 +141,28 @@ describe('what a sender is shown', () => {
     });
     // The whole mechanic in one assertion: a commander whose order was read by the enemy
     // sees precisely what they saw the moment they sent it.
-    expect(senderCopy(taken, false)).toEqual(senderCopy(despatch(), false));
+    expect(senderCopy(taken)).toEqual(senderCopy(despatch()));
   });
 
-  it('learns of an arrival only when an acknowledgement comes back', () => {
-    expect(senderCopy(despatch(), false).acknowledged).toBe(false);
-    expect(senderCopy(despatch(), true).acknowledged).toBe(true);
+  it('says nothing different when it arrived, either', () => {
+    // No acknowledgement comes back on its own. They learn it arrived when somebody
+    // writes back, on another rider.
+    const arrived = despatch({ fate: { kind: 'delivered', atHours: 9 } });
+    expect(senderCopy(arrived)).toEqual(senderCopy(despatch()));
   });
 });
 
 describe('what an addressee is shown', () => {
   it('leads with the hour it describes, not the hour it arrived', () => {
     const arrived = despatch({ fate: { kind: 'delivered', atHours: 11 } });
-    const copy = addresseeCopy(arrived, false);
+    const copy = addresseeCopy(arrived);
     expect(copy.sentAtHours).toBe(4);
     expect(copy.receivedAtHours).toBe(11);
   });
 
   it('carries no route either: the ride is the referee’s business', () => {
     const arrived = despatch({ fate: { kind: 'delivered', atHours: 11 } });
-    expect('route' in addresseeCopy(arrived, false)).toBe(false);
+    expect('route' in addresseeCopy(arrived)).toBe(false);
   });
 });
 
@@ -214,38 +209,132 @@ describe('a captor', () => {
     });
     // The addressee is being written to by their own subordinate: the point of the paper is
     // that it tells them where III Corps is and what state it is in.
-    const report = addresseeCopy(arrived, false).body.unitReport as Record<string, unknown>;
+    const report = addresseeCopy(arrived).body.unitReport as Record<string, unknown>;
     expect(report['unitId']).toBe('red-1');
     expect(report['paperStrength']).toBe(4210);
   });
 });
 
-describe('dated orders', () => {
-  const at = (id: string, sent: number, delivered: number): Despatch =>
-    despatch({ id, sentAtHours: sent, fate: { kind: 'delivered', atHours: delivered } });
-
-  it('disregards an order overtaken by a later one already in hand', () => {
-    const early = at('d1', 4, 12);
-    const late = at('d2', 6, 9);
-    expect(isSuperseded(early, [early, late])).toBe(true);
-    expect(isSuperseded(late, [early, late])).toBe(false);
-  });
-
-  it('stands when the later order has not arrived yet', () => {
-    const early = at('d1', 4, 9);
-    const late = despatch({ id: 'd2', sentAtHours: 6 });
-    expect(isSuperseded(early, [early, late])).toBe(false);
-  });
-
-  it('never supersedes a report — an old fact is still a fact', () => {
-    const old = at('d1', 4, 12);
-    const report = despatch({ id: 'd2', kind: 'report', sentAtHours: 6 });
-    expect(isSuperseded({ ...old, kind: 'report' }, [old, report])).toBe(false);
-  });
-
+describe('delivery', () => {
   it('reads a delivery hour off a fate, and null off anything else', () => {
-    expect(deliveredAt(at('d1', 4, 9))).toBe(9);
+    const arrived = despatch({ fate: { kind: 'delivered', atHours: 9 } });
+    expect(deliveredAt(arrived)).toBe(9);
     expect(deliveredAt(despatch())).toBeNull();
+  });
+});
+
+describe('a despatch from an older log', () => {
+  it('loses the kind and the reply it was stored with, and nothing else', () => {
+    const old = { ...despatch(), kind: 'acknowledgement', inReplyTo: 'd0' } as Despatch;
+    const now = normaliseDespatch(old);
+    expect('kind' in now).toBe(false);
+    expect('inReplyTo' in now).toBe(false);
+    expect(now).toEqual(despatch());
+  });
+
+  it('leaves a despatch written today exactly as it was', () => {
+    expect(normaliseDespatch(despatch())).toEqual(despatch());
+  });
+});
+
+/**
+ * Who may write to whom, on open ground.
+ *
+ *     Ney (2,2) ── Soult (10,10) ── Girard (3,2)      beside Ney, two links down
+ *        │                    └──── Durutte (16,16)   far from everyone
+ *        │                    └──── Pajol (5,2)       scouts: sees two hexes
+ *        └──── Kellermann (2,16) ── Milhaud (5,4)     two hexes from Pajol
+ *
+ *     Wellington (2,3), on the other side, beside Ney.
+ */
+describe('who may be written to', () => {
+  const officer = (id: string, unitId: string, superiorId: string | null, faction = 'red') =>
+    [id, { id, name: `General ${id}`, faction, unitId, superiorId }] as [string, Commander];
+  const at = (id: string, q: number, r: number, faction = 'red', traits: Unit['traits'] = []) => {
+    const u = { ...unit(id, faction, [{ q, r }]), traits };
+    return [id, u] as [string, Unit];
+  };
+
+  const s: CampaignState = {
+    ...EMPTY_STATE,
+    commanders: new Map([
+      officer('ney', 'u-ney', null),
+      officer('soult', 'u-soult', 'ney'),
+      officer('girard', 'u-girard', 'soult'),
+      officer('durutte', 'u-durutte', 'soult'),
+      officer('pajol', 'u-pajol', 'soult'),
+      officer('kellermann', 'u-kellermann', 'ney'),
+      officer('milhaud', 'u-milhaud', 'kellermann'),
+      officer('wellington', 'u-wellington', null, 'blue'),
+    ]),
+    units: new Map([
+      at('u-ney', 2, 2),
+      at('u-soult', 10, 10),
+      at('u-girard', 3, 2),
+      at('u-durutte', 16, 16),
+      at('u-pajol', 5, 2, 'red', ['scout']),
+      at('u-kellermann', 2, 16),
+      at('u-milhaud', 5, 4),
+      at('u-wellington', 2, 3, 'blue'),
+    ]),
+  };
+  const may = (a: string, b: string) => mayWriteTo(s, world, cfg, a, b);
+
+  it('reaches a direct subordinate and a direct superior, however far away', () => {
+    expect(may('ney', 'soult')).toBe(true);
+    expect(may('soult', 'ney')).toBe(true);
+    expect(may('ney', 'kellermann')).toBe(true);
+  });
+
+  it('does not reach two links down when out of sight', () => {
+    expect(may('ney', 'durutte')).toBe(false);
+    expect(may('durutte', 'ney')).toBe(false);
+  });
+
+  it('reaches two links down when the column is in sight', () => {
+    expect(may('ney', 'girard')).toBe(true);
+    expect(may('girard', 'ney')).toBe(true);
+  });
+
+  it('does not reach a peer out of sight: that goes through the common superior', () => {
+    expect(may('kellermann', 'soult')).toBe(false);
+    expect(may('girard', 'durutte')).toBe(false);
+  });
+
+  it('reaches a peer in sight, and sight is one-way', () => {
+    // Pajol's scouts see two hexes; Milhaud's line division sees one. Two hexes apart,
+    // Pajol may write and Milhaud may not write back until they close up.
+    expect(inSight(s, world, cfg, 'pajol', 'milhaud')).toBe(true);
+    expect(inSight(s, world, cfg, 'milhaud', 'pajol')).toBe(false);
+    expect(may('pajol', 'milhaud')).toBe(true);
+    expect(may('milhaud', 'pajol')).toBe(false);
+  });
+
+  it('never reaches the enemy, even in plain sight', () => {
+    expect(inSight(s, world, cfg, 'ney', 'wellington')).toBe(true);
+    expect(may('ney', 'wellington')).toBe(false);
+    expect(may('wellington', 'ney')).toBe(false);
+  });
+
+  it('never reaches themselves, or somebody who is not there', () => {
+    expect(may('ney', 'ney')).toBe(false);
+    expect(may('ney', 'nobody')).toBe(false);
+    expect(may('nobody', 'ney')).toBe(false);
+  });
+
+  it('keeps the chain when a formation is gone, but loses the sight', () => {
+    const units = new Map(s.units);
+    units.delete('u-girard');
+    const bereaved: CampaignState = { ...s, units };
+    expect(inSight(bereaved, world, cfg, 'ney', 'girard')).toBe(false);
+    expect(mayWriteTo(bereaved, world, cfg, 'ney', 'girard')).toBe(false);
+    expect(mayWriteTo(bereaved, world, cfg, 'soult', 'girard')).toBe(true);
+  });
+
+  it('lists everyone reachable, in id order', () => {
+    expect(addresseesOf(s, world, cfg, 'ney')).toEqual(['girard', 'kellermann', 'soult']);
+    expect(addresseesOf(s, world, cfg, 'durutte')).toEqual(['soult']);
+    expect(addresseesOf(s, world, cfg, 'nobody')).toEqual([]);
   });
 });
 

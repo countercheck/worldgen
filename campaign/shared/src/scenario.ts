@@ -292,8 +292,6 @@ export function demoCommands(world: World): Command[] {
       faction: spec.faction,
       unitId: spec.id,
       superiorId: superiorOf.get(spec.commander.id) ?? null,
-      // The referee runs every seat until somebody is sent a link for one.
-      autoCascade: true,
     };
     commands.push({ kind: 'add_commander', commander });
   }

@@ -4,7 +4,18 @@
  * Everything a commander knows beyond their own horizon arrives here. A despatch runs from
  * one commander to another — the formation is only the address a rider must find — and it takes
  * real hours to get there, may be intercepted on the way, and is never acknowledged
- * unless a second despatch makes the return trip.
+ * unless the addressee writes back — which is simply another despatch, on another rider.
+ *
+ * There is one kind. An order is a despatch with orders written in it, a report is a
+ * despatch with news in it, and the engine does not need to tell them apart because it
+ * executes neither: see below.
+ *
+ * ## Who may write to whom
+ *
+ * One link of the chain of command, up or down, or anyone on their own side they can see.
+ * Coordinating with a corps out of sight means writing to the common superior and waiting
+ * for them to pass it on, which is slow on purpose: the chain of command costs time, and a
+ * side that disperses pays it. See `mayWriteTo`.
  *
  * ## An order is a message, not a command
  *
@@ -33,23 +44,16 @@
  */
 
 import { FOOTPRINT, occupied, type FootprintShape } from './column.js';
+import { inChain } from './commander.js';
 import type { CampaignConfig } from './config.js';
 import { crossingAt, riverClass } from './crossing.js';
 import { astar, distance, key, neighbors, type Hex } from './hex.js';
 import { speedKmh } from './movement.js';
-import { publicContact, type PublicContact, type Sighting } from './recon.js';
+import { publicContact, reconZone, type PublicContact, type Sighting } from './recon.js';
+import type { CampaignState } from './state.js';
 import { gradeOf, isPassable, isRiver } from './terrain.js';
 import type { Formation, Unit, UnitReport } from './unit.js';
 import { hexAt, type World, type WorldHex } from './world.js';
-
-/**
- * What a despatch is for.
- *
- * Three kinds and no more. An order travels downward, a report travels anywhere, and an
- * acknowledgement is the only feedback channel in the game — which is why it is a
- * despatch in its own right, and can itself be lost.
- */
-export type DespatchKind = 'order' | 'report' | 'acknowledgement';
 
 /**
  * What is written on the paper.
@@ -108,7 +112,6 @@ export type Fate =
 
 export interface Despatch {
   readonly id: string;
-  readonly kind: DespatchKind;
   /** Commander id. Despatches run commander to commander; the formation is only the address. */
   readonly from: string;
   readonly to: string;
@@ -120,7 +123,6 @@ export interface Despatch {
   readonly via: readonly Hex[];
   /** A report being passed on. Two lags stack, which is very much the period. */
   readonly forwardedFrom: string | null;
-  readonly inReplyTo: string | null;
   /**
    * The rider's path to the addressee's actual position.
    *
@@ -159,28 +161,18 @@ export const deliveredAt = (d: Despatch): number | null =>
  */
 export interface SentDespatch {
   readonly id: string;
-  readonly kind: DespatchKind;
   readonly to: string;
   readonly sentAtHours: number;
   readonly body: PublicBody;
   /** Their own waypoints, which they chose and therefore already knows. */
   readonly via: readonly Hex[];
-  readonly inReplyTo: string | null;
   /** Whether it was handed over on the spot. They watched that happen. */
   readonly handed: boolean;
-  /**
-   * Whether an acknowledgement has come back for it.
-   *
-   * The only thing a sender ever learns about a despatch's fate, and only because a
-   * second rider made the return trip.
-   */
-  readonly acknowledged: boolean;
 }
 
 /** A despatch as its **addressee** sees it: only once it is actually in their hand. */
 export interface ReceivedDespatch {
   readonly id: string;
-  readonly kind: DespatchKind;
   readonly from: string;
   /** The hour it describes. Shown first, because it is what they now know about. */
   readonly sentAtHours: number;
@@ -188,20 +180,11 @@ export interface ReceivedDespatch {
   readonly receivedAtHours: number;
   readonly body: PublicBody;
   readonly forwardedFrom: string | null;
-  readonly inReplyTo: string | null;
-  /**
-   * An order overtaken by a later one already in hand.
-   *
-   * Marked rather than hidden: correct staff practice is to disregard it, and seeing
-   * that happen is half of understanding why the corps did what it did.
-   */
-  readonly superseded: boolean;
 }
 
 /** A despatch as a **captor** sees it: the body, and the fact that they took it. */
 export interface CapturedDespatch {
   readonly id: string;
-  readonly kind: DespatchKind;
   readonly from: string;
   readonly to: string;
   readonly faction: string;
@@ -273,33 +256,26 @@ const publicBody = (b: DespatchBody, report: 'own' | 'captured' = 'own'): Public
     : { unitReport: report === 'own' ? b.unitReport : capturedReport(b.unitReport) }),
 });
 
-export const senderCopy = (d: Despatch, acknowledged: boolean): SentDespatch => ({
+export const senderCopy = (d: Despatch): SentDespatch => ({
   id: d.id,
-  kind: d.kind,
   to: d.to,
   sentAtHours: d.sentAtHours,
   body: publicBody(d.body),
   via: d.via,
-  inReplyTo: d.inReplyTo,
   handed: d.handed,
-  acknowledged,
 });
 
-export const addresseeCopy = (d: Despatch, superseded: boolean): ReceivedDespatch => ({
+export const addresseeCopy = (d: Despatch): ReceivedDespatch => ({
   id: d.id,
-  kind: d.kind,
   from: d.from,
   sentAtHours: d.sentAtHours,
   receivedAtHours: deliveredAt(d) ?? d.sentAtHours,
   body: publicBody(d.body),
   forwardedFrom: d.forwardedFrom,
-  inReplyTo: d.inReplyTo,
-  superseded,
 });
 
 export const captorCopy = (d: Despatch): CapturedDespatch => ({
   id: d.id,
-  kind: d.kind,
   from: d.from,
   to: d.to,
   faction: d.faction,
@@ -309,29 +285,79 @@ export const captorCopy = (d: Despatch): CapturedDespatch => ({
 });
 
 /**
- * Whether an arriving order has been overtaken.
+ * A despatch as it was stored before there was only one kind.
  *
- * Every despatch carries the hour it was written, and a commander already holding a later
- * order disregards an earlier one that turns up afterwards. The comparison is on the date
- * alone — which is all an engine can do with prose, and all it needs to do.
- *
- * Only orders supersede orders. A report is never stale in this sense: an old report is
- * still a fact about an old hour, and remains worth having.
+ * Logs written by older builds carry `kind` ('order', 'report', 'acknowledgement') and
+ * `inReplyTo` on every despatch. The log is the campaign and cannot be rewritten, so the
+ * reducer passes each one through here on the way in: the fields are dropped and the
+ * despatch is an ordinary despatch, which is what every one of them now is.
  */
-export function isSuperseded(d: Despatch, held: readonly Despatch[]): boolean {
-  if (d.kind !== 'order') return false;
-  const mine = deliveredAt(d);
-  if (mine === null) return false;
-
-  return held.some(
-    (other) =>
-      other.id !== d.id &&
-      other.kind === 'order' &&
-      other.to === d.to &&
-      other.sentAtHours > d.sentAtHours &&
-      (deliveredAt(other) ?? Infinity) <= mine,
-  );
+export function normaliseDespatch(d: Despatch): Despatch {
+  const { kind: _kind, inReplyTo: _inReplyTo, ...rest } = d as Despatch & {
+    kind?: unknown;
+    inReplyTo?: unknown;
+  };
+  return rest;
 }
+
+// ---- who may write to whom ---------------------------------------------
+
+/**
+ * Whether one commander can see another's formation from where they stand.
+ *
+ * Any hex of the other column inside the sender's recon zone: the same test that decides
+ * whether they can see an enemy, pointed at a friend. One-way, like sight — a scouting
+ * division sees further than the line division beside it, so the scouts may be able to
+ * write to them before they can write back.
+ */
+export function inSight(
+  state: CampaignState,
+  world: World,
+  cfg: CampaignConfig,
+  id: string,
+  targetId: string,
+): boolean {
+  const from = state.commanders.get(id);
+  const to = state.commanders.get(targetId);
+  if (from === undefined || to === undefined) return false;
+  const fromUnit = state.units.get(from.unitId);
+  const toUnit = state.units.get(to.unitId);
+  if (fromUnit === undefined || toUnit === undefined) return false;
+
+  const zone = reconZone(world, cfg, fromUnit);
+  return occupied(toUnit, 'road', cfg.footprint).some((c) => zone.has(key(c)));
+}
+
+/**
+ * Whether `id` may send a despatch to `targetId`.
+ *
+ * Their direct superior, their direct subordinates, or anyone on their own side whose
+ * column they can see. Never the enemy, and never themselves. Hard, in `check`: this is
+ * who a rider can be sent to, not a rule a referee bends.
+ */
+export function mayWriteTo(
+  state: CampaignState,
+  world: World,
+  cfg: CampaignConfig,
+  id: string,
+  targetId: string,
+): boolean {
+  if (inChain(state, id, targetId)) return true;
+  const from = state.commanders.get(id);
+  const to = state.commanders.get(targetId);
+  if (from === undefined || to === undefined) return false;
+  if (id === targetId || from.faction !== to.faction) return false;
+  return inSight(state, world, cfg, id, targetId);
+}
+
+/** Everyone `id` may write to right now, in id order. */
+export const addresseesOf = (
+  state: CampaignState,
+  world: World,
+  cfg: CampaignConfig,
+  id: string,
+): string[] =>
+  [...state.commanders.keys()].filter((t) => mayWriteTo(state, world, cfg, id, t)).sort();
 
 // ---- riding ------------------------------------------------------------
 

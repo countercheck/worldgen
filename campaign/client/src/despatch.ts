@@ -1,9 +1,9 @@
 /**
  * The post, as a commander's console needs it.
  *
- * Pure and separate from the components, for the same reason `board.ts` is: the rules
- * about who may be written to, what may be ordered, and how long a rider is likely to
- * take are worth testing without a browser.
+ * Pure and separate from the components, for the same reason `board.ts` is: who may be
+ * written to, and how long a rider is likely to take, are worth testing without a
+ * browser.
  *
  * ## The estimate is the interesting part
  *
@@ -25,13 +25,20 @@ import {
   type CampaignConfig,
   type ClientView,
   type Hex,
-  type PublicCommander,
   type ReceivedDespatch,
   type SentDespatch,
   type World,
 } from '@campaign/shared';
 
-/** Somebody a commander may write to, and whether they may give them orders. */
+/**
+ * How an addressee stands to the sender, which is also why they may be written to at all.
+ *
+ * The first two are the chain of command, one link either way. The third is anyone else
+ * on their own side whose column they can see from where they stand.
+ */
+export type Relation = 'superior' | 'subordinate' | 'in_sight';
+
+/** Somebody a commander may write to, and why. */
 export interface Correspondent {
   readonly id: string;
   readonly name: string;
@@ -47,45 +54,26 @@ export interface Correspondent {
    */
   readonly unitName: string;
   readonly faction: string;
-  /**
-   * Whether an order may be sent, as opposed to merely a message.
-   *
-   * Orders travel downward only. Lateral coordination between corps commanders was real
-   * and mattered enormously, so writing sideways is allowed and ordering sideways is not
-   * — and the difference is worth showing in the form rather than discovering on a
-   * refusal.
-   */
-  readonly mayOrder: boolean;
-}
-
-/** Everyone beneath a commander, at any depth. Cycle-guarded, like the engine's version. */
-export function descendantsOf(
-  commanders: readonly PublicCommander[],
-  id: string,
-): Set<string> {
-  const children = new Map<string, string[]>();
-  for (const c of commanders) {
-    if (c.superiorId === null) continue;
-    children.set(c.superiorId, [...(children.get(c.superiorId) ?? []), c.id]);
-  }
-
-  const found = new Set<string>();
-  const queue = [id];
-  while (queue.length > 0) {
-    for (const child of children.get(queue.shift()!) ?? []) {
-      if (found.has(child) || child === id) continue;
-      found.add(child);
-      queue.push(child);
-    }
-  }
-  return found;
+  readonly relation: Relation;
 }
 
 /**
- * Who this commander may write to, in the order a form should offer them.
+ * The address a note to the referee is sent to, in place of a commander's id.
  *
- * Subordinates first, because most despatches are orders and most orders go down. Then
- * everyone else on their own side. Never themselves, and never the enemy.
+ * Not a commander, and never one: an id with a character no commander id can contain, so
+ * no officer can ever be named into it — `idFor` makes ids from letters, digits and
+ * hyphens only.
+ */
+export const REFEREE_ADDRESS = '@referee';
+
+const RELATION_ORDER: Record<Relation, number> = { superior: 0, subordinate: 1, in_sight: 2 };
+
+/**
+ * Who this commander may write to right now, in the order a form should offer them.
+ *
+ * Exactly who the server says, from `view.addressees`, which is computed by the same
+ * function `check` enforces — so the list cannot offer somebody a despatch would then be
+ * refused for. Their superior first, then those beneath them, then anyone else in sight.
  */
 export function correspondents(view: ClientView, senderId?: string): Correspondent[] {
   // The viewer, normally. A referee writing on a commander's behalf names the sender
@@ -94,21 +82,28 @@ export function correspondents(view: ClientView, senderId?: string): Corresponde
   const from = senderId ?? view.commander?.id;
   if (from === undefined) return [];
 
-  const under = descendantsOf(view.commanders, from);
+  const sender = view.commanders.find((c) => c.id === from);
+  const allowed = new Set(view.addressees[from] ?? []);
+
   return view.commanders
-    .filter((c) => c.id !== from)
+    .filter((c) => c.id !== from && allowed.has(c.id))
     .map((c) => ({
       id: c.id,
       name: c.name,
       unitId: c.unitId,
       unitName: c.unitName,
       faction: c.faction,
-      mayOrder: under.has(c.id),
+      relation:
+        sender?.superiorId === c.id
+          ? ('superior' as const)
+          : c.superiorId === from
+            ? ('subordinate' as const)
+            : ('in_sight' as const),
     }))
-    .sort((a, b) => {
-      if (a.mayOrder !== b.mayOrder) return a.mayOrder ? -1 : 1;
-      return a.name < b.name ? -1 : 1;
-    });
+    .sort(
+      (a, b) =>
+        RELATION_ORDER[a.relation] - RELATION_ORDER[b.relation] || (a.name < b.name ? -1 : 1),
+    );
 }
 
 /**
@@ -161,16 +156,6 @@ export const inbox = (view: ClientView): ReceivedDespatch[] =>
 /** The outbox, newest first. */
 export const outbox = (view: ClientView): SentDespatch[] =>
   [...view.sent].sort((a, b) => b.sentAtHours - a.sentAtHours);
-
-/**
- * Whether a received despatch still wants an answer.
- *
- * An acknowledgement is the only feedback channel in the game, so the console has to make
- * it obvious which despatches have had one and which have not — a sender learns nothing
- * at all unless somebody clicks this.
- */
-export const isAcknowledged = (view: ClientView, despatchId: string): boolean =>
-  view.sent.some((d) => d.kind === 'acknowledgement' && d.inReplyTo === despatchId);
 
 /** What a forwarded despatch says, so two lags stack rather than one fact being retyped. */
 export const forwardOf = (

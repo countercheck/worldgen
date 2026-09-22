@@ -39,7 +39,7 @@
  */
 
 import { catchupHours, occupied } from './column.js';
-import { directSubordinates, superiors } from './commander.js';
+import { superiors } from './commander.js';
 import type { CampaignConfig, Grade } from './config.js';
 import {
   courierStepHours,
@@ -47,7 +47,6 @@ import {
   planRide,
   type Despatch,
   type DespatchBody,
-  type DespatchKind,
 } from './despatch.js';
 import { REFEREE, type EventPayload, type LoggedEvent } from './events.js';
 import { key, type Hex } from './hex.js';
@@ -122,10 +121,8 @@ interface Rider {
 export interface SendSpec {
   readonly from: string;
   readonly to: string;
-  readonly kind: DespatchKind;
   readonly body: DespatchBody;
   readonly via?: readonly Hex[];
-  readonly inReplyTo?: string;
   readonly forwardedFrom?: string;
 }
 
@@ -133,8 +130,8 @@ export interface SendSpec {
  * One simulation, held open so that more than one command can drive it.
  *
  * Sending a despatch and advancing the clock are different commands but the same
- * machinery: a handed-over despatch is delivered, an arriving order is cascaded, and each
- * of those raises the same decisions with the same ids however it was triggered. Writing
+ * machinery: a handed-over despatch is delivered and its arrival queued for the referee,
+ * and each of those raises the same decisions with the same ids however it was triggered. Writing
  * that twice — once in `decide` for a send, once here for an arrival — is exactly how the
  * two paths drift, and it would drift in the direction of a commander seeing something they
  * should not.
@@ -211,10 +208,10 @@ function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: 
   /**
    * Put a despatch in a commander's hand, with everything that follows from it.
    *
-   * An arriving order is work for a referee — somebody has to read the prose and decide
-   * what the addressee makes of it — so it raises a decision. And a commander the referee
-   * is running passes it straight down as fresh despatches with fresh riders, so the
-   * copies can still be intercepted individually even though the decision cost nothing.
+   * Every arrival is work for a referee — somebody has to read the prose and decide what
+   * the addressee makes of it — so it raises a decision. Nothing is passed on by itself:
+   * a commander nobody is playing yet is the referee's to play, and what they write next
+   * is the referee's to write.
    */
   const deliver = (d: Despatch, atHours: number): void => {
     clockTo(atHours);
@@ -242,17 +239,9 @@ function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: 
 
     raise('despatch_arrived', d.to, to.unitId, atHours, {
       despatchId: d.id,
-      kind: d.kind,
       from: d.from,
       sentAtHours: d.sentAtHours,
     });
-
-    if (d.kind !== 'order' || !to.autoCascade) return;
-    // The text passes down verbatim. A referee who wants their divisions doing different
-    // things writes to them personally — cascading is a convenience, not a judgement.
-    for (const sub of directSubordinates(s, d.to)) {
-      send({ from: d.to, to: sub.id, kind: 'order', body: d.body, inReplyTo: d.id }, atHours);
-    }
   };
 
   /**
@@ -290,7 +279,6 @@ function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: 
     clockTo(atHours);
     const despatch: Despatch = {
       id: nextId('d'),
-      kind: spec.kind,
       from: spec.from,
       to: spec.to,
       faction: sender.faction,
@@ -298,13 +286,10 @@ function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: 
       // Where they stood when they sealed it, attached whether or not they thought to say so —
       // and written last, so it is the ground truth about the sender rather than whatever
       // a client put in the field. A body that could override it is a forged report, and
-      // a forged report is believed: it is filed as knowledge the moment it arrives. It
-      // also makes a cascaded order carry the cascading commander's position rather than
-      // the original sender's, which is the one a rider coming from them would know.
+      // a forged report is believed: it is filed as knowledge the moment it arrives.
       body: { ...spec.body, unitReport: reportOf(fromUnit, atHours) },
       via,
       forwardedFrom: spec.forwardedFrom ?? null,
-      inReplyTo: spec.inReplyTo ?? null,
       route,
       progress: 0,
       fate: { kind: 'in_transit' },
@@ -993,7 +978,7 @@ function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: 
       const commander = s.commanders.get(commanderId);
       if (commander != null && commander.superiorId !== null) {
         send(
-          { from: commanderId, to: commander.superiorId, kind: 'report', body: { contacts: fresh } },
+          { from: commanderId, to: commander.superiorId, body: { contacts: fresh } },
           tickEnd,
         );
       }
@@ -1101,7 +1086,7 @@ export function advance(
  * Put one despatch on the road, with everything that follows immediately from it.
  *
  * Immediately means: handed over if the two formations are touching, and if so delivered,
- * cascaded and queued for the referee before the clock moves at all. Everything else is
+ * and queued for the referee before the clock moves at all. Everything else is
  * the rider's business and happens in `advance`.
  */
 export function despatchNow(

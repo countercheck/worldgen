@@ -99,7 +99,6 @@ const commander = (id: string, faction: string, unitId: string): Commander => ({
   faction,
   unitId,
   superiorId: null,
-  autoCascade: true,
 });
 
 const stateWith = (units: Unit[], commanders: Commander[], clockHours = 6): CampaignState => ({

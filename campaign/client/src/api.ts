@@ -16,7 +16,6 @@ import type {
   ClientView,
   Command,
   DespatchBody,
-  DespatchKind,
   Commander,
   Faction,
   Formation,
@@ -195,10 +194,8 @@ export function sendDespatch(
   session: Session,
   despatch: {
     to: string;
-    despatchKind: DespatchKind;
     body: DespatchBody;
     via?: readonly Hex[];
-    inReplyTo?: string;
     forwardedFrom?: string;
     from?: string;
   },
@@ -211,6 +208,14 @@ export function sendDespatch(
     ...despatch,
   });
 }
+
+/**
+ * A note to the referee, out of the game: no rider, no delay, and nobody else reads it.
+ *
+ * `from` is the server's to fill in, from the token, as for a despatch.
+ */
+export const writeToReferee = (session: Session, text: string): Promise<CommandResult> =>
+  sendCommand(session, { kind: 'write_to_referee', from: '', text });
 
 /**
  * Set a formation marching. Referee only, and deliberately so.

@@ -150,13 +150,7 @@ export function unitFrom(draft: UnitDraft, cfg: CampaignConfig, at: Hex): Unit {
   };
 }
 
-/**
- * The commander a draft appoints to the formation it raises.
- *
- * `autoCascade` is true because the referee runs every seat until a link is issued for
- * one: an order arriving at a commander nobody is playing should pass down the chain
- * rather than wait on a player who does not exist yet.
- */
+/** The commander a draft appoints to the formation it raises. */
 export function commanderFrom(
   draft: UnitDraft,
   unitId: string,
@@ -168,6 +162,5 @@ export function commanderFrom(
     faction: draft.faction,
     unitId,
     superiorId: draft.superiorId === '' ? null : draft.superiorId,
-    autoCascade: true,
   };
 }

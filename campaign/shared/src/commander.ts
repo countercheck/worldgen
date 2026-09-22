@@ -34,13 +34,6 @@ export interface Commander {
   readonly unitId: string;
   /** Who they answer to. Null for the army commander, and for nobody else. */
   readonly superiorId: string | null;
-  /**
-   * Whether an arriving despatch is passed straight down to subordinates.
-   *
-   * True for a commander the referee is running, so that twenty formations do not become
-   * twenty pieces of paperwork a campaign day. False for a player, who writes their own.
-   */
-  readonly autoCascade: boolean;
 }
 
 /** Commanders in a fixed order, so nothing depends on the order they were added in. */
@@ -92,26 +85,20 @@ export function superiors(s: CampaignState, id: string): Commander[] {
 }
 
 /**
- * Whether `id` may give orders to `targetId`.
+ * Whether two commanders are one link apart in the chain of command.
  *
- * Orders travel downward only. A message may go to anyone on the same side — lateral
- * coordination between corps commanders was real and mattered enormously — but an order
- * is an instruction, and an instruction that can go sideways is not a chain of command.
+ * Direct superior or direct subordinate, and nothing further. A despatch that skips a
+ * level — the army commander writing straight to a division — has to go through the corps
+ * commander in between, unless the two are within sight of each other; see `mayWriteTo`
+ * in `despatch.ts`, which adds that exception. Same side is implied by the link, and
+ * checked anyway, because a log from an older build is not something to trust about it.
  */
-export const mayOrder = (s: CampaignState, id: string, targetId: string): boolean =>
-  id !== targetId && subordinates(s, id).some((c) => c.id === targetId);
-
-/**
- * Whether `id` may send any despatch at all to `targetId`.
- *
- * Same faction, and not themselves. Writing to the enemy is not a despatch, and if it ever
- * becomes a mechanic it will be a different one with its own rules.
- */
-export function mayWriteTo(s: CampaignState, id: string, targetId: string): boolean {
+export function inChain(s: CampaignState, id: string, targetId: string): boolean {
   const from = s.commanders.get(id);
   const to = s.commanders.get(targetId);
   if (from === undefined || to === undefined) return false;
-  return id !== targetId && from.faction === to.faction;
+  if (id === targetId || from.faction !== to.faction) return false;
+  return from.superiorId === targetId || to.superiorId === id;
 }
 
 /** The formation a commander rides with, if it still exists. */

@@ -28,7 +28,6 @@ import {
   assertMasked,
   DEFAULT_CONFIG,
   type ConfigOverrides,
-  inboxOf,
   logFor,
   viewFor,
   type CampaignConfig,
@@ -419,13 +418,15 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
       return reply.code(400).send({ error: 'a command is required' });
     }
 
-    // A commander may do exactly one thing: write. Everything else — tasks, the clock,
-    // the order of battle — is the referee's, and rejecting it here rather than in
-    // `check` keeps the engine free of any notion of who is connected.
+    // A commander may do exactly two things, both of them writing: a despatch, and a note to
+    // the referee. Everything else — tasks, the clock, the order of battle — is the
+    // referee's, and rejecting it here rather than in `check` keeps the engine free of any
+    // notion of who is connected.
     let command = body.command;
+    const isReferee = auth.role.kind === 'referee';
     if (auth.role.kind !== 'referee') {
-      if (command.kind !== 'send_despatch') {
-        return reply.code(403).send({ error: 'a commander may only send despatches' });
+      if (command.kind !== 'send_despatch' && command.kind !== 'write_to_referee') {
+        return reply.code(403).send({ error: 'a commander may only write' });
       }
       // The sender is who the token says they are, never who the payload claims. Trusting
       // `from` would let anyone holding any seat write in another commander's name, which is
@@ -434,9 +435,12 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
       command = { ...command, from: auth.role.id };
     }
 
+    // Bending a rule is the referee's alone. From a commander both are ignored rather than
+    // refused, so a client that sends them anyway is held to the rules and nothing more:
+    // honouring them was a way to march a despatch straight past every soft check.
     const result = store.execute(auth.campaign, command, auth.role, {
-      ...(body.force !== undefined ? { force: body.force } : {}),
-      ...(body.strictness !== undefined ? { strictness: body.strictness } : {}),
+      ...(isReferee && body.force !== undefined ? { force: body.force } : {}),
+      ...(isReferee && body.strictness !== undefined ? { strictness: body.strictness } : {}),
     });
 
     if (!result.ok) {
@@ -499,16 +503,10 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
     // A commander gets their outbox, rebuilt from the log rather than filtered out of it.
     // The raw events are a rich source of exactly what the fog exists to withhold — every
     // march in order, and every rider's route, which is a position — and filtering by
-    // actor does not remove them: a cascaded order is stamped with the name of the commander
-    // who started the chain but carries a route to somebody else's subordinate. See
+    // actor does not remove them: a despatch is stamped with its writer's name but carries
+    // a route to wherever its addressee is standing. See
     // `logFor`, which builds by construction for the same reason `senderCopy` does.
-    const mine = auth.role.id;
-    const acknowledged = new Set(
-      inboxOf(store.state(auth.campaign.id), mine)
-        .filter((d) => d.kind === 'acknowledgement')
-        .map((d) => d.inReplyTo),
-    );
-    return reply.send(logFor(events, mine, acknowledged));
+    return reply.send(logFor(events, auth.role.id));
   });
 
   // ---- live updates -----------------------------------------------------

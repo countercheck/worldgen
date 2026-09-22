@@ -36,7 +36,7 @@ import { DEFAULT_CONFIG, DEFAULT_RULESET, type CampaignConfig } from './config.j
 import {
   addresseeCopy,
   captorCopy,
-  isSuperseded,
+  addresseesOf,
   senderCopy,
   type CapturedDespatch,
   type Despatch,
@@ -117,6 +117,17 @@ export interface ClientView {
   readonly factions: readonly PublicFaction[];
   /** Commanders this role may know of: everyone on their own side, or all of them. */
   readonly commanders: readonly PublicCommander[];
+  /**
+   * Who may be written to, right now, by each commander this role writes as.
+   *
+   * Keyed by sender: a commander's own id alone, or every commander for a referee, who
+   * writes on behalf of anyone. Computed by the same `addresseesOf` that `check` enforces,
+   * so the addressee list cannot offer somebody the server would then refuse.
+   *
+   * A peer in the list is a peer in sight, which says roughly where they are. That is not
+   * a leak: they can see them, and would know whose colours those were.
+   */
+  readonly addressees: Readonly<Record<string, readonly string[]>>;
   /** A `world.json` document. Masked only when `terrainFog` is on. */
   readonly world: unknown;
   /**
@@ -241,6 +252,11 @@ export function viewFor(input: ViewInput, role: Role): ClientView {
       commanders: [...state.commanders.values()]
         .map((c) => publicCommander(c, state.units))
         .sort(byId),
+      addressees: Object.fromEntries(
+        [...state.commanders.keys()]
+          .sort()
+          .map((id) => [id, addresseesOf(state, world, cfg, id)]),
+      ),
       // Projected, like every other path out of this function. A referee sees the whole
       // map and no masking applies to them, which is exactly why this line read
       // `input.worldDoc` and quietly sent twelve fields nobody reads — the saving was
@@ -280,6 +296,7 @@ export function viewFor(input: ViewInput, role: Role): ClientView {
       config: cfg,
       factions,
       commanders: [],
+      addressees: {},
       world: maskedWorld(input, cfg, new Set<HexKey>(), new Set<HexKey>(), role.id),
       units: [],
       battle: [],
@@ -322,15 +339,10 @@ export function viewFor(input: ViewInput, role: Role): ClientView {
   // drops the observed unit's id on the way out.
   const contacts = contactsOf(state, role.id).map(publicContact);
 
-  // Their outbox, stripped by construction. An acknowledgement that has come back is the
-  // one and only thing they ever learn about a despatch's fate, so it is computed from
-  // their own inbox rather than from the despatch they sent.
-  const held = inboxOf(state, role.id);
-  const acknowledged = new Set(
-    held.filter((d) => d.kind === 'acknowledgement').map((d) => d.inReplyTo),
-  );
-  const sent = despatchesFrom(state, role.id).map((d) => senderCopy(d, acknowledged.has(d.id)));
-  const received = held.map((d) => addresseeCopy(d, isSuperseded(d, held)));
+  // Their outbox, stripped by construction. They learn nothing of a despatch's fate
+  // unless somebody writes back.
+  const sent = despatchesFrom(state, role.id).map(senderCopy);
+  const received = inboxOf(state, role.id).map(addresseeCopy);
 
   return {
     role: 'commander',
@@ -344,6 +356,7 @@ export function viewFor(input: ViewInput, role: Role): ClientView {
       .filter((c) => c.faction === me.faction)
       .map((c) => publicCommander(c, state.units))
       .sort(byId),
+    addressees: { [me.id]: addresseesOf(state, world, cfg, me.id) },
     world: maskedWorld(input, cfg, surveyed, visible, me.faction),
     units: own === undefined ? [] : [own],
     reports,
@@ -502,9 +515,9 @@ export function assertMasked(view: ClientView, cfg: CampaignConfig = DEFAULT_CON
  *
  * The log is the single richest thing in the campaign: every march in order, every
  * rider's path, every contact anyone filed. Filtering it by who *acted* is not enough,
- * because one command produces events that happened to other commanders — a cascaded order
- * carries a route to the addressee's subordinate, stamped with the original sender's
- * name — so the filter is on the fact rather than on the actor.
+ * because one command produces events that happened to other commanders — a despatch
+ * carries a route to wherever its addressee is standing — so the filter is on the fact
+ * rather than on the actor.
  *
  * What survives is their outbox: the despatches they themselves wrote, in the shape
  * `senderCopy` already defines. Everything else is somebody else's business and is dropped
@@ -516,21 +529,13 @@ export interface LoggedAction {
   readonly despatch: SentDespatch;
 }
 
-export function logFor(
-  events: readonly LoggedEvent[],
-  commanderId: string,
-  acknowledged: ReadonlySet<string | null> = new Set(),
-): LoggedAction[] {
+export function logFor(events: readonly LoggedEvent[], commanderId: string): LoggedAction[] {
   const out: LoggedAction[] = [];
   for (const e of events) {
     if (e.payload.kind !== 'despatch_sent') continue;
     const d = e.payload.despatch;
     if (d.from !== commanderId) continue;
-    out.push({
-      seq: e.seq,
-      clockHours: e.clockHours,
-      despatch: senderCopy(d, acknowledged.has(d.id)),
-    });
+    out.push({ seq: e.seq, clockHours: e.clockHours, despatch: senderCopy(d) });
   }
   return out;
 }

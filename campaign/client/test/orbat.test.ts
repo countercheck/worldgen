@@ -102,10 +102,6 @@ describe('the commander a draft appoints', () => {
   it('answers to the superior chosen', () => {
     expect(appoint({ superiorId: 'ney' }).superiorId).toBe('ney');
   });
-
-  it('passes orders down on its own until somebody is given the seat', () => {
-    expect(appoint().autoCascade).toBe(true);
-  });
 });
 
 describe('the formation a draft describes', () => {

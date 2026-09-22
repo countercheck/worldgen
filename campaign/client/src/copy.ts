@@ -214,15 +214,10 @@ export const copy = {
     reached: (at: string, hours: string): string =>
       `Reached you ${at}, after ${hours} h on the road`,
     forwardedFrom: (who: string): string => ` · forwarded from ${who}`,
-    superseded: 'Overtaken by a later order you already hold. Disregarded.',
     sightingsAttached: (n: number): string =>
       n === 1 ? '1 sighting attached' : `${n} sightings attached`,
 
-    acknowledged: 'Acknowledged',
-    acknowledge: 'Acknowledge',
     forward: 'Forward',
-    /** The body of an acknowledgement, which is itself a despatch and can itself be lost. */
-    acknowledgementText: (of: string): string => `Received your despatch of ${of}.`,
 
     sentHeading: 'Sent',
     emptyOutbox: 'You have written nothing yet.',
@@ -237,9 +232,8 @@ export const copy = {
      */
     commands: (unit: string, faction: string): string => `${unit} · ${faction}`,
     handed: 'Handed over on the spot — their column was touching yours.',
-    arrived: 'Acknowledged. It arrived.',
     /** The mechanic, not a missing feature. It is worded to make that unambiguous. */
-    unknownFate: 'Unacknowledged.',
+    unknownFate: 'Whether it arrived, you will know only if they write back.',
     viaWaypoints: (n: number): string => ` · Rider sent via ${n} waypoint(s) of yours.`,
   },
 
@@ -250,7 +244,18 @@ export const copy = {
     heading: 'Write a despatch',
     from: 'From',
     to: 'To',
-    messageOnly: ' — message only',
+    /**
+     * Why an officer is on the list at all, after their name.
+     *
+     * Nothing for a subordinate — writing down the chain is the common case and needs no
+     * caption — and a word for the other two, so the reader can see the rule working.
+     */
+    relation: {
+      superior: ' — your superior',
+      subordinate: '',
+      in_sight: ' — in sight',
+    },
+    theReferee: 'The referee — out of the game',
     /**
      * One line of an addressee list: who, what they command, and which side.
      *
@@ -261,12 +266,12 @@ export const copy = {
     correspondent: (name: string, unit: string, faction: string): string =>
       `${name} — ${unit}, ${faction}`,
 
-    orderPlaceholder: 'Move on Quatre Bras with all speed; I expect you astride the crossroads by noon.',
-    reportPlaceholder: 'What you have seen, and when you saw it.',
+    despatchPlaceholder: 'Move on Quatre Bras with all speed; I expect you astride the crossroads by noon.',
+    notePlaceholder: 'A question about the rules, or something you think the referee should know.',
 
     asReferee: 'Written in their name, and logged as yours. What the addressee makes of it is still a decision when it arrives.',
-    isOrder: 'This is an order. The referee will read it and decide what your subordinate makes of it.',
-    isMessage: 'This is a message. You may write to anyone on your own side; only those beneath you take orders.',
+    whoMayBeWritten: 'A rider can be sent to your superior, to those directly beneath you, and to anyone on your side you can see. Anyone else, write through one of them.',
+    isNote: 'Out of the game: no rider, no delay, and nobody but the referee reads it.',
 
     /** A commander is told why there is no estimate, rather than shown an empty space. */
     noEstimate: 'How long the ride takes is not yours to know. Your rider will go until they find the addressee, and nobody will tell you when they did.',
@@ -277,6 +282,7 @@ export const copy = {
 
     sending: 'Sealing…',
     send: 'Send by rider',
+    sendNote: 'Send to the referee',
     cancel: 'Cancel',
   },
 
@@ -362,6 +368,7 @@ export const copy = {
     column_blocked: 'has run into a column in its way',
     column_contested: 'is contesting a hex, and neither is the faster',
     patrol_contact: 'has run into something',
+    referee_note: '— its commander has written to you, out of the game',
     unknown: 'needs a decision',
   },
 
