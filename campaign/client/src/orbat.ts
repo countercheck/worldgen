@@ -15,6 +15,7 @@
 import {
   MAX_MORALE,
   type CampaignConfig,
+  type Commander,
   type Echelon,
   type Experience,
   type Hex,
@@ -36,6 +37,18 @@ export interface UnitDraft {
   readonly corps: string | null;
   readonly echelon: Echelon | null;
   readonly at: Hex | null;
+  /**
+   * Who commands it, by name, and who they answer to.
+   *
+   * Part of the draft rather than a second form, because a formation nobody commands
+   * cannot be ordered and cannot report — it is a hole in the chain of command rather
+   * than a piece on the board. Raising one and appointing to it is a single act here for
+   * the same reason a unit is raised with its supply full: the referee is describing a
+   * formation that exists, and a formation that exists has an officer at its head.
+   */
+  readonly commanderName: string;
+  /** Empty for army command, which is where the first formation of a side necessarily sits. */
+  readonly superiorId: string;
 }
 
 export const emptyDraft = (faction: string): UnitDraft => ({
@@ -49,6 +62,8 @@ export const emptyDraft = (faction: string): UnitDraft => ({
   corps: null,
   echelon: null,
   at: null,
+  commanderName: '',
+  superiorId: '',
 });
 
 /**
@@ -88,6 +103,7 @@ export function draftProblems(
   if (!Number.isFinite(draft.paperStrength) || draft.paperStrength < 0) {
     out.push(copy.orbat.strengthNegative);
   }
+  if (draft.commanderName.trim() === '') out.push(copy.orbat.needsCommander);
   if (draft.at === null) out.push(copy.orbat.needsGround);
   return out;
 }
@@ -131,5 +147,27 @@ export function unitFrom(draft: UnitDraft, cfg: CampaignConfig, at: Hex): Unit {
     corps: draft.corps,
     parentUnitId: null,
     ...(draft.echelon === null ? {} : { echelon: draft.echelon }),
+  };
+}
+
+/**
+ * The commander a draft appoints to the formation it raises.
+ *
+ * `autoCascade` is true because the referee runs every seat until a link is issued for
+ * one: an order arriving at a commander nobody is playing should pass down the chain
+ * rather than wait on a player who does not exist yet.
+ */
+export function commanderFrom(
+  draft: UnitDraft,
+  unitId: string,
+  taken: ReadonlySet<string>,
+): Commander {
+  return {
+    id: idFor(draft.commanderName, taken),
+    name: draft.commanderName.trim(),
+    faction: draft.faction,
+    unitId,
+    superiorId: draft.superiorId === '' ? null : draft.superiorId,
+    autoCascade: true,
   };
 }

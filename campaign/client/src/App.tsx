@@ -54,6 +54,7 @@ import {
   forwardOf,
   inbox,
   isAcknowledged,
+  labelling,
   outbox,
 } from './despatch.js';
 import { Join, type Joined } from './Join.jsx';
@@ -522,6 +523,10 @@ function Console({
   const sender = writingAs ?? senders[0]?.id ?? null;
   const correspondents = correspondentsOf(view, sender ?? undefined);
   const nameOf = (id: string): string => board.commanders.get(id)?.name ?? id;
+  const factionName = (id: string): string => board.factions.get(id)?.name ?? id;
+  // Built once per render rather than per despatch: the post names a commander four times
+  // over on a busy turn, and each of those wants the same three facts about them.
+  const labelOf = labelling(view);
   const ownFormation =
     view.commander === null ? null : (board.units.get(view.commander.unitId) ?? null);
 
@@ -740,7 +745,7 @@ function Console({
         ownUnitId={view.commander?.unitId ?? null}
         clockHours={clock}
         cfg={cfg}
-        factionName={(id) => board.factions.get(id)?.name ?? id}
+        factionName={factionName}
         colorOf={(f) => board.factions.get(f)?.color ?? '#888'}
         selectedId={selectedId}
         onSelect={setSelectedId}
@@ -759,18 +764,26 @@ function Console({
                 setOrdering(ORDER_OF_BATTLE);
                 setPicked([]);
               }}
-              onRaise={(unit) => {
+              onRaise={(unit, commander) => {
                 setSending(true);
                 setPostError(null);
+                // Sequential, and it has to be: a commander must have a formation to ride
+                // with before they can be appointed to it, so the appointment cannot be
+                // sent until the unit is known to exist. If the second command is refused
+                // the formation stands there with nobody at its head, which the referee is
+                // told about rather than left to notice.
                 void addUnit(session, unit)
+                  .then(async (raised) => {
+                    if (!raised.ok) return raised;
+                    setPlacing(null);
+                    return addCommander(session, commander);
+                  })
                   .then((result) => {
                     if (!result.ok) {
                       setPostError(
                         result.violations?.map((v) => v.message).join('; ') ??
                           copy.orders.refused,
                       );
-                    } else {
-                      setPlacing(null);
                     }
                   })
                   .finally(() => setSending(false));
@@ -909,6 +922,7 @@ function Console({
               ) : (
                 <Composer
                   correspondents={correspondents}
+                  factionName={factionName}
                   estimateFor={(id) =>
                     estimateRide(view, board.world, cfg, id, [], sender ?? undefined)
                   }
@@ -940,7 +954,7 @@ function Console({
               <DespatchLog
                 despatches={view.despatches}
                 clockHours={clock}
-                nameOf={nameOf}
+                labelOf={labelOf}
               />
             </>
           )}
@@ -950,6 +964,7 @@ function Console({
               {writing !== null && (
                 <Composer
                   correspondents={correspondents}
+                  factionName={factionName}
                   clockHours={clock}
                   busy={sending}
                   error={postError}
@@ -973,7 +988,7 @@ function Console({
                 received={inbox(view)}
                 sent={outbox(view)}
                 clockHours={clock}
-                nameOf={nameOf}
+                labelOf={labelOf}
                 acknowledged={(id) => isAcknowledged(view, id)}
                 busyId={busyId}
                 onWrite={() => setWriting({})}

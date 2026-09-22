@@ -227,6 +227,15 @@ export const copy = {
     sentHeading: 'Sent',
     emptyOutbox: 'You have written nothing yet.',
     to: (who: string): string => `To ${who}`,
+    /**
+     * The formation an officer rides with, and whose side they are on.
+     *
+     * Under the name rather than beside it: the officer is who the despatch is from, and
+     * the formation is which body of troops that makes it about. Both are wanted — "Ney"
+     * alone is a name a new player has not learned yet, and "1re Division" alone loses who
+     * wrote it — but they are not equals, so they are not on one line.
+     */
+    commands: (unit: string, faction: string): string => `${unit} · ${faction}`,
     handed: 'Handed over on the spot — their column was touching yours.',
     arrived: 'Acknowledged. It arrived.',
     /** The mechanic, not a missing feature. It is worded to make that unambiguous. */
@@ -242,6 +251,15 @@ export const copy = {
     from: 'From',
     to: 'To',
     messageOnly: ' — message only',
+    /**
+     * One line of an addressee list: who, what they command, and which side.
+     *
+     * A dropdown has no room for two lines, and an addressee chosen by name alone is the
+     * easiest mistake to make in this interface — two officers of the same rank, and the
+     * order goes to the wrong corps. The formation disambiguates them.
+     */
+    correspondent: (name: string, unit: string, faction: string): string =>
+      `${name} — ${unit}, ${faction}`,
 
     orderPlaceholder: 'Move on Quatre Bras with all speed; I expect you astride the crossroads by noon.',
     reportPlaceholder: 'What you have seen, and when you saw it.',
@@ -274,6 +292,8 @@ export const copy = {
     queueEmpty: 'Nothing is waiting on you. Run the clock until something is.',
     /** Traffic carries no commander: two columns meeting is a fact about the ground. */
     theGround: 'The ground',
+    /** Between the sender's formation and the addressee's, in the log's second line. */
+    towards: ' → ',
 
     noStandingTask: ' · no standing task',
     taskHalted: ' · halted',
@@ -438,6 +458,7 @@ export const copy = {
     willBeRaisedBefore: 'It will be raised as',
     willBeRaisedAfter: ', fresh and fully supplied.',
 
+    commander: 'Commander',
     commanderNamePlaceholder: 'Marshal Ney',
     ridesWith: 'Rides with',
     answersTo: 'Answers to',
@@ -448,6 +469,7 @@ export const copy = {
 
     // What is wrong with a draft, in the order a reader would find it.
     needsName: 'It needs a name.',
+    needsCommander: 'It needs a commander. Every formation has one — a formation nobody commands can neither be ordered nor report.',
     idTaken: (id: string): string => `There is already a ${id}.`,
     strengthNegative: 'Paper strength cannot be negative.',
     needsGround: 'Point at the ground it stands on.',

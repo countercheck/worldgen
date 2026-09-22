@@ -324,8 +324,14 @@ describe('the view endpoint', () => {
   });
 
   it("does not send a subordinate their superior's live column", async () => {
-    const raw = (await viewAs(f, f.kellermann)).body;
-    expect(raw).not.toContain(RED_NAME);
+    const res = await viewAs(f, f.kellermann);
+    const raw = res.body;
+    // As a unit, not as a name. The formation's name does reach them — `unitName` on
+    // their superior, which is the order of battle every staff on a side holds — so the
+    // canary is the unit object itself: its name field, its id among their units, and
+    // its strength.
+    expect(raw).not.toContain(`"name":"${RED_NAME}"`);
+    expect((res.json().units as { id: string }[]).map((u) => u.id)).not.toContain('red-1');
     expect(raw).not.toContain(`"paperStrength":${RED_STRENGTH}`);
   });
 

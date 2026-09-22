@@ -41,8 +41,10 @@ import {
   forwardOf,
   inbox,
   isAcknowledged,
+  labelling,
   outbox,
 } from '../src/despatch.js';
+import { copy } from '../src/copy.js';
 
 const world = parseWorld(worldDoc);
 
@@ -134,6 +136,74 @@ describe('who a commander may write to', () => {
 
   it('gives a commander with no seat nobody to write to', () => {
     expect(correspondents(view(REFEREE_ROLE))).toEqual([]);
+  });
+});
+
+describe('naming an officer by what they command', () => {
+  it('sends the name of the formation each commander rides with', () => {
+    const neyHere = ney.commanders.find((c) => c.id === 'ney')!;
+    expect(neyHere.unitName).toBe('1re Division');
+    expect(ney.commander!.unitName).toBe('1re Division');
+  });
+
+  it('sends formation names for their own side only', () => {
+    // The order of battle a commander already holds, and no more: the enemy's
+    // establishment arrives by sighting or not at all.
+    expect(ney.commanders.every((c) => c.faction === ney.commander!.faction)).toBe(true);
+    expect(ney.commanders.some((c) => c.unitName === '3rd Division')).toBe(false);
+  });
+
+  it('sends the referee every side\'s', () => {
+    const referee = view(REFEREE_ROLE);
+    expect(referee.commanders.some((c) => c.unitName === '3rd Division')).toBe(true);
+  });
+
+  it('falls back to the unit id when the formation is gone', () => {
+    const units = new Map(state.units);
+    units.delete('red-2');
+    const bereaved = viewFor(
+      { campaignId: 'c1', state: { ...state, units }, worldDoc, world },
+      commanderRole('ney'),
+    );
+    expect(bereaved.commanders.find((c) => c.id === 'kellermann')!.unitName).toBe('red-2');
+  });
+
+  it('puts the formation and side on every addressee', () => {
+    const kellermann = correspondents(ney).find((c) => c.id === 'kellermann')!;
+    expect(kellermann.unitName).toBe('Cuirassiers de la Garde');
+    expect(kellermann.faction).toBe('red');
+  });
+
+  it('labels a known commander by name, formation and the side\'s name', () => {
+    expect(labelling(ney)('kellermann')).toEqual({
+      name: 'General Kellermann',
+      unit: 'Cuirassiers de la Garde',
+      // The name, not the id: "red" is a key, not something a reader should see.
+      faction: 'Armée du Nord',
+    });
+  });
+
+  it('labels a commander this view does not know by their id, not by nothing', () => {
+    // An enemy officer to a commander, or one removed since the despatch was written.
+    expect(labelling(ney)('wellington')).toEqual({
+      name: 'wellington',
+      unit: 'wellington',
+      faction: '',
+    });
+  });
+
+  it('falls back to the faction id when the side is not in the view', () => {
+    const sideless: ClientView = { ...ney, factions: [] };
+    expect(labelling(sideless)('kellermann').faction).toBe('red');
+  });
+
+  it('writes the addressee line and the byline the same way everywhere', () => {
+    expect(copy.composer.correspondent('Ney', '1re Division', 'Armée du Nord')).toBe(
+      'Ney — 1re Division, Armée du Nord',
+    );
+    expect(copy.post.commands('1re Division', 'Armée du Nord')).toBe(
+      '1re Division · Armée du Nord',
+    );
   });
 });
 

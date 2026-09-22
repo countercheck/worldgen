@@ -148,3 +148,54 @@ export function wouldCycle(
   if (superiorId === id) return true;
   return superiors(s, superiorId).some((c) => c.id === id);
 }
+
+/**
+ * The commanders riding with a formation, senior first.
+ *
+ * Normally one. More than one happens when a corps commander whose headquarters has been
+ * destroyed falls back on one of their divisions, and then the order matters: a despatch
+ * naming the formation rather than the officer is for whoever is senior on the spot.
+ * Seniority is depth in the chain of command, and ties break on id so that two officers of
+ * equal standing never depend on the order they were appointed in.
+ */
+export const ridersOf = (s: CampaignState, unitId: string): Commander[] =>
+  [...s.commanders.values()]
+    .filter((c) => c.unitId === unitId)
+    .sort((a, b) => superiors(s, a.id).length - superiors(s, b.id).length || (a.id < b.id ? -1 : 1));
+
+/**
+ * Who commands a unit — the invariant that every unit has somebody.
+ *
+ * A patrol has no officer of its own in these rules: twenty troopers are a detachment of
+ * the formation they came off, they are recalled to it, and what they see is what its
+ * commander comes to know. So the answer for a patrol is its parent's commander, found by
+ * walking up `parentUnitId` rather than by appointing a seat nobody would ever write to.
+ *
+ * Undefined only for a formation nobody has been appointed to, which `uncommanded` exists
+ * to find and the referee's console exists to prevent.
+ */
+export function commanderOf(s: CampaignState, unitId: string): Commander | undefined {
+  const seen = new Set<string>();
+  let at: string | undefined = unitId;
+
+  while (at !== undefined && !seen.has(at)) {
+    seen.add(at);
+    const rider = ridersOf(s, at)[0];
+    if (rider !== undefined) return rider;
+    at = s.units.get(at)?.parentUnitId ?? undefined;
+  }
+  return undefined;
+}
+
+/**
+ * Formations with nobody to command them, in id order.
+ *
+ * Every unit is supposed to have a named commander: a formation nobody commands cannot be
+ * ordered, cannot report, and is a hole in the chain of command rather than a piece on the
+ * board. Patrols are not counted — they answer to the formation they were detached from,
+ * which `commanderOf` resolves for them.
+ */
+export const uncommanded = (s: CampaignState): Unit[] =>
+  [...s.units.values()]
+    .filter((u) => u.parentUnitId === null && commanderOf(s, u.id) === undefined)
+    .sort((a, b) => (a.id < b.id ? -1 : 1));

@@ -569,6 +569,21 @@ code.link {
   justify-content: space-between;
   align-items: baseline;
   gap: 8px;
+  flex-wrap: wrap;
+}
+
+/*
+ * The formation an officer rides with, under their name rather than beside it.
+ *
+ * Its own line, because the referee's log puts two of these on one row — sender's
+ * formation and addressee's — and a name crowded against them stops being the thing the
+ * eye lands on first. Muted and small for the same reason: who wrote it is the heading,
+ * what they command is the qualification.
+ */
+.despatch-commands {
+  flex-basis: 100%;
+  font-size: 11px;
+  color: var(--muted);
 }
 
 .despatch-from {
