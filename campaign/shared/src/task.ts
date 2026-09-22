@@ -111,7 +111,9 @@ export type DecisionTrigger =
   /** Two heads were entering the same hex at once, and neither was the faster. */
   | 'column_contested'
   /** A patrol ran into something. Twenty troopers meeting anything is the referee's. */
-  | 'patrol_contact';
+  | 'patrol_contact'
+  /** A player wrote to the referee directly, out of the game. `context.text` is the note. */
+  | 'referee_note';
 
 export const DECISION_TRIGGERS: readonly DecisionTrigger[] = [
   'enemy_contact',
@@ -124,6 +126,7 @@ export const DECISION_TRIGGERS: readonly DecisionTrigger[] = [
   'column_blocked',
   'column_contested',
   'patrol_contact',
+  'referee_note',
 ];
 
 /**

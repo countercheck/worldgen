@@ -69,7 +69,6 @@ const commander = (
   faction,
   unitId,
   superiorId,
-  autoCascade: true,
 });
 
 function setUp() {

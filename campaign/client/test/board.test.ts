@@ -284,7 +284,6 @@ describe('riders on the map', () => {
           kind: 'send_despatch',
           from: 'ney',
           to: 'kellermann',
-          despatchKind: 'order',
           body: { text: 'Move on Quatre Bras with all speed.' },
         },
         { kind: 'advance_clock', hours: 1 },

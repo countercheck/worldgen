@@ -38,6 +38,7 @@ import {
   fetchView,
   resolveDecision,
   sendDespatch,
+  writeToReferee,
   setFormation,
   setTask,
   subscribe,
@@ -52,8 +53,8 @@ import {
   correspondents as correspondentsOf,
   estimateRide,
   forwardOf,
+  REFEREE_ADDRESS,
   inbox,
-  isAcknowledged,
   labelling,
   outbox,
 } from './despatch.js';
@@ -428,24 +429,25 @@ function Console({
   /**
    * Put a despatch on the road.
    *
-   * A refusal comes back as violations rather than as a thrown error — "they do not
-   * answer to you, so that is a message rather than an order" is the game working — so it
-   * is shown in the form the commander is still looking at.
+   * A refusal comes back as violations rather than as a thrown error — "they are out of
+   * sight, and not one link away" is the game working — so it is shown in the form the
+   * commander is still looking at.
+   *
+   * The referee is an addressee too, for a commander, but not a rider's: a note to them
+   * goes out of the game, at once, as an alert in their queue.
    */
   const write = useCallback(
     async (
       to: string,
-      despatchKind: 'order' | 'report' | 'acknowledgement',
       body: { text?: string; contacts?: readonly unknown[] },
-      extra: { inReplyTo?: string; forwardedFrom?: string; from?: string } = {},
+      extra: { forwardedFrom?: string; from?: string } = {},
     ): Promise<boolean> => {
       setPostError(null);
-      const result = await sendDespatch(session, {
-        to,
-        despatchKind,
-        body: body as { text?: string },
-        ...extra,
-      }).catch((err: Error) => {
+      const sent =
+        to === REFEREE_ADDRESS
+          ? writeToReferee(session, body.text ?? '')
+          : sendDespatch(session, { to, body: body as { text?: string }, ...extra });
+      const result = await sent.catch((err: Error) => {
         setPostError(err.message);
         return null;
       });
@@ -940,9 +942,7 @@ function Console({
                   onSend={(draft) => {
                     if (draft.from === undefined) return;
                     setSending(true);
-                    void write(draft.to, draft.despatchKind, { text: draft.text }, {
-                      from: draft.from,
-                    })
+                    void write(draft.to, { text: draft.text }, { from: draft.from })
                       .then((ok) => {
                         if (ok) setWriting(null);
                       })
@@ -965,6 +965,7 @@ function Console({
                 <Composer
                   correspondents={correspondents}
                   factionName={factionName}
+                  toReferee
                   clockHours={clock}
                   busy={sending}
                   error={postError}
@@ -975,7 +976,7 @@ function Console({
                   }}
                   onSend={(draft) => {
                     setSending(true);
-                    void write(draft.to, draft.despatchKind, { text: draft.text })
+                    void write(draft.to, { text: draft.text })
                       .then((ok) => {
                         if (ok) setWriting(null);
                       })
@@ -989,24 +990,12 @@ function Console({
                 sent={outbox(view)}
                 clockHours={clock}
                 labelOf={labelOf}
-                acknowledged={(id) => isAcknowledged(view, id)}
                 busyId={busyId}
                 onWrite={() => setWriting({})}
-                onAcknowledge={(d: ReceivedDespatch) => {
-                  setBusyId(d.id);
-                  // An acknowledgement is itself a despatch, so it takes a rider and can
-                  // itself be lost. That recursion is the whole of the feedback channel.
-                  void write(
-                    d.from,
-                    'acknowledgement',
-                    { text: copy.post.acknowledgementText(dayHour(d.sentAtHours)) },
-                    { inReplyTo: d.id },
-                  ).finally(() => setBusyId(null));
-                }}
                 onForward={(d: ReceivedDespatch) => {
                   // Opens the composer rather than sending: forwarding is a choice of
                   // addressee, and the commander they want is rarely the first in the list.
-                  setWriting({ despatchKind: 'report', text: forwardOf(d).text ?? '' });
+                  setWriting({ text: forwardOf(d).text ?? '' });
                 }}
               />
 

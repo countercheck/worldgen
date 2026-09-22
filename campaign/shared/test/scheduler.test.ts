@@ -122,8 +122,7 @@ const commander = (
   faction: string,
   unitId: string,
   superiorId: string | null = null,
-  autoCascade = true,
-): Commander => ({ id, name: id, faction, unitId, superiorId, autoCascade });
+): Commander => ({ id, name: id, faction, unitId, superiorId });
 
 interface Setup {
   units?: Unit[];
@@ -477,7 +476,8 @@ describe('discovery', () => {
     const reports = payloads
       .filter((p) => p.kind === 'despatch_sent')
       .map((p) => (p.kind === 'despatch_sent' ? p.despatch : null))
-      .filter((d) => d?.kind === 'report');
+      // Nobody wrote it: what makes it the automatic report is the sightings on it.
+      .filter((d) => d?.body.contacts !== undefined);
 
     expect(reports).toHaveLength(1);
     expect(reports[0]).toMatchObject({ from: 'ney', to: 'soult' });
@@ -491,7 +491,7 @@ describe('riders', () => {
   const near = unit('red-1', 'red', { q: 5, r: 5 });
   const far = unit('red-2', 'red', { q: 25, r: 5 });
   const ney = commander('ney', 'red', 'red-1');
-  const kellermann = commander('kellermann', 'red', 'red-2', 'ney', false);
+  const kellermann = commander('kellermann', 'red', 'red-2', 'ney');
 
   const apart = (): CampaignState =>
     stateFrom({ units: [near, far], commanders: [ney, kellermann] });
@@ -503,7 +503,6 @@ describe('riders', () => {
     const sent = despatchNow(state, world, cfg, clean, {
       from: 'ney',
       to: 'kellermann',
-      kind: 'order',
       body: order,
     });
 
@@ -533,7 +532,6 @@ describe('riders', () => {
     const sent = despatchNow(state, world, cfg, clean, {
       from: 'ney',
       to: 'kellermann',
-      kind: 'order',
       body: order,
     });
 
@@ -560,7 +558,6 @@ describe('riders', () => {
       despatchNow(state, world, cfg, clean, {
         from: 'ney',
         to: 'kellermann',
-        kind: 'order',
         body: order,
       }),
     );
@@ -576,50 +573,26 @@ describe('riders', () => {
     expect(kinds(payloads)).toContain('despatch_delivered');
   });
 
-  it('cascades an arriving order to subordinates who are run by the referee', () => {
+  it('passes nothing on by itself: what the addressee does next is the referee\'s', () => {
+    // Kellermann has a subordinate and nobody playing them. The paper stops in their hand,
+    // and the referee is asked what they make of it.
     const state = stateFrom({
       units: [near, unit('red-2', 'red', { q: 6, r: 5 }), unit('red-3', 'red', { q: 30, r: 5 })],
       commanders: [
         ney,
-        commander('kellermann', 'red', 'red-2', 'ney', true),
-        commander('soult', 'red', 'red-3', 'kellermann', true),
+        commander('kellermann', 'red', 'red-2', 'ney'),
+        commander('soult', 'red', 'red-3', 'kellermann'),
       ],
     });
 
-    const sent = despatchNow(state, world, cfg, clean, {
-      from: 'ney',
-      to: 'kellermann',
-      kind: 'order',
-      body: order,
-    });
+    const sent = despatchNow(state, world, cfg, clean, { from: 'ney', to: 'kellermann', body: order });
 
-    const onward = sent
-      .filter((p) => p.kind === 'despatch_sent')
-      .map((p) => (p.kind === 'despatch_sent' ? p.despatch : null));
-
-    expect(onward).toHaveLength(2);
-    expect(onward[1]).toMatchObject({ from: 'kellermann', to: 'soult', kind: 'order' });
-    // Verbatim, and pointing back at the order it came from.
-    expect(onward[1]!.body.text).toBe(order.text);
-    expect(onward[1]!.inReplyTo).toBe(onward[0]!.id);
-  });
-
-  it('does not cascade past a commander a player is holding', () => {
-    const state = stateFrom({
-      units: [near, unit('red-2', 'red', { q: 6, r: 5 }), unit('red-3', 'red', { q: 30, r: 5 })],
-      commanders: [
-        ney,
-        commander('kellermann', 'red', 'red-2', 'ney', false),
-        commander('soult', 'red', 'red-3', 'kellermann', true),
-      ],
-    });
-    const sent = despatchNow(state, world, cfg, clean, {
-      from: 'ney',
-      to: 'kellermann',
-      kind: 'order',
-      body: order,
-    });
     expect(sent.filter((p) => p.kind === 'despatch_sent')).toHaveLength(1);
+    const asked = sent.find((p) => p.kind === 'decision_raised');
+    expect(asked?.kind === 'decision_raised' ? asked.decision : null).toMatchObject({
+      trigger: 'despatch_arrived',
+      commanderId: 'kellermann',
+    });
   });
 });
 
@@ -634,7 +607,7 @@ describe('interception', () => {
       units: [red, far, picket],
       commanders: [
         commander('ney', 'red', 'red-1'),
-        commander('kellermann', 'red', 'red-2', 'ney', false),
+        commander('kellermann', 'red', 'red-2', 'ney'),
         commander('wellington', 'blue', 'blue-1'),
       ],
     });
@@ -645,7 +618,6 @@ describe('interception', () => {
       despatchNow(state, world, cfg, clean, {
         from: 'ney',
         to: 'kellermann',
-        kind: 'order',
         body: { text: 'Hold the crossroads.' },
       }),
     );
@@ -835,7 +807,7 @@ describe('a rider with nowhere to ride', () => {
   const near = unit('red-1', 'red', { q: 5, r: 5 });
   const far = unit('red-2', 'red', { q: 25, r: 5 });
   const ney = commander('ney', 'red', 'red-1');
-  const kellermann = commander('kellermann', 'red', 'red-2', 'ney', false);
+  const kellermann = commander('kellermann', 'red', 'red-2', 'ney');
 
   const sundered = (): CampaignState =>
     stateFrom({ units: [near, far], commanders: [ney, kellermann] });
@@ -845,7 +817,6 @@ describe('a rider with nowhere to ride', () => {
     const payloads = despatchNow(state, split, cfg, clean, {
       from: 'ney',
       to: 'kellermann',
-      kind: 'order',
       body: { text: 'Close on me.' },
     });
 
@@ -865,7 +836,6 @@ describe('a rider with nowhere to ride', () => {
       despatchNow(state, split, cfg, clean, {
         from: 'ney',
         to: 'kellermann',
-        kind: 'order',
         body: { text: 'Close on me.' },
       }),
     );
@@ -888,7 +858,7 @@ describe('what a despatch says about its sender', () => {
   const near = unit('red-1', 'red', { q: 5, r: 5 });
   const far = unit('red-2', 'red', { q: 25, r: 5 });
   const ney = commander('ney', 'red', 'red-1');
-  const kellermann = commander('kellermann', 'red', 'red-2', 'ney', false);
+  const kellermann = commander('kellermann', 'red', 'red-2', 'ney');
 
   it('is the engine\'s own return, not the one the caller wrote', () => {
     // A forged report is believed — it is filed as knowledge the moment it arrives — so a
@@ -898,7 +868,6 @@ describe('what a despatch says about its sender', () => {
     const payloads = despatchNow(state, world, cfg, clean, {
       from: 'ney',
       to: 'kellermann',
-      kind: 'report',
       body: {
         text: 'All quiet.',
         unitReport: {
@@ -924,38 +893,6 @@ describe('what a despatch says about its sender', () => {
     expect(report?.head).toEqual({ q: 5, r: 5 });
     // The prose is their own and is left alone.
     expect(sent?.kind === 'despatch_sent' ? sent.despatch.body.text : null).toBe('All quiet.');
-  });
-
-  it('is the cascading commander\'s own position, not the original sender\'s', () => {
-    // A rider coming from the corps commander knows where the corps commander was. They have
-    // never been near the army headquarters that wrote the order in the first place.
-    // Standing beside them, so the paper is handed over and the cascade happens at once
-    // rather than a rider's journey later.
-    const army = unit('red-3', 'red', { q: 4, r: 5 });
-    const state = stateFrom({
-      units: [near, far, army],
-      commanders: [
-        commander('napoleon', 'red', 'red-3'),
-        commander('ney', 'red', 'red-1', 'napoleon', true),
-        commander('kellermann', 'red', 'red-2', 'ney', false),
-      ],
-    });
-
-    const payloads = despatchNow(state, world, cfg, clean, {
-      from: 'napoleon',
-      to: 'ney',
-      kind: 'order',
-      body: { text: 'Take Quatre Bras.' },
-    });
-
-    const cascaded = payloads
-      .filter((p) => p.kind === 'despatch_sent')
-      .map((p) => (p.kind === 'despatch_sent' ? p.despatch : null))
-      .find((d) => d?.from === 'ney');
-
-    expect(cascaded).toBeDefined();
-    expect(cascaded!.body.unitReport?.unitId).toBe('red-1');
-    expect(cascaded!.body.text).toBe('Take Quatre Bras.');
   });
 });
 

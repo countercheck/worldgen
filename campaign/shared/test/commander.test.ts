@@ -20,8 +20,7 @@ import {
   directSubordinates,
   formationOf,
   formationsUnder,
-  mayOrder,
-  mayWriteTo,
+  inChain,
   ridersOf,
   subordinates,
   superiors,
@@ -43,7 +42,6 @@ const commander = (
   faction,
   unitId,
   superiorId,
-  autoCascade: true,
 });
 
 const unit = (id: string, faction: string, parentUnitId: string | null = null): Unit => ({
@@ -133,32 +131,42 @@ describe('the tree', () => {
   });
 });
 
-describe('who may be written to', () => {
+describe('one link of the chain', () => {
   const s = army();
 
-  it('lets a commander order anyone beneath them, at any depth', () => {
-    expect(mayOrder(s, 'ney', 'kellermann')).toBe(true);
-    // Past a level: Napoleon wrote directly to divisions constantly, and the skipped
-    // commander simply does not find out.
-    expect(mayOrder(s, 'ney', 'girard')).toBe(true);
+  it('joins a commander to their direct superior, both ways', () => {
+    expect(inChain(s, 'soult', 'ney')).toBe(true);
+    expect(inChain(s, 'ney', 'soult')).toBe(true);
   });
 
-  it('refuses an order upward or sideways', () => {
-    expect(mayOrder(s, 'girard', 'ney')).toBe(false);
-    expect(mayOrder(s, 'kellermann', 'soult')).toBe(false);
-    expect(mayOrder(s, 'ney', 'ney')).toBe(false);
+  it('does not reach past one level', () => {
+    // Ney to Girard skips Soult. Under these rules that goes through Soult, unless Ney
+    // can see Girard's column — which is `mayWriteTo`'s business, not this function's.
+    expect(inChain(s, 'ney', 'girard')).toBe(false);
+    expect(inChain(s, 'girard', 'ney')).toBe(false);
   });
 
-  it('lets a commander write to anyone on their own side', () => {
-    // Lateral coordination between corps commanders was real and mattered enormously.
-    expect(mayWriteTo(s, 'kellermann', 'soult')).toBe(true);
-    expect(mayWriteTo(s, 'girard', 'ney')).toBe(true);
+  it('does not join two commanders who share a superior', () => {
+    expect(inChain(s, 'kellermann', 'soult')).toBe(false);
   });
 
-  it('refuses a despatch to the enemy or to themselves', () => {
-    expect(mayWriteTo(s, 'ney', 'wellington')).toBe(false);
-    expect(mayWriteTo(s, 'ney', 'ney')).toBe(false);
-    expect(mayWriteTo(s, 'ney', 'nobody')).toBe(false);
+  it('never joins a commander to the enemy, to themselves, or to nobody', () => {
+    expect(inChain(s, 'ney', 'wellington')).toBe(false);
+    expect(inChain(s, 'ney', 'ney')).toBe(false);
+    expect(inChain(s, 'ney', 'nobody')).toBe(false);
+    expect(inChain(s, 'nobody', 'ney')).toBe(false);
+  });
+
+  it('does not trust a superior on the other side', () => {
+    // Refused by `check`, but a log from an older build is folded without it.
+    const crossed: CampaignState = {
+      ...s,
+      commanders: new Map(s.commanders).set(
+        'wellington',
+        commander('wellington', 'blue', 'blue-1', 'ney'),
+      ),
+    };
+    expect(inChain(crossed, 'ney', 'wellington')).toBe(false);
   });
 });
 

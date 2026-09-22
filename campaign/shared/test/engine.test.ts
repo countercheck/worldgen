@@ -78,7 +78,6 @@ const NEY: Commander = {
   faction: 'red',
   unitId: 'red-1',
   superiorId: null,
-  autoCascade: true,
 };
 
 const WELLINGTON: Commander = {
@@ -87,7 +86,6 @@ const WELLINGTON: Commander = {
   faction: 'blue',
   unitId: 'blue-1',
   superiorId: null,
-  autoCascade: true,
 };
 
 function division(id: string, faction: string, at: Hex = LAND, paperStrength = 5000): Unit {
@@ -168,7 +166,6 @@ describe('check', () => {
         kind: 'send_despatch',
         from: 'ney',
         to: 'ney',
-        despatchKind: 'order',
         body: { text: 'Hold the crossroads.' },
       },
       { kind: 'set_task', unitId: 'red-1', destination: LAND },
@@ -461,7 +458,6 @@ describe('tasks and the clock', () => {
             faction: 'red',
             unitId: 'red-2',
             superiorId: 'ney',
-            autoCascade: false,
           },
         },
       ],
@@ -476,7 +472,6 @@ describe('tasks and the clock', () => {
         kind: 'send_despatch',
         from: 'ney',
         to: 'kellermann',
-        despatchKind: 'order',
         body: { text: 'Hold the crossroads.' },
       },
       withSubordinate(),
@@ -501,7 +496,6 @@ describe('tasks and the clock', () => {
           kind: 'send_despatch',
           from: 'ney',
           to: 'wellington',
-          despatchKind: 'report',
           body: { text: 'I surrender.' },
         },
         withSubordinate(),
@@ -519,13 +513,130 @@ describe('tasks and the clock', () => {
         kind: 'send_despatch',
         from: 'ney',
         to: 'kellermann',
-        despatchKind: 'order',
         body: {},
       },
       withSubordinate(),
       world,
     );
     expect(v.some((x) => x.code === CODES.MALFORMED && x.severity === 'hard')).toBe(true);
+  });
+
+  /**
+   * Ney over Kellermann over Soult, and Reille beside Ney under nobody but Ney's peer.
+   *
+   * Soult stands on the far side of the map from everyone, so the only way to reach them is
+   * one link at a time. Reille answers to Kellermann but stands on Ney's hex.
+   */
+  const farLand = (): Hex => {
+    let best = LAND;
+    for (const h of world.hexes.values()) {
+      if (h.terrainClass !== 'land') continue;
+      const d = Math.max(Math.abs(h.coord.q - LAND.q), Math.abs(h.coord.r - LAND.r));
+      const b = Math.max(Math.abs(best.q - LAND.q), Math.abs(best.r - LAND.r));
+      if (d > b) best = h.coord;
+    }
+    return best;
+  };
+
+  const chain = (): CampaignState =>
+    applyAll(
+      [
+        { kind: 'add_unit', unit: division('red-3', 'red', farLand()) },
+        { kind: 'add_unit', unit: division('red-4', 'red') },
+        {
+          kind: 'add_commander',
+          commander: { ...NEY, id: 'soult', name: 'Marshal Soult', unitId: 'red-3', superiorId: 'kellermann' },
+        },
+        {
+          kind: 'add_commander',
+          commander: { ...NEY, id: 'reille', name: 'General Reille', unitId: 'red-4', superiorId: 'kellermann' },
+        },
+      ],
+      withSubordinate(),
+      world,
+      'lenient',
+    ).state;
+
+  const write = (from: string, to: string): Command => ({
+    kind: 'send_despatch',
+    from,
+    to,
+    body: { text: 'Hold the crossroads.' },
+  });
+
+  it('refuses a despatch two links down and out of sight, hard, even forced and open', () => {
+    const v = check(write('ney', 'soult'), chain(), world);
+    const found = v.find((x) => x.code === CODES.OUT_OF_REACH);
+    expect(found?.severity).toBe('hard');
+    expect(found?.message).toContain('Marshal Soult');
+
+    expect(apply(write('ney', 'soult'), chain(), world, 'open', { force: true }).ok).toBe(false);
+    expect(apply(write('soult', 'ney'), chain(), world, 'open', { force: true }).ok).toBe(false);
+  });
+
+  it('lets it through one link at a time', () => {
+    expect(check(write('ney', 'kellermann'), chain(), world)).toEqual([]);
+    expect(check(write('soult', 'kellermann'), chain(), world).map((x) => x.code)).not.toContain(
+      CODES.OUT_OF_REACH,
+    );
+  });
+
+  it('lets it through two links down when the column is in sight', () => {
+    // Reille answers to Kellermann, not Ney, but is standing on Ney's hex.
+    expect(check(write('ney', 'reille'), chain(), world)).toEqual([]);
+    expect(check(write('reille', 'ney'), chain(), world)).toEqual([]);
+  });
+
+  it('refuses to write to themselves, at every strictness', () => {
+    const v = check(write('ney', 'ney'), chain(), world);
+    expect(v.map((x) => x.code)).toContain(CODES.WRONG_FACTION);
+    expect(v.every((x) => x.severity === 'hard')).toBe(true);
+  });
+});
+
+describe('a note to the referee', () => {
+  const note = (text: string, from = 'ney'): Command => ({ kind: 'write_to_referee', from, text });
+
+  it('raises an alert in the referee\'s queue at once, in the writer\'s words', () => {
+    const state = setUp();
+    const out = applyOrThrow(note('  Should my division not have seen that column?  '), state, world, 'strict', {
+      actor: byCommander('ney'),
+    });
+
+    expect(out.events).toHaveLength(1);
+    const decision = [...out.state.decisions.values()][0]!;
+    expect(decision).toMatchObject({
+      trigger: 'referee_note',
+      commanderId: 'ney',
+      unitId: 'red-1',
+      atHours: state.clockHours,
+      resolvedAtHours: null,
+      context: { text: 'Should my division not have seen that column?' },
+    });
+    // The id its event took, like every decision the scheduler raises.
+    expect(decision.id).toBe(`k${out.events[0]!.seq}`);
+  });
+
+  it('puts nothing on the road: no despatch, no rider', () => {
+    const out = applyOrThrow(note('A question.'), setUp(), world, 'strict');
+    expect(out.state.despatches.size).toBe(0);
+  });
+
+  it('is refused with nothing written on it', () => {
+    const v = check(note('   '), setUp(), world);
+    expect(v.map((x) => x.code)).toEqual([CODES.MALFORMED]);
+    expect(v[0]!.severity).toBe('hard');
+  });
+
+  it('is refused from somebody who is not a commander', () => {
+    expect(check(note('Hello.', 'ghost'), setUp(), world).map((x) => x.code)).toEqual([
+      CODES.NO_SUCH_COMMANDER,
+    ]);
+  });
+
+  it('is refused from a commander whose formation is gone', () => {
+    const state = applyOrThrow({ kind: 'remove_unit', unitId: 'red-1' }, setUp(), world, 'open').state;
+    expect(check(note('Hello.'), state, world).map((x) => x.code)).toContain(CODES.NO_SUCH_UNIT);
   });
 });
 

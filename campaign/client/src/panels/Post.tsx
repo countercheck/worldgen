@@ -13,12 +13,8 @@
  *
  * **The outbox is deliberately unhelpful.** It says what they wrote and when, and nothing
  * about whether it arrived, because that is the mechanic rather than a missing feature.
- * The one thing that can change is an acknowledgement coming back, which is the only
- * feedback channel in the game and is therefore the loudest thing on a sent despatch.
- *
- * **Superseded orders are marked, not hidden.** An order that turned up after a later one
- * is disregarded by correct staff practice, and watching that happen is half of
- * understanding why a corps did what it did.
+ * They learn it arrived when somebody writes back, which is another despatch in the inbox
+ * above, on another rider who can also be stopped.
  */
 
 import type { ReceivedDespatch, SentDespatch } from '@campaign/shared';
@@ -34,8 +30,6 @@ export function Post({
   sent,
   clockHours,
   labelOf,
-  acknowledged,
-  onAcknowledge,
   onForward,
   onWrite,
   busyId,
@@ -51,8 +45,6 @@ export function Post({
    * therefore about, which is what a reader actually plans against.
    */
   labelOf: (commanderId: string) => CommanderLabel;
-  acknowledged: (despatchId: string) => boolean;
-  onAcknowledge: (d: ReceivedDespatch) => void;
   onForward: (d: ReceivedDespatch) => void;
   onWrite: () => void;
   busyId: string | null;
@@ -70,10 +62,7 @@ export function Post({
         ) : (
           <ul className="post">
             {received.map((d) => (
-              <li
-                key={d.id}
-                className={`despatch ${d.superseded ? 'superseded' : ''} kind-${d.kind}`}
-              >
+              <li key={d.id} className="despatch">
                 <div className="despatch-head">
                   <span className="despatch-from">{labelOf(d.from).name}</span>
                   <span className="despatch-commands">
@@ -96,8 +85,6 @@ export function Post({
                   {d.forwardedFrom === null ? '' : copy.post.forwardedFrom(labelOf(d.forwardedFrom).name)}
                 </div>
 
-                {d.superseded && <div className="flag">{copy.post.superseded}</div>}
-
                 {d.body.text !== undefined && <p className="prose-read">{d.body.text}</p>}
 
                 {d.body.contacts !== undefined && d.body.contacts.length > 0 && (
@@ -112,13 +99,6 @@ export function Post({
                 )}
 
                 <div className="despatch-actions">
-                  {acknowledged(d.id) ? (
-                    <span className="muted small">{copy.post.acknowledged}</span>
-                  ) : (
-                    <button disabled={busyId === d.id} onClick={() => onAcknowledge(d)}>
-                      {copy.post.acknowledge}
-                    </button>
-                  )}
                   <button disabled={busyId === d.id} onClick={() => onForward(d)}>
                     {copy.post.forward}
                   </button>
@@ -136,7 +116,7 @@ export function Post({
         ) : (
           <ul className="post">
             {sent.map((d) => (
-              <li key={d.id} className={`despatch sent kind-${d.kind}`}>
+              <li key={d.id} className="despatch sent">
                 <div className="despatch-head">
                   <span className="despatch-from">{copy.post.to(labelOf(d.to).name)}</span>
                   <span className="despatch-commands">
@@ -153,11 +133,7 @@ export function Post({
                 {d.body.text !== undefined && <p className="prose-read">{d.body.text}</p>}
 
                 <div className="muted small">
-                  {d.handed
-                    ? copy.post.handed
-                    : d.acknowledged
-                      ? copy.post.arrived
-                      : copy.post.unknownFate}
+                  {d.handed ? copy.post.handed : copy.post.unknownFate}
                   {d.via.length > 0 && copy.post.viaWaypoints(d.via.length)}
                 </div>
               </li>

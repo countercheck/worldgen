@@ -543,25 +543,10 @@ code.link {
   border-radius: 5px;
 }
 
-/* A message is not an order, and the left edge says which before the words do. */
-.despatch.kind-report {
-  border-left-color: #4c7fbf;
-}
-
-.despatch.kind-acknowledgement {
-  border-left-color: #4f9d69;
-}
-
 /* Sent paper is quieter than received paper: it is a record, not news. */
 .despatch.sent {
   border-left-color: var(--line);
   background: transparent;
-}
-
-/* Disregarded, not hidden. Seeing an order arrive too late is half of understanding
-   why the corps did what it did. */
-.despatch.superseded {
-  opacity: 0.6;
 }
 
 .despatch-head {
@@ -605,15 +590,6 @@ code.link {
 
 .small {
   font-size: 11px;
-}
-
-.flag {
-  margin: 6px 0 0;
-  padding: 4px 7px;
-  font-size: 11px;
-  color: #e0b341;
-  background: rgb(203 161 53 / 12%);
-  border-radius: 4px;
 }
 
 /* Prose, read as prose: the line length and the whitespace are the content. */
@@ -782,7 +758,7 @@ button.formation:hover {
 /* ---- the referee ----
 
    A decision is louder than a despatch: it is the only thing on this screen that is
-   actually waiting on him, and it should be findable without reading. */
+   actually waiting on them, and it should be findable without reading. */
 
 .despatch.decision {
   border-left-color: #e0b341;
@@ -798,6 +774,13 @@ button.formation:hover {
 .despatch.decision.trigger-despatch_arrived {
   border-left-color: #4c7fbf;
   background: transparent;
+}
+
+/* A player asking for the referee. Not an event in the game, so not in the game's colours:
+   a person is waiting on an answer, and it should not read as one more column halting. */
+.despatch.decision.trigger-referee_note {
+  border-left-color: #9b6fd1;
+  background: rgb(155 111 209 / 10%);
 }
 
 /* The log is reference, not work: quieter than the queue above it, with only a capture

@@ -147,7 +147,13 @@ function Context({ decision }: { decision: PendingDecision }) {
     patrolUnitId?: string;
     hostile?: boolean;
     dice?: number;
+    text?: string;
   };
+
+  // A player talking to the referee. Their words, in full, as they wrote them.
+  if (decision.trigger === 'referee_note') {
+    return <p className="prose-read">{c.text ?? ''}</p>;
+  }
 
   if (c.contacts !== undefined && c.contacts.length > 0) {
     return (
@@ -235,7 +241,7 @@ export function DespatchLog({
       ) : (
         <ul className="post">
           {ordered.map((d) => (
-            <li key={d.id} className={`despatch log fate-${d.fate.kind} kind-${d.kind}`}>
+            <li key={d.id} className={`despatch log fate-${d.fate.kind}`}>
               <div className="despatch-head">
                 <span className="despatch-from">
                   {labelOf(d.from).name} → {labelOf(d.to).name}

@@ -375,9 +375,6 @@ export function Orbat({
                   faction: unit.faction,
                   unitId: draftCommander.unitId,
                   superiorId: draftCommander.superiorId === '' ? null : draftCommander.superiorId,
-                  // Run by the referee until a seat is issued for them, so an arriving
-                  // order cascades rather than waiting on a player who does not exist yet.
-                  autoCascade: true,
                 });
                 setDraftCommander({ name: '', unitId: '', superiorId: '' });
               }}

@@ -1,16 +1,19 @@
 /**
  * Writing a despatch.
  *
- * Small on purpose. Orders in this game are prose — the referee reads what was written
- * and decides what the addressee makes of it — so there is nothing to build here beyond
- * an addressee, a box, and one instruction to the rider. Almost all the design effort of
- * a commander's interface belongs in the reading rather than the writing.
+ * Small on purpose. A despatch in this game is prose — orders are whatever is written in
+ * one, and the referee reads it and decides what the addressee makes of it — so there is
+ * nothing to build here beyond an addressee, a box, and one instruction to the rider.
+ * Almost all the design effort of a commander's interface belongs in the reading rather
+ * than the writing.
  *
  * Three things this form has to get right:
  *
- * **Ordering and writing are different acts.** A commander may write to anyone on their own
- * side, but may only *order* those beneath them. The addressee list says which is which
- * before they choose, rather than letting them discover it on a refusal.
+ * **The list is who a rider can be sent to, and says why.** Their superior, those directly
+ * beneath them, and anyone on their side they can see. Everyone else is reached through
+ * somebody on that list, and the form says so rather than letting them find out on a
+ * refusal. The referee is on it too, for a commander — but as a note out of the game,
+ * not a despatch, and the form says that as well.
  *
  * **The waypoints are the rider's, not the column's.** "Send my rider via Ligny" and
  * "march on Ligny" are unrelated routes and a form that blurred them would be misread the
@@ -24,16 +27,14 @@
 
 import { useEffect, useMemo, useState } from 'react';
 
-import type { DespatchKind } from '@campaign/shared';
-
 import { dayHour } from '../board.js';
 import { copy } from '../copy.js';
 
-import type { Correspondent, Estimate } from '../despatch.js';
+import { REFEREE_ADDRESS, type Correspondent, type Estimate } from '../despatch.js';
 
 export interface Draft {
+  /** A commander's id, or `REFEREE_ADDRESS` for a note to the referee. */
   readonly to: string;
-  readonly despatchKind: DespatchKind;
   readonly text: string;
   /** Who it is from. Absent for a commander, who can only be themselves. */
   readonly from?: string;
@@ -42,6 +43,7 @@ export interface Draft {
 export function Composer({
   correspondents,
   factionName,
+  toReferee = false,
   estimateFor,
   clockHours,
   busy,
@@ -56,6 +58,8 @@ export function Composer({
   correspondents: readonly Correspondent[];
   /** A side's name from its id, so an addressee's affiliation reads rather than decodes. */
   factionName: (faction: string) => string;
+  /** Offer the referee as an addressee: a commander's form, not a referee's own. */
+  toReferee?: boolean;
   /**
    * How long a rider would take, where the asker is entitled to know.
    *
@@ -73,7 +77,7 @@ export function Composer({
   /**
    * Whose name this may be written in.
    *
-   * Only a referee has more than one. They run most of the commanders on the map and takes
+   * Only a referee has more than one. They run most of the commanders on the map and take
    * dictation from the players who hold the rest, so writing as a commander is their ordinary
    * work rather than an impersonation — and the log records that they did it.
    */
@@ -81,25 +85,22 @@ export function Composer({
   from?: string;
   onFrom?: (commanderId: string) => void;
 }) {
-  const [to, setTo] = useState(initial?.to ?? correspondents[0]?.id ?? '');
+  const first = correspondents[0]?.id ?? (toReferee ? REFEREE_ADDRESS : '');
+  const [to, setTo] = useState(initial?.to ?? first);
   const [text, setText] = useState(initial?.text ?? '');
+  const toTheReferee = to === REFEREE_ADDRESS;
 
-  // The addressee list changes with the sender: a commander may write to their own side only,
-  // and order only those beneath them. Keeping a stale addressee would send Ney's order to
-  // Wellington the moment the referee switched seats.
+  // The addressee list changes with the sender, and with the ground: somebody in sight a
+  // moment ago may have marched out of it. Keeping a stale addressee would offer a despatch
+  // the server is about to refuse.
   useEffect(() => {
-    if (!correspondents.some((c) => c.id === to)) setTo(correspondents[0]?.id ?? '');
-  }, [correspondents, to]);
-
-  const addressee = correspondents.find((c) => c.id === to) ?? null;
-  // An order if they may give one, a message if they may not. Not a control: making the
-  // reader choose between two words for the same box would only invite the wrong one.
-  const despatchKind: DespatchKind =
-    initial?.despatchKind ?? (addressee?.mayOrder === true ? 'order' : 'report');
+    const still = correspondents.some((c) => c.id === to) || (toReferee && toTheReferee);
+    if (!still) setTo(first);
+  }, [correspondents, to, toReferee, toTheReferee, first]);
 
   const estimate = useMemo(
-    () => (to === '' || estimateFor === undefined ? null : estimateFor(to)),
-    [to, estimateFor],
+    () => (to === '' || toTheReferee || estimateFor === undefined ? null : estimateFor(to)),
+    [to, toTheReferee, estimateFor],
   );
 
   return (
@@ -129,9 +130,10 @@ export function Composer({
           {correspondents.map((c) => (
             <option key={c.id} value={c.id}>
               {copy.composer.correspondent(c.name, c.unitName, factionName(c.faction))}
-              {c.mayOrder ? '' : copy.composer.messageOnly}
+              {copy.composer.relation[c.relation]}
             </option>
           ))}
+          {toReferee && <option value={REFEREE_ADDRESS}>{copy.composer.theReferee}</option>}
         </select>
       </label>
 
@@ -140,9 +142,7 @@ export function Composer({
         rows={6}
         value={text}
         placeholder={
-          despatchKind === 'order'
-            ? copy.composer.orderPlaceholder
-            : copy.composer.reportPlaceholder
+          toTheReferee ? copy.composer.notePlaceholder : copy.composer.despatchPlaceholder
         }
         onChange={(e) => setText(e.target.value)}
         disabled={busy}
@@ -151,12 +151,12 @@ export function Composer({
       <p className="muted">
         {senders !== undefined
           ? copy.composer.asReferee
-          : despatchKind === 'order'
-            ? copy.composer.isOrder
-            : copy.composer.isMessage}
+          : toTheReferee
+            ? copy.composer.isNote
+            : copy.composer.whoMayBeWritten}
       </p>
 
-      {estimateFor === undefined ? (
+      {toTheReferee ? null : estimateFor === undefined ? (
         <p className="muted">{copy.composer.noEstimate}</p>
       ) : estimate === null ? (
         <p className="muted">{copy.composer.nothingToRideTo}</p>
@@ -176,11 +176,13 @@ export function Composer({
         <button
           className="primary"
           disabled={busy || to === '' || text.trim() === ''}
-          onClick={() =>
-            onSend({ to, despatchKind, text, ...(from === undefined ? {} : { from }) })
-          }
+          onClick={() => onSend({ to, text, ...(from === undefined ? {} : { from }) })}
         >
-          {busy ? copy.composer.sending : copy.composer.send}
+          {busy
+            ? copy.composer.sending
+            : toTheReferee
+              ? copy.composer.sendNote
+              : copy.composer.send}
         </button>
         <button onClick={onCancel} disabled={busy}>
           {copy.composer.cancel}

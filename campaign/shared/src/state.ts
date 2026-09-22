@@ -13,7 +13,7 @@
 
 import { advanceColumn, FOOTPRINT, occupied, type FootprintShape } from './column.js';
 import type { Commander } from './commander.js';
-import type { Despatch } from './despatch.js';
+import { normaliseDespatch, type Despatch } from './despatch.js';
 import { key, type Hex, type HexKey } from './hex.js';
 import type { Faction, LoggedEvent, WorldRef } from './events.js';
 import { viaIndexAt, type PendingDecision, type Task } from './task.js';
@@ -358,7 +358,7 @@ export function reduce(state: CampaignState, event: LoggedEvent): CampaignState 
     }
 
     case 'despatch_sent':
-      return withDespatch(s, p.despatch);
+      return withDespatch(s, normaliseDespatch(p.despatch));
 
     case 'despatch_progressed': {
       const d = s.despatches.get(p.despatchId);

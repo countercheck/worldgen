@@ -25,7 +25,7 @@ anything is.**
 | The ground | Everybody has a map — terrain fog is off by default |
 | Their own corps | Where they *last heard* it was, by rider, hours ago |
 | The enemy | Where somebody saw a column, labelled by their own staff |
-| Whether their orders arrived | Only if an acknowledgement comes back |
+| Whether their orders arrived | Only if somebody writes back |
 
 That last row is the mechanic rather than a missing feature. A despatch takes real time,
 can be intercepted, and its sender is never told what became of it.
@@ -132,13 +132,15 @@ The referee's controls, in the order they get used:
 - **Run** — advance until something needs a decision, rather than guessing at an interval
   and finding out afterwards that two corps met each other ninety minutes in.
 - **The queue** — what stopped the clock, and who it belongs to. Each row can march its
-  formation somewhere or be marked dealt with.
+  formation somewhere or be marked dealt with. A player's note to the referee lands here
+  too, at once and out of the game.
 - **The post** — every despatch, with routes and fates. The only place either is visible.
 - **Seat switching** — a referee holds every link, so they can read the game through any
   commander's eyes and adjudicate from *that commander's* information rather than from the map.
 
 A commander's screen is their post, their formations with an hour against each, and the ground.
-They write prose, acknowledges what arrives, and forwards what somebody else should see.
+They write prose, forward what somebody else should see, and can write to the referee directly
+when they need a ruling.
 
 ---
 
@@ -173,6 +175,14 @@ recorded in the event, so a referee can show them.
 **Formations whose columns touch** hand paper over instantly and cannot be intercepted,
 which is the mechanical reward for concentrating.
 
+**Who may be written to.** A commander's direct superior, their direct subordinates, and
+anyone on their own side whose column is inside their recon zone. Nobody else: a corps out
+of sight is reached through the common superior, one link at a time, which is slow on
+purpose. There is one kind of despatch, so an order is a despatch with orders in it. Nothing
+passes itself down the chain: a despatch arriving at a commander nobody is playing goes to
+the referee's queue like any other. This rule is hard, so not even the referee can force a
+despatch past it.
+
 ---
 
 ## How it is built
@@ -202,8 +212,8 @@ Three redactions are load-bearing enough to name:
   sender their own rider's route would tell them exactly where their detached corps stands. It
   is referee-only, and so is anything derived from it — a delivery estimate is a distance,
   and a distance is a position.
-- **A despatch's fate** is never shown to its sender. They learns it arrived only if an
-  acknowledgement comes back, and that is itself a despatch that can be lost.
+- **A despatch's fate** is never shown to its sender. They learn it arrived only if the
+  addressee writes back, and that is another despatch, which can also be lost.
 - **A contact never names the formation it is a sighting of.** It carries the observing
   commander's own label, so two sightings hours apart cannot be correlated for free — that
   correlation is what these rules make you buy with a patrol.

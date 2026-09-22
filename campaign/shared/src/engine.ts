@@ -19,9 +19,9 @@
  * the first place. Both routes are logged.
  */
 
-import { type Commander, mayOrder, mayWriteTo, ridersOf, wouldCycle } from './commander.js';
+import { type Commander, ridersOf, wouldCycle } from './commander.js';
 import { DEFAULT_CONFIG, type CampaignConfig } from './config.js';
-import { planRide, type DespatchBody, type DespatchKind } from './despatch.js';
+import { mayWriteTo, planRide, type DespatchBody } from './despatch.js';
 import { planMarch } from './movement.js';
 import { advance, despatchNow } from './scheduler.js';
 import { contestants, type Task } from './task.js';
@@ -68,18 +68,29 @@ export type Command =
       /** Stop at the first discovery a referee wants to see, rather than at the hour. */
       readonly untilDecision?: boolean;
     }
-  /** The one command a commander issues themselves. Everything else is the referee's. */
+  /**
+   * A despatch: prose, and whatever sightings go with it, on a rider.
+   *
+   * One of the two commands a commander issues themselves. Everything else is the referee's.
+   */
   | {
       readonly kind: 'send_despatch';
       readonly from: string;
       readonly to: string;
-      readonly despatchKind: DespatchKind;
       readonly body: DespatchBody;
       /** Waypoints the sender insists their rider takes — around pickets, say. */
       readonly via?: readonly Hex[];
-      readonly inReplyTo?: string;
       readonly forwardedFrom?: string;
     }
+  /**
+   * A note to the referee, out of the game.
+   *
+   * The other thing a commander may do. No rider, no delay, nothing to intercept: it is a
+   * player talking to the person running the game — a question about the rules, a
+   * request for a ruling, "I think my division should have seen that" — so it arrives
+   * at once, as an alert in the referee's queue, and nobody else ever sees it.
+   */
+  | { readonly kind: 'write_to_referee'; readonly from: string; readonly text: string }
   /** The referee, having read a despatch, sets a formation marching. */
   | {
       readonly kind: 'set_task';
@@ -431,24 +442,18 @@ export function check(
       }
 
       if (from !== undefined && to !== undefined) {
-        // Hard: writing to the other side is not a despatch. If it ever becomes a
+        // Hard, both. Writing to the other side is not a despatch: if it ever becomes a
         // mechanic — a summons to surrender, a parley — it will be a different one with
-        // its own rules, and letting it through here would produce state neither the
-        // inbox nor the fog knows how to describe.
-        if (!mayWriteTo(state, cmd.from, cmd.to)) {
+        // its own rules. And a despatch to somebody two links away and out of sight is
+        // one no rider is sent with; it goes to the officer in between.
+        if (from.faction !== to.faction || cmd.from === cmd.to) {
+          v.push(hard(CODES.WRONG_FACTION, `${cmd.from} cannot write to ${cmd.to}`));
+        } else if (!mayWriteTo(state, world, cfg, cmd.from, cmd.to)) {
           v.push(
             hard(
-              CODES.WRONG_FACTION,
-              `${cmd.from} cannot write to ${cmd.to}`,
-            ),
-          );
-        } else if (cmd.despatchKind === 'order' && !mayOrder(state, cmd.from, cmd.to)) {
-          // Soft: orders travel downward, but a referee reconstructing a moment where
-          // one marshal did give another instructions should be able to say so.
-          v.push(
-            soft(
-              CODES.NOT_IN_COMMAND,
-              `${cmd.to} does not answer to ${cmd.from}; that is a message, not an order`,
+              CODES.OUT_OF_REACH,
+              `${to.name} is neither ${from.name}'s direct superior, nor a direct ` +
+                `subordinate, nor in sight`,
             ),
           );
         }
@@ -468,6 +473,18 @@ export function check(
             ),
           );
         }
+      }
+      break;
+    }
+
+    case 'write_to_referee': {
+      const from = requireCommander(cmd.from);
+      if (cmd.text.trim() === '') {
+        v.push(hard(CODES.MALFORMED, 'a note with nothing written on it is not a note'));
+      }
+      if (from !== undefined && !state.units.has(from.unitId)) {
+        // Every decision names a formation, and this one names theirs.
+        v.push(hard(CODES.NO_SUCH_UNIT, `${from.name} has no formation to write from`));
       }
       break;
     }
@@ -644,10 +661,8 @@ export function decide(
         ...despatchNow(state, world, cfg, rng, {
           from: cmd.from,
           to: cmd.to,
-          kind: cmd.despatchKind,
           body: cmd.body,
           ...(cmd.via !== undefined ? { via: cmd.via } : {}),
-          ...(cmd.inReplyTo !== undefined ? { inReplyTo: cmd.inReplyTo } : {}),
           ...(cmd.forwardedFrom !== undefined ? { forwardedFrom: cmd.forwardedFrom } : {}),
         }),
       ];
@@ -778,6 +793,27 @@ export function decide(
 
     case 'clear_task':
       return [{ kind: 'task_cleared', unitId: cmd.unitId }];
+
+    case 'write_to_referee': {
+      const from = state.commanders.get(cmd.from)!;
+      return [
+        {
+          kind: 'decision_raised',
+          decision: {
+            // The id its event will take, as the scheduler mints them.
+            id: `k${state.nextSeq}`,
+            commanderId: cmd.from,
+            unitId: from.unitId,
+            atHours: state.clockHours,
+            trigger: 'referee_note',
+            context: { text: cmd.text.trim() },
+            resolvedAtHours: null,
+            note: null,
+            favouring: null,
+          },
+        },
+      ];
+    }
 
     case 'resolve_decision':
       return [
