@@ -74,6 +74,24 @@ CREATE TABLE IF NOT EXISTS campaigns (
   created_at    TEXT NOT NULL
 );
 
+-- Worlds, stored once each and named by their own hash.
+--
+-- A world used to live in the campaign row, which meant a referee running five games on
+-- one map stored that map five times. At 23 MB for a 200x200 that is the difference
+-- between 225 MB and 23 GB across a thousand campaigns, and the hash was already being
+-- computed and stored — the row knew the world's identity and simply did not act on it.
+--
+-- Content-addressed, so there is no version to get wrong: two identical documents are the
+-- same row by construction, and a regenerated world with so much as a different seed is a
+-- different hash and a different row.
+--
+-- Nothing reaps these. Campaigns are never deleted, so a world is never orphaned; add
+-- reference counting on the day that stops being true.
+CREATE TABLE IF NOT EXISTS worlds (
+  hash          TEXT PRIMARY KEY,
+  blob          TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS events (
   campaign_id   TEXT NOT NULL,
   seq           INTEGER NOT NULL,
@@ -127,6 +145,51 @@ const ADDED_COLUMNS: readonly string[] = [
   `ALTER TABLE campaigns ADD COLUMN config_json TEXT`,
 ];
 
+/**
+ * Move each campaign's world into `worlds`, then stop storing it on the campaign.
+ *
+ * The one migration in this file that is not an `ALTER TABLE ADD COLUMN`, because it moves
+ * data rather than making room for some. It runs inside a transaction and drops the old
+ * column only after every campaign has been shown to have a world row to read instead: a
+ * crash halfway leaves the database exactly as it was, which for the only copy of somebody
+ * else's campaign is the only acceptable behaviour.
+ *
+ * Idempotent by inspection rather than by a version table — the column is either there or
+ * it is not, and that is the whole of the question.
+ */
+function moveWorldsOut(db: Db): void {
+  const columns = db.prepare(`PRAGMA table_info(campaigns)`).all() as { name: string }[];
+  if (!columns.some((c) => c.name === 'world_blob')) return;
+
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    // `OR IGNORE`, because the whole point is that many campaigns share one hash.
+    db.exec(
+      `INSERT OR IGNORE INTO worlds (hash, blob)
+       SELECT world_hash, world_blob FROM campaigns WHERE world_blob <> ''`,
+    );
+
+    // Checked before anything is dropped. A campaign left without a world would open
+    // cleanly and fail on the first request, which is the worst time to find out.
+    const { stranded } = db
+      .prepare(
+        `SELECT COUNT(*) AS stranded FROM campaigns c
+         LEFT JOIN worlds w ON w.hash = c.world_hash
+         WHERE w.hash IS NULL`,
+      )
+      .get() as { stranded: number };
+    if (stranded > 0) {
+      throw new Error(`${stranded} campaigns would be left without a world; not migrating`);
+    }
+
+    db.exec(`ALTER TABLE campaigns DROP COLUMN world_blob`);
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+}
+
 export function openDb(path = ':memory:'): Db {
   const db = new DatabaseSync(path);
   db.exec('PRAGMA journal_mode = WAL');
@@ -136,9 +199,10 @@ export function openDb(path = ':memory:'): Db {
     try {
       db.exec(sql);
     } catch {
-      // Already there. Adding a column is the only migration this schema has ever needed,
-      // and re-running it is how a database written by an older build catches up.
+      // Already there. Adding a column was for a long time the only migration this schema
+      // needed, and re-running it is how a database written by an older build catches up.
     }
   }
+  moveWorldsOut(db);
   return db;
 }

@@ -21,8 +21,9 @@ describe('backing a campaign up', () => {
     const d = dir();
     const source = join(d, 'campaign.db');
     const db = openDb(source);
-    db.exec(`INSERT INTO campaigns (id, name, world_hash, world_blob, created_at)
-             VALUES ('c1', 'Austerlitz', 'h', '{}', '1805-12-02')`);
+    db.exec(`INSERT INTO worlds (hash, blob) VALUES ('h', '{}')`);
+    db.exec(`INSERT INTO campaigns (id, name, world_hash, created_at)
+             VALUES ('c1', 'Austerlitz', 'h', '1805-12-02')`);
 
     // Still open, still in WAL mode, nothing checkpointed — which is the state a server
     // mid-evening is actually in, and the state a plain file copy gets wrong.
@@ -42,8 +43,9 @@ describe('backing a campaign up', () => {
     const d = dir();
     const source = join(d, 'campaign.db');
     const db = openDb(source);
-    db.exec(`INSERT INTO campaigns (id, name, world_hash, world_blob, created_at)
-             VALUES ('c1', 'n', 'h', '{}', '1805-12-02')`);
+    db.exec(`INSERT INTO worlds (hash, blob) VALUES ('h', '{}')`);
+    db.exec(`INSERT INTO campaigns (id, name, world_hash, created_at)
+             VALUES ('c1', 'n', 'h', '1805-12-02')`);
 
     const snapshot = join(d, 'snapshot.db');
     backup(source, snapshot);
@@ -75,8 +77,9 @@ describe('backing a campaign up', () => {
     const d = dir();
     const source = join(d, 'campaign.db');
     const db = openDb(source);
-    db.exec(`INSERT INTO campaigns (id, name, world_hash, world_blob, created_at)
-             VALUES ('c1', 'n', 'h', '{}', '1805-12-02')`);
+    db.exec(`INSERT INTO worlds (hash, blob) VALUES ('h', '{}')`);
+    db.exec(`INSERT INTO campaigns (id, name, world_hash, created_at)
+             VALUES ('c1', 'n', 'h', '1805-12-02')`);
 
     const snapshot = join(d, "the referee's copy.db");
     backup(source, snapshot);
