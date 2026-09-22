@@ -183,17 +183,28 @@ export class CampaignStore {
     // run with amended defaults hands them to the campaigns it creates.
     const config = resolveConfig(opts.config, ruleset, this.cfg);
 
+    const hash = sha256(blob);
+
+    // `OR IGNORE`, and the saving is the whole point: a referee running five games on one
+    // map stores that map once. At 23 MB for a 200x200 world, a thousand campaigns over
+    // fifty maps is 225 MB rather than 23 GB.
+    //
+    // Before the campaign row rather than after, so that a campaign never exists pointing
+    // at a world that does not.
+    this.db
+      .prepare(`INSERT OR IGNORE INTO worlds (hash, blob) VALUES (?, ?)`)
+      .run(hash, blob);
+
     this.db
       .prepare(
         `INSERT INTO campaigns
-           (id, name, world_hash, world_blob, strictness, ruleset, config_json, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+           (id, name, world_hash, strictness, ruleset, config_json, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         opts.id,
         opts.name,
-        sha256(blob),
-        blob,
+        hash,
         strictness,
         ruleset,
         JSON.stringify(config),
@@ -210,7 +221,7 @@ export class CampaignStore {
     const campaign: CampaignRow = {
       id: opts.id,
       name: opts.name,
-      worldHash: sha256(blob),
+      worldHash: hash,
       // Projected here as well as on read, so a campaign is the same object whether it
       // was just created or just loaded. The full document is already in `blob` and on
       // its way to disk; what is kept in hand is what a client can use.
@@ -231,7 +242,7 @@ export class CampaignStore {
           height: world.height,
           layout: world.layout,
           schemaVersion: world.schemaVersion,
-          hash: sha256(blob),
+          hash,
         },
         seed: opts.seed ?? Math.floor(Math.random() * 2 ** 31),
       },
@@ -299,8 +310,11 @@ export class CampaignStore {
 
     const row = this.db
       .prepare(
-        `SELECT id, name, world_hash, world_blob, strictness, ruleset, config_json
-         FROM campaigns WHERE id = ?`,
+        `SELECT c.id, c.name, c.world_hash, w.blob AS world_blob,
+                c.strictness, c.ruleset, c.config_json
+         FROM campaigns c
+         JOIN worlds w ON w.hash = c.world_hash
+         WHERE c.id = ?`,
       )
       .get(id) as
       | {
