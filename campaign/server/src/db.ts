@@ -13,6 +13,7 @@
  */
 
 import { createRequire } from 'node:module';
+import { gunzipSync, gzipSync } from 'node:zlib';
 
 /**
  * `node:sqlite` is loaded through `createRequire` rather than imported.
@@ -87,9 +88,15 @@ CREATE TABLE IF NOT EXISTS campaigns (
 --
 -- Nothing reaps these. Campaigns are never deleted, so a world is never orphaned; add
 -- reference counting on the day that stops being true.
+-- The blob is gzipped JSON. A world is tens of thousands of objects carrying the same
+-- dozen keys, which is about as compressible as text gets: 23 MB becomes 4.5 MB.
+--
+-- Declared BLOB, and a database written before this was declared TEXT. That does not
+-- matter and no table needs rebuilding: SQLite stores a blob as a blob whatever the
+-- column's affinity says, and unpackWorld reads a string as the plain JSON it is.
 CREATE TABLE IF NOT EXISTS worlds (
   hash          TEXT PRIMARY KEY,
-  blob          TEXT NOT NULL
+  blob          BLOB NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS events (
@@ -144,6 +151,52 @@ const ADDED_COLUMNS: readonly string[] = [
   `ALTER TABLE campaigns ADD COLUMN ruleset TEXT NOT NULL DEFAULT 'standard'`,
   `ALTER TABLE campaigns ADD COLUMN config_json TEXT`,
 ];
+
+/**
+ * A world on its way to disk.
+ *
+ * Level 6 rather than 9: on a 23 MB world the last three levels buy about two per cent for
+ * several times the CPU, and this runs while a referee waits on the one request that
+ * already takes the longest.
+ */
+export const packWorld = (json: string): Uint8Array => gzipSync(Buffer.from(json), { level: 6 });
+
+/**
+ * A world on its way back.
+ *
+ * A string is plain JSON from a database written before worlds were compressed. The type
+ * is the discriminator and needs no magic bytes: `node:sqlite` hands back a `Uint8Array`
+ * for a blob and a `string` for text, and nothing else can appear in this column.
+ */
+export const unpackWorld = (stored: string | Uint8Array): string =>
+  typeof stored === 'string' ? stored : gunzipSync(Buffer.from(stored)).toString('utf8');
+
+/**
+ * Compress any world still stored as plain JSON.
+ *
+ * Separate from `moveWorldsOut` and run after it, so each migration does one thing and
+ * either can be read without the other in mind. The cost is that a database old enough to
+ * need both writes its worlds twice, once on a migration that runs once.
+ *
+ * Idempotent: a row already stored as a blob is left alone, so this is a no-op on every
+ * start after the first.
+ */
+function compressWorlds(db: Db): void {
+  const plain = db
+    .prepare(`SELECT hash, blob FROM worlds WHERE typeof(blob) = 'text'`)
+    .all() as { hash: string; blob: string }[];
+  if (plain.length === 0) return;
+
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const update = db.prepare(`UPDATE worlds SET blob = ? WHERE hash = ?`);
+    for (const row of plain) update.run(packWorld(row.blob), row.hash);
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+}
 
 /**
  * Move each campaign's world into `worlds`, then stop storing it on the campaign.
@@ -204,5 +257,6 @@ export function openDb(path = ':memory:'): Db {
     }
   }
   moveWorldsOut(db);
+  compressWorlds(db);
   return db;
 }

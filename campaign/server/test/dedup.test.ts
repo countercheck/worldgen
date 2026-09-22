@@ -18,7 +18,7 @@ import { join } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-import { DatabaseSync, openDb, type Db } from '../src/db.js';
+import { DatabaseSync, openDb, unpackWorld, type Db } from '../src/db.js';
 import { CampaignStore } from '../src/store.js';
 
 const world = (): unknown =>
@@ -99,10 +99,18 @@ describe('migrating a database written before worlds were shared', () => {
 
     expect(count(db, 'worlds')).toBe(2);
     expect(count(db, 'campaigns')).toBe(3);
-    const blobs = db.prepare(`SELECT hash, blob FROM worlds ORDER BY hash`).all();
+    // Unpacked rather than compared raw: what is on disk is gzipped, and what matters is
+    // that the right world came across, not the bytes it came across as.
+    const blobs = (
+      db.prepare(`SELECT hash, blob FROM worlds ORDER BY hash`).all() as {
+        hash: string;
+        blob: string | Uint8Array;
+      }[]
+    ).map((r) => ({ hash: r.hash, json: unpackWorld(r.blob) }));
+
     expect(blobs).toEqual([
-      { hash: 'hash-a', blob: '{"hexes":[1]}' },
-      { hash: 'hash-b', blob: '{"hexes":[2]}' },
+      { hash: 'hash-a', json: '{"hexes":[1]}' },
+      { hash: 'hash-b', json: '{"hexes":[2]}' },
     ]);
   });
 

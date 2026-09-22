@@ -47,7 +47,7 @@ import {
   type World,
 } from '@campaign/shared';
 
-import type { Db } from './db.js';
+import { packWorld, unpackWorld, type Db } from './db.js';
 
 /**
  * Bring a stored payload up to the shape the engine now expects.
@@ -193,7 +193,7 @@ export class CampaignStore {
     // at a world that does not.
     this.db
       .prepare(`INSERT OR IGNORE INTO worlds (hash, blob) VALUES (?, ?)`)
-      .run(hash, blob);
+      .run(hash, packWorld(blob));
 
     this.db
       .prepare(
@@ -321,7 +321,7 @@ export class CampaignStore {
           id: string;
           name: string;
           world_hash: string;
-          world_blob: string;
+          world_blob: string | Uint8Array;
           strictness: string;
           ruleset: string | null;
           config_json: string | null;
@@ -337,7 +337,7 @@ export class CampaignStore {
     // The full document stays in SQLite, unread. Nothing needs it today, and a field that
     // moves from ignored to read tomorrow is then a cache that reloads rather than a
     // thousand campaigns that must be uploaded again.
-    const worldDoc = projectWorld(JSON.parse(row.world_blob));
+    const worldDoc = projectWorld(JSON.parse(unpackWorld(row.world_blob)));
     const ruleset = row.ruleset ?? DEFAULT_RULESET;
     return this.remember({
       id: row.id,
