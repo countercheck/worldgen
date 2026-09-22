@@ -89,6 +89,8 @@ export const CODES = {
   NO_COURIER_ROUTE: 'no_courier_route',
   NO_MARCH_ROUTE: 'no_march_route',
   UNIT_TOO_SMALL: 'unit_too_small',
+  /** A formation left with nobody to command it. Every unit is supposed to have somebody. */
+  UNIT_UNCOMMANDED: 'unit_uncommanded',
 } as const;
 
 export const anyHard = (violations: readonly Violation[]): boolean =>

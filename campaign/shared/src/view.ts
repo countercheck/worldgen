@@ -79,6 +79,17 @@ export interface PublicCommander {
   readonly name: string;
   readonly faction: string;
   readonly unitId: string;
+  /**
+   * The name of that formation: "1re Division".
+   *
+   * Sent rather than looked up, because a commander's view carries exactly one live unit —
+   * their own — and would otherwise have no way to say whose formation a lateral peer
+   * rides with. It leaks nothing: which formation an officer commands is the order of
+   * battle, known to every staff on their own side, and a name is not a position. Their
+   * *side's* order of battle only — `commanders` is already filtered to their faction, so
+   * the enemy's establishment still arrives by sighting or not at all.
+   */
+  readonly unitName: string;
   readonly superiorId: string | null;
 }
 
@@ -170,11 +181,17 @@ const publicFaction = (f: Faction): PublicFaction => ({
   color: f.color,
 });
 
-const publicCommander = (c: Commander): PublicCommander => ({
+const publicCommander = (
+  c: Commander,
+  units: ReadonlyMap<string, Unit>,
+): PublicCommander => ({
   id: c.id,
   name: c.name,
   faction: c.faction,
   unitId: c.unitId,
+  // The id is a poor name and a good fallback: a commander riding with a formation that
+  // has just been removed should still be legible in an inbox rather than blank.
+  unitName: units.get(c.unitId)?.name ?? c.unitId,
   superiorId: c.superiorId,
 });
 
@@ -221,7 +238,9 @@ export function viewFor(input: ViewInput, role: Role): ClientView {
       campaign,
       config: cfg,
       factions,
-      commanders: [...state.commanders.values()].map(publicCommander).sort(byId),
+      commanders: [...state.commanders.values()]
+        .map((c) => publicCommander(c, state.units))
+        .sort(byId),
       // Projected, like every other path out of this function. A referee sees the whole
       // map and no masking applies to them, which is exactly why this line read
       // `input.worldDoc` and quietly sent twelve fields nobody reads — the saving was
@@ -315,7 +334,7 @@ export function viewFor(input: ViewInput, role: Role): ClientView {
 
   return {
     role: 'commander',
-    commander: publicCommander(me),
+    commander: publicCommander(me, state.units),
     campaign,
     config: cfg,
     factions,
@@ -323,7 +342,7 @@ export function viewFor(input: ViewInput, role: Role): ClientView {
     // intelligence, and it arrives by sighting or not at all.
     commanders: [...state.commanders.values()]
       .filter((c) => c.faction === me.faction)
-      .map(publicCommander)
+      .map((c) => publicCommander(c, state.units))
       .sort(byId),
     world: maskedWorld(input, cfg, surveyed, visible, me.faction),
     units: own === undefined ? [] : [own],

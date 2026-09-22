@@ -24,6 +24,7 @@ import type { Despatch, PendingDecision, Task, Unit } from '@campaign/shared';
 
 import { ageLabel, dayHour } from '../board.js';
 import { copy, triggerLabel } from '../copy.js';
+import type { CommanderLabel } from '../despatch.js';
 
 export function DecisionQueue({
   decisions,
@@ -208,11 +209,18 @@ function Context({ decision }: { decision: PendingDecision }) {
 export function DespatchLog({
   despatches,
   clockHours,
-  nameOf,
+  labelOf,
 }: {
   despatches: readonly Despatch[];
   clockHours: number;
-  nameOf: (commanderId: string) => string;
+  /**
+   * How to name an officer, formation and side.
+   *
+   * The referee's log spans both armies, so the side is doing real work here rather than
+   * repeating what the reader already knows: two lines of traffic crossing in the same list
+   * are only legible if each says whose it is.
+   */
+  labelOf: (commanderId: string) => CommanderLabel;
 }) {
   const ordered = [...despatches].sort((a, b) => {
     const flying = (d: Despatch): number => (d.fate.kind === 'in_transit' ? 0 : 1);
@@ -230,7 +238,12 @@ export function DespatchLog({
             <li key={d.id} className={`despatch log fate-${d.fate.kind} kind-${d.kind}`}>
               <div className="despatch-head">
                 <span className="despatch-from">
-                  {nameOf(d.from)} → {nameOf(d.to)}
+                  {labelOf(d.from).name} → {labelOf(d.to).name}
+                </span>
+                <span className="despatch-commands">
+                  {copy.post.commands(labelOf(d.from).unit, labelOf(d.from).faction)}
+                  {copy.referee.towards}
+                  {copy.post.commands(labelOf(d.to).unit, labelOf(d.to).faction)}
                 </span>
               </div>
               <div className="despatch-when">

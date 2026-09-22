@@ -253,6 +253,54 @@ describe('check', () => {
   });
 });
 
+describe('removing a commander', () => {
+  const uncommandedIn = <V extends { code: string }>(v: readonly V[]): V[] =>
+    v.filter((x) => x.code === CODES.UNIT_UNCOMMANDED);
+
+  it('warns, softly, when it would leave a formation with nobody at its head', () => {
+    const v = check({ kind: 'remove_commander', commanderId: 'ney' }, setUp(), world);
+    const found = uncommandedIn(v);
+    expect(found).toHaveLength(1);
+    expect(found[0]!.severity).toBe('soft');
+    // Named by the formation, which is what the referee is looking at on the map.
+    expect(found[0]!.message).toContain('red-1 Division');
+  });
+
+  it('is refused under strict rules and let through under open ones, with the warning logged', () => {
+    const state = setUp();
+    const cmd: Command = { kind: 'remove_commander', commanderId: 'ney' };
+
+    expect(apply(cmd, state, world, 'strict').ok).toBe(false);
+
+    const out = apply(cmd, state, world, 'open');
+    expect(out.ok).toBe(true);
+    expect(out.state.commanders.has('ney')).toBe(false);
+    expect(out.events[0]!.bypassed.map((x) => x.code)).toEqual([CODES.UNIT_UNCOMMANDED]);
+  });
+
+  it('says nothing when another officer still rides with the formation', () => {
+    const state = applyOrThrow(
+      {
+        kind: 'add_commander',
+        commander: { ...NEY, id: 'reille', name: 'General Reille', superiorId: 'ney' },
+      },
+      setUp(),
+      world,
+      'strict',
+    ).state;
+
+    // Either of the two may go: the other is still there.
+    expect(check({ kind: 'remove_commander', commanderId: 'reille' }, state, world)).toEqual([]);
+    expect(check({ kind: 'remove_commander', commanderId: 'ney' }, state, world)).toEqual([]);
+  });
+
+  it('refuses a commander who does not exist, hard, without also warning of a vacancy', () => {
+    const v = check({ kind: 'remove_commander', commanderId: 'ghost' }, setUp(), world);
+    expect(v.map((x) => x.code)).toEqual([CODES.NO_SUCH_COMMANDER]);
+    expect(v[0]!.severity).toBe('hard');
+  });
+});
+
 /**
  * Tasks, despatches and the clock, as they arrive through the engine.
  *

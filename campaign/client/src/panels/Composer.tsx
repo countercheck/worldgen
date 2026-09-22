@@ -41,6 +41,7 @@ export interface Draft {
 
 export function Composer({
   correspondents,
+  factionName,
   estimateFor,
   clockHours,
   busy,
@@ -53,6 +54,8 @@ export function Composer({
   onFrom,
 }: {
   correspondents: readonly Correspondent[];
+  /** A side's name from its id, so an addressee's affiliation reads rather than decodes. */
+  factionName: (faction: string) => string;
   /**
    * How long a rider would take, where the asker is entitled to know.
    *
@@ -74,7 +77,7 @@ export function Composer({
    * dictation from the players who hold the rest, so writing as a commander is their ordinary
    * work rather than an impersonation — and the log records that they did it.
    */
-  senders?: readonly { id: string; name: string }[];
+  senders?: readonly { id: string; name: string; unitName: string; faction: string }[];
   from?: string;
   onFrom?: (commanderId: string) => void;
 }) {
@@ -113,7 +116,7 @@ export function Composer({
           >
             {senders.map((c) => (
               <option key={c.id} value={c.id}>
-                {c.name}
+                {copy.composer.correspondent(c.name, c.unitName, factionName(c.faction))}
               </option>
             ))}
           </select>
@@ -125,7 +128,7 @@ export function Composer({
         <select value={to} onChange={(e) => setTo(e.target.value)} disabled={busy}>
           {correspondents.map((c) => (
             <option key={c.id} value={c.id}>
-              {c.name}
+              {copy.composer.correspondent(c.name, c.unitName, factionName(c.faction))}
               {c.mayOrder ? '' : copy.composer.messageOnly}
             </option>
           ))}

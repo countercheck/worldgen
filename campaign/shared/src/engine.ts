@@ -19,7 +19,7 @@
  * the first place. Both routes are logged.
  */
 
-import { type Commander, mayOrder, mayWriteTo, wouldCycle } from './commander.js';
+import { type Commander, mayOrder, mayWriteTo, ridersOf, wouldCycle } from './commander.js';
 import { DEFAULT_CONFIG, type CampaignConfig } from './config.js';
 import { planRide, type DespatchBody, type DespatchKind } from './despatch.js';
 import { planMarch } from './movement.js';
@@ -288,9 +288,24 @@ export function check(
       break;
     }
 
-    case 'remove_commander':
-      requireCommander(cmd.commanderId);
+    case 'remove_commander': {
+      const c = requireCommander(cmd.commanderId);
+      // Soft: a commander can be killed, captured or simply sacked, and the formation is
+      // then leaderless until somebody is appointed — a real situation and the referee's to
+      // create. It is flagged rather than refused because the state is readable, merely
+      // irregular: nobody can order that formation and nobody can report for it until the
+      // vacancy is filled.
+      if (c !== undefined && ridersOf(state, c.unitId).every((r) => r.id === c.id)) {
+        const unit = state.units.get(c.unitId);
+        v.push(
+          soft(
+            CODES.UNIT_UNCOMMANDED,
+            `${unit?.name ?? c.unitId} would be left with nobody to command it`,
+          ),
+        );
+      }
       break;
+    }
 
     case 'reassign_commander': {
       const c = requireCommander(cmd.commanderId);

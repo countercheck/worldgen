@@ -37,6 +37,17 @@ export interface Correspondent {
   readonly name: string;
   readonly unitId: string;
   /**
+   * The formation they ride with, and whose side they are on, for the addressee list.
+   *
+   * An officer's name is not enough to address a despatch by. Two generals of the same
+   * rank are told apart by what they command, and a new player has learned the formations
+   * on the map long before they have learned which marshal rides with which — so the list
+   * says both. Neither is a secret and neither is a position: it is the order of battle,
+   * which every staff on that side already holds.
+   */
+  readonly unitName: string;
+  readonly faction: string;
+  /**
    * Whether an order may be sent, as opposed to merely a message.
    *
    * Orders travel downward only. Lateral coordination between corps commanders was real
@@ -86,7 +97,14 @@ export function correspondents(view: ClientView, senderId?: string): Corresponde
   const under = descendantsOf(view.commanders, from);
   return view.commanders
     .filter((c) => c.id !== from)
-    .map((c) => ({ id: c.id, name: c.name, unitId: c.unitId, mayOrder: under.has(c.id) }))
+    .map((c) => ({
+      id: c.id,
+      name: c.name,
+      unitId: c.unitId,
+      unitName: c.unitName,
+      faction: c.faction,
+      mayOrder: under.has(c.id),
+    }))
     .sort((a, b) => {
       if (a.mayOrder !== b.mayOrder) return a.mayOrder ? -1 : 1;
       return a.name < b.name ? -1 : 1;
@@ -164,3 +182,41 @@ export const forwardOf = (
     ...(d.body.contacts === undefined ? {} : { contacts: d.body.contacts }),
   };
 };
+
+/**
+ * An officer as the post has to name them: who, what they command, and which side.
+ *
+ * One function rather than three lookups at each of the four places a commander is named
+ * in the post — the inbox, the outbox, the addressee list and the referee's log — so that
+ * an officer is described the same way wherever they appear. A despatch that says only
+ * "From Ney" is asking the reader to remember an order of battle; one that says only
+ * "1re Division" has lost who put their name to it.
+ */
+export interface CommanderLabel {
+  readonly name: string;
+  readonly unit: string;
+  /** The side's name as it is shown, not its id. */
+  readonly faction: string;
+}
+
+/**
+ * How to name any commander this view knows of.
+ *
+ * Falls back to the id on all three counts, which is what a commander riding with a
+ * formation that has just been destroyed comes back as. An inbox that went blank would be
+ * worse: the despatch is still in their hand and still says something.
+ */
+export function labelling(view: ClientView): (commanderId: string) => CommanderLabel {
+  const byId = new Map(view.commanders.map((c) => [c.id, c]));
+  const factions = new Map(view.factions.map((f) => [f.id, f.name]));
+
+  return (commanderId) => {
+    const c = byId.get(commanderId);
+    if (c === undefined) return { name: commanderId, unit: commanderId, faction: '' };
+    return {
+      name: c.name,
+      unit: c.unitName,
+      faction: factions.get(c.faction) ?? c.faction,
+    };
+  };
+}

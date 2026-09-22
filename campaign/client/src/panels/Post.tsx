@@ -25,6 +25,7 @@ import type { ReceivedDespatch, SentDespatch } from '@campaign/shared';
 
 import { ageLabel, dayHour } from '../board.js';
 import { copy } from '../copy.js';
+import type { CommanderLabel } from '../despatch.js';
 
 
 
@@ -32,7 +33,7 @@ export function Post({
   received,
   sent,
   clockHours,
-  nameOf,
+  labelOf,
   acknowledged,
   onAcknowledge,
   onForward,
@@ -42,7 +43,14 @@ export function Post({
   received: readonly ReceivedDespatch[];
   sent: readonly SentDespatch[];
   clockHours: number;
-  nameOf: (commanderId: string) => string;
+  /**
+   * How to name an officer: who they are, what they command, which side.
+   *
+   * Both halves are shown, on two lines rather than one. The officer is who the despatch is
+   * from — they put their name to it — and the formation is which body of troops it is
+   * therefore about, which is what a reader actually plans against.
+   */
+  labelOf: (commanderId: string) => CommanderLabel;
   acknowledged: (despatchId: string) => boolean;
   onAcknowledge: (d: ReceivedDespatch) => void;
   onForward: (d: ReceivedDespatch) => void;
@@ -67,7 +75,10 @@ export function Post({
                 className={`despatch ${d.superseded ? 'superseded' : ''} kind-${d.kind}`}
               >
                 <div className="despatch-head">
-                  <span className="despatch-from">{nameOf(d.from)}</span>
+                  <span className="despatch-from">{labelOf(d.from).name}</span>
+                  <span className="despatch-commands">
+                    {copy.post.commands(labelOf(d.from).unit, labelOf(d.from).faction)}
+                  </span>
                 </div>
 
                 {/* The hour it describes, first and large. Everything else is smaller. */}
@@ -82,7 +93,7 @@ export function Post({
                     dayHour(d.receivedAtHours),
                     (d.receivedAtHours - d.sentAtHours).toFixed(1),
                   )}
-                  {d.forwardedFrom === null ? '' : copy.post.forwardedFrom(nameOf(d.forwardedFrom))}
+                  {d.forwardedFrom === null ? '' : copy.post.forwardedFrom(labelOf(d.forwardedFrom).name)}
                 </div>
 
                 {d.superseded && <div className="flag">{copy.post.superseded}</div>}
@@ -127,7 +138,10 @@ export function Post({
             {sent.map((d) => (
               <li key={d.id} className={`despatch sent kind-${d.kind}`}>
                 <div className="despatch-head">
-                  <span className="despatch-from">{copy.post.to(nameOf(d.to))}</span>
+                  <span className="despatch-from">{copy.post.to(labelOf(d.to).name)}</span>
+                  <span className="despatch-commands">
+                    {copy.post.commands(labelOf(d.to).unit, labelOf(d.to).faction)}
+                  </span>
                 </div>
                 <div className="despatch-when">
                   {copy.post.written(

@@ -27,7 +27,14 @@ import {
 } from '@campaign/shared';
 
 import { copy, prettify } from '../copy.js';
-import { draftProblems, emptyDraft, idFor, unitFrom, type UnitDraft } from '../orbat.js';
+import {
+  commanderFrom,
+  draftProblems,
+  emptyDraft,
+  idFor,
+  unitFrom,
+  type UnitDraft,
+} from '../orbat.js';
 
 const KINDS: UnitKind[] = [
   'infantry',
@@ -72,7 +79,15 @@ export function Orbat({
   placing: Hex | null;
   /** Ask for a hex. The drawer closes, the map takes a click, and `placing` comes back. */
   onPlace: () => void;
-  onRaise: (unit: Unit) => void;
+  /**
+   * Raise the formation and appoint its commander, as one act.
+   *
+   * Two commands go to the server, in that order and only in that order — a commander must
+   * have a formation to ride with before they can be appointed to it — but it is one thing
+   * the referee did, and a failure halfway through leaves a formation with nobody at its
+   * head, which the caller has to say out loud.
+   */
+  onRaise: (unit: Unit, commander: Commander) => void;
   onAppoint: (commander: Commander) => void;
   busy: boolean;
   error: string | null;
@@ -122,7 +137,11 @@ export function Orbat({
               <span>{copy.orbat.side}</span>
               <select
                 value={draft.faction}
-                onChange={(e) => setDraft({ ...draft, faction: e.target.value })}
+                onChange={(e) =>
+                  // The superior goes with it. Keeping it would offer Wellington as Ney's
+                  // superior for exactly as long as it took somebody to press Raise.
+                  setDraft({ ...draft, faction: e.target.value, superiorId: '' })
+                }
                 disabled={busy}
               >
                 {factions.map((f) => (
@@ -190,6 +209,41 @@ export function Orbat({
                 disabled={busy}
               />
             </label>
+
+            {/* Asked for here rather than in the appointment form below, because a
+                formation nobody commands cannot be ordered and cannot report. The other
+                form is for a second officer riding with an existing formation — a corps
+                commander whose headquarters has gone — not for filling a vacancy this one
+                left open. */}
+            <label>
+              <span>{copy.orbat.commander}</span>
+              <input
+                value={draft.commanderName}
+                placeholder={copy.orbat.commanderNamePlaceholder}
+                onChange={(e) => setDraft({ ...draft, commanderName: e.target.value })}
+                disabled={busy}
+              />
+            </label>
+
+            <label>
+              <span>{copy.orbat.answersTo}</span>
+              <select
+                value={draft.superiorId}
+                onChange={(e) => setDraft({ ...draft, superiorId: e.target.value })}
+                disabled={busy}
+              >
+                <option value="">{copy.orbat.noSuperior}</option>
+                {/* Their own side only, and it changes with the side above: a chain of
+                    command that crosses the lines is not a chain of command. */}
+                {commanders
+                  .filter((c) => c.faction === draft.faction)
+                  .map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+              </select>
+            </label>
           </div>
 
           <div className="field">
@@ -224,7 +278,10 @@ export function Orbat({
               disabled={busy || problems.length > 0 || at === null}
               onClick={() => {
                 if (at === null) return;
-                onRaise(unitFrom({ ...draft, id }, cfg, at));
+                onRaise(
+                  unitFrom({ ...draft, id }, cfg, at),
+                  commanderFrom({ ...draft, id }, id, new Set(commanders.map((c) => c.id))),
+                );
                 setDraft(emptyDraft(draft.faction));
               }}
             >
