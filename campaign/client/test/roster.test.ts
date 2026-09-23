@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { Unit, UnitReport } from '@campaign/shared';
 
-import { commandTrees, type CommandNode, type CommandTree } from '../src/roster.js';
+import { beneath, commandTrees, type CommandNode, type CommandTree } from '../src/roster.js';
 
 const unit = (
   id: string,
@@ -175,6 +175,20 @@ describe('the referee’s order of battle', () => {
     ];
     const [tree] = commandTrees({ factions: ['red'], commanders, units: army.units, reports: [] });
     expect(tree!.roots.map((r) => r.id).sort()).toEqual(['bereaved', 'ney', 'turncoat']);
+  });
+
+  it('counts everyone beneath an officer, at every level, for a folded row', () => {
+    expect(beneath(find(red, 'ney')!)).toBe(3);
+    expect(beneath(find(red, 'soult')!)).toBe(1);
+    expect(beneath(find(red, 'girard')!)).toBe(0);
+  });
+
+  it('marks each formation with its size, stated or guessed', () => {
+    const units = [...army.units.slice(1), { ...unit('red-1', 'red'), kind: 'hq' as const, echelon: 'army_group' as const }];
+    const [tree] = commandTrees({ factions: ['red'], commanders: army.commanders, units, reports: [] });
+    expect(find(tree!, 'ney')!.formation.line?.echelon).toBe('army_group');
+    // Guessed from strength when nobody said: 4,000 paper is a division.
+    expect(find(tree!, 'soult')!.formation.line?.echelon).toBe('division');
   });
 
   it('lists everyone exactly once when the chain loops, and stops', () => {

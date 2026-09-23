@@ -16,9 +16,11 @@ import { useState } from 'react';
 
 import {
   ECHELON_MARKS,
+  ECHELONS,
   EXPERIENCE_NAMES,
   type CampaignConfig,
   type Commander,
+  type Echelon,
   type Experience,
   type Hex,
   type Trait,
@@ -152,6 +154,29 @@ export function RaiseForm({
             {KINDS.map((k) => (
               <option key={k} value={k}>
                 {prettify(k)}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label>
+          <span>{copy.orbat.echelon}</span>
+          <select
+            value={draft.echelon ?? ''}
+            onChange={(e) =>
+              setDraft({
+                ...draft,
+                echelon: e.target.value === '' ? null : (e.target.value as Echelon),
+              })
+            }
+            disabled={busy}
+          >
+            {/* Left unset, the map guesses from strength and arm — which is right for a
+                division and wrong for an army headquarters of a few hundred staff. */}
+            <option value="">{copy.orbat.echelonGuessed}</option>
+            {ECHELONS.filter((e) => e !== 'none').map((e) => (
+              <option key={e} value={e}>
+                {echelonLabel(e)}
               </option>
             ))}
           </select>
@@ -348,4 +373,4 @@ export function AppointForm({
 
 /** The size mark a formation will carry, for a referee choosing an echelon. */
 export const echelonLabel = (e: keyof typeof ECHELON_MARKS): string =>
-  ECHELON_MARKS[e] === '' ? e : `${e} (${ECHELON_MARKS[e]})`;
+  ECHELON_MARKS[e] === '' ? prettify(e) : `${prettify(e)} (${ECHELON_MARKS[e]})`;

@@ -26,6 +26,7 @@
 import { useState, type ReactNode } from 'react';
 
 import {
+  ECHELON_MARKS,
   isPatrol,
   maxMorale,
   presentUnderArms,
@@ -39,8 +40,9 @@ import {
 } from '@campaign/shared';
 
 import { ageLabel, dayHour } from '../board.js';
-import { copy } from '../copy.js';
+import { copy, prettify } from '../copy.js';
 import {
+  beneath,
   commandTrees,
   type CommandNode,
   type FormationNode,
@@ -173,6 +175,11 @@ export function Roster({
               style={{ background: colorOf(line?.faction ?? faction?.id ?? '') }}
             />
             {f.name}
+            {line !== null && ECHELON_MARKS[line.echelon] !== '' && (
+              <span className="cmd-echelon" title={prettify(line.echelon)}>
+                {ECHELON_MARKS[line.echelon]}
+              </span>
+            )}
             {patrol && <span className="muted">{copy.roster.patrol}</span>}
             {line === null && <span className="muted">{copy.roster.noWord}</span>}
             {line !== null && line.asOfHours !== null && (
@@ -235,7 +242,7 @@ export function Roster({
           <span className="cmd-name">{c.name}</span>
           {root && <span className="muted small">{copy.roster.armyCommand}</span>}
           {isFolded && (
-            <span className="muted small">{copy.roster.foldedCount(c.subordinates.length)}</span>
+            <span className="muted small">{copy.roster.foldedCount(beneath(c))}</span>
           )}
           {editing !== undefined && (
             <button

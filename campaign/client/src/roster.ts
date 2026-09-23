@@ -8,7 +8,7 @@
  * remembered rows quietly become live ones.
  */
 
-import type { Unit, UnitReport } from '@campaign/shared';
+import { echelonOf, type Echelon, type Unit, type UnitReport } from '@campaign/shared';
 
 /** One row, from either source, reduced to what both can say. */
 export interface RosterLine {
@@ -20,6 +20,8 @@ export interface RosterLine {
   readonly fatigue: number;
   readonly formation: string;
   readonly corps: string | null;
+  /** Its size, as the map marks it: stated, or guessed from strength. */
+  readonly echelon: Echelon;
   /** The hour this describes, or null when it is simply true now. */
   readonly asOfHours: number | null;
   /** Present for a live row. A report cannot carry one, and that is the whole difference. */
@@ -35,6 +37,7 @@ const fromUnit = (u: Unit): RosterLine => ({
   fatigue: u.fatigue,
   formation: u.formation,
   corps: u.corps,
+  echelon: echelonOf(u),
   asOfHours: null,
   unit: u,
 });
@@ -48,6 +51,7 @@ const fromReport = (r: UnitReport): RosterLine => ({
   fatigue: r.fatigue,
   formation: r.formation,
   corps: r.corps,
+  echelon: r.echelon,
   asOfHours: r.atHours,
   unit: null,
 });
@@ -92,6 +96,15 @@ export interface CommandNode {
   readonly formation: FormationNode;
   readonly subordinates: readonly CommandNode[];
 }
+
+/**
+ * Everyone beneath an officer, at every level.
+ *
+ * What a folded row says it is hiding. Counting only the officers directly beneath a wing
+ * commander would say "2" of a wing with two corps and eight divisions in it.
+ */
+export const beneath = (n: CommandNode): number =>
+  n.subordinates.reduce((sum, s) => sum + 1 + beneath(s), 0);
 
 /** One side's chain of command, and whatever nobody commands. */
 export interface CommandTree {

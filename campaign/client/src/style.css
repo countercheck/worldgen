@@ -1038,6 +1038,12 @@ button.formation:hover {
   cursor: pointer;
 }
 
+.cmd-echelon {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
 .cmd-unit:hover {
   background: var(--panel-2);
 }
