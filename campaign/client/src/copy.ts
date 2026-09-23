@@ -423,34 +423,52 @@ export const copy = {
     label: 'Order of battle',
     heading: 'Order of battle',
     close: 'Close',
-    empty: 'Nothing here.',
+    empty: 'Nobody on this side yet.',
 
-    columnFormation: 'Formation',
+    // The tree.
+    armyCommand: 'army command',
+    fold: 'Hide who answers to them',
+    unfold: 'Show who answers to them',
+    foldedCount: (n: number): string => (n === 1 ? '1 beneath' : `${n} beneath`),
+    patrol: ' · patrol',
+    withYou: 'with you',
+    /** After a formation's name, when it has no report: a name in the order of battle and nothing more. */
+    noWord: ' · no word',
+    /** A second officer at the same column, so neither row looks like the only one. */
+    alsoRiding: (names: string): string => ` · also ${names}`,
+    asLastHeard: 'As you last heard. The hour against a formation is when word of it was written, not where it is now.',
+    uncommanded: 'Nobody commands',
+    uncommandedNote: 'A hole in the chain of command: nobody can order these and nobody reports for them.',
+
+    // A formation, opened.
+    asOf: 'As of',
     columnWhere: 'Where',
+    corps: 'Corps',
     columnStrength: 'Strength',
     columnFatigue: 'Fatigue',
+    supply: 'Supply',
+    supplyLine: (prov: number, maxProv: number, equip: number, maxEquip: number): string =>
+      `provisions ${prov}/${maxProv} · equipment ${equip}/${maxEquip}`,
     columnDoing: 'Doing',
-
-    patrol: ' · patrol',
-    detachment: 'detachment',
-    notTracked: '—',
     underArms: (n: string): string => `${n} under arms`,
     morale: (has: number, max: number): string => `morale ${has}/${max}`,
-    withYou: 'with you',
+    noWordDetail: 'Nobody has sent you word of this formation. You know its name, and who rides with it.',
 
-    groupWithYou: 'With you',
-    groupUnderCommand: 'Under your command',
-    groupUnderCommandNote: 'As you last heard. Every hour below is when word reached you, not where they are now.',
+    // The referee's hands on it.
+    addSubordinate: '+ subordinate',
+    addOfficer: '+ officer',
+    addArmyCommand: '+ army command',
   },
 
   /** Raising and appointing: the referee's preparation for a game. */
   orbat: {
-    raiseFormation: 'Raise a formation',
-    appointCommander: 'Appoint a commander',
+    asArmyCommand: 'A new army command: answering to nobody.',
+    under: (superior: string): string => `A new command answering to ${superior}.`,
+    toRideWith: (unit: string): string => `An officer to ride with ${unit}.`,
 
     name: 'Name',
+    ridingWith: 'Riding with',
     namePlaceholder: '1re Division',
-    side: 'Side',
     arm: 'Arm',
     paperStrength: 'Paper strength',
     experience: 'Experience',
@@ -467,11 +485,10 @@ export const copy = {
 
     commander: 'Commander',
     commanderNamePlaceholder: 'Marshal Ney',
-    ridesWith: 'Rides with',
     answersTo: 'Answers to',
     noSuperior: 'nobody — army command',
-    none: '—',
     appoint: 'Appoint',
+    cancel: 'Cancel',
     appointBlurb: 'Appointing a commander does not give anybody a seat. Issue a link when you want somebody to play them.',
 
     // What is wrong with a draft, in the order a reader would find it.

@@ -906,48 +906,176 @@ button.formation:hover {
   color: var(--muted);
 }
 
-.roster-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-
-.roster-table th {
-  text-align: left;
-  font-weight: 500;
-  color: var(--muted);
+/* One tab per side, for a referee. A commander has one side and gets no tabs. */
+.tabs {
+  display: flex;
+  gap: 2px;
+  padding: 0 16px;
   border-bottom: 1px solid var(--line);
-  padding: 4px 8px 4px 0;
+  flex: none;
+  overflow-x: auto;
 }
 
-.roster-table td {
-  padding: 6px 8px 6px 0;
-  border-bottom: 1px solid rgb(47 51 63 / 55%);
-  vertical-align: top;
+.tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  font: inherit;
+  padding: 8px 12px 7px;
+  cursor: pointer;
+  white-space: nowrap;
 }
 
-.roster-table td.num,
-.roster-table th:nth-child(2),
-.roster-table th:nth-child(3),
-.roster-table th:nth-child(4) {
-  font-variant-numeric: tabular-nums;
+.tab:hover {
+  color: var(--text);
 }
 
-.roster-table tbody tr {
+.tab.on {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+/* ---- the chain of command ----
+
+   Officers nest under the officer they answer to, and the guide line down the left of each
+   level is the chain itself. The formation an officer rides with hangs directly under
+   their name, set in from it and marked with its side's swatch — a different kind of row
+   from an officer, because riding with a division and commanding a corps are different
+   relationships and should not read as the same indent. */
+
+.cmd-tree {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 14px;
+  border-left: 1px solid var(--line);
+}
+
+.cmd-tree.cmd-top {
+  padding-left: 0;
+  border-left: none;
+  margin-top: 10px;
+}
+
+.cmd-node {
+  margin: 4px 0;
+}
+
+.cmd-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 26px;
+}
+
+.cmd-fold {
+  width: 18px;
+  background: none;
+  border: none;
+  color: var(--muted);
+  font: inherit;
+  padding: 0;
   cursor: pointer;
 }
 
-.roster-table tbody tr:hover {
+.cmd-fold:disabled {
+  cursor: default;
+}
+
+.cmd-name {
+  font-weight: 600;
+}
+
+/* Only visible where the pointer is, so a long army is a staff list rather than a wall of
+   buttons. Still reachable by keyboard: focus shows it too. */
+.cmd-action {
+  margin-left: auto;
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  padding: 1px 7px;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.cmd-row:hover .cmd-action,
+.cmd-action:focus-visible {
+  opacity: 1;
+}
+
+.cmd-action:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.cmd-rides,
+.cmd-patrols {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 26px;
+}
+
+.cmd-patrols {
+  padding-left: 18px;
+}
+
+.cmd-unit {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  padding: 3px 6px;
+  cursor: pointer;
+}
+
+.cmd-unit:hover {
   background: var(--panel-2);
 }
 
-.roster-table tbody tr.selected {
+.cmd-row.selected .cmd-unit {
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
-/* A remembered row is not a live one, and the table should not let them look alike: this
-   is where a commander is told he is reading the past. */
-.roster-table tbody tr.remembered td {
+/* A formation opened in place. Two columns of label and value, tabular figures so a column
+   of strengths can be compared by eye. */
+.cmd-details {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 3px 12px;
+  margin: 4px 0 8px 30px;
+  padding: 8px 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cmd-details dt {
   color: var(--muted);
+}
+
+.cmd-details dd {
+  margin: 0;
+}
+
+p.cmd-details {
+  display: block;
+}
+
+.cmd-node > .orbat-form,
+.cmd-formation > .orbat-form {
+  margin: 6px 0 10px 26px;
 }
 
 .swatch.small.ghost {
@@ -959,11 +1087,6 @@ button.formation:hover {
 
 /* The editor sits at the top of the order of battle, because it is the same work: you
    look at what you have, and you add what is missing. */
-.orbat {
-  padding: 10px 0 14px;
-  border-bottom: 1px solid var(--line);
-}
-
 .orbat-form {
   margin-top: 10px;
   padding: 12px;
