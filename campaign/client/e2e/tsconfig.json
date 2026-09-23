@@ -1,0 +1,14 @@
+{
+  // The browser tests and their config, typechecked with everything else by
+  // `npm run typecheck` rather than only transpiled when Playwright loads them.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["node"],
+    "rootDir": "..",
+    "outDir": "../dist-tsc/e2e",
+    "tsBuildInfoFile": "../dist-tsc/e2e/tsconfig.tsbuildinfo",
+    "emitDeclarationOnly": true
+  },
+  "include": ["./**/*.ts", "../playwright.config.ts"]
+}

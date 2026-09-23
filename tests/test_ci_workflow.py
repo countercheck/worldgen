@@ -80,7 +80,7 @@ def test_the_gate_job_waits_for_lint_and_tests(workflow):
 # `campaign/` is a second suite in a second language, and a suite nobody runs is a suite
 # that does not exist. These are the same assertions as above, aimed one language over.
 
-JS_JOBS = ("js-lint", "js-test")
+JS_JOBS = ("js-lint", "js-test", "js-e2e")
 
 
 def test_the_typescript_suite_runs(workflow):
@@ -89,6 +89,7 @@ def test_the_typescript_suite_runs(workflow):
     assert "npm test" in joined, "CI does not run the TypeScript tests"
     assert "npm run lint" in joined, "CI does not lint the TypeScript"
     assert "npm run typecheck" in joined, "CI does not typecheck the TypeScript"
+    assert "npm run e2e" in joined, "CI does not run the browser tests"
 
 
 def test_the_typescript_install_is_reproducible(workflow):

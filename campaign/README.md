@@ -21,6 +21,15 @@ same API a referee uses. The referee is then handed **one join link per seat** â
 names a person, not a side â€” and sends each commander their own.
 
 ```bash
+npm test             # the engine, server and client suites (vitest)
+npm run e2e          # the console in Chromium, at phone and desktop sizes (Playwright)
+```
+
+The browser tests build first and run the built server over the built client, with a
+throwaway database. The first time, fetch the browser: `npx -w @campaign/client playwright
+install chromium`.
+
+```bash
 npm run build
 CAMPAIGN_DB=./campaign.db node server/dist/index.js
 ```

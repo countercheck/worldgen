@@ -59,11 +59,13 @@ import {
   outbox,
 } from './despatch.js';
 import { Join, type Joined } from './Join.jsx';
+import { coarsePointer, panesFor, useNarrow, type Pane } from './layout.js';
 import { HexMap } from './map/HexMap.js';
 import { Command } from './panels/Command.jsx';
 import { Composer, type Draft } from './panels/Composer.jsx';
 import { ContactPanel } from './panels/ContactPanel.jsx';
 import { HexPanel } from './panels/HexPanel.js';
+import { More } from './panels/More.jsx';
 import { Post } from './panels/Post.jsx';
 import { DecisionQueue, DespatchLog } from './panels/Referee.jsx';
 import { ReportPanel } from './panels/ReportPanel.jsx';
@@ -198,8 +200,12 @@ export default function App() {
   if (stored === null) return <Join onJoined={() => undefined} notice={copy.join.noSuchCampaign} />;
 
   return (
+    // Keyed by seat as well as campaign, so switching seats is a fresh console rather than
+    // the last one's with a different token. Everything a console holds of its own — a
+    // despatch half written in someone's name, a march half pointed out, a formation half
+    // raised — was that seat's, and the next seat should not open onto it.
     <Console
-      key={route.campaignId}
+      key={`${route.campaignId}:${stored.session.token}`}
       joined={{
         session: stored.session,
         held: stored.held,
@@ -260,6 +266,27 @@ function Console({
   const [ordering, setOrdering] = useState<string | null>(null);
   const [picked, setPicked] = useState<readonly Hex[]>([]);
   const [halted, setHalted] = useState<PendingDecision | null>(null);
+
+  // The phone layout's own state: which pane the tab bar has picked, whether the sheet
+  // over the map is pulled up, and whether the header's controls are open. All of it is
+  // inert on a wide screen, where every pane is on show at once.
+  const narrow = useNarrow();
+  const [pane, setPane] = useState<Pane>('map');
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [more, setMore] = useState(false);
+
+  // The order of battle is a drawer on a wide screen and a tab on a phone, and the two
+  // have to agree: whatever opens or closes the drawer — the tab, its own Close, pointing
+  // at ground to raise a formation — moves the tab with it.
+  useEffect(() => {
+    if (roster) setPane('orbat');
+    else setPane((p) => (p === 'orbat' ? 'map' : p));
+  }, [roster]);
+
+  // Every pointing mode is a question about the map, so it brings the map back.
+  useEffect(() => {
+    if (ordering !== null) setPane('map');
+  }, [ordering]);
 
   // The front page lists a campaign by name and says which seat this browser holds.
   // Neither is known anywhere but here: both arrive with the view.
@@ -324,6 +351,15 @@ function Console({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [roster, ordering]);
+
+  useEffect(() => {
+    if (!more) return;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setMore(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [more]);
 
   // `v` cycles how much of the map is washed. Separate from the Escape handler above,
   // which is only bound while a destination is being pointed at.
@@ -580,8 +616,55 @@ function Console({
           }),
         ];
 
+  /**
+   * Pick a pane on a phone.
+   *
+   * The order of battle is the one pane with a life of its own on a wide screen — it is the
+   * drawer — so choosing it opens the drawer and choosing anything else closes it.
+   */
+  const choosePane = (next: Pane): void => {
+    setPane(next);
+    setRoster(next === 'orbat');
+    if (next !== 'map') setMore(false);
+  };
+
+  /**
+   * Show a formation, from a list of them.
+   *
+   * On a wide screen the map is beside the list, so selecting is enough. On a phone the
+   * list is covering the map, and a reader who taps a formation wants to see where it is.
+   * Not the order of battle's: a tap there opens the formation in place, which is what
+   * the reader asked to see.
+   */
+  const showOnMap = (id: string): void => {
+    setSelectedId(id);
+    if (narrow) choosePane('map');
+  };
+
+  const setWash = (next: WashMode): void => {
+    saveWash(next);
+    setWashMode(next);
+  };
+
+  const tabs = panesFor(isReferee ? 'referee' : 'commander');
+
+  // The way out of every pointing mode that is not a key. Escape still works; a phone has
+  // no Escape, and a mode with no visible way out is a trap on any screen.
+  const stopPointing = (): void => {
+    setOrdering(null);
+    setPicked([]);
+  };
+  // Said only where there is a key to press. See `copy.notices`.
+  const keyed = !coarsePointer();
+  const escape = keyed ? ` ${copy.notices.escape}` : '';
+  const cancelButton = (
+    <button className="dismiss" onClick={stopPointing}>
+      {copy.orders.cancel}
+    </button>
+  );
+
   return (
-    <div className="app">
+    <div className={`app pane-${pane}${sheetOpen ? ' sheet-open' : ''}`}>
       <header>
         <button
           className="home"
@@ -592,6 +675,8 @@ function Console({
         </button>
         <h1>{view.campaign.name}</h1>
 
+        {/* Everything a phone moves into the More sheet. */}
+        <div className="header-tools">
         {identities.length > 0 && (
           <div className="roles">
             {identities.map((identity) => (
@@ -633,11 +718,7 @@ function Console({
           <button
             className="wash-toggle"
             title={copy.console.washHint}
-            onClick={() => {
-              const next = nextWash(washMode);
-              saveWash(next);
-              setWashMode(next);
-            }}
+            onClick={() => setWash(nextWash(washMode))}
           >
             {washMode === 'three'
               ? copy.console.washThree
@@ -646,6 +727,7 @@ function Console({
                 : copy.console.washNone}
           </button>
         )}
+        </div>
 
         <div className="clock">
           {dayHour(view.campaign.clockHours)}
@@ -684,7 +766,38 @@ function Console({
         <span className={`live live-${live}`} title={copy.console.liveHint(live)}>
           {live === 'open' ? copy.console.liveOpen : copy.console.liveReconnecting}
         </span>
+
+        <button
+          className="more-button"
+          aria-label={copy.more.open}
+          aria-expanded={more}
+          onClick={() => setMore((m) => !m)}
+        >
+          <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="5" cy="12" r="1.8" />
+            <circle cx="12" cy="12" r="1.8" />
+            <circle cx="19" cy="12" r="1.8" />
+          </svg>
+        </button>
       </header>
+
+      {more && (
+        <More
+          identities={identities}
+          activeToken={session.token}
+          onSwitch={(token) => {
+            setMore(false);
+            onSwitch({ campaignId: session.campaignId, token });
+          }}
+          washMode={isReferee ? null : washMode}
+          onWash={setWash}
+          showReach={showReach}
+          reachDisabled={selectedUnit === null}
+          onReach={setShowReach}
+          onHome={() => navigate(HOME_HASH)}
+          onClose={() => setMore(false)}
+        />
+      )}
 
       {isReferee && halted !== null && (
         <div className="notice halted">
@@ -701,18 +814,38 @@ function Console({
       )}
 
       {isReferee && ordering === DECLARE_BATTLE && (
-        <div className="notice picking">{copy.notices.pickBattle}</div>
+        <div className="notice picking">
+          <span className="notice-text">
+            {copy.notices.pickBattle}
+            {keyed ? ` ${copy.notices.battleEscape}` : ''}
+          </span>
+          <span className="notice-actions">
+            <button className="primary" onClick={stopPointing}>
+              {copy.console.battleDone}
+            </button>
+          </span>
+        </div>
       )}
 
       {isReferee && ordering === ORDER_OF_BATTLE && (
-        <div className="notice picking">{copy.notices.pickForRaise}</div>
+        <div className="notice picking">
+          <span className="notice-text">
+            {copy.notices.pickForRaise}
+            {escape}
+          </span>
+          <span className="notice-actions">{cancelButton}</span>
+        </div>
       )}
 
       {isReferee && ordering !== null && ordering.startsWith(PLACE_PREFIX) && (
         <div className="notice picking">
-          {copy.notices.pickForPlace(
-            board.units.get(ordering.slice(PLACE_PREFIX.length))?.name ?? 'it',
-          )}
+          <span className="notice-text">
+            {copy.notices.pickForPlace(
+              board.units.get(ordering.slice(PLACE_PREFIX.length))?.name ?? 'it',
+            )}
+            {escape}
+          </span>
+          <span className="notice-actions">{cancelButton}</span>
         </div>
       )}
 
@@ -722,7 +855,25 @@ function Console({
         ordering !== DECLARE_BATTLE &&
         !ordering.startsWith(PLACE_PREFIX) && (
         <div className="notice picking">
-          {copy.notices.pickForMarch(board.units.get(ordering)?.name ?? ordering)}
+          <span className="notice-text">
+            {copy.notices.pickForMarch(board.units.get(ordering)?.name ?? ordering)}
+            {escape}
+          </span>
+          {/* The same three as under the formation in the sidebar, repeated here because
+              on a phone the sidebar is a sheet the map is being pointed at through. */}
+          <span className="notice-actions">
+            <button
+              className="primary"
+              disabled={picked.length === 0}
+              onClick={() => order(ordering, picked)}
+            >
+              {copy.orders.confirmMarch}
+            </button>
+            <button disabled={picked.length === 0} onClick={() => setPicked((r) => r.slice(0, -1))}>
+              {copy.orders.undoLast}
+            </button>
+            {cancelButton}
+          </span>
         </div>
       )}
 
@@ -754,6 +905,8 @@ function Console({
         commanders={view.commanders}
         colorOf={(f) => board.factions.get(f)?.color ?? '#888'}
         selectedId={selectedId}
+        // Selects without leaving: tapping a formation here also opens it in place, and
+        // on a phone jumping to the map would take the reader away from what they opened.
         onSelect={setSelectedId}
         {...(isReferee
           ? {
@@ -888,8 +1041,22 @@ function Console({
         />
 
         <aside className="sidebar">
+          {/* The handle that pulls the sheet up over the map. A phone's alone; hidden on
+              a wide screen, where the sidebar is not a sheet. */}
+          <button
+            className="sheet-handle"
+            aria-label={sheetOpen ? copy.tabs.sheetClose : copy.tabs.sheetOpen}
+            aria-expanded={sheetOpen}
+            onClick={() => setSheetOpen((o) => !o)}
+          >
+            <span aria-hidden="true" />
+          </button>
+
+          {/* Each group below is one pane on a phone. On a wide screen the groups are
+              transparent to layout and the sidebar reads top to bottom as it always has. */}
           {isReferee && (
             <>
+              <div className="pane-group" data-pane="map">
               {postError !== null && (
                 <section className="panel-section">
                   <p className="error">{postError}</p>
@@ -912,7 +1079,9 @@ function Console({
                 }}
                 busyId={busyId}
               />
+              </div>
 
+              <div className="pane-group" data-pane="post">
               {writing === null ? (
                 <section className="panel-section">
                   <h3>{copy.referee.despatchesHeading}</h3>
@@ -958,11 +1127,13 @@ function Console({
                 clockHours={clock}
                 labelOf={labelOf}
               />
+              </div>
             </>
           )}
 
           {!isReferee && view.commander !== null && (
             <>
+              <div className="pane-group" data-pane="post">
               {writing !== null && (
                 <Composer
                   correspondents={correspondents}
@@ -1000,18 +1171,22 @@ function Console({
                   setWriting({ text: forwardOf(d).text ?? '' });
                 }}
               />
+              </div>
 
+              <div className="pane-group" data-pane="command">
               <Command
                 own={ownFormation}
                 reports={view.reports}
                 clockHours={clock}
                 colorOf={(f) => board.factions.get(f)?.color ?? '#888'}
-                onSelect={setSelectedId}
+                onSelect={showOnMap}
                 taskLine={taskLine}
               />
+              </div>
             </>
           )}
 
+          <div className="pane-group" data-pane="map">
           {isReferee && shownUnit !== null && (
             <section className="panel-section">
               {/* Not the unit's name: the panel below already carries that, and a heading
@@ -1181,7 +1356,10 @@ function Console({
           {hovered === null && shownId === null && (
             <section className="panel-section">
               <h3>{copy.idle.heading}</h3>
-              <p className="muted">{copy.idle.blurb}</p>
+              <p className="muted">
+                {coarsePointer() ? copy.idle.blurbTouch
+                  : copy.idle.blurb}
+              </p>
 
               {/* A commander has their formations above, in the panel that also carries
                   their hours. Repeating them here would be the same list twice, once
@@ -1239,9 +1417,74 @@ function Console({
               <button onClick={onForget}>{copy.idle.leave}</button>
             </section>
           )}
+          </div>
         </aside>
       </div>
+
+      {/* A phone's way between panes. Hidden on a wide screen, where every pane is open. */}
+      <nav className="tabbar" aria-label={copy.tabs.label}>
+        {tabs.map((t) => (
+          <button
+            key={t}
+            className={pane === t ? 'on' : ''}
+            aria-current={pane === t ? 'page' : undefined}
+            onClick={() => choosePane(t)}
+          >
+            <TabIcon pane={t} />
+            <span>
+              {t === 'post' && isReferee ? copy.tabs.despatches : copy.tabs[t]}
+            </span>
+            {t === 'map' && isReferee && view.decisions.length > 0 && (
+              <span className="badge" aria-label={copy.tabs.decisions(view.decisions.length)}>
+                {view.decisions.length}
+              </span>
+            )}
+          </button>
+        ))}
+      </nav>
     </div>
+  );
+}
+
+/** One tab's picture. Stroke icons, drawn in the tab's text colour. */
+function TabIcon({ pane }: { pane: Pane }) {
+  const paths: Record<Pane, JSX.Element> = {
+    map: (
+      <>
+        <path d="M9 4L3 6v14l6-2 6 2 6-2V4l-6 2-6-2z" />
+        <path d="M9 4v14M15 6v14" />
+      </>
+    ),
+    post: (
+      <>
+        <rect x="3" y="5" width="18" height="14" rx="2" />
+        <path d="M3 7l9 6 9-6" />
+      </>
+    ),
+    command: (
+      <>
+        <circle cx="12" cy="5" r="2.2" />
+        <circle cx="5" cy="19" r="2.2" />
+        <circle cx="19" cy="19" r="2.2" />
+        <path d="M12 7.2v5M5 16.8V14h14v2.8" />
+      </>
+    ),
+    orbat: <path d="M4 6h16M8 12h12M12 18h8M4 6v12h4M4 12h4" />,
+  };
+  return (
+    <svg
+      width="22"
+      height="22"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {paths[pane]}
+    </svg>
   );
 }
 

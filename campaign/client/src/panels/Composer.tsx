@@ -25,10 +25,11 @@
  * where the addressee actually is and must never let that leak back through a number.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { dayHour } from '../board.js';
 import { copy } from '../copy.js';
+import { useNarrow } from '../layout.js';
 
 import { REFEREE_ADDRESS, type Correspondent, type Estimate } from '../despatch.js';
 
@@ -89,6 +90,19 @@ export function Composer({
   const [to, setTo] = useState(initial?.to ?? first);
   const [text, setText] = useState(initial?.text ?? '');
   const toTheReferee = to === REFEREE_ADDRESS;
+  // A dropdown has room for one line, and on a phone that line is cut off long before the
+  // formation that tells two generals apart. So a phone gets every addressee as a row.
+  const narrow = useNarrow();
+
+  // Opened from a button further down the post, the form lands above where the reader is
+  // looking — off the top of a phone entirely, because the browser holds the button it was
+  // opened from still and pushes everything inserted above it out of view. So the form
+  // brings itself into view once, a frame after opening, when the browser has done that.
+  const form = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => form.current?.scrollIntoView?.({ block: 'start' }));
+    return () => cancelAnimationFrame(frame);
+  }, []);
 
   // The addressee list changes with the sender, and with the ground: somebody in sight a
   // moment ago may have marched out of it. Keeping a stale addressee would offer a despatch
@@ -104,7 +118,7 @@ export function Composer({
   );
 
   return (
-    <section className="panel-section composer">
+    <section ref={form} className="panel-section composer">
       <h3>{copy.composer.heading}</h3>
 
       {senders !== undefined && senders.length > 0 && (
@@ -124,6 +138,41 @@ export function Composer({
         </label>
       )}
 
+      {narrow ? (
+        <fieldset className="choices addressees" disabled={busy}>
+          <legend>{copy.composer.to}</legend>
+          {correspondents.map((c) => (
+            <label key={c.id} className="choice">
+              <input
+                type="radio"
+                name="to"
+                checked={to === c.id}
+                onChange={() => setTo(c.id)}
+              />
+              <span className="choice-label">
+                <strong>{c.name}</strong>
+                <span className="muted small">
+                  {copy.composer.correspondentLine(c.unitName, factionName(c.faction))}
+                </span>
+              </span>
+              {copy.composer.relationTag[c.relation] !== '' && (
+                <span className="choice-tag">{copy.composer.relationTag[c.relation]}</span>
+              )}
+            </label>
+          ))}
+          {toReferee && (
+            <label className="choice">
+              <input
+                type="radio"
+                name="to"
+                checked={toTheReferee}
+                onChange={() => setTo(REFEREE_ADDRESS)}
+              />
+              <span className="choice-label muted">{copy.composer.theReferee}</span>
+            </label>
+          )}
+        </fieldset>
+      ) : (
       <label className="field">
         <div className="row-label">{copy.composer.to}</div>
         <select value={to} onChange={(e) => setTo(e.target.value)} disabled={busy}>
@@ -136,6 +185,7 @@ export function Composer({
           {toReferee && <option value={REFEREE_ADDRESS}>{copy.composer.theReferee}</option>}
         </select>
       </label>
+      )}
 
       <textarea
         className="prose"
