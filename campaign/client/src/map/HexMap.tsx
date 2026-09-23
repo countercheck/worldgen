@@ -259,6 +259,11 @@ export function HexMap({
         return;
       }
 
+      // Still a tap: leave the pointer where it went down, so that when it does leave the
+      // slop the pan takes in the whole way it has come rather than trailing by the slop.
+      const p = press.current;
+      if (p !== null && !p.moved && isTap(p.start, at)) return;
+
       const others = [...pointers.current.entries()].filter(([id]) => id !== e.pointerId);
       pointers.current.set(e.pointerId, at);
 
@@ -280,8 +285,6 @@ export function HexMap({
         return;
       }
 
-      const p = press.current;
-      if (p !== null && !p.moved && isTap(p.start, at)) return;
       if (p !== null) p.moved = true;
       setCamera((c) => ({
         zoom: c.zoom,
