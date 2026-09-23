@@ -1,58 +1,97 @@
 /**
- * The order of battle, in a drawer.
+ * The order of battle, in a drawer, drawn as the chain of command.
  *
- * The sidebar answers "what is this one formation", and answers it well. This answers the
- * other question a referee asks constantly and could not ask at all — "what is everything
- * doing" — without giving up the map to a table.
+ * The sidebar answers "what is this one formation". This answers the other question a
+ * referee asks constantly — "who commands what, and what is everything doing" — without
+ * giving up the map to a table.
+ *
+ * ## Two relationships, drawn two ways
+ *
+ * A commander has a place in the chain of command and a formation they ride with, and the
+ * two are different things. The tree is built on the first: each officer, and beneath them
+ * the officers who answer to them. The second hangs off each officer as a formation row —
+ * where they are, and the troops they are standing among. A marshal rides with one division
+ * and commands a corps, and a drawing that nested the corps under the division would have
+ * the army upside down.
  *
  * ## Two very different lists
  *
- * A referee gets every formation as it is. A commander gets their own as it is, and every
- * other one *as they last heard*: a `UnitReport` carries the hour it describes, not the hour
- * it arrived, and half the design is that those are different. So a commander's rows are
- * dated and a referee's are not, and the two are built from different data rather than one
- * filtered — a filtered list is how the dated ones quietly become live ones.
- *
- * A report carries less than a unit does, and deliberately: a rider knows where a
- * formation was, roughly how strong and how tired, and does not know its ammunition. The
- * columns here are the intersection, so a commander is never shown a blank where a referee
- * sees a number and left to wonder which it is.
+ * A referee gets every side, in tabs, and every formation as it is. A commander gets their
+ * own side only, their own formation as it is, and every other one *as they last heard*: a
+ * `UnitReport` carries the hour it describes, not the hour it arrived. A formation they
+ * have no word of at all — their superior's, a peer's — is a name and nothing more. See
+ * `commandTrees`, which builds from what the role holds rather than filtering one list.
  */
 
+import { useState, type ReactNode } from 'react';
+
 import {
+  ECHELON_MARKS,
   isPatrol,
   maxMorale,
   presentUnderArms,
   type CampaignConfig,
+  type Commander,
+  type Hex,
+  type PublicCommander,
+  type PublicFaction,
   type Unit,
   type UnitReport,
 } from '@campaign/shared';
 
-import type { ReactNode } from 'react';
-
 import { ageLabel, dayHour } from '../board.js';
-import { copy } from '../copy.js';
-import { rosterGroups, type RosterLine } from '../roster.js';
+import { copy, prettify } from '../copy.js';
+import {
+  beneath,
+  commandTrees,
+  type CommandNode,
+  type FormationNode,
+  type RosterLine,
+} from '../roster.js';
+import { AppointForm, RaiseForm } from './Orbat.jsx';
+
+/** The referee's order-of-battle controls. Absent for a commander, who raises nothing. */
+export interface OrbatEditing {
+  readonly cfg: CampaignConfig;
+  readonly placing: Hex | null;
+  readonly onPlace: () => void;
+  readonly onRaise: (unit: Unit, commander: Commander) => void;
+  readonly onAppoint: (commander: Commander) => void;
+  /** A form was closed without raising anything: forget the hex it was pointed at. */
+  readonly onDiscard: () => void;
+  readonly busy: boolean;
+  readonly error: string | null;
+}
+
+/** Where a form is open: under a commander, at the top of a side, or on a formation. */
+type Editing =
+  | { readonly kind: 'raise'; readonly superiorId: string | null }
+  | { readonly kind: 'appoint'; readonly unitId: string }
+  | null;
 
 export function Roster({
   open,
   onClose,
   role,
+  factions,
+  commanders,
   units,
   reports,
   ownUnitId,
   clockHours,
   cfg,
-  factionName,
   colorOf,
   selectedId,
   onSelect,
   taskOf,
-  editor,
+  editing,
 }: {
   open: boolean;
   onClose: () => void;
   role: 'referee' | 'commander';
+  /** The sides to show, one tab each: every side for a referee, their own for a commander. */
+  factions: readonly PublicFaction[];
+  commanders: readonly PublicCommander[];
   /** Live formations: all of them for a referee, their own for a commander. */
   units: readonly Unit[];
   /** Dated reports. Empty for a referee, who has no need of them. */
@@ -60,20 +99,176 @@ export function Roster({
   ownUnitId: string | null;
   clockHours: number;
   cfg: CampaignConfig;
-  factionName: (id: string) => string;
   colorOf: (faction: string) => string;
   selectedId: string | null;
   onSelect: (unitId: string) => void;
   taskOf: (unitId: string) => string | null;
-  /** The referee's order-of-battle controls. Absent for a commander, who raises nothing. */
-  editor?: ReactNode;
+  editing?: OrbatEditing;
 }) {
-  if (!open) return null;
+  const [tab, setTab] = useState<string | null>(null);
+  const [folded, setFolded] = useState<ReadonlySet<string>>(new Set());
+  const [shown, setShown] = useState<ReadonlySet<string>>(new Set());
+  const [form, setForm] = useState<Editing>(null);
 
-  const groups = rosterGroups({ role, units, reports, factionName });
+  const trees = commandTrees({
+    factions: factions.map((f) => f.id),
+    commanders,
+    units,
+    reports,
+  });
+  const current = trees.find((t) => t.faction === tab) ?? trees[0];
+  const faction = factions.find((f) => f.id === current?.faction);
 
+  const toggle = (set: ReadonlySet<string>, id: string): Set<string> => {
+    const next = new Set(set);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    return next;
+  };
+
+  const closeForm = (): void => {
+    setForm(null);
+    editing?.onDiscard();
+  };
+
+  const officers = commanders.map((c) => ({ id: c.id, name: c.name, faction: c.faction }));
+
+  const raiseForm = (superior: CommandNode | null): ReactNode =>
+    editing !== undefined &&
+    faction !== undefined && (
+      <RaiseForm
+        faction={faction.id}
+        superior={superior === null ? null : { ...superior, faction: faction.id }}
+        units={units}
+        commanders={officers}
+        cfg={editing.cfg}
+        placing={editing.placing}
+        onPlace={editing.onPlace}
+        onRaise={(unit, commander) => {
+          editing.onRaise(unit, commander);
+          setForm(null);
+        }}
+        onCancel={closeForm}
+        busy={editing.busy}
+      />
+    );
+
+  const formationRow = (f: FormationNode): ReactNode => {
+    const expanded = shown.has(f.unitId);
+    const line = f.line;
+    const patrol = line?.unit !== null && line?.unit !== undefined && isPatrol(line.unit);
+    const appointing = form?.kind === 'appoint' && form.unitId === f.unitId;
+
+    return (
+      <li key={f.unitId} className="cmd-formation">
+        <div className={`cmd-row${f.unitId === selectedId ? ' selected' : ''}`}>
+          <button
+            className="cmd-unit"
+            aria-expanded={expanded}
+            onClick={() => {
+              setShown(toggle(shown, f.unitId));
+              if (line !== null) onSelect(f.unitId);
+            }}
+          >
+            <span
+              className={`swatch small${line?.asOfHours == null ? '' : ' ghost'}`}
+              style={{ background: colorOf(line?.faction ?? faction?.id ?? '') }}
+            />
+            {f.name}
+            {line !== null && ECHELON_MARKS[line.echelon] !== '' && (
+              <span className="cmd-echelon" title={prettify(line.echelon)}>
+                {ECHELON_MARKS[line.echelon]}
+              </span>
+            )}
+            {patrol && <span className="muted">{copy.roster.patrol}</span>}
+            {line === null && <span className="muted">{copy.roster.noWord}</span>}
+            {line !== null && line.asOfHours !== null && (
+              <span className="muted" title={dayHour(line.asOfHours)}>
+                {' · '}
+                {ageLabel(line.asOfHours, clockHours)}
+              </span>
+            )}
+            {f.unitId === ownUnitId && <span className="muted"> · {copy.roster.withYou}</span>}
+            {f.alsoRiding.length > 0 && (
+              <span className="muted">{copy.roster.alsoRiding(f.alsoRiding.join(', '))}</span>
+            )}
+          </button>
+          {editing !== undefined && !patrol && (
+            <button
+              className="cmd-action"
+              onClick={() => setForm(appointing ? null : { kind: 'appoint', unitId: f.unitId })}
+            >
+              {copy.roster.addOfficer}
+            </button>
+          )}
+        </div>
+
+        {expanded && <Details line={line} task={taskOf(f.unitId)} cfg={cfg} clockHours={clockHours} />}
+
+        {appointing && editing !== undefined && (
+          <AppointForm
+            unit={{ id: f.unitId, name: f.name, faction: line?.faction ?? faction?.id ?? '' }}
+            commanders={officers}
+            onAppoint={(c) => {
+              editing.onAppoint(c);
+              setForm(null);
+            }}
+            onCancel={() => setForm(null)}
+            busy={editing.busy}
+          />
+        )}
+
+        {f.patrols.length > 0 && <ul className="cmd-patrols">{f.patrols.map(formationRow)}</ul>}
+      </li>
+    );
+  };
+
+  const commanderNode = (c: CommandNode, root: boolean): ReactNode => {
+    const isFolded = folded.has(c.id);
+    const raising = form?.kind === 'raise' && form.superiorId === c.id;
+
+    return (
+      <li key={c.id} className="cmd-node">
+        <div className="cmd-row">
+          <button
+            className="cmd-fold"
+            aria-label={isFolded ? copy.roster.unfold : copy.roster.fold}
+            aria-expanded={!isFolded}
+            disabled={c.subordinates.length === 0}
+            onClick={() => setFolded(toggle(folded, c.id))}
+          >
+            {c.subordinates.length === 0 ? '·' : isFolded ? '▸' : '▾'}
+          </button>
+          <span className="cmd-name">{c.name}</span>
+          {root && <span className="muted small">{copy.roster.armyCommand}</span>}
+          {isFolded && (
+            <span className="muted small">{copy.roster.foldedCount(beneath(c))}</span>
+          )}
+          {editing !== undefined && (
+            <button
+              className="cmd-action"
+              onClick={() => setForm(raising ? null : { kind: 'raise', superiorId: c.id })}
+            >
+              {copy.roster.addSubordinate}
+            </button>
+          )}
+        </div>
+
+        <ul className="cmd-rides">{formationRow(c.formation)}</ul>
+
+        {raising && raiseForm(c)}
+
+        {!isFolded && c.subordinates.length > 0 && (
+          <ul className="cmd-tree">{c.subordinates.map((s) => commanderNode(s, false))}</ul>
+        )}
+      </li>
+    );
+  };
+
+  // Hidden rather than unmounted: pointing at the map for a new formation closes the
+  // drawer, and a half-filled form has to be there when it opens again.
   return (
-    <aside className="roster" aria-label={copy.roster.label}>
+    <aside className="roster" aria-label={copy.roster.label} style={open ? undefined : { display: 'none' }}>
       <header className="roster-head">
         <h2>{copy.roster.heading}</h2>
         <button className="dismiss" onClick={onClose}>
@@ -81,111 +276,135 @@ export function Roster({
         </button>
       </header>
 
+      {factions.length > 1 && (
+        <div className="tabs" role="tablist">
+          {factions.map((f) => (
+            <button
+              key={f.id}
+              role="tab"
+              aria-selected={f.id === current?.faction}
+              className={`tab${f.id === current?.faction ? ' on' : ''}`}
+              onClick={() => {
+                setTab(f.id);
+                closeForm();
+              }}
+            >
+              <span className="swatch small" style={{ background: f.color }} />
+              {f.name}
+              <span className="muted"> · {units.filter((u) => u.faction === f.id).length}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="roster-body">
-        {editor}
+        {editing?.error != null && <p className="error">{editing.error}</p>}
 
-        {groups.map((group) => (
-          <section key={group.title} className="roster-group">
-            <h3>
-              {group.title}
-              <span className="muted"> · {group.lines.length}</span>
-            </h3>
-            {group.note !== null && <p className="muted small">{group.note}</p>}
+        {role === 'commander' && reports.length > 0 && (
+          <p className="muted small">{copy.roster.asLastHeard}</p>
+        )}
 
-            {group.lines.length === 0 ? (
-              <p className="muted small">{copy.roster.empty}</p>
-            ) : (
-              <table className="roster-table">
-                <thead>
-                  <tr>
-                    <th>{copy.roster.columnFormation}</th>
-                    <th>{copy.roster.columnWhere}</th>
-                    <th>{copy.roster.columnStrength}</th>
-                    <th>{copy.roster.columnFatigue}</th>
-                    <th>{copy.roster.columnDoing}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {group.lines.map((line: RosterLine) => {
-                    const task = taskOf(line.unitId);
-                    const patrol = line.unit !== null && isPatrol(line.unit);
-                    return (
-                      <tr
-                        key={line.unitId}
-                        className={
-                          (line.unitId === selectedId ? 'selected ' : '') +
-                          (line.asOfHours === null ? '' : 'remembered')
-                        }
-                        onClick={() => onSelect(line.unitId)}
-                      >
-                        <td>
-                          <span
-                            className={`swatch small${line.asOfHours === null ? '' : ' ghost'}`}
-                            style={{ background: colorOf(line.faction) }}
-                          />
-                          {line.name}
-                          {line.corps !== null && <span className="muted"> · {line.corps}</span>}
-                          {patrol && <span className="muted">{copy.roster.patrol}</span>}
-                        </td>
-                        <td className="num">
-                          {line.at.q}, {line.at.r}
-                          {line.asOfHours !== null && (
-                            <div className="muted small" title={dayHour(line.asOfHours)}>
-                              {ageLabel(line.asOfHours, clockHours)}
-                            </div>
-                          )}
-                        </td>
-                        <td className="num">
-                          {/* A patrol has no strength in the sense this column means, and
-                              a zero here would read as a formation destroyed. */}
-                          {patrol ? (
-                            <span className="muted">{copy.roster.detachment}</span>
-                          ) : (
-                            <>
-                              {line.paperStrength.toLocaleString()}
-                              {line.unit !== null && (
-                                <div className="muted small">
-                                  {copy.roster.underArms(
-                                    presentUnderArms(line.unit).toLocaleString(),
-                                  )}
-                                </div>
-                              )}
-                            </>
-                          )}
-                        </td>
-                        <td className="num">
-                          {patrol ? (
-                            <span className="muted">{copy.roster.notTracked}</span>
-                          ) : (
-                            <>
-                              {line.fatigue}
-                              {line.unit !== null && (
-                                <div className="muted small">
-                                  {copy.roster.morale(
-                                    line.unit.morale,
-                                    maxMorale(line.unit, cfg.maxMorale),
-                                  )}
-                                </div>
-                              )}
-                            </>
-                          )}
-                        </td>
-                        <td>
-                          {line.formation}
-                          {task !== null && <div className="muted small">{task}</div>}
-                          {line.unitId === ownUnitId && (
-                            <div className="muted small">{copy.roster.withYou}</div>
-                          )}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            )}
+        {current === undefined || (current.roots.length === 0 && current.uncommanded.length === 0) ? (
+          <p className="muted small">{copy.roster.empty}</p>
+        ) : (
+          <ul className="cmd-tree cmd-top">{current.roots.map((c) => commanderNode(c, true))}</ul>
+        )}
+
+        {editing !== undefined && (
+          <div className="despatch-actions">
+            <button
+              onClick={() =>
+                setForm(form?.kind === 'raise' && form.superiorId === null ? null : { kind: 'raise', superiorId: null })
+              }
+            >
+              {copy.roster.addArmyCommand}
+            </button>
+          </div>
+        )}
+        {form?.kind === 'raise' && form.superiorId === null && raiseForm(null)}
+
+        {current !== undefined && current.uncommanded.length > 0 && (
+          <section className="roster-group">
+            <h3>{copy.roster.uncommanded}</h3>
+            <p className="muted small">{copy.roster.uncommandedNote}</p>
+            <ul className="cmd-rides">{current.uncommanded.map(formationRow)}</ul>
           </section>
-        ))}
+        )}
       </div>
     </aside>
+  );
+}
+
+/**
+ * What is known of one formation, opened in place under it.
+ *
+ * A report carries less than a unit does, and deliberately: a rider knows where a formation
+ * was, roughly how strong and how tired, and not its ammunition. So a dated card shows what
+ * the report holds and says when it was true, and never pads the rest with a blank that
+ * could be read as a zero.
+ */
+function Details({
+  line,
+  task,
+  cfg,
+  clockHours,
+}: {
+  line: RosterLine | null;
+  task: string | null;
+  cfg: CampaignConfig;
+  clockHours: number;
+}) {
+  if (line === null) return <p className="cmd-details muted small">{copy.roster.noWordDetail}</p>;
+
+  const unit = line.unit;
+  const patrol = unit !== null && isPatrol(unit);
+
+  return (
+    <dl className="cmd-details">
+      {line.asOfHours !== null && (
+        <>
+          <dt>{copy.roster.asOf}</dt>
+          <dd>
+            {dayHour(line.asOfHours)} · {ageLabel(line.asOfHours, clockHours)}
+          </dd>
+        </>
+      )}
+      <dt>{copy.roster.columnWhere}</dt>
+      <dd>
+        {line.at.q}, {line.at.r}
+      </dd>
+      {line.corps !== null && (
+        <>
+          <dt>{copy.roster.corps}</dt>
+          <dd>{line.corps}</dd>
+        </>
+      )}
+      {!patrol && (
+        <>
+          <dt>{copy.roster.columnStrength}</dt>
+          <dd>
+            {line.paperStrength.toLocaleString()}
+            {unit !== null &&
+              ` · ${copy.roster.underArms(presentUnderArms(unit).toLocaleString())}`}
+          </dd>
+          <dt>{copy.roster.columnFatigue}</dt>
+          <dd>
+            {line.fatigue}
+            {unit !== null && ` · ${copy.roster.morale(unit.morale, maxMorale(unit, cfg.maxMorale))}`}
+          </dd>
+        </>
+      )}
+      {unit !== null && !patrol && (
+        <>
+          <dt>{copy.roster.supply}</dt>
+          <dd>{copy.roster.supplyLine(unit.provisions, unit.maxProvisions, unit.equipment, unit.maxEquipment)}</dd>
+        </>
+      )}
+      <dt>{copy.roster.columnDoing}</dt>
+      <dd>
+        {line.formation}
+        {task !== null && ` · ${task}`}
+      </dd>
+    </dl>
   );
 }

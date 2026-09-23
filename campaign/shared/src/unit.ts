@@ -83,7 +83,15 @@ export const isPatrol = (u: Unit): boolean => u.parentUnitId != null;
  * the rules keys off it. Optional on `Unit` because a scenario that does not say gets a
  * sensible guess from strength rather than a wrong assertion.
  */
-export type Echelon = 'none' | 'battalion' | 'regiment' | 'brigade' | 'division' | 'corps';
+export type Echelon =
+  | 'none'
+  | 'battalion'
+  | 'regiment'
+  | 'brigade'
+  | 'division'
+  | 'corps'
+  | 'army'
+  | 'army_group';
 
 /** Echelon marks, in the order they are drawn above the frame. */
 export const ECHELON_MARKS: Readonly<Record<Echelon, string>> = {
@@ -93,7 +101,23 @@ export const ECHELON_MARKS: Readonly<Record<Echelon, string>> = {
   brigade: 'X',
   division: 'XX',
   corps: 'XXX',
+  // Above corps, for the headquarters of a wing or an army and of the whole: never guessed
+  // from strength — an army headquarters is a few hundred staff — only ever stated.
+  army: 'XXXX',
+  army_group: 'XXXXX',
 };
+
+/** Every echelon, smallest first: the order a form should offer them in. */
+export const ECHELONS: readonly Echelon[] = [
+  'none',
+  'battalion',
+  'regiment',
+  'brigade',
+  'division',
+  'corps',
+  'army',
+  'army_group',
+];
 
 export interface Unit {
   readonly id: string;

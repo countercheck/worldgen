@@ -64,7 +64,6 @@ import { Command } from './panels/Command.jsx';
 import { Composer, type Draft } from './panels/Composer.jsx';
 import { ContactPanel } from './panels/ContactPanel.jsx';
 import { HexPanel } from './panels/HexPanel.js';
-import { Orbat } from './panels/Orbat.jsx';
 import { Post } from './panels/Post.jsx';
 import { DecisionQueue, DespatchLog } from './panels/Referee.jsx';
 import { ReportPanel } from './panels/ReportPanel.jsx';
@@ -747,66 +746,69 @@ function Console({
         ownUnitId={view.commander?.unitId ?? null}
         clockHours={clock}
         cfg={cfg}
-        factionName={factionName}
+        factions={
+          isReferee
+            ? view.factions
+            : view.factions.filter((f) => f.id === view.commander?.faction)
+        }
+        commanders={view.commanders}
         colorOf={(f) => board.factions.get(f)?.color ?? '#888'}
         selectedId={selectedId}
         onSelect={setSelectedId}
-        editor={
-          isReferee ? (
-            <Orbat
-              factions={view.factions}
-              units={view.units}
-              commanders={view.commanders}
-              cfg={cfg}
-              placing={placing}
-              busy={sending}
-              error={postError}
-              onPlace={() => {
-                setRoster(false);
-                setOrdering(ORDER_OF_BATTLE);
-                setPicked([]);
-              }}
-              onRaise={(unit, commander) => {
-                setSending(true);
-                setPostError(null);
-                // Sequential, and it has to be: a commander must have a formation to ride
-                // with before they can be appointed to it, so the appointment cannot be
-                // sent until the unit is known to exist. If the second command is refused
-                // the formation stands there with nobody at its head, which the referee is
-                // told about rather than left to notice.
-                void addUnit(session, unit)
-                  .then(async (raised) => {
-                    if (!raised.ok) return raised;
-                    setPlacing(null);
-                    return addCommander(session, commander);
-                  })
-                  .then((result) => {
-                    if (!result.ok) {
-                      setPostError(
-                        result.violations?.map((v) => v.message).join('; ') ??
-                          copy.orders.refused,
-                      );
-                    }
-                  })
-                  .finally(() => setSending(false));
-              }}
-              onAppoint={(commander) => {
-                setSending(true);
-                setPostError(null);
-                void addCommander(session, commander)
-                  .then((result) => {
-                    if (!result.ok) {
-                      setPostError(
-                        result.violations?.map((v) => v.message).join('; ') ??
-                          copy.orders.refused,
-                      );
-                    }
-                  })
-                  .finally(() => setSending(false));
-              }}
-            />
-          ) : undefined
-        }
+        {...(isReferee
+          ? {
+              editing: {
+                cfg,
+                placing,
+                busy: sending,
+                error: postError,
+                onPlace: () => {
+                  setRoster(false);
+                  setOrdering(ORDER_OF_BATTLE);
+                  setPicked([]);
+                },
+                onDiscard: () => setPlacing(null),
+                onRaise: (unit, commander) => {
+                  setSending(true);
+                  setPostError(null);
+                  // Sequential, and it has to be: a commander must have a formation to ride
+                  // with before they can be appointed to it, so the appointment cannot be
+                  // sent until the unit is known to exist. If the second command is refused
+                  // the formation stands there with nobody at its head, which the referee is
+                  // told about rather than left to notice.
+                  void addUnit(session, unit)
+                    .then(async (raised) => {
+                      if (!raised.ok) return raised;
+                      setPlacing(null);
+                      return addCommander(session, commander);
+                    })
+                    .then((result) => {
+                      if (!result.ok) {
+                        setPostError(
+                          result.violations?.map((v) => v.message).join('; ') ??
+                            copy.orders.refused,
+                        );
+                      }
+                    })
+                    .finally(() => setSending(false));
+                },
+                onAppoint: (commander) => {
+                  setSending(true);
+                  setPostError(null);
+                  void addCommander(session, commander)
+                    .then((result) => {
+                      if (!result.ok) {
+                        setPostError(
+                          result.violations?.map((v) => v.message).join('; ') ??
+                            copy.orders.refused,
+                        );
+                      }
+                    })
+                    .finally(() => setSending(false));
+                },
+              },
+            }
+          : {})}
         taskOf={(unitId) => {
           const task = view.tasks.find((t) => t.unitId === unitId);
           if (task === undefined) return view.task?.unitId === unitId ? taskLine : null;
