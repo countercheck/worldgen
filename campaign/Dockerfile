@@ -95,7 +95,7 @@ ENV NODE_ENV=production \
 # that asks for a second one is ambiguous about which the data is in.
 #
 # So the mount is the caller's job, and both callers do it: `docker run -v campaign-data:/data`
-# as `docs/CAMPAIGN.md` gives it, and `requiredMountPath` in `railway.json`, which refuses
+# as `docs/CAMPAIGN.md` gives it, and `requiredMountPath` in `.railway/railway.ts`, which refuses
 # to start the container at all without the volume. What is lost is the anonymous volume
 # Docker would have created for someone who forgot the flag — a safety net that mostly
 # produced volumes nobody could name afterwards.
