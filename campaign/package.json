@@ -16,6 +16,7 @@
     "predev": "npm run build -w @campaign/shared",
     "dev": "npm run dev -w @campaign/server & npm run dev -w @campaign/client & wait",
     "test": "npm run test --workspaces --if-present",
+    "e2e": "npm run build && npm run e2e -w @campaign/client",
     "lint": "eslint .",
     "typecheck": "tsc --build"
   },

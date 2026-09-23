@@ -633,6 +633,8 @@ function Console({
    *
    * On a wide screen the map is beside the list, so selecting is enough. On a phone the
    * list is covering the map, and a reader who taps a formation wants to see where it is.
+   * Not the order of battle's: a tap there opens the formation in place, which is what
+   * the reader asked to see.
    */
   const showOnMap = (id: string): void => {
     setSelectedId(id);
@@ -903,7 +905,9 @@ function Console({
         commanders={view.commanders}
         colorOf={(f) => board.factions.get(f)?.color ?? '#888'}
         selectedId={selectedId}
-        onSelect={showOnMap}
+        // Selects without leaving: tapping a formation here also opens it in place, and
+        // on a phone jumping to the map would take the reader away from what they opened.
+        onSelect={setSelectedId}
         {...(isReferee
           ? {
               editing: {

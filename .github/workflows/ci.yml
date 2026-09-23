@@ -139,6 +139,43 @@ jobs:
       - name: Run tests
         run: npm test
 
+  # The console in a real browser, at phone and desktop sizes. The phone layout is CSS, and
+  # nothing but a browser can say which pane is on screen or whether a banner has its
+  # button — so these are a job of their own rather than more vitest. `npm run e2e` builds
+  # first and then runs the built server over the built client, the way it is deployed.
+  js-e2e:
+    name: JS Browser Tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: campaign
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: campaign/package-lock.json
+
+      - run: npm ci
+
+      # The browser matching the pinned @playwright/test, and the system libraries it needs.
+      - name: Install Chromium
+        run: npx -w @campaign/client playwright install --with-deps chromium
+
+      - name: Run browser tests
+        run: npm run e2e
+
+      # A failed run's traces: open one with `npx playwright show-trace` to step through it.
+      - name: Keep the traces of a failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: campaign/client/test-results/
+          retention-days: 7
+
   # The gate branch protection points at. Its name is load-bearing: a required status
   # check is matched by name, so renaming this job silently stops it gating anything.
   #
@@ -149,7 +186,7 @@ jobs:
   required:
     name: CIExpected
     runs-on: ubuntu-latest
-    needs: [lint, test, js-lint, js-test]
+    needs: [lint, test, js-lint, js-test, js-e2e]
     if: always()
     steps:
       # `needs['js-lint']`, not `needs.js-lint`. A hyphen is an operator in GitHub's
@@ -161,7 +198,8 @@ jobs:
           if [ "${{ needs.lint.result }}" != "success" ] \
             || [ "${{ needs.test.result }}" != "success" ] \
             || [ "${{ needs['js-lint'].result }}" != "success" ] \
-            || [ "${{ needs['js-test'].result }}" != "success" ]; then
+            || [ "${{ needs['js-test'].result }}" != "success" ] \
+            || [ "${{ needs['js-e2e'].result }}" != "success" ]; then
             echo "❌ Linting or tests failed"
             exit 1
           fi

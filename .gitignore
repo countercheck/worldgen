@@ -17,6 +17,11 @@ node_modules/
 *.tsbuildinfo
 dist-tsc/
 coverage/
+# What the browser tests leave: the demonstration campaign's stored link, and the traces
+# and reports of a failed run.
+campaign/client/e2e/.state/
+test-results/
+playwright-report/
 # The dev server's SQLite file, and the journals beside it. A campaign somebody played
 # locally is not a repository artifact.
 campaign.db*
