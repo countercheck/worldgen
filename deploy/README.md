@@ -9,24 +9,26 @@ capacity — it is a second campaign that half the players are connected to.
 
 | File | What it decides |
 |---|---|
-| `deploy/*.tf` | The project, the service, the volume, the domain, and the environment the process reads |
-| `railway.json` (repo root) | How the image is built and how a deploy behaves. Railway reads this itself |
-| `campaign/Dockerfile` | The image. Unchanged by any of this |
+| `.railway/railway.ts` | The service, its volume, its domain, how the image is built, how a deploy behaves, and the environment the process reads |
+| `campaign/Dockerfile` | The image. Nothing here depends on Railway |
 
-Two files rather than one because they answer to different readers: OpenTofu creates the
-service and can be reviewed in a pull request, while `railway.json` is read by Railway at
-build time and has to sit where Railway looks for it.
-
-## First deploy
+Railway does not read `.railway/railway.ts` on deploy. A push to `master` builds and
+deploys the code; a change to the file reaches the service only when it is applied:
 
 ```bash
-cd deploy
-export RAILWAY_TOKEN=...        # an account token, not a project token
-tofu init
-tofu apply
+npm install --prefix .railway   # once: the SDK the file imports
+railway config plan             # what would change, touching nothing
+railway config apply            # make it so, after a confirmation
 ```
 
-`tofu apply` prints the URL. Everything after that is a push to the deployed branch.
+So a merged change to the file is not live until someone applies it, and a setting
+changed in the Railway console is reverted by the next apply. Run `plan` before either.
+
+Two project settings the file cannot state, which were set when the project was made
+and must stay that way: the project is **private** (the join links are the whole security
+model), and **pull-request environments are off** (each would want its own volume, and a
+throwaway environment holding a copy of somebody's campaign is not a thing to create by
+accident).
 
 ## The settings that are not obvious
 
@@ -60,6 +62,28 @@ original is a copy, not a backup.
 
 ## Changing a limit
 
-The budgets and the upload ceiling are variables in `variables.tf`, applied as environment
-variables. Edit and `tofu apply`; do not set them in the Railway console, where the next
-apply would silently revert them.
+The upload ceiling and the rate budgets are the `env` block in `.railway/railway.ts`,
+with why each is what it is. Edit, `railway config plan`, `railway config apply`; do not
+set them in the Railway console, where the next apply would silently revert them.
+
+## Moving off Railway
+
+Nothing in the image is Railway's. What a new host has to provide is the list below, and
+`.railway/railway.ts` states each item in one place:
+
+- **One container, one replica, never two at once.** No rolling deploy that starts the
+  new container before the old one stops (`overlapSeconds: 0`), and no sleeping.
+- **A persistent volume at `/data`**, and a refusal to start without it.
+- **The image built from the repository root** with `campaign/Dockerfile`, because the
+  client imports a world fixture from `shared/test/fixtures`.
+- **A health check on `/health`**, and a restart when the process fails.
+- **The four variables** in the `env` block, with `TRUST_PROXY` only if something in
+  front terminates TLS and forwards.
+
+Until 2026-09-23 this was described in OpenTofu, against the community Railway provider.
+For a host with a Terraform provider, that is a starting point for the same shape:
+
+```bash
+git show 9db0e2a:deploy/main.tf
+git show 9db0e2a:deploy/variables.tf
+```
