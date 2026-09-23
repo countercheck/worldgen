@@ -1279,7 +1279,7 @@ button.tag {
 }
 
 .choices legend {
-  padding: 0 0 8px;
+  padding: 12px 14px 8px;
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.09em;
@@ -1329,6 +1329,26 @@ button.tag {
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+.choice-tag {
+  flex: none;
+  font-size: 12px;
+  color: var(--accent);
+}
+
+/* The composer's addressee list on a phone: the chosen row is lit, so it can be seen at a
+   glance which general the despatch is going to before it is sent. */
+.addressees {
+  margin: 10px 0;
+}
+
+.addressees .choice:has(input:checked) {
+  background: var(--panel-2);
+}
+
+.addressees:disabled {
+  opacity: 0.6;
 }
 
 button.more-home {
@@ -1389,23 +1409,31 @@ button.more-home {
     color: var(--text);
   }
 
-  /* The referee's clock buttons get a row of their own, full width and finger-sized. */
   .clock-controls {
     display: flex;
-    width: 100%;
-    margin: 6px 0 2px;
+    margin: 4px 0 2px;
   }
 
-  /* A referee's clock carries its buttons, so it takes a line of its own below. */
+  /* A referee's clock carries its buttons, so it takes a line of its own below: the hour
+     and then the buttons, on one row, so the map loses one row to them rather than two. */
   .clock:has(.clock-controls) {
     order: 4;
     flex-basis: 100%;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .clock-controls {
+    flex: 1;
+    min-width: 0;
   }
 
   .clock-controls button {
     flex: 1;
+    min-width: 0;
     min-height: 40px;
-    padding: 0 8px;
+    padding: 0 4px;
   }
 
   .live {

@@ -155,20 +155,26 @@ export const copy = {
    * Each one is a mode the referee is in and cannot see from the map itself, so each says
    * what a click will now do and how to get out. "Escape to think again" is the same
    * phrase every time on purpose: it is the one keystroke that always works.
+   *
+   * The Escape sentence is kept apart from the rest and added only where there is a key to
+   * press. On a touch screen it would name a key that is not there, and the banner's own
+   * Cancel or Done button is the way out.
    */
   notices: {
     clockStopped: (at: string, who: string, unit: string, trigger: string): string =>
       `The clock stopped at ${at}: ${who}${unit} ${trigger}. It is in the queue below.`,
 
-    pickBattle: 'Point at the ground being fought over; point again to take it back out. Traffic rules stop applying there — formations in a battle are intermingled, and this map does not resolve what happens between them. Escape when the field is drawn.',
+    pickBattle: 'Point at the ground being fought over; point again to take it back out. Traffic rules stop applying there — formations in a battle are intermingled, and this map does not resolve what happens between them.',
+    battleEscape: 'Escape when the field is drawn.',
+    escape: 'Escape to think again.',
 
-    pickForRaise: 'Point at the ground the new formation is to stand on. Escape to think again.',
+    pickForRaise: 'Point at the ground the new formation is to stand on.',
 
     pickForPlace: (name: string): string =>
-      `Point at the ground ${name} is to stand on. It goes there without marching, and the log records that you moved it. Escape to think again.`,
+      `Point at the ground ${name} is to stand on. It goes there without marching, and the log records that you moved it.`,
 
     pickForMarch: (name: string): string =>
-      `Point at the ground ${name} is to march to. Point again to insist they go by way of somewhere first — the last place you name is where they are to end up. Places, not a route: between them they will find their own way, and discover what is in it when they get there. Escape to think again.`,
+      `Point at the ground ${name} is to march to. Point again to insist they go by way of somewhere first — the last place you name is where they are to end up. Places, not a route: between them they will find their own way, and discover what is in it when they get there.`,
 
     /** What a commander is told once, on arriving. The whole design, in four sentences. */
     whoYouAre: (name: string, unit: string, visibleHexes: number): string =>
@@ -301,6 +307,17 @@ export const copy = {
       subordinate: '',
       in_sight: ' — in sight',
     },
+    /**
+     * The same three reasons, as a tag at the end of a row on a phone, where each addressee
+     * is a row of its own rather than a line in a dropdown and needs no dash to set it off.
+     */
+    relationTag: {
+      superior: 'your superior',
+      subordinate: '',
+      in_sight: 'in sight',
+    },
+    /** The second line of an addressee's row on a phone: what they command, and for whom. */
+    correspondentLine: (unit: string, faction: string): string => `${unit} · ${faction}`,
     theReferee: 'The referee — out of the game',
     /**
      * One line of an addressee list: who, what they command, and which side.

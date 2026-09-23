@@ -648,6 +648,9 @@ function Console({
     setOrdering(null);
     setPicked([]);
   };
+  // Said only where there is a key to press. See `copy.notices`.
+  const keyed = !coarsePointer();
+  const escape = keyed ? ` ${copy.notices.escape}` : '';
   const cancelButton = (
     <button className="dismiss" onClick={stopPointing}>
       {copy.orders.cancel}
@@ -806,7 +809,10 @@ function Console({
 
       {isReferee && ordering === DECLARE_BATTLE && (
         <div className="notice picking">
-          <span className="notice-text">{copy.notices.pickBattle}</span>
+          <span className="notice-text">
+            {copy.notices.pickBattle}
+            {keyed ? ` ${copy.notices.battleEscape}` : ''}
+          </span>
           <span className="notice-actions">
             <button className="primary" onClick={stopPointing}>
               {copy.console.battleDone}
@@ -817,7 +823,10 @@ function Console({
 
       {isReferee && ordering === ORDER_OF_BATTLE && (
         <div className="notice picking">
-          <span className="notice-text">{copy.notices.pickForRaise}</span>
+          <span className="notice-text">
+            {copy.notices.pickForRaise}
+            {escape}
+          </span>
           <span className="notice-actions">{cancelButton}</span>
         </div>
       )}
@@ -828,6 +837,7 @@ function Console({
             {copy.notices.pickForPlace(
               board.units.get(ordering.slice(PLACE_PREFIX.length))?.name ?? 'it',
             )}
+            {escape}
           </span>
           <span className="notice-actions">{cancelButton}</span>
         </div>
@@ -841,6 +851,7 @@ function Console({
         <div className="notice picking">
           <span className="notice-text">
             {copy.notices.pickForMarch(board.units.get(ordering)?.name ?? ordering)}
+            {escape}
           </span>
           {/* The same three as under the formation in the sidebar, repeated here because
               on a phone the sidebar is a sheet the map is being pointed at through. */}
