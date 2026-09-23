@@ -200,8 +200,12 @@ export default function App() {
   if (stored === null) return <Join onJoined={() => undefined} notice={copy.join.noSuchCampaign} />;
 
   return (
+    // Keyed by seat as well as campaign, so switching seats is a fresh console rather than
+    // the last one's with a different token. Everything a console holds of its own — a
+    // despatch half written in someone's name, a march half pointed out, a formation half
+    // raised — was that seat's, and the next seat should not open onto it.
     <Console
-      key={route.campaignId}
+      key={`${route.campaignId}:${stored.session.token}`}
       joined={{
         session: stored.session,
         held: stored.held,
