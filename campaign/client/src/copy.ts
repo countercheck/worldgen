@@ -175,6 +175,52 @@ export const copy = {
       `You are ${name}, riding with ${unit}. You can see ${visibleHexes} hexes from where you stand.`,
   },
 
+  /**
+   * The phone layout: a tab bar along the bottom and a sheet over the map.
+   *
+   * Each tab names a pane of what is a sidebar on a wide screen. A referee's post is
+   * everybody's, so it is called what it holds rather than "Post", which reads as their own.
+   */
+  tabs: {
+    label: 'Console',
+    map: 'Map',
+    post: 'Post',
+    despatches: 'Despatches',
+    command: 'Command',
+    orbat: 'Order of battle',
+    decisions: (n: number): string => (n === 1 ? '1 wants a decision' : `${n} want a decision`),
+    sheetOpen: 'Show more of this panel',
+    sheetClose: 'Show more of the map',
+  },
+
+  /** The header's controls, gathered behind one button on a screen too narrow for them. */
+  more: {
+    open: 'More',
+    heading: 'More',
+    close: 'Close',
+    seat: 'Seat',
+    seatBlurb: 'Switching asks the server as that commander, so you see only what they see.',
+    shading: 'Shading',
+    washThreeBlurb: 'Seen now, seen before, never seen',
+    washTwoBlurb: 'Everything not in sight now is dark',
+    washNoneBlurb: 'The map as the survey drew it',
+    reachNeedsSelection: 'Select a formation first',
+  },
+
+  /**
+   * The line in the corner of the map.
+   *
+   * Two sets, for a mouse and for a finger, chosen by what the device can do rather than
+   * how wide it is. The touch version has no Escape in it: there is no key to press, and
+   * the banner above the map carries a Cancel button instead.
+   */
+  map: {
+    hint: 'scroll to zoom · drag to pan · click a unit to select',
+    picking: 'click the ground you want them to march to · Esc to think again',
+    hintTouch: 'pinch to zoom · drag to pan · tap a unit to select',
+    pickingTouch: 'tap the ground you want them to march to',
+  },
+
   // -------------------------------------------------------------------------
   // The clock, and the age of a fact
   // -------------------------------------------------------------------------
@@ -663,6 +709,7 @@ export const copy = {
   idle: {
     heading: 'Nothing',
     blurb: 'Move over the map to read the ground, or over a column to read the unit standing on it. Click a unit to keep it in view.',
+    blurbTouch: 'Tap the ground to read it, or a column to read the unit standing on it.',
     formations: 'Formations',
     contacts: 'Contacts',
     contactLabel: (id: string): string => `Contact ${id}`,

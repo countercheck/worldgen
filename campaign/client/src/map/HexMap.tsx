@@ -7,6 +7,11 @@
  * frame and the hover would lag behind the cursor — which would make the sidebar feel
  * broken even though it was correct.
  *
+ * A tap and a click are the same act here, and both land when the press lifts rather than
+ * when it goes down (see `gesture.ts`): a finger has to press to pan, and a map that
+ * selected on every press would deselect on every drag. Two fingers pinch, about the point
+ * between them.
+ *
  * Hit-testing goes through `pixelToAxial`, the same conversion the Python uses and the
  * one the conformance fixture pins. That matters more than it looks: the rounding at a
  * hex boundary decides which hex a cursor on an edge belongs to, and getting it wrong
@@ -24,6 +29,9 @@ import {
   type World,
 } from '@campaign/shared';
 
+import { copy } from '../copy.js';
+import { coarsePointer } from '../layout.js';
+
 import {
   drawOverlay,
   drawTerrain,
@@ -37,7 +45,12 @@ import {
   type WashMode,
 } from './draw.js';
 
+import { distance, isTap, midpoint, zoomAt, type Camera, type Point } from './gesture.js';
+
 export type { Mark, Rider, WashMode } from './draw.js';
+
+/** A press in progress: where it went down, and whether it has stopped being a tap. */
+type Press = { start: Point; button: number; moved: boolean };
 
 export function HexMap({
   world,
@@ -96,10 +109,13 @@ export function HexMap({
   const overlayRef = useRef<HTMLCanvasElement>(null);
 
   const [box, setBox] = useState({ w: 800, h: 600 });
-  const [zoom, setZoom] = useState(1);
-  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [camera, setCamera] = useState<Camera>({ zoom: 1, pan: { x: 0, y: 0 } });
+  const { zoom, pan } = camera;
   const [hoveredUnitId, setHoveredUnitId] = useState<string | null>(null);
-  const dragging = useRef<{ x: number; y: number } | null>(null);
+  // Every pointer currently down, where it was last seen. One is a pan or a tap; two are a
+  // pinch. Refs, not state: they change on every move and nothing renders from them.
+  const pointers = useRef(new Map<number, Point>());
+  const press = useRef<Press | null>(null);
 
   // Fit the world to the viewport once, then let zoom and pan work from there.
   const base = useMemo(() => {
@@ -206,66 +222,126 @@ export function HexMap({
     battle,
   ]);
 
-  const hexAtPointer = useCallback(
-    (e: React.PointerEvent): Hex | null => {
-      const canvas = overlayRef.current;
-      if (canvas === null) return null;
-      const rect = canvas.getBoundingClientRect();
-      const c = pixelToAxial(
-        e.clientX - rect.left - view.offsetX,
-        e.clientY - rect.top - view.offsetY,
-        view.size,
-      );
+  const local = useCallback((e: React.PointerEvent | React.WheelEvent): Point => {
+    const rect = overlayRef.current?.getBoundingClientRect();
+    return rect === undefined
+      ? { x: e.clientX, y: e.clientY }
+      : { x: e.clientX - rect.left, y: e.clientY - rect.top };
+  }, []);
+
+  const hexAt = useCallback(
+    (p: Point): Hex | null => {
+      const c = pixelToAxial(p.x - view.offsetX, p.y - view.offsetY, view.size);
       return world.hexes.has(key(c)) ? c : null;
     },
     [view, world],
   );
 
-  const onPointerMove = useCallback(
-    (e: React.PointerEvent) => {
-      if (dragging.current !== null) {
-        setPan((p) => ({
-          x: p.x + e.clientX - dragging.current!.x,
-          y: p.y + e.clientY - dragging.current!.y,
-        }));
-        dragging.current = { x: e.clientX, y: e.clientY };
-        return;
-      }
-      const hex = hexAtPointer(e);
+  const hoverAt = useCallback(
+    (p: Point) => {
+      const hex = hexAt(p);
       const id = hex === null ? null : markAtHex(marks, hex);
       setHoveredUnitId(id);
       onHover(hex, id);
+      return { hex, id };
     },
-    [hexAtPointer, marks, onHover],
+    [hexAt, marks, onHover],
   );
+
+  const onPointerMove = useCallback(
+    (e: React.PointerEvent) => {
+      const at = local(e);
+      const last = pointers.current.get(e.pointerId);
+
+      // Nothing pressed: a mouse moving over the map, which is a hover.
+      if (last === undefined) {
+        if (e.pointerType === 'mouse') hoverAt(at);
+        return;
+      }
+
+      const others = [...pointers.current.entries()].filter(([id]) => id !== e.pointerId);
+      pointers.current.set(e.pointerId, at);
+
+      const other = others[0]?.[1];
+      if (other !== undefined) {
+        // A pinch: zoom by how far the fingers spread, about the point between them, and
+        // pan by how far that point moved.
+        const before = distance(last, other);
+        const after = distance(at, other);
+        const from = midpoint(last, other);
+        const to = midpoint(at, other);
+        setCamera((c) => {
+          const zoomed = before > 0 ? zoomAt(c, from, box, c.zoom * (after / before)) : c;
+          return {
+            zoom: zoomed.zoom,
+            pan: { x: zoomed.pan.x + to.x - from.x, y: zoomed.pan.y + to.y - from.y },
+          };
+        });
+        return;
+      }
+
+      const p = press.current;
+      if (p !== null && !p.moved && isTap(p.start, at)) return;
+      if (p !== null) p.moved = true;
+      setCamera((c) => ({
+        zoom: c.zoom,
+        pan: { x: c.pan.x + at.x - last.x, y: c.pan.y + at.y - last.y },
+      }));
+    },
+    [local, hoverAt, box],
+  );
+
+  const release = useCallback((e: React.PointerEvent) => {
+    pointers.current.delete(e.pointerId);
+    if (pointers.current.size === 0) press.current = null;
+    const el = e.currentTarget as HTMLElement;
+    if (el.hasPointerCapture(e.pointerId)) el.releasePointerCapture(e.pointerId);
+  }, []);
 
   return (
     <div
       ref={wrap}
       className="map"
       onPointerDown={(e) => {
-        if (e.button === 0) {
-          const hex = hexAtPointer(e);
-          if (onPick !== undefined) {
-            if (hex !== null) onPick(hex);
-          } else {
-            onSelect(hex === null ? null : markAtHex(marks, hex));
-          }
+        const at = local(e);
+        pointers.current.set(e.pointerId, at);
+        // A second finger makes the gesture a pinch, and a pinch is never a tap.
+        if (pointers.current.size === 1) {
+          press.current = { start: at, button: e.button, moved: false };
+        } else if (press.current !== null) {
+          press.current.moved = true;
         }
-        dragging.current = { x: e.clientX, y: e.clientY };
-        (e.target as HTMLElement).setPointerCapture(e.pointerId);
+        e.currentTarget.setPointerCapture(e.pointerId);
       }}
       onPointerUp={(e) => {
-        dragging.current = null;
-        (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+        const p = press.current;
+        const tapped = p !== null && !p.moved && p.button === 0 && pointers.current.size === 1;
+        release(e);
+        if (!tapped) return;
+
+        // A finger has no hover, so its tap is also the hover: the sidebar reads the ground
+        // or the column it landed on, exactly as a mouse resting there would make it.
+        const { hex, id } = e.pointerType === 'mouse'
+          ? { hex: hexAt(local(e)), id: null as string | null }
+          : hoverAt(local(e));
+        if (onPick !== undefined) {
+          if (hex !== null) onPick(hex);
+        } else {
+          onSelect(hex === null ? null : (id ?? markAtHex(marks, hex)));
+        }
       }}
+      onPointerCancel={release}
       onPointerMove={onPointerMove}
-      onPointerLeave={() => {
+      onPointerLeave={(e) => {
+        // A lifted finger leaves too, and clearing on that would throw away what the tap
+        // just put in the sidebar.
+        if (e.pointerType !== 'mouse') return;
         setHoveredUnitId(null);
         onHover(null, null);
       }}
       onWheel={(e) => {
-        setZoom((z) => Math.max(0.4, Math.min(8, z * (e.deltaY < 0 ? 1.12 : 1 / 1.12))));
+        const at = local(e);
+        setCamera((c) => zoomAt(c, at, box, c.zoom * (e.deltaY < 0 ? 1.12 : 1 / 1.12)));
       }}
     >
       <canvas ref={terrainRef} style={{ width: box.w, height: box.h }} />
@@ -273,9 +349,13 @@ export function HexMap({
       <canvas ref={washRef} style={{ width: box.w, height: box.h }} />
       <canvas ref={overlayRef} style={{ width: box.w, height: box.h }} />
       <div className={`map-hint${onPick === undefined ? '' : ' picking'}`}>
-        {onPick === undefined
-          ? 'scroll to zoom · drag to pan · click a unit to select'
-          : 'click the ground you want them to march to · Esc to think again'}
+        {coarsePointer()
+          ? onPick === undefined
+            ? copy.map.hintTouch
+            : copy.map.pickingTouch
+          : onPick === undefined
+            ? copy.map.hint
+            : copy.map.picking}
       </div>
     </div>
   );
