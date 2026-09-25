@@ -49,11 +49,13 @@ import { maskWorld } from './mask.js';
 import { commanderVisible, publicContact, type PublicContact } from './recon.js';
 import {
   capturedBy,
+  configAt,
   contactsOf,
   despatchesFrom,
   inboxOf,
   type CampaignState,
 } from './state.js';
+import type { StandingOrders } from './standing.js';
 import type { PendingDecision, Task } from './task.js';
 import type { Unit, UnitReport } from './unit.js';
 import { parseWorld, projectWorld, type World } from './world.js';
@@ -176,6 +178,14 @@ export interface ClientView {
   readonly captured: readonly CapturedDespatch[];
   /** What the formation they ride with is doing. They set out on it; they know. */
   readonly task: Task | null;
+  /**
+   * When each formation's head may be on the road, keyed by unit id.
+   *
+   * Every formation's for a referee; for a commander, only the one they ride with. What a
+   * subordinate's standing orders are is a thing they were told by despatch, and they hold
+   * the despatch.
+   */
+  readonly standingOrders: Readonly<Record<string, StandingOrders>>;
 
   // ---- the referee's, and only their ------------------------------------
   /** Every despatch in the campaign, routes and fates and all. Empty for a commander. */
@@ -226,8 +236,10 @@ export interface ViewInput {
  * no live position for any formation but their own.
  */
 export function viewFor(input: ViewInput, role: Role): ClientView {
-  const cfg = input.cfg ?? DEFAULT_CONFIG;
   const { state, world } = input;
+  // With the referee's daylight over it, so the sun a console draws is the one the rules
+  // are charging night fatigue by.
+  const cfg = configAt(input.cfg ?? DEFAULT_CONFIG, state);
 
   const campaign = {
     id: input.campaignId,
@@ -272,6 +284,9 @@ export function viewFor(input: ViewInput, role: Role): ClientView {
       received: [],
       captured: [],
       task: null,
+      standingOrders: Object.fromEntries(
+        [...state.standingOrders].sort(([a], [b]) => (a < b ? -1 : 1)),
+      ),
       despatches: [...state.despatches.values()].sort(
         (a, b) => a.sentAtHours - b.sentAtHours || (a.id < b.id ? -1 : 1),
       ),
@@ -308,6 +323,7 @@ export function viewFor(input: ViewInput, role: Role): ClientView {
       received: [],
       captured: [],
       task: null,
+      standingOrders: {},
       despatches: [],
       decisions: [],
       tasks: [],
@@ -368,6 +384,10 @@ export function viewFor(input: ViewInput, role: Role): ClientView {
     received,
     captured: capturedBy(state, me.faction).map(captorCopy),
     task: state.tasks.get(me.unitId) ?? null,
+    standingOrders: (() => {
+      const own = state.standingOrders.get(me.unitId);
+      return own === undefined ? {} : { [me.unitId]: own };
+    })(),
     despatches: [],
     decisions: [],
     tasks: [],
@@ -461,6 +481,12 @@ export function assertMasked(view: ClientView, cfg: CampaignConfig = DEFAULT_CON
   if (view.despatches.length > 0) {
     throw new Error(`leak: a commander was sent ${view.despatches.length} raw despatches`);
   }
+  for (const unitId of Object.keys(view.standingOrders)) {
+    if (view.commander === null || unitId !== view.commander.unitId) {
+      throw new Error(`leak: a commander was sent ${unitId}'s standing orders`);
+    }
+  }
+
   if (view.decisions.length > 0 || view.tasks.length > 0) {
     throw new Error("leak: the referee's queue was sent to a commander");
   }

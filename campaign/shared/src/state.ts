@@ -18,6 +18,8 @@ import { key, type Hex, type HexKey } from './hex.js';
 import type { Faction, LoggedEvent, WorldRef } from './events.js';
 import { viaIndexAt, type PendingDecision, type Task } from './task.js';
 import type { Contact } from './recon.js';
+import type { CampaignConfig } from './config.js';
+import type { Daylight, StandingOrders } from './standing.js';
 import type { Formation, Unit, UnitReport } from './unit.js';
 
 /**
@@ -111,6 +113,15 @@ export interface CampaignState {
    * stored roster would when a column marches out of the fighting.
    */
   readonly battle: ReadonlySet<HexKey>;
+  /**
+   * When the sun rises and sets, if the referee has said.
+   *
+   * Null until they do, and then the campaign's config holds. State rather than config
+   * because it moves: config is fixed when a campaign is created, and the season is not.
+   */
+  readonly daylight: Daylight | null;
+  /** When each formation's head may be on the road, keyed by unit id. Absent: no limits. */
+  readonly standingOrders: ReadonlyMap<string, StandingOrders>;
 }
 
 const EMPTY_WORLD: WorldRef = {
@@ -142,6 +153,8 @@ export const EMPTY_STATE: CampaignState = {
   tasks: new Map(),
   decisions: new Map(),
   battle: new Set(),
+  daylight: null,
+  standingOrders: new Map(),
 };
 
 const withUnit = (s: CampaignState, unit: Unit): CampaignState => ({
@@ -287,7 +300,9 @@ export function reduce(state: CampaignState, event: LoggedEvent): CampaignState 
     case 'unit_removed': {
       const units = new Map(s.units);
       units.delete(p.unitId);
-      return { ...s, units };
+      const standingOrders = new Map(s.standingOrders);
+      standingOrders.delete(p.unitId);
+      return { ...s, units, standingOrders };
     }
 
     case 'clock_advanced':
@@ -520,6 +535,16 @@ export function reduce(state: CampaignState, event: LoggedEvent): CampaignState 
       return { ...s, units, clockHours: Math.max(s.clockHours, p.toHours) };
     }
 
+    case 'daylight_set':
+      return { ...s, daylight: { sunriseHour: p.sunriseHour, sunsetHour: p.sunsetHour } };
+
+    case 'standing_orders_set': {
+      const standingOrders = new Map(s.standingOrders);
+      if (p.orders === null) standingOrders.delete(p.unitId);
+      else standingOrders.set(p.unitId, p.orders);
+      return { ...s, standingOrders };
+    }
+
     case 'decision_raised':
       return { ...s, decisions: new Map(s.decisions).set(p.decision.id, p.decision) };
 
@@ -538,6 +563,16 @@ export function reduce(state: CampaignState, event: LoggedEvent): CampaignState 
     }
   }
 }
+
+/**
+ * The numbers in force right now: the campaign's config, with the referee's daylight over it.
+ *
+ * Everything that reads the hour of sunset reads it off config, so the referee's setting
+ * reaches all of them — night fatigue, the console's sun and moon — by being laid over the
+ * one place they already look, rather than by each of them learning to ask the state.
+ */
+export const configAt = (cfg: CampaignConfig, s: CampaignState): CampaignConfig =>
+  s.daylight === null ? cfg : { ...cfg, ...s.daylight };
 
 /** Fold a whole log. The only way a campaign is ever loaded. */
 export const replay = (events: Iterable<LoggedEvent>, from = EMPTY_STATE): CampaignState => {

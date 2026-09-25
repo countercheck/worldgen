@@ -690,6 +690,41 @@ describe('authorisation', () => {
     expect(advance.statusCode).toBe(403);
   });
 
+  it('lets a commander set standing orders for their own formation and nobody else’s', async () => {
+    const orders = { startHour: 5, latestHour: 19, maxHoursOnRoad: 10 };
+    // Aimed at their subordinate's division: held to their own instead. Kellermann's march
+    // day is a thing Ney tells them by rider.
+    const res = await f.app.inject({
+      method: 'POST',
+      url: `/api/campaigns/${f.id}/commands`,
+      headers: { 'x-campaign-token': f.ney },
+      payload: {
+        command: { kind: 'set_standing_orders', unitId: 'red-2', orders } satisfies Command,
+      },
+    });
+    expect(res.statusCode, res.body).toBe(200);
+
+    const referee = (await viewAs(f, f.referee)).json();
+    expect(referee.standingOrders).toEqual({ 'red-1': orders });
+
+    // Nobody else is told: not the subordinate, and certainly not the enemy.
+    expect((await viewAs(f, f.ney)).json().standingOrders).toEqual({ 'red-1': orders });
+    expect((await viewAs(f, f.kellermann)).json().standingOrders).toEqual({});
+    expect((await viewAs(f, f.wellington)).body).not.toContain('maxHoursOnRoad');
+  });
+
+  it('keeps the sun the referee’s', async () => {
+    const res = await f.app.inject({
+      method: 'POST',
+      url: `/api/campaigns/${f.id}/commands`,
+      headers: { 'x-campaign-token': f.ney },
+      payload: {
+        command: { kind: 'set_daylight', sunriseHour: 4, sunsetHour: 22 } satisfies Command,
+      },
+    });
+    expect(res.statusCode).toBe(403);
+  });
+
   it('refuses a commander the power to mint join links', async () => {
     // Otherwise anybody could issue themselves a seat on the other side of the map.
     const res = await f.app.inject({

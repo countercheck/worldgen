@@ -418,21 +418,30 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
       return reply.code(400).send({ error: 'a command is required' });
     }
 
-    // A commander may do exactly two things, both of them writing: a despatch, and a note to
-    // the referee. Everything else — tasks, the clock, the order of battle — is the
-    // referee's, and rejecting it here rather than in `check` keeps the engine free of any
-    // notion of who is connected.
+    // A commander may do three things: write a despatch, write to the referee, and set the
+    // standing orders of the formation they ride with. Everything else — tasks, the clock,
+    // the order of battle — is the referee's, and rejecting it here rather than in `check`
+    // keeps the engine free of any notion of who is connected.
     let command = body.command;
     const isReferee = auth.role.kind === 'referee';
     if (auth.role.kind !== 'referee') {
-      if (command.kind !== 'send_despatch' && command.kind !== 'write_to_referee') {
+      if (command.kind === 'set_standing_orders') {
+        // Their own formation, whatever the payload names. Standing orders for anyone
+        // further off go by rider, and the referee sets them on reading the despatch.
+        const own = store.state(auth.campaign.id).commanders.get(auth.role.id)?.unitId;
+        if (own === undefined) {
+          return reply.code(403).send({ error: 'you have no formation to give orders to' });
+        }
+        command = { ...command, unitId: own };
+      } else if (command.kind !== 'send_despatch' && command.kind !== 'write_to_referee') {
         return reply.code(403).send({ error: 'a commander may only write' });
+      } else {
+        // The sender is who the token says they are, never who the payload claims. Trusting
+        // `from` would let anyone holding any seat write in another commander's name, which
+        // is both forgery and — since a forged report would be believed — a way to feed the
+        // enemy's commander false intelligence signed by their own subordinate.
+        command = { ...command, from: auth.role.id };
       }
-      // The sender is who the token says they are, never who the payload claims. Trusting
-      // `from` would let anyone holding any seat write in another commander's name, which is
-      // both forgery and — since a forged report would be believed — a way to feed the
-      // enemy's commander false intelligence signed by their own subordinate.
-      command = { ...command, from: auth.role.id };
     }
 
     // Bending a rule is the referee's alone. From a commander both are ignored rather than

@@ -32,10 +32,12 @@ import {
   type Commander,
   type Command,
   type Contact,
+  type Daylight,
   type Despatch,
   type EventPayload,
   type LoggedEvent,
   type PendingDecision,
+  type StandingOrders,
   type Task,
   type Unit,
   type UnitReport,
@@ -558,6 +560,8 @@ export function serialise(state: CampaignState): string {
     tasks: [...state.tasks.values()],
     decisions: [...state.decisions.values()],
     battle: [...state.battle],
+    daylight: state.daylight,
+    standingOrders: [...state.standingOrders],
   });
 }
 
@@ -592,6 +596,10 @@ export function deserialise(json: string): CampaignState {
     // Battlefields postdate the first snapshots. Absent means no fighting anywhere, which
     // is what a campaign written before they existed had.
     battle?: string[];
+    // Daylight and standing orders likewise: absent is the referee never having set the
+    // sun, and nobody having limited a march day.
+    daylight?: Daylight | null;
+    standingOrders?: [string, StandingOrders][];
   };
 
   return {
@@ -635,5 +643,7 @@ export function deserialise(json: string): CampaignState {
       (d.decisions ?? []).map((k) => [k.id, { ...k, favouring: k.favouring ?? null }]),
     ),
     battle: new Set(d.battle ?? []),
+    daylight: d.daylight ?? null,
+    standingOrders: new Map(d.standingOrders ?? []),
   };
 }

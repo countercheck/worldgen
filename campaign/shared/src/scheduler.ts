@@ -60,7 +60,8 @@ import {
 import { marchFatigueBetween, nightFatigue } from './fatigue.js';
 import { detectionDice, spottedBy, type Sighting } from './recon.js';
 import { ones, type Rng } from './rng.js';
-import { reduce, type CampaignState } from './state.js';
+import { configAt, reduce, type CampaignState } from './state.js';
+import { hoursMarchedBy, standingHoursLeft } from './standing.js';
 import {
   contestedHex,
   isOpen,
@@ -136,7 +137,10 @@ export interface SendSpec {
  * two paths drift, and it would drift in the direction of a commander seeing something they
  * should not.
  */
-function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: Rng) {
+function simulate(state: CampaignState, world: World, base: CampaignConfig, rng: Rng) {
+  // The referee's daylight, laid over the campaign's. Idempotent, so a caller that has
+  // already done it — `apply` has — loses nothing by its being done again here.
+  const cfg = configAt(base, state);
   const halts = new Set<DecisionTrigger>(cfg.haltTriggers);
 
   let s = state;
@@ -685,7 +689,7 @@ function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: 
         // it, and standing formed up is charged like marching once a column has broken
         // camp. What is left, not a whole hour: a column stopped half an hour into its
         // hour has already been charged for the half it walked.
-        waitedHours: Math.max(0, Math.min(budget, marchHoursLeftToday(cfg, unit))),
+        waitedHours: Math.max(0, Math.min(budget, hoursLeft(unit, atHours))),
       });
       closeUp(unit, atHours, unitSpeedKmh(cfg, unit, gradeOf(world, cfg, head, to)));
 
@@ -774,6 +778,31 @@ function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: 
   };
 
   /**
+   * Hours a column's head may still march from `atHours` today: the rules' cap, and within
+   * it whatever its commander's standing orders allow.
+   */
+  const hoursLeft = (unit: Unit, atHours: number): number =>
+    Math.min(
+      marchHoursLeftToday(cfg, unit),
+      standingHoursLeft(s.standingOrders.get(unit.id), unit.hoursMarchedToday, atHours),
+    );
+
+  /**
+   * Whether standing orders will let the head step off at a later hour.
+   *
+   * Asked of a column in camp, so that it starts breaking camp early enough to be in column
+   * of march on the hour its commander named. Troops were roused before dawn so the head
+   * could step off at it; a column that only began striking tents at five would be on the
+   * road at seven.
+   */
+  const mayMarchAt = (unit: Unit, now: number, then: number): boolean =>
+    standingHoursLeft(
+      s.standingOrders.get(unit.id),
+      hoursMarchedBy(unit.hoursMarchedToday, now, then),
+      then,
+    ) > 1e-9;
+
+  /**
    * Give one column its hour of marching.
    *
    * The hour is the unit of time and the unit of accounting. A column is handed an hour of
@@ -793,6 +822,19 @@ function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: 
     const budgetToday = marchHoursLeftToday(cfg, unit0);
     if (budgetToday <= 0) return;
 
+    // Standing orders are checked after the rules' cap and before the camp, for the same
+    // reason: outside the hours its commander allows, a column in camp stays in it. It
+    // starts breaking camp only when that will have it formed up by the hour it may march.
+    const allowed = hoursLeft(unit0, atHours);
+    if (allowed <= 1e-9) {
+      const inCamp = unit0.formation !== 'march' && unit0.formationChange == null;
+      const striking = cfg.formationChangeHours[unit0.formation]['march'];
+      if (inCamp && striking > 0 && mayMarchAt(unit0, atHours, atHours + striking)) {
+        beginChange(unit0, 'march', atHours, 'break_camp');
+      }
+      return;
+    }
+
     // A formation is not in column of march until it is. A division still building its
     // camp, or already in it, has to break camp before it steps off — which is what a
     // march order given to a resting corps actually costs, and the reason a referee thinks
@@ -806,7 +848,7 @@ function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: 
       return;
     }
 
-    let budget = Math.min(HOURS_PER_STEP, budgetToday);
+    let budget = Math.min(HOURS_PER_STEP, allowed);
 
     let moved = false;
     let lastGrade: Grade = 'road';
@@ -913,11 +955,18 @@ function simulate(state: CampaignState, world: World, cfg: CampaignConfig, rng: 
       // A formation that has spent its twenty hours is done for the day and builds a camp
       // where it stands. The rules make this the one change that happens without an order:
       // nobody decides to stop after twenty hours on the road, they simply stop.
+      const next = atHours + HOURS_PER_STEP;
+      const running = s.tasks.get(task.unitId)?.nextHex != null;
       if (marchHoursLeftToday(cfg, after) <= 1e-9) {
-        closeUp(after, atHours + HOURS_PER_STEP, lastSpeed);
-        beginChange(after, 'rest', atHours + HOURS_PER_STEP, 'day_spent');
-      } else if (s.tasks.get(task.unitId)?.nextHex == null) {
-        closeUp(after, atHours + HOURS_PER_STEP, lastSpeed);
+        closeUp(after, next, lastSpeed);
+        beginChange(after, 'rest', next, 'day_spent');
+      } else if (running && !mayMarchAt(after, atHours, next)) {
+        // Its commander's hours are up with the march unfinished. It camps, as it would at
+        // the rules' cap, and breaks camp again in time to step off when they said.
+        closeUp(after, next, lastSpeed);
+        beginChange(after, 'rest', next, 'standing_orders');
+      } else if (!running) {
+        closeUp(after, next, lastSpeed);
       }
     }
     void lastGrade;

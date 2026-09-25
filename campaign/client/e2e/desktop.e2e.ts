@@ -82,3 +82,36 @@ test('drags the map with the ground held under the cursor', async ({ page }) => 
   for (const p of probes) after.push(await hexUnder({ x: p.x + by.x, y: p.y + by.y }));
   expect(after).toEqual(before);
 });
+
+test('shows a sun or a moon by the clock, and lets the referee move the sun', async ({ page }) => {
+  await expect(page.locator('.clock .day-night')).toHaveAttribute('aria-label', /^(Daylight|Night)\./);
+
+  const sidebar = page.locator('.sidebar');
+  await sidebar.getByLabel('Sunrise').selectOption('4');
+  await sidebar.getByLabel('Sunset').selectOption('21');
+  await sidebar.getByRole('button', { name: 'Set the sun' }).click();
+  await expect(sidebar.getByText('Sunrise 04:00, sunset 21:00.')).toBeVisible();
+
+  // Put it back, so the campaign every other test opens has the rules' own sun.
+  await sidebar.getByLabel('Sunrise').selectOption('6');
+  await sidebar.getByLabel('Sunset').selectOption('18');
+  await sidebar.getByRole('button', { name: 'Set the sun' }).click();
+  await expect(sidebar.getByText('Sunrise 06:00, sunset 18:00.')).toBeVisible();
+});
+
+test('gives a formation standing orders, and lifts them', async ({ page }) => {
+  const sidebar = page.locator('.sidebar');
+  await sidebar.locator('.unit-list button').first().click();
+  await expect(sidebar.getByRole('heading', { name: 'Standing orders' })).toBeVisible();
+
+  await sidebar.getByLabel('Step off at').selectOption('5');
+  await sidebar.getByLabel('Off the road by').selectOption('19');
+  await sidebar.getByLabel('Hours on the road').fill('10');
+  await sidebar.getByRole('button', { name: 'Give these orders' }).click();
+  await expect(
+    sidebar.getByText('Steps off at 05:00 · off the road by 19:00 · 10 h on the road.'),
+  ).toBeVisible();
+
+  await sidebar.getByRole('button', { name: 'Lift them' }).click();
+  await expect(sidebar.getByText(/^None given\./)).toBeVisible();
+});

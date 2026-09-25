@@ -26,6 +26,7 @@ export * from './rng.js';
 export * from './ruling.js';
 export * from './scenario.js';
 export * from './scheduler.js';
+export * from './standing.js';
 export * from './state.js';
 export * from './task.js';
 export * from './terrain.js';
