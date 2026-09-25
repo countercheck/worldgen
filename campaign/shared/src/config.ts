@@ -87,8 +87,21 @@ export interface CampaignConfig {
    * a column with guns and waggons stops being able to take the ground straight on.
    */
   readonly badGoingSlopeMPerKm: number;
-  /** The rules' hard cap: no unit, patrol or convoy marches more than this in a day. */
+  /**
+   * The rules' hard cap: no unit, patrol or convoy marches more than this in a day.
+   *
+   * A day is any twenty-four hours, not midnight to midnight: a column that marches through
+   * the night is still on its first day when the clock rolls over.
+   */
   readonly maxMarchHoursPerDay: number;
+  /**
+   * Hours in any twenty-four a column must spend off the road, whatever the cap allows.
+   *
+   * A judgement, not from the rules, which cap the march at twenty hours and leave the
+   * other four implied. It also marks what a rest is: this many hours off the road and the
+   * fatigue table reads from its first hour again.
+   */
+  readonly minRestHoursPerDay: number;
 
   // ---- river crossings ------------------------------------------------
   /** Crossing a minor river at a ford, per division. Free if there is a bridge. */
@@ -319,6 +332,7 @@ export const DEFAULT_CONFIG: CampaignConfig = {
   badGoingCovers: DEFAULT_BAD_GOING_COVERS,
   badGoingSlopeMPerKm: 150,
   maxMarchHoursPerDay: 20,
+  minRestHoursPerDay: 4,
 
   fordHours: 1,
   majorCrossingHours: 1,

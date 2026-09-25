@@ -52,16 +52,18 @@ import { REFEREE, type EventPayload, type LoggedEvent } from './events.js';
 import { key, type Hex } from './hex.js';
 import { fileSightings } from './knowledge.js';
 import {
+  hasRested,
   hoursToEnter,
-  marchHoursLeftToday,
+  marchHoursLeft,
   planMarch,
+  roadHoursWithin,
   unitSpeedKmh,
 } from './movement.js';
 import { marchFatigueBetween, nightFatigue } from './fatigue.js';
 import { detectionDice, spottedBy, type Sighting } from './recon.js';
 import { ones, type Rng } from './rng.js';
 import { configAt, reduce, type CampaignState } from './state.js';
-import { hoursMarchedBy, standingHoursLeft } from './standing.js';
+import { standingHoursLeft } from './standing.js';
 import {
   contestedHex,
   isOpen,
@@ -777,15 +779,21 @@ function simulate(state: CampaignState, world: World, base: CampaignConfig, rng:
     return true;
   };
 
+  /** Hours the head may march at `atHours` under its commander's standing orders alone. */
+  const ordersAllow = (unit: Unit, atHours: number): number =>
+    standingHoursLeft(
+      s.standingOrders.get(unit.id),
+      roadHoursWithin(unit, atHours),
+      atHours,
+      cfg.sunriseHour,
+    );
+
   /**
-   * Hours a column's head may still march from `atHours` today: the rules' cap, and within
-   * it whatever its commander's standing orders allow.
+   * Hours a column's head may still march in the hour at `atHours`: the rules' cap, and
+   * within it whatever its commander's standing orders allow.
    */
   const hoursLeft = (unit: Unit, atHours: number): number =>
-    Math.min(
-      marchHoursLeftToday(cfg, unit),
-      standingHoursLeft(s.standingOrders.get(unit.id), unit.hoursMarchedToday, atHours),
-    );
+    Math.min(marchHoursLeft(cfg, unit, atHours), ordersAllow(unit, atHours));
 
   /**
    * Whether standing orders will let the head step off at a later hour.
@@ -794,13 +802,11 @@ function simulate(state: CampaignState, world: World, base: CampaignConfig, rng:
    * of march on the hour its commander named. Troops were roused before dawn so the head
    * could step off at it; a column that only began striking tents at five would be on the
    * road at seven.
+   *
+   * Hours on the road are read over the twenty-four before `then`, so the hours that will
+   * have dropped out of them by then are already off the count.
    */
-  const mayMarchAt = (unit: Unit, now: number, then: number): boolean =>
-    standingHoursLeft(
-      s.standingOrders.get(unit.id),
-      hoursMarchedBy(unit.hoursMarchedToday, now, then),
-      then,
-    ) > 1e-9;
+  const mayMarchAt = (unit: Unit, then: number): boolean => ordersAllow(unit, then) > 1e-9;
 
   /**
    * Give one column its hour of marching.
@@ -819,7 +825,7 @@ function simulate(state: CampaignState, world: World, base: CampaignConfig, rng:
     // its twenty left walks for a quarter of an hour and then stops for good. Checked
     // before the camp, because a formation that has spent its day is not going to break
     // the camp it just built — it would undo it on the hour and rebuild it on the next.
-    const budgetToday = marchHoursLeftToday(cfg, unit0);
+    const budgetToday = marchHoursLeft(cfg, unit0, atHours);
     if (budgetToday <= 0) return;
 
     // Standing orders are checked after the rules' cap and before the camp, for the same
@@ -829,7 +835,7 @@ function simulate(state: CampaignState, world: World, base: CampaignConfig, rng:
     if (allowed <= 1e-9) {
       const inCamp = unit0.formation !== 'march' && unit0.formationChange == null;
       const striking = cfg.formationChangeHours[unit0.formation]['march'];
-      if (inCamp && striking > 0 && mayMarchAt(unit0, atHours, atHours + striking)) {
+      if (inCamp && striking > 0 && mayMarchAt(unit0, atHours + striking)) {
         beginChange(unit0, 'march', atHours, 'break_camp');
       }
       return;
@@ -957,10 +963,10 @@ function simulate(state: CampaignState, world: World, base: CampaignConfig, rng:
       // nobody decides to stop after twenty hours on the road, they simply stop.
       const next = atHours + HOURS_PER_STEP;
       const running = s.tasks.get(task.unitId)?.nextHex != null;
-      if (marchHoursLeftToday(cfg, after) <= 1e-9) {
+      if (marchHoursLeft(cfg, after, atHours) <= 1e-9) {
         closeUp(after, next, lastSpeed);
         beginChange(after, 'rest', next, 'day_spent');
-      } else if (running && !mayMarchAt(after, atHours, next)) {
+      } else if (running && !mayMarchAt(after, next)) {
         // Its commander's hours are up with the march unfinished. It camps, as it would at
         // the rules' cap, and breaks camp again in time to step off when they said.
         closeUp(after, next, lastSpeed);
@@ -1049,15 +1055,20 @@ function simulate(state: CampaignState, world: World, base: CampaignConfig, rng:
       const hourEnd = hourStart + HOURS_PER_STEP;
       const before = payloads.length;
 
-      // Midnight: the day's marching starts again, and provisions will tick here when
-      // they are built.
-      //
-      // At the top of the hour that begins the new day, not at the end of the hour that
-      // reaches it. Marching is stamped at `hourStart`, so rolling the day on the hour
-      // from eleven to midnight would credit a column's twenty-third hour of marching to
-      // tomorrow — it would step off again an hour early, every night.
+      // Midnight, for the log, and for provisions when they are built. It gives no
+      // column its march back: the cap is read over the last twenty-four hours, so a
+      // column that marched through the night is still on its first day.
       if (hourStart > 0 && hourStart % HOURS_PER_DAY === 0) {
         emit({ kind: 'day_rolled', toHours: hourStart });
+      }
+
+      // A column off the road long enough to count as rested reads the fatigue table from
+      // its first hour again. At the top of the hour, before anyone marches in it, so the
+      // hour it steps off in is charged as the first of a new march.
+      for (const unit of [...s.units.values()].sort((a, b) => (a.id < b.id ? -1 : 1))) {
+        if (hasRested(cfg, unit, hourStart)) {
+          emit({ kind: 'unit_rested', unitId: unit.id, atHours: hourStart });
+        }
       }
 
       rideTick(hourEnd);

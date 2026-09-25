@@ -40,7 +40,12 @@ import {
   type Violation,
 } from './ruling.js';
 import { configAt, EMPTY_STATE, patrolsOf, reduce, type CampaignState } from './state.js';
-import { daylightProblems, standingOrdersProblems, type StandingOrders } from './standing.js';
+import {
+  daylightProblems,
+  standingOrdersOf,
+  standingOrdersProblems,
+  type StandingOrders,
+} from './standing.js';
 import { hasTrait, isDivision, type Formation, type Unit } from './unit.js';
 import { hexAt, type World } from './world.js';
 
@@ -877,7 +882,13 @@ export function decide(
       ];
 
     case 'set_standing_orders':
-      return [{ kind: 'standing_orders_set', unitId: cmd.unitId, orders: cmd.orders }];
+      return [
+        {
+          kind: 'standing_orders_set',
+          unitId: cmd.unitId,
+          orders: cmd.orders === null ? null : standingOrdersOf(cmd.orders),
+        },
+      ];
   }
 }
 

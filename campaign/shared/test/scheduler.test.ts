@@ -21,6 +21,7 @@ import { EMPTY_STATE, reduce, type CampaignState } from '../src/state.js';
 import { contestants, contestedHex, type Task } from '../src/task.js';
 import type { Trait, Unit, UnitKind } from '../src/unit.js';
 import type { World, WorldHex } from '../src/world.js';
+import { marched as onRoadFor } from './fixtures/road.js';
 
 const cfg = DEFAULT_CONFIG;
 
@@ -231,10 +232,10 @@ describe('marching', () => {
     expect(again.payloads.filter((p) => p.kind === 'unit_marched')).toHaveLength(0);
   });
 
-  it('halts at the twenty-hour cap and starts again at midnight', () => {
+  it('halts at the twenty-hour cap and starts again as hours fall out of the day', () => {
     // Nineteen and a half hours already marched leaves half an hour: one hex, and then
-    // the column stands until the day rolls over.
-    const tired = unit('red-1', 'red', { q: 5, r: 5 }, { hoursMarchedToday: 19.5 });
+    // the column stands until its earliest hours are more than a day behind it.
+    const tired = unit('red-1', 'red', { q: 5, r: 5 }, onRoadFor(19.5, 20));
     const state = stateFrom({
       units: [tired],
       commanders: [ney],
@@ -252,8 +253,8 @@ describe('marching', () => {
 
     // One hex, and the twentieth hour is spent. The column builds a camp where it stands —
     // nobody decides to stop after twenty hours on the road, they simply stop — and it is
-    // then in a camp it has to get out of. Midnight resets the day but not the camp: it
-    // breaks camp first, two hours of it, and steps off on the far side of that.
+    // then in a camp it has to get out of. At midnight its first hours drop out of the
+    // last twenty-four: it breaks camp, two hours of it, and steps off on the far side.
     expect(marched[0]).toBe(20);
     expect(marched[1]).toBe(26);
     expect(after.units.get('red-1')!.formation).toBe('march');
@@ -264,6 +265,67 @@ describe('marching', () => {
       'rest',
       'march',
     ]);
+  });
+});
+
+describe('marching through the night', () => {
+  const ney = commander('ney', 'red', 'red-1');
+
+  /** Hours on the road in each campaign hour of a long march with no standing orders. */
+  const run = (hours: number) => {
+    const red = unit('red-1', 'red', { q: 1, r: 5 });
+    const state = stateFrom({
+      units: [red],
+      commanders: [ney],
+      // Back and forth across the map, far enough that it is still marching at the end.
+      tasks: [
+        marchTo(red, { q: 1, r: 30 }, 0, { q: 2, r: 5 }, [
+          { q: 38, r: 5 },
+          { q: 1, r: 8 },
+          { q: 38, r: 11 },
+          { q: 1, r: 14 },
+          { q: 38, r: 17 },
+          { q: 1, r: 20 },
+          { q: 38, r: 23 },
+          { q: 1, r: 26 },
+          { q: 38, r: 29 },
+        ]),
+      ],
+    });
+    const { payloads } = advance(state, world, cfg, clean, { hours });
+    const byHour = new Map<number, number>();
+    for (const p of payloads) {
+      const spent =
+        p.kind === 'unit_marched' ? p.stepHours : p.kind === 'march_progressed' ? p.spentHours : 0;
+      if (spent > 0) byHour.set(Math.floor(p.atHours), (byHour.get(Math.floor(p.atHours)) ?? 0) + spent);
+    }
+    return { payloads, byHour };
+  };
+
+  it('is on the road no more than the cap in any twenty-four hours', () => {
+    const { byHour } = run(96);
+    for (let from = 0; from + 24 <= 96; from++) {
+      let day = 0;
+      for (let h = from; h < from + 24; h++) day += byHour.get(h) ?? 0;
+      expect(day).toBeLessThanOrEqual(cfg.maxMarchHoursPerDay + 1e-9);
+      expect(24 - day).toBeGreaterThanOrEqual(cfg.minRestHoursPerDay - 1e-9);
+    }
+    // And it does march at night: the cap is the limit, not the clock.
+    expect([...byHour.keys()].some((h) => h % 24 < cfg.sunriseHour && h >= 24)).toBe(true);
+  });
+
+  it('reads the fatigue table from the first hour again only after a rest', () => {
+    const { payloads } = run(48);
+    const rested = payloads.filter((p) => p.kind === 'unit_rested');
+    expect(rested.length).toBeGreaterThan(0);
+    // Midnight is no rest: every rest follows the hours off the road the config asks for.
+    const { byHour } = run(48);
+    for (const r of rested) {
+      if (r.kind !== 'unit_rested') continue;
+      for (let h = r.atHours - cfg.minRestHoursPerDay; h < r.atHours; h++) {
+        expect(byHour.get(h) ?? 0).toBe(0);
+      }
+    }
   });
 });
 
@@ -1375,7 +1437,7 @@ describe('making and breaking camp', () => {
   });
 
   it('camps of its own accord only when the day is spent', () => {
-    const tired = unit('red-1', 'red', { q: 5, r: 5 }, { hoursMarchedToday: 19.5 });
+    const tired = unit('red-1', 'red', { q: 5, r: 5 }, onRoadFor(19.5, 20));
     const state = stateFrom({
       units: [tired],
       commanders: [ney],
@@ -1391,7 +1453,7 @@ describe('making and breaking camp', () => {
   });
 
   it('takes two hours to build, and the unit is still in march formation until it is', () => {
-    const tired = unit('red-1', 'red', { q: 5, r: 5 }, { hoursMarchedToday: 19.5 });
+    const tired = unit('red-1', 'red', { q: 5, r: 5 }, onRoadFor(19.5, 20));
     const state = stateFrom({
       units: [tired],
       commanders: [ney],
@@ -1435,7 +1497,7 @@ describe('making and breaking camp', () => {
   it('breaks a camp it was only halfway through building', () => {
     // An order arriving mid-camp does not get the tents back for free: the troops have to
     // undo what they have done, and the rules charge the change either way.
-    const tired = unit('red-1', 'red', { q: 5, r: 5 }, { hoursMarchedToday: 19.5 });
+    const tired = unit('red-1', 'red', { q: 5, r: 5 }, onRoadFor(19.5, 20));
     const state = stateFrom({
       units: [tired],
       commanders: [ney],

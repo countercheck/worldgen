@@ -23,6 +23,7 @@ import {
 } from '../src/engine.js';
 import type { Faction, LoggedEvent, WorldRef } from '../src/events.js';
 import { key, type Hex } from '../src/hex.js';
+import { roadHoursWithin } from '../src/movement.js';
 import { makeRng, rngFor } from '../src/rng.js';
 import { CODES, RuleViolation } from '../src/ruling.js';
 import {
@@ -1367,7 +1368,7 @@ describe('patrols', () => {
     // It rode — the hours are counted, because the twenty-hour cap still applies to a
     // horse — but it was charged nothing for them.
     const rider = out.state.units.get('vedette')!;
-    expect(rider.hoursMarchedToday).toBeGreaterThan(4);
+    expect(roadHoursWithin(rider, out.state.clockHours)).toBeGreaterThan(4);
     expect(rider.fatigue).toBe(0);
     expect(
       out.events.filter((e) => e.payload.kind === 'fatigue_accrued'),

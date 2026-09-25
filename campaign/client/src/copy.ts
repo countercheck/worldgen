@@ -264,7 +264,9 @@ export const copy = {
     latestHour: 'Off the road by',
     maxHoursOnRoad: 'Hours on the road',
     any: '—',
-    none: 'None given. The column marches until the rules’ day is spent.',
+    none: 'None given. The column marches, night or day, until it has had the rules’ hours on the road in the last 24.',
+    dawn: (time: string): string => `Dawn (${time})`,
+    startAtDawn: 'steps off at dawn',
     start: (time: string): string => `steps off at ${time}`,
     latest: (time: string): string => `off the road by ${time}`,
     max: (hours: number): string => `${hours} h on the road`,
@@ -637,8 +639,11 @@ export const copy = {
 
     marchHeading: 'March',
     formation: 'Formation',
-    marchedToday: 'Marched today',
+    marchedToday: 'On the road, last 24 h',
     marchedTodayValue: (done: string, cap: number): string => `${done} h of ${cap} h`,
+    sinceRest: 'Since last rest',
+    sinceRestHint: (restHours: number): string =>
+      `Hours on the road since the column last had ${restHours} off it. Fatigue reads this.`,
     remaining: 'Remaining',
     speedByGoing: 'Speed by going',
 

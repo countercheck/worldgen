@@ -1343,6 +1343,7 @@ function Console({
               factionName={board.factions.get(shownUnit.faction)?.name ?? shownUnit.faction}
               color={board.factions.get(shownUnit.faction)?.color ?? '#888'}
               cfg={cfg}
+              clockHours={view.campaign.clockHours}
               patrolsOut={patrolsOf(shownUnit.id).length}
               {...(() => {
                 const parent =

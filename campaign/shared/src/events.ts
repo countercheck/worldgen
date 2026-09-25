@@ -305,8 +305,13 @@ export type EventPayload =
       readonly fromNight: number;
     }
   | { readonly kind: 'task_completed'; readonly unitId: string; readonly atHours: number }
-  /** Midnight. Every unit's day of marching starts again. */
+  /** Midnight. Marked for the log and for provisions; the march cap does not read it. */
   | { readonly kind: 'day_rolled'; readonly toHours: number }
+  /**
+   * A column has been off the road for `minRestHoursPerDay`, and the fatigue table reads
+   * from its first hour again.
+   */
+  | { readonly kind: 'unit_rested'; readonly unitId: string; readonly atHours: number }
   /** Referee: the sun now rises and sets at these hours of the day. */
   | { readonly kind: 'daylight_set'; readonly sunriseHour: number; readonly sunsetHour: number }
   /**

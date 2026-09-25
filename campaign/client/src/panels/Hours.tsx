@@ -11,6 +11,7 @@ import { useEffect, useState } from 'react';
 
 import {
   isDark,
+  marchCapHours,
   standingOrdersProblems,
   type CampaignConfig,
   type StandingOrders,
@@ -57,6 +58,7 @@ function HourSelect({
   from,
   to,
   allowNone,
+  noneLabel = copy.standing.any,
   disabled,
   onChange,
 }: {
@@ -64,6 +66,8 @@ function HourSelect({
   from: number;
   to: number;
   allowNone: boolean;
+  /** What the empty choice is called: no limit, or the hour it stands for. */
+  noneLabel?: string;
   disabled: boolean;
   onChange: (hour: number | null) => void;
 }) {
@@ -74,7 +78,7 @@ function HourSelect({
       disabled={disabled}
       onChange={(e) => onChange(e.target.value === '' ? null : Number(e.target.value))}
     >
-      {allowNone && <option value="">{copy.standing.any}</option>}
+      {allowNone && <option value="">{noneLabel}</option>}
       {hours.map((h) => (
         <option key={h} value={h}>
           {/* 24:00 rather than 00:00: "off the road by midnight" is the end of this day. */}
@@ -145,8 +149,10 @@ export function DaylightControl({
           onClick={() => {
             setBusy(true);
             setError(null);
+            // A refusal comes back as a sentence; anything else — a 403, a dropped
+            // connection — comes back thrown, and has to be shown just the same.
             void onSet(sunrise, sunset)
-              .then(setError)
+              .then(setError, (err: Error) => setError(err.message))
               .finally(() => setBusy(false));
           }}
         >
@@ -162,12 +168,20 @@ export function DaylightControl({
 export function standingSummary(orders: StandingOrders | undefined): string {
   if (orders === undefined) return copy.standing.none;
   const parts: string[] = [];
-  if (orders.startHour !== null) parts.push(copy.standing.start(timeOfDay(orders.startHour)));
+  parts.push(
+    orders.startHour === null
+      ? copy.standing.startAtDawn
+      : copy.standing.start(timeOfDay(orders.startHour)),
+  );
   if (orders.latestHour !== null) {
     parts.push(copy.standing.latest(orders.latestHour === 24 ? '24:00' : timeOfDay(orders.latestHour)));
   }
   if (orders.maxHoursOnRoad !== null) parts.push(copy.standing.max(orders.maxHoursOnRoad));
-  return parts.length === 0 ? copy.standing.none : copy.standing.summary(parts);
+  // Blank all through is no orders: the engine reads it so, and dawn alone is not a limit
+  // anybody set.
+  return parts.length === 1 && orders.startHour === null
+    ? copy.standing.none
+    : copy.standing.summary(parts);
 }
 
 const NONE: StandingOrders = { startHour: null, latestHour: null, maxHoursOnRoad: null };
@@ -209,8 +223,10 @@ export function StandingOrdersPanel({
   const save = (next: StandingOrders | null): void => {
     setBusy(true);
     setError(null);
+    // A refusal comes back as a sentence; anything else — a 403 for a formation they no
+    // longer ride with, a dropped connection — comes back thrown, and has to be shown too.
     void onSave(next)
-      .then(setError)
+      .then(setError, (err: Error) => setError(err.message))
       .finally(() => setBusy(false));
   };
 
@@ -231,6 +247,7 @@ export function StandingOrdersPanel({
               from={0}
               to={23}
               allowNone
+              noneLabel={copy.standing.dawn(timeOfDay(cfg.sunriseHour))}
               disabled={busy}
               onChange={(h) => setDraft({ ...draft, startHour: h })}
             />
@@ -251,7 +268,7 @@ export function StandingOrdersPanel({
             <input
               type="number"
               min={1}
-              max={cfg.maxMarchHoursPerDay}
+              max={marchCapHours(cfg)}
               step={1}
               placeholder={copy.standing.any}
               value={draft.maxHoursOnRoad ?? ''}

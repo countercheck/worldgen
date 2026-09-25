@@ -20,10 +20,12 @@ import {
   isBroken,
   isPatrol,
   isStarving,
-  marchHoursLeftToday,
+  marchCapHours,
+  marchHoursLeft,
   maxMorale,
   presentUnderArms,
   reconRadius,
+  roadHoursWithin,
   unitSpeedKmh,
   type Unit,
 } from '@campaign/shared';
@@ -40,6 +42,7 @@ export function UnitPanel({
   patrolsOut,
   parent,
   cfg = DEFAULT_CONFIG,
+  clockHours,
 }: {
   unit: Unit;
   name: string;
@@ -51,6 +54,8 @@ export function UnitPanel({
   parent?: Unit;
   /** The campaign's numbers, as the server resolved them. */
   cfg?: CampaignConfig;
+  /** The campaign clock: the cap is read over the twenty-four hours up to it. */
+  clockHours: number;
 }) {
   const lengthKm = columnLengthKm(unit);
   const speed = unitSpeedKmh(cfg, unit, 'road');
@@ -164,13 +169,18 @@ export function UnitPanel({
         <Row
           label={copy.unit.marchedToday}
           value={copy.unit.marchedTodayValue(
-            unit.hoursMarchedToday.toFixed(1),
-            cfg.maxMarchHoursPerDay,
+            roadHoursWithin(unit, clockHours).toFixed(1),
+            marchCapHours(cfg),
           )}
         />
         <Row
           label={copy.unit.remaining}
-          value={`${marchHoursLeftToday(cfg, unit).toFixed(1)} h`}
+          value={`${marchHoursLeft(cfg, unit, clockHours).toFixed(1)} h`}
+        />
+        <Row
+          label={copy.unit.sinceRest}
+          value={`${unit.hoursMarchedToday.toFixed(1)} h`}
+          hint={copy.unit.sinceRestHint(cfg.minRestHoursPerDay)}
         />
         <Field label={copy.unit.speedByGoing}>
           <table className="grid">

@@ -245,14 +245,65 @@ export function reachable(
   return { hours, cameFrom };
 }
 
+/** The hours a day holds, for a cap read over any twenty-four of them. */
+const HOURS_PER_DAY = 24;
+
+/** The most a column may be on the road in any twenty-four hours: the rules' cap, less rest. */
+export const marchCapHours = (cfg: CampaignConfig): number =>
+  Math.max(0, Math.min(cfg.maxMarchHoursPerDay, HOURS_PER_DAY - cfg.minRestHoursPerDay));
+
 /**
- * Hours a unit has left today before the rules' hard march cap.
+ * Hours on the road in the twenty-four hours up to and including the hour at `atHours`.
+ *
+ * Read over elapsed time rather than since midnight, so a column that marched through the
+ * night does not find its day handed back to it at twelve o'clock.
+ */
+export const roadHoursWithin = (unit: Unit, atHours: number): number => {
+  const hour = Math.floor(atHours);
+  let total = 0;
+  for (const r of unit.roadHours ?? []) {
+    if (r.hour > hour - HOURS_PER_DAY && r.hour <= hour) total += r.hours;
+  }
+  return total;
+};
+
+/**
+ * Hours a unit may still march in the hour at `atHours` before the rules' hard cap.
  *
  * "Max march is 20 hours for any unit, patrol, or convoy." Fatigue accrues long before
  * that and is what actually limits a column; this is the wall behind it.
  */
-export const marchHoursLeftToday = (cfg: CampaignConfig, unit: Unit): number =>
-  Math.max(0, cfg.maxMarchHoursPerDay - unit.hoursMarchedToday);
+export const marchHoursLeft = (cfg: CampaignConfig, unit: Unit, atHours: number): number =>
+  Math.max(0, marchCapHours(cfg) - roadHoursWithin(unit, atHours));
+
+/**
+ * Whether a column has been off the road long enough to count as rested at `atHours`.
+ *
+ * Only asked of a column with hours to shed: one that has not marched since its last rest
+ * has nothing to reset.
+ */
+export const hasRested = (cfg: CampaignConfig, unit: Unit, atHours: number): boolean => {
+  if (unit.hoursMarchedToday <= 0) return false;
+  const log = unit.roadHours ?? [];
+  const last = log.length === 0 ? null : log[log.length - 1]!.hour;
+  return last === null || Math.floor(atHours) - (last + 1) >= cfg.minRestHoursPerDay;
+};
+
+/**
+ * A unit after `hours` more on the road in the hour at `atHours`.
+ *
+ * Kept by the hour, and only a day of it: the cap never looks further back.
+ */
+export const onRoad = (unit: Unit, atHours: number, hours: number): Unit => {
+  const hour = Math.floor(atHours);
+  const kept = (unit.roadHours ?? []).filter((r) => r.hour > hour - HOURS_PER_DAY);
+  const last = kept[kept.length - 1];
+  const roadHours =
+    last !== undefined && last.hour === hour
+      ? [...kept.slice(0, -1), { hour, hours: last.hours + hours }]
+      : [...kept, { hour, hours }];
+  return { ...unit, hoursMarchedToday: unit.hoursMarchedToday + hours, roadHours };
+};
 
 /** Whether two hexes are adjacent — the one geometric precondition of a march step. */
 export const isStep = (a: Hex, b: Hex): boolean => distance(a, b) === 1;

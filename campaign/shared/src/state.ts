@@ -15,6 +15,7 @@ import { advanceColumn, FOOTPRINT, occupied, type FootprintShape } from './colum
 import type { Commander } from './commander.js';
 import { normaliseDespatch, type Despatch } from './despatch.js';
 import { key, type Hex, type HexKey } from './hex.js';
+import { onRoad } from './movement.js';
 import type { Faction, LoggedEvent, WorldRef } from './events.js';
 import { viaIndexAt, type PendingDecision, type Task } from './task.js';
 import type { Contact } from './recon.js';
@@ -417,9 +418,8 @@ export function reduce(state: CampaignState, event: LoggedEvent): CampaignState 
       if (unit === undefined) return s;
 
       const moved = withUnit(s, {
-        ...unit,
+        ...onRoad(unit, p.atHours, p.stepHours),
         column: advanceColumn(unit, p.to, p.grade),
-        hoursMarchedToday: unit.hoursMarchedToday + p.stepHours,
       });
 
       const task = moved.tasks.get(p.unitId);
@@ -488,7 +488,7 @@ export function reduce(state: CampaignState, event: LoggedEvent): CampaignState 
       const walked =
         unit === undefined
           ? s
-          : withUnit(s, { ...unit, hoursMarchedToday: unit.hoursMarchedToday + p.spentHours });
+          : withUnit(s, onRoad(unit, p.atHours, p.spentHours));
 
       const task = walked.tasks.get(p.unitId);
       if (task === undefined) return walked;
@@ -508,7 +508,7 @@ export function reduce(state: CampaignState, event: LoggedEvent): CampaignState 
       const waited =
         unit === undefined || unit.hoursMarchedToday <= 0
           ? s
-          : withUnit(s, { ...unit, hoursMarchedToday: unit.hoursMarchedToday + p.waitedHours });
+          : withUnit(s, onRoad(unit, p.atHours, p.waitedHours));
 
       // The head keeps its ground and its banked progress: it did not walk, so it is no
       // closer, and it has not lost what it had already walked either.
@@ -529,10 +529,14 @@ export function reduce(state: CampaignState, event: LoggedEvent): CampaignState 
       };
     }
 
-    case 'day_rolled': {
-      const units = new Map(s.units);
-      for (const [id, u] of units) units.set(id, { ...u, hoursMarchedToday: 0 });
-      return { ...s, units, clockHours: Math.max(s.clockHours, p.toHours) };
+    case 'day_rolled':
+      // Midnight no longer hands a column its day back: the cap reads the last twenty-four
+      // hours, and fatigue starts again at a rest, whenever that falls.
+      return { ...s, clockHours: Math.max(s.clockHours, p.toHours) };
+
+    case 'unit_rested': {
+      const unit = s.units.get(p.unitId);
+      return unit === undefined ? s : withUnit(s, { ...unit, hoursMarchedToday: 0 });
     }
 
     case 'daylight_set':
