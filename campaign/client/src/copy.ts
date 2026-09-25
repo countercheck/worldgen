@@ -239,6 +239,45 @@ export const copy = {
   },
 
   // -------------------------------------------------------------------------
+  // Day and night
+  // -------------------------------------------------------------------------
+  daylight: {
+    /** On the sun and moon beside the clock. */
+    day: (sunset: string): string => `Daylight. The sun sets at ${sunset}.`,
+    night: (sunrise: string): string => `Night. The sun rises at ${sunrise}.`,
+    heading: 'Daylight',
+    hours: (sunrise: string, sunset: string): string => `Sunrise ${sunrise}, sunset ${sunset}.`,
+    blurb: 'The season moves, and the sun with it. Night fatigue is charged by these hours from now on, and every console shows the same sun.',
+    sunrise: 'Sunrise',
+    sunset: 'Sunset',
+    set: 'Set the sun',
+  },
+
+  // -------------------------------------------------------------------------
+  // Standing orders: when the head of a column is on the road
+  // -------------------------------------------------------------------------
+  standing: {
+    heading: 'Standing orders',
+    blurbOwn: 'When the head of your column is on the road. It halts at whichever limit it reaches first, and they hold every day until you change them. Anyone else’s march day you give by despatch.',
+    blurbReferee: 'When the head of this column is on the road. It halts at whichever limit it reaches first. For a commander you run, or on reading a despatch that gives them.',
+    startHour: 'Step off at',
+    latestHour: 'Off the road by',
+    maxHoursOnRoad: 'Hours on the road',
+    any: '—',
+    none: 'None given. The column marches, night or day, until it has had the rules’ hours on the road in the last 24.',
+    dawn: (time: string): string => `Dawn (${time})`,
+    startAtDawn: 'steps off at dawn',
+    start: (time: string): string => `steps off at ${time}`,
+    latest: (time: string): string => `off the road by ${time}`,
+    max: (hours: number): string => `${hours} h on the road`,
+    /** The three limits as a sentence: `Steps off at 05:00 · off the road by 19:00`. */
+    summary: (parts: readonly string[]): string =>
+      parts.join(' · ').replace(/^./, (c) => c.toUpperCase()) + '.',
+    save: 'Give these orders',
+    lift: 'Lift them',
+  },
+
+  // -------------------------------------------------------------------------
   // What a commander has: their own formation, and their memory of the rest
   // -------------------------------------------------------------------------
   command: {
@@ -600,8 +639,11 @@ export const copy = {
 
     marchHeading: 'March',
     formation: 'Formation',
-    marchedToday: 'Marched today',
+    marchedToday: 'On the road, last 24 h',
     marchedTodayValue: (done: string, cap: number): string => `${done} h of ${cap} h`,
+    sinceRest: 'Since last rest',
+    sinceRestHint: (restHours: number): string =>
+      `Hours on the road since the column last had ${restHours} off it. Fatigue reads this.`,
     remaining: 'Remaining',
     speedByGoing: 'Speed by going',
 

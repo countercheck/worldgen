@@ -27,6 +27,7 @@ import {
   reachable,
   viaAhead,
   type ClientView,
+  type StandingOrders,
 } from '@campaign/shared';
 
 import {
@@ -39,7 +40,9 @@ import {
   resolveDecision,
   sendDespatch,
   writeToReferee,
+  setDaylight,
   setFormation,
+  setStandingOrders,
   setTask,
   subscribe,
   teleportUnit,
@@ -65,6 +68,7 @@ import { Command } from './panels/Command.jsx';
 import { Composer, type Draft } from './panels/Composer.jsx';
 import { ContactPanel } from './panels/ContactPanel.jsx';
 import { HexPanel } from './panels/HexPanel.js';
+import { DayNight, DaylightControl, StandingOrdersPanel } from './panels/Hours.jsx';
 import { More } from './panels/More.jsx';
 import { Post } from './panels/Post.jsx';
 import { DecisionQueue, DespatchLog } from './panels/Referee.jsx';
@@ -585,6 +589,13 @@ function Console({
             dayHour(view.task.setAtHours),
           );
 
+  /** A command's refusal as a sentence, or null when it went through. */
+  const refusal = (result: { ok: boolean; violations?: readonly { message: string }[] }) =>
+    result.ok ? null : (result.violations?.map((v) => v.message).join('; ') ?? copy.orders.refused);
+
+  const giveStandingOrders = (unitId: string, orders: StandingOrders | null) =>
+    setStandingOrders(session, unitId, orders).then(refusal);
+
   /**
    * Every identity this browser actually holds a token for.
    *
@@ -730,6 +741,7 @@ function Console({
         </div>
 
         <div className="clock">
+          <DayNight cfg={cfg} hours={view.campaign.clockHours} />
           {dayHour(view.campaign.clockHours)}
           {isReferee && (
             <span className="clock-controls">
@@ -1182,6 +1194,14 @@ function Console({
                 onSelect={showOnMap}
                 taskLine={taskLine}
               />
+              {ownFormation !== null && (
+                <StandingOrdersPanel
+                  orders={view.standingOrders[ownFormation.id]}
+                  cfg={cfg}
+                  forReferee={false}
+                  onSave={(orders) => giveStandingOrders(ownFormation.id, orders)}
+                />
+              )}
               </div>
             </>
           )}
@@ -1306,6 +1326,16 @@ function Console({
             </section>
           )}
 
+          {isReferee && shownUnit !== null && (
+            <StandingOrdersPanel
+              key={shownUnit.id}
+              orders={view.standingOrders[shownUnit.id]}
+              cfg={cfg}
+              forReferee
+              onSave={(orders) => giveStandingOrders(shownUnit.id, orders)}
+            />
+          )}
+
           {shownUnit !== null && (
             <UnitPanel
               unit={shownUnit}
@@ -1313,6 +1343,7 @@ function Console({
               factionName={board.factions.get(shownUnit.faction)?.name ?? shownUnit.faction}
               color={board.factions.get(shownUnit.faction)?.color ?? '#888'}
               cfg={cfg}
+              clockHours={view.campaign.clockHours}
               patrolsOut={patrolsOf(shownUnit.id).length}
               {...(() => {
                 const parent =
@@ -1404,6 +1435,19 @@ function Console({
                     ))}
                   </ul>
                 </>
+              )}
+
+              <h3>{copy.daylight.heading}</h3>
+              <p className="muted">
+                {copy.daylight.hours(timeOfDay(cfg.sunriseHour), timeOfDay(cfg.sunsetHour))}
+              </p>
+              {isReferee && (
+                <DaylightControl
+                  cfg={cfg}
+                  onSet={(sunrise, sunset) =>
+                    setDaylight(session, sunrise, sunset).then(refusal)
+                  }
+                />
               )}
 
               <h3>{copy.idle.campaignHeading}</h3>

@@ -39,7 +39,13 @@ import {
   type Strictness,
   type Violation,
 } from './ruling.js';
-import { EMPTY_STATE, patrolsOf, reduce, type CampaignState } from './state.js';
+import { configAt, EMPTY_STATE, patrolsOf, reduce, type CampaignState } from './state.js';
+import {
+  daylightProblems,
+  standingOrdersOf,
+  standingOrdersProblems,
+  type StandingOrders,
+} from './standing.js';
 import { hasTrait, isDivision, type Formation, type Unit } from './unit.js';
 import { hexAt, type World } from './world.js';
 
@@ -71,7 +77,7 @@ export type Command =
   /**
    * A despatch: prose, and whatever sightings go with it, on a rider.
    *
-   * One of the two commands a commander issues themselves. Everything else is the referee's.
+   * One of the three commands a commander issues themselves. Everything else is the referee's.
    */
   | {
       readonly kind: 'send_despatch';
@@ -85,7 +91,7 @@ export type Command =
   /**
    * A note to the referee, out of the game.
    *
-   * The other thing a commander may do. No rider, no delay, nothing to intercept: it is a
+   * Another thing a commander may do. No rider, no delay, nothing to intercept: it is a
    * player talking to the person running the game — a question about the rules, a
    * request for a ruling, "I think my division should have seen that" — so it arrives
    * at once, as an alert in the referee's queue, and nobody else ever sees it.
@@ -142,7 +148,21 @@ export type Command =
   | { readonly kind: 'set_unit_stats'; readonly unitId: string; readonly changes: UnitStatChanges }
   /** Referee: this ground is being fought over, and open-country rules stop applying. */
   | { readonly kind: 'declare_battle'; readonly coords: readonly Hex[] }
-  | { readonly kind: 'end_battle'; readonly coords: readonly Hex[] };
+  | { readonly kind: 'end_battle'; readonly coords: readonly Hex[] }
+  /** Referee: the sun rises and sets at these hours of the day, from now on. */
+  | { readonly kind: 'set_daylight'; readonly sunriseHour: number; readonly sunsetHour: number }
+  /**
+   * When a formation's head may be on the road. Null lifts every limit.
+   *
+   * The other thing a commander may do besides write, and only for the formation they ride
+   * with — the server holds them to that. It is not an order carried to anyone: it is how
+   * they run their own march day, and everyone else's goes by despatch.
+   */
+  | {
+      readonly kind: 'set_standing_orders';
+      readonly unitId: string;
+      readonly orders: StandingOrders | null;
+    };
 
 export type CommandKind = Command['kind'];
 
@@ -167,6 +187,7 @@ const REFEREE_ONLY: ReadonlySet<CommandKind> = new Set([
   'set_unit_stats',
   'declare_battle',
   'end_battle',
+  'set_daylight',
   // Tasks are the referee's, always. A commander writes prose; turning prose into a
   // march is the adjudication this whole design exists to keep in human hands.
   'set_task',
@@ -409,6 +430,17 @@ export function check(
         v.push(hard(CODES.MALFORMED, 'a battle has to be somewhere'));
       }
       requireOnMap(cmd.coords, 'hex');
+      break;
+
+    case 'set_daylight':
+      for (const m of daylightProblems(cmd)) v.push(hard(CODES.MALFORMED, m));
+      break;
+
+    case 'set_standing_orders':
+      requireUnit(cmd.unitId);
+      if (cmd.orders !== null) {
+        for (const m of standingOrdersProblems(cmd.orders, cfg)) v.push(hard(CODES.MALFORMED, m));
+      }
       break;
 
     case 'set_unit_stats': {
@@ -843,6 +875,20 @@ export function decide(
 
     case 'end_battle':
       return [{ kind: 'battle_ended', coords: cmd.coords }];
+
+    case 'set_daylight':
+      return [
+        { kind: 'daylight_set', sunriseHour: cmd.sunriseHour, sunsetHour: cmd.sunsetHour },
+      ];
+
+    case 'set_standing_orders':
+      return [
+        {
+          kind: 'standing_orders_set',
+          unitId: cmd.unitId,
+          orders: cmd.orders === null ? null : standingOrdersOf(cmd.orders),
+        },
+      ];
   }
 }
 
@@ -863,7 +909,9 @@ export function apply(
   const forced = opts.force ?? false;
   const actor = opts.actor ?? REFEREE;
 
-  const cfg = opts.cfg ?? DEFAULT_CONFIG;
+  // With the referee's daylight laid over it, so every rule that asks when the sun sets
+  // hears the answer they gave rather than the one the campaign was created with.
+  const cfg = configAt(opts.cfg ?? DEFAULT_CONFIG, state);
 
   const violations = check(cmd, state, world, cfg);
   if (refuses(violations, effective, forced)) {

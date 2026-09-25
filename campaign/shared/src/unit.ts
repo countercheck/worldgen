@@ -107,6 +107,13 @@ export const ECHELON_MARKS: Readonly<Record<Echelon, string>> = {
   army_group: 'XXXXX',
 };
 
+/** Hours a column spent on the road in one campaign hour. */
+export interface RoadHour {
+  /** The campaign hour, whole. */
+  readonly hour: number;
+  readonly hours: number;
+}
+
 /** Every echelon, smallest first: the order a form should offer them in. */
 export const ECHELONS: readonly Echelon[] = [
   'none',
@@ -184,8 +191,19 @@ export interface Unit {
    */
   readonly column: readonly Hex[];
 
-  /** Hours marched since the last midnight. Drives fatigue; capped at 20. */
+  /**
+   * Hours on the road since the column last rested. Drives fatigue.
+   *
+   * Named for the day it used to reset at; it now resets after `minRestHoursPerDay` off
+   * the road, whenever that falls. The name stays because every logged unit carries it.
+   */
   readonly hoursMarchedToday: number;
+  /**
+   * Hours on the road, by campaign hour, over the last day. The rules' cap reads it.
+   *
+   * Optional because units logged before it existed do not carry it; absent is no hours.
+   */
+  readonly roadHours?: readonly RoadHour[];
 
   /** Corps grouping. Presentation and combat only — everything tracks individually. */
   readonly corps: string | null;

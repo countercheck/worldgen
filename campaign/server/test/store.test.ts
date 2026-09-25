@@ -16,6 +16,7 @@ import {
   KIND_DEFAULTS,
   parseWorld,
   REFEREE_ROLE,
+  roadHoursWithin,
   type Command,
   type Commander,
   type Hex,
@@ -567,8 +568,10 @@ describe('a campaign carries its own numbers', () => {
     // Twelve hours of marching, not twenty. To a tolerance, because a day is accumulated
     // out of thirds of an hour and binary floating point does not sum them to exactly
     // twelve — the cap holds, the last bit does not.
-    expect(store.state('c1').units.get('r1')!.hoursMarchedToday).toBeLessThanOrEqual(12 + 1e-9);
-    expect(store.state('c1').units.get('r1')!.hoursMarchedToday).toBeGreaterThan(11);
+    const state = store.state('c1');
+    const onRoad = roadHoursWithin(state.units.get('r1')!, state.clockHours);
+    expect(onRoad).toBeLessThanOrEqual(12 + 1e-9);
+    expect(onRoad).toBeGreaterThan(11);
   });
 });
 

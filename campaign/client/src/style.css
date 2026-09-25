@@ -1125,6 +1125,8 @@ p.cmd-details {
 
 .orbat-grid input,
 .orbat-grid select,
+.hours-grid input,
+.hours-grid select,
 .composer select {
   background: var(--panel);
   color: var(--text);
@@ -1135,9 +1137,58 @@ p.cmd-details {
 }
 
 .orbat-grid input:focus,
-.orbat-grid select:focus {
+.orbat-grid select:focus,
+.hours-grid input:focus,
+.hours-grid select:focus {
   outline: 1px solid var(--accent);
   border-color: var(--accent);
+}
+
+/* ---- the hours of the day ---------------------------------------------- */
+
+/* Sunrise and sunset, and a column's march day: two or three hours, side by side. */
+.hours-form {
+  margin-top: 6px;
+}
+
+.hours-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 9px 12px;
+  margin: 6px 0 8px;
+}
+
+.hours-grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.hours-grid label > span {
+  color: var(--muted);
+}
+
+/* Beside the clock. A sun in the accent by day, a pale moon by night: darkness is a rule
+   here, and the referee should see it change without reading the hour. */
+.day-night {
+  display: inline-flex;
+  vertical-align: -2px;
+  margin-right: 6px;
+}
+
+.day-night svg {
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.day-night.day svg {
+  fill: #e0b04a;
+  stroke: #e0b04a;
+}
+
+.day-night.night svg {
+  fill: #aeb8d6;
+  stroke: none;
 }
 
 /* A trait is on or off, and the chip says which without a second column of checkboxes. */

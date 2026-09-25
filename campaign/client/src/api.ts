@@ -21,6 +21,7 @@ import type {
   Formation,
   Hex,
   PendingDecision,
+  StandingOrders,
   Strictness,
   Unit,
   UnitStatChanges,
@@ -328,6 +329,29 @@ export function setFormation(
 ): Promise<CommandResult> {
   return sendCommand(session, { kind: 'set_formation', unitId, formation });
 }
+
+/**
+ * Referee: the sun rises and sets at these hours of the day, from now on.
+ *
+ * The season moves, and night fatigue is charged by whatever is set here.
+ */
+export const setDaylight = (
+  session: Session,
+  sunriseHour: number,
+  sunsetHour: number,
+): Promise<CommandResult> => sendCommand(session, { kind: 'set_daylight', sunriseHour, sunsetHour });
+
+/**
+ * When a formation's head may be on the road. Null lifts every limit.
+ *
+ * A commander's always land on the formation they ride with — the server fills in the unit
+ * from their token, as it fills in `from` on a despatch. A referee's land where they point.
+ */
+export const setStandingOrders = (
+  session: Session,
+  unitId: string,
+  orders: StandingOrders | null,
+): Promise<CommandResult> => sendCommand(session, { kind: 'set_standing_orders', unitId, orders });
 
 /** Mark a decision dealt with. The note is the referee's own record of why. */
 export function resolveDecision(

@@ -18,7 +18,11 @@ import { distance, key, type Hex, type HexKey } from '../src/hex.js';
 import {
   fastestHoursPerHex,
   hoursToEnter,
-  marchHoursLeftToday,
+  hasRested,
+  marchCapHours,
+  marchHoursLeft,
+  onRoad,
+  roadHoursWithin,
   pathHours,
   planMarch,
   reachable,
@@ -545,13 +549,56 @@ describe('reachable', () => {
 describe('the daily march cap', () => {
   it('is the rules twenty hours', () => {
     expect(cfg.maxMarchHoursPerDay).toBe(20);
-    expect(marchHoursLeftToday(cfg, unit('infantry'))).toBe(20);
+    expect(marchHoursLeft(cfg, unit('infantry'), 0)).toBe(20);
+  });
+
+  it('leaves at least the rest the config asks for in any day', () => {
+    expect(marchCapHours({ ...cfg, maxMarchHoursPerDay: 24 })).toBe(24 - cfg.minRestHoursPerDay);
+    expect(marchCapHours({ ...cfg, maxMarchHoursPerDay: 12 })).toBe(12);
   });
 
   it('runs down as a unit marches, and never below zero', () => {
-    const u = { ...unit('infantry'), hoursMarchedToday: 14 };
-    expect(marchHoursLeftToday(cfg, u)).toBe(6);
-    expect(marchHoursLeftToday(cfg, { ...u, hoursMarchedToday: 25 })).toBe(0);
+    let u = unit('infantry');
+    for (let h = 0; h < 14; h++) u = onRoad(u, h, 1);
+    expect(marchHoursLeft(cfg, u, 14)).toBe(6);
+    for (let h = 14; h < 25; h++) u = onRoad(u, h, 1);
+    expect(marchHoursLeft(cfg, u, 24)).toBe(0);
+  });
+
+  it('reads the last twenty-four hours, not the hours since midnight', () => {
+    // On the road from six in the evening until two in the morning: eight hours, and
+    // midnight in the middle of them hands none of them back.
+    let u = unit('infantry');
+    for (let h = 18; h < 26; h++) u = onRoad(u, h, 1);
+    expect(roadHoursWithin(u, 25)).toBe(8);
+    expect(marchHoursLeft(cfg, u, 26)).toBe(12);
+
+    // A day after the first of them, they begin to fall away one by one.
+    expect(roadHoursWithin(u, 42)).toBe(7);
+    expect(roadHoursWithin(u, 50)).toBe(0);
+  });
+
+  it('keeps one entry an hour, and nothing older than a day', () => {
+    let u = unit('infantry');
+    u = onRoad(u, 3, 0.25);
+    u = onRoad(u, 3.5, 0.5);
+    expect(u.roadHours).toEqual([{ hour: 3, hours: 0.75 }]);
+    u = onRoad(u, 40, 1);
+    expect(u.roadHours).toEqual([{ hour: 40, hours: 1 }]);
+    expect(u.hoursMarchedToday).toBe(1.75);
+  });
+});
+
+describe('resting', () => {
+  it('takes the hours the config asks for off the road', () => {
+    let u = unit('infantry');
+    u = onRoad(u, 10, 1);
+    expect(hasRested(cfg, u, 11 + cfg.minRestHoursPerDay - 1)).toBe(false);
+    expect(hasRested(cfg, u, 11 + cfg.minRestHoursPerDay)).toBe(true);
+  });
+
+  it('is nothing to a column that has not marched since its last', () => {
+    expect(hasRested(cfg, unit('infantry'), 100)).toBe(false);
   });
 });
 

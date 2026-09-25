@@ -23,6 +23,7 @@ import type { Grade } from './config.js';
 import type { Hex } from './hex.js';
 import type { Strictness, Violation } from './ruling.js';
 import type { Contact } from './recon.js';
+import type { StandingOrders } from './standing.js';
 import type { PendingDecision, Task } from './task.js';
 import type { Experience, Formation, Trait, Unit, UnitKind, UnitReport } from './unit.js';
 
@@ -304,8 +305,25 @@ export type EventPayload =
       readonly fromNight: number;
     }
   | { readonly kind: 'task_completed'; readonly unitId: string; readonly atHours: number }
-  /** Midnight. Every unit's day of marching starts again. */
+  /** Midnight. Marked for the log and for provisions; the march cap does not read it. */
   | { readonly kind: 'day_rolled'; readonly toHours: number }
+  /**
+   * A column has been off the road for `minRestHoursPerDay`, and the fatigue table reads
+   * from its first hour again.
+   */
+  | { readonly kind: 'unit_rested'; readonly unitId: string; readonly atHours: number }
+  /** Referee: the sun now rises and sets at these hours of the day. */
+  | { readonly kind: 'daylight_set'; readonly sunriseHour: number; readonly sunsetHour: number }
+  /**
+   * When a formation's head may be on the road. Null lifts every limit.
+   *
+   * Set by the commander who rides with it, or by the referee having read a despatch.
+   */
+  | {
+      readonly kind: 'standing_orders_set';
+      readonly unitId: string;
+      readonly orders: StandingOrders | null;
+    }
   // ---- decisions --------------------------------------------------------
   | { readonly kind: 'decision_raised'; readonly decision: PendingDecision }
   | {
