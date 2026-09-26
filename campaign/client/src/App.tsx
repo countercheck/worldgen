@@ -32,11 +32,13 @@ import {
 
 import {
   addCommander,
+  addFaction,
   addUnit,
   advanceClock,
   clearTask,
   detachPatrol,
   fetchView,
+  issueSeatToken,
   reassignPatrol,
   resolveDecision,
   sendDespatch,
@@ -959,6 +961,38 @@ function Console({
                       }
                     })
                     .finally(() => setSending(false));
+                },
+                onAddFaction: (faction) => {
+                  setSending(true);
+                  setPostError(null);
+                  void addFaction(session, faction)
+                    .then((result) => setPostError(refusal(result)))
+                    .finally(() => setSending(false));
+                },
+                linkFor: async (commanderId) => {
+                  // The token this browser already holds for the seat, if it holds one: a
+                  // link sent again is the same link, and the player's copy keeps working.
+                  // Only a seat this browser never held gets a new one, kept here so the
+                  // next ask returns it rather than minting another.
+                  const stored = loadCampaign(session.campaignId);
+                  const held = stored?.held[commanderId];
+                  if (held !== undefined) return joinLink({ campaignId: session.campaignId, token: held });
+
+                  const { token } = await issueSeatToken(session, commanderId);
+                  const commander = board.commanders.get(commanderId);
+                  if (stored !== null) {
+                    saveCampaign({
+                      ...stored,
+                      held: { ...stored.held, [commanderId]: token },
+                      seats: {
+                        ...stored.seats,
+                        ...(commander === undefined
+                          ? {}
+                          : { [commanderId]: { name: commander.name, faction: commander.faction } }),
+                      },
+                    });
+                  }
+                  return joinLink({ campaignId: session.campaignId, token });
                 },
                 onAppoint: (commander) => {
                   setSending(true);

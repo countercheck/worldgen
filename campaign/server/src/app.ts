@@ -271,8 +271,14 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
         config?: ConfigOverrides;
       };
 
-      if (body?.world === undefined || !Array.isArray(body.factions) || body.factions.length === 0) {
-        return reply.code(400).send({ error: 'a world and at least one faction are required' });
+      // Factions are optional. A campaign starts with none, and the referee adds each side
+      // with its own name and colour once the map is up. A list is still accepted, which is
+      // how the demonstration arrives with its two sides ready.
+      if (body?.world === undefined) {
+        return reply.code(400).send({ error: 'a world is required' });
+      }
+      if (body.factions !== undefined && !Array.isArray(body.factions)) {
+        return reply.code(400).send({ error: 'factions, when given, must be a list' });
       }
 
       const id = body.id ?? `c${Date.now().toString(36)}`;
@@ -281,7 +287,7 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
           id,
           name: body.name ?? 'Campaign',
           worldDoc: body.world,
-          factions: body.factions,
+          factions: body.factions ?? [],
           ...(body.seed !== undefined ? { seed: body.seed } : {}),
           ...(body.strictness !== undefined ? { strictness: body.strictness } : {}),
           ...(body.ruleset !== undefined ? { ruleset: body.ruleset } : {}),

@@ -1743,3 +1743,23 @@ button.more-home {
     min-height: 44px;
   }
 }
+
+/* A commander's join link, opened under their row for the referee to copy or send again. */
+.cmd-link {
+  margin: 2px 0 6px 26px;
+}
+
+.cmd-link code.link {
+  display: block;
+  overflow-wrap: anywhere;
+  user-select: all;
+  cursor: text;
+}
+
+/* The native picker, sized to sit in the form's grid beside a text field. */
+.orbat-grid input.color-pick {
+  width: 100%;
+  min-height: 30px;
+  padding: 2px;
+  cursor: pointer;
+}

@@ -253,6 +253,31 @@ describe('check', () => {
   });
 });
 
+describe('adding a side', () => {
+  const fresh = (): CampaignState => apply(CREATE, EMPTY_STATE, world, 'strict').state;
+  const add = (faction: { id: string; name: string; color: string }) =>
+    apply({ kind: 'add_faction', faction }, fresh(), world, 'strict');
+
+  it('takes a side the referee named and coloured', () => {
+    const out = add({ id: 'grande-armee', name: 'Grande Armée', color: '#1f4e9c' });
+    expect(out.ok).toBe(true);
+    expect(out.state.factions.get('grande-armee')?.color).toBe('#1f4e9c');
+  });
+
+  it('refuses a side with no name', () => {
+    const out = add({ id: 'x', name: '  ', color: '#1f4e9c' });
+    expect(out.ok).toBe(false);
+    expect(out.violations.map((v) => v.code)).toContain(CODES.MALFORMED);
+  });
+
+  it('refuses a colour that is not a hex colour', () => {
+    for (const color of ['blue', '#12345', 'url(x)', '']) {
+      const out = add({ id: 'x', name: 'X', color });
+      expect(out.ok, color).toBe(false);
+    }
+  });
+});
+
 describe('removing a commander', () => {
   const uncommandedIn = <V extends { code: string }>(v: readonly V[]): V[] =>
     v.filter((x) => x.code === CODES.UNIT_UNCOMMANDED);

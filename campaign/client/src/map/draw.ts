@@ -16,9 +16,13 @@
 import {
   axialToPixel,
   DEFAULT_THEME,
+  hexAt,
   key,
+  riverClass,
   type Hex,
   type HexKey,
+  type River,
+  type RoadStyle,
   type Theme,
   type World,
   type WorldHex,
@@ -128,25 +132,64 @@ export function drawTerrain(
     ctx.stroke();
   }
 
-  drawRivers(ctx, world, view);
+  drawRivers(ctx, world, view, theme);
   drawRoads(ctx, world, view, theme);
   drawSettlements(ctx, world, view);
 }
 
-function drawRivers(ctx: CanvasRenderingContext2D, world: World, view: View): void {
-  ctx.strokeStyle = '#3a7ad9';
+/** A stretch of one river drawn in one style. */
+export interface RiverRun {
+  readonly cls: 'major' | 'minor';
+  readonly hexes: readonly Hex[];
+}
+
+/**
+ * Split a river into stretches by the rules' Major/Minor class.
+ *
+ * A segment takes the class of its upstream end. Rivers run source to mouth, so a major
+ * reach carries on into the sea or lake that ends it, while a minor tributary stays thin
+ * right up to the major river it joins instead of ending in a stub of wide channel. A
+ * hex the rules call no
+ * river at all — a mouth in open water, or one the mask has blanked — counts as minor:
+ * the generator drew a watercourse there, so something is drawn.
+ */
+export function riverRuns(river: River, world: World): RiverRun[] {
+  const classOf = (c: Hex): 'major' | 'minor' => {
+    const hex = hexAt(world, c);
+    return hex !== undefined && riverClass(hex, world) === 'major' ? 'major' : 'minor';
+  };
+
+  const runs: { cls: 'major' | 'minor'; hexes: Hex[] }[] = [];
+  let prev: { c: Hex; cls: 'major' | 'minor' } | undefined;
+  for (const c of river.hexes) {
+    const here = classOf(c);
+    if (prev !== undefined) {
+      const cls = prev.cls;
+      const last = runs.at(-1);
+      if (last !== undefined && last.cls === cls) last.hexes.push(c);
+      else runs.push({ cls, hexes: [prev.c, c] });
+    }
+    prev = { c, cls: here };
+  }
+  return runs;
+}
+
+function drawRivers(ctx: CanvasRenderingContext2D, world: World, view: View, theme: Theme): void {
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
   for (const river of world.rivers) {
-    if (river.hexes.length < 2) continue;
-    ctx.lineWidth = Math.max(1, view.size * 0.18);
-    ctx.beginPath();
-    river.hexes.forEach((c, i) => {
-      const p = toScreen(c, view);
-      if (i === 0) ctx.moveTo(p.x, p.y);
-      else ctx.lineTo(p.x, p.y);
-    });
-    ctx.stroke();
+    for (const run of riverRuns(river, world)) {
+      const style = theme.river[run.cls];
+      ctx.strokeStyle = style.color;
+      ctx.lineWidth = Math.max(run.cls === 'major' ? 2.5 : 1, view.size * style.width);
+      ctx.beginPath();
+      run.hexes.forEach((c, i) => {
+        const p = toScreen(c, view);
+        if (i === 0) ctx.moveTo(p.x, p.y);
+        else ctx.lineTo(p.x, p.y);
+      });
+      ctx.stroke();
+    }
   }
 }
 
@@ -157,14 +200,14 @@ function drawRoads(
   theme: Theme,
 ): void {
   ctx.lineCap = 'round';
-  // Ascending tier order, so a primary road is never overdrawn by a track.
-  for (const tier of ['track', 'secondary', 'primary'] as const) {
+  const tiers = (['track', 'secondary', 'primary'] as const).flatMap((tier) => {
     const style = theme.road[tier];
-    if (style === undefined) continue;
-    ctx.strokeStyle = style.color;
-    ctx.lineWidth = Math.max(1, view.size * 0.06 * style.width);
-    ctx.setLineDash(style.dash ? style.dash.map((d) => d * view.size * 0.15) : []);
-
+    return style === undefined ? [] : [{ tier, style }];
+  });
+  const widthOf = (style: RoadStyle): number => Math.max(1, view.size * 0.06 * style.width);
+  const dashOf = (style: RoadStyle): number[] =>
+    style.dash ? style.dash.map((d) => d * view.size * 0.15) : [];
+  const pathOf = (tier: string): void => {
     ctx.beginPath();
     for (const edge of world.roadEdges.values()) {
       if (edge.tier !== tier) continue;
@@ -173,6 +216,25 @@ function drawRoads(
       ctx.moveTo(a.x, a.y);
       ctx.lineTo(b.x, b.y);
     }
+  };
+
+  // Every casing before any road, so one road's casing never cuts across another road
+  // where they meet. A track's casing is dashed with it: solid, it outweighs the track's
+  // own pale dashes and every track reads as a white road.
+  ctx.strokeStyle = theme.roadCasing;
+  for (const { tier, style } of tiers) {
+    ctx.lineWidth = widthOf(style) + Math.max(1.5, view.size * 0.05);
+    ctx.setLineDash(dashOf(style));
+    pathOf(tier);
+    ctx.stroke();
+  }
+
+  // Ascending tier order, so a primary road is never overdrawn by a track.
+  for (const { tier, style } of tiers) {
+    ctx.strokeStyle = style.color;
+    ctx.lineWidth = widthOf(style);
+    ctx.setLineDash(dashOf(style));
+    pathOf(tier);
     ctx.stroke();
   }
   ctx.setLineDash([]);

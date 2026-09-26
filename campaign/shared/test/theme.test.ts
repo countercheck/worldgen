@@ -73,3 +73,23 @@ describe('colorFor', () => {
     expect(theme.fallback).toBe('#ff00ff');
   });
 });
+
+describe('river and road casing styles', () => {
+  it('draws a major river wider than a minor one', () => {
+    // Width is what carries the distinction; hue alone is lost under the wash.
+    const { major, minor } = DEFAULT_THEME.river;
+    expect(major.width).toBeGreaterThanOrEqual(minor.width * 2);
+    expect(major.color).not.toBe(minor.color);
+  });
+
+  it('overrides one river class without restating the other', () => {
+    const theme = resolveTheme({ river: { minor: { color: '#00ffff', width: 0.2 } } });
+    expect(theme.river.minor).toEqual({ color: '#00ffff', width: 0.2 });
+    expect(theme.river.major).toEqual(DEFAULT_THEME.river.major);
+  });
+
+  it('overrides the road casing', () => {
+    expect(resolveTheme({ roadCasing: '#000000' }).roadCasing).toBe('#000000');
+    expect(resolveTheme({}).roadCasing).toBe(DEFAULT_THEME.roadCasing);
+  });
+});

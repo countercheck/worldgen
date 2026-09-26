@@ -300,6 +300,11 @@ export function setUnitStats(
   return sendCommand(session, { kind: 'set_unit_stats', unitId, changes });
 }
 
+/** Add a side. A campaign starts with none; the referee names and colours each one. */
+export function addFaction(session: Session, faction: Faction): Promise<CommandResult> {
+  return sendCommand(session, { kind: 'add_faction', faction });
+}
+
 export function addCommander(session: Session, commander: Commander): Promise<CommandResult> {
   return sendCommand(session, { kind: 'add_commander', commander });
 }
