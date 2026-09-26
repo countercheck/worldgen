@@ -91,6 +91,28 @@ export function idFor(name: string, taken: ReadonlySet<string>): string {
   }
 }
 
+/**
+ * Where the colour picker starts for the `n`th side, as `#rrggbb`.
+ *
+ * Hues a golden angle apart, so each new side starts as far from the others as it can
+ * without knowing how many there will be. Fixed saturation and lightness keep every one
+ * of them readable as a marker on the map.
+ */
+export function startingColor(n: number): string {
+  const hue = (n * 137.508 + 5) % 360;
+  const s = 0.6;
+  const l = 0.5;
+  const a = s * Math.min(l, 1 - l);
+  const channel = (k: number): string => {
+    const t = (k + hue / 30) % 12;
+    const v = l - a * Math.max(-1, Math.min(t - 3, 9 - t, 1));
+    return Math.round(v * 255)
+      .toString(16)
+      .padStart(2, '0');
+  };
+  return `#${channel(0)}${channel(8)}${channel(4)}`;
+}
+
 /** Everything wrong with a draft, in the order a reader would find it. */
 export function draftProblems(
   draft: UnitDraft,

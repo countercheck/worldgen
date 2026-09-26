@@ -6,6 +6,8 @@
  * shape it had.
  */
 
+import { fileURLToPath } from 'node:url';
+
 import { expect, test } from '@playwright/test';
 
 import { hexInSidebar, mapPoints, openConsole, type Point } from './helpers.js';
@@ -184,4 +186,42 @@ test('offers the help on the front page, starting at the beginning', async ({ pa
   await expect(help.getByRole('tab', { name: 'Getting started' })).toHaveAttribute('aria-selected', 'true');
   await help.getByRole('button', { name: 'Close' }).click();
   await expect(help).toBeHidden();
+});
+
+test('hands the referee a commander’s link, and the same one when asked again', async ({ page }) => {
+  await page.locator('header').getByRole('button', { name: /^Order of battle/ }).click();
+  const roster = page.locator('.roster');
+  const first = roster.getByRole('button', { name: 'Copy link' }).first();
+  await first.focus();
+  await first.click();
+
+  const link = roster.locator('.cmd-link code').first();
+  await expect(link).toContainText('#/j/');
+  const sent = await link.textContent();
+
+  // Asked again — a lost link resent — it is the same link, so the player's copy still works.
+  await first.click();
+  await expect(link).toHaveText(sent ?? '');
+});
+
+test('starts an uploaded world with no sides, and takes one the referee adds', async ({ page }) => {
+  await page.goto('/');
+  await page
+    .locator('input[type=file]')
+    .setInputFiles(fileURLToPath(new URL('../../shared/test/fixtures/world-32x32.json', import.meta.url)));
+  await page.getByRole('button', { name: 'Enter as referee' }).click();
+  await page.locator('.map canvas').first().waitFor();
+
+  await page.locator('header').getByRole('button', { name: /^Order of battle/ }).click();
+  const roster = page.locator('.roster');
+  await expect(roster).toContainText('No sides yet.');
+
+  await roster.getByPlaceholder('Armée du Nord').fill('Grande Armée');
+  await roster.locator('input[type=color]').fill('#1f4e9c');
+  await roster.getByRole('button', { name: 'Add side' }).click();
+
+  const tab = roster.getByRole('tab', { name: /Grande Armée/ });
+  await expect(tab).toBeVisible();
+  await expect(tab.locator('.swatch')).toHaveCSS('background-color', 'rgb(31, 78, 156)');
+  await expect(roster).not.toContainText('No sides yet.');
 });

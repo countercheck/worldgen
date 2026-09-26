@@ -133,13 +133,9 @@ export function Join({
     setBusy(copy.join.readingWorld);
     void run(async () => {
       const worldDoc: unknown = JSON.parse(await file.text());
-      return startCampaign(
-        file.name.replace(/\.json$/, ''),
-        worldDoc,
-        DEMO_FACTIONS,
-        false,
-        setBusy,
-      );
+      // No sides: the referee names and colours each one once the map is up. Only the
+      // demonstration arrives with its two, because its scenario is written for them.
+      return startCampaign(file.name.replace(/\.json$/, ''), worldDoc, [], false, setBusy);
     });
   };
 

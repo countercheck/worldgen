@@ -595,6 +595,16 @@ export const copy = {
     addSubordinate: '+ subordinate',
     addOfficer: '+ officer',
     addArmyCommand: '+ army command',
+    addSide: '+ side',
+    noSides: 'No sides yet. Add one, with a name and a colour, before raising anybody.',
+
+    // A commander's join link, for the referee to send or send again.
+    copyLink: 'Copy link',
+    copyLinkHint: 'The link that opens this commander’s seat, to send to whoever plays them.',
+    fetchingLink: 'Fetching…',
+    linkCopied: 'Copied. Send it to whoever plays them.',
+    linkToCopy: 'Copy this and send it to whoever plays them.',
+    linkFailed: (why: string): string => `Could not get a link: ${why}`,
   },
 
   /** Raising and appointing: the referee's preparation for a game. */
@@ -628,6 +638,14 @@ export const copy = {
     noSuperior: 'nobody — army command',
     appoint: 'Appoint',
     cancel: 'Cancel',
+    // A side, raised by hand: nothing arrives with a campaign.
+    newSide: 'A new side.',
+    sideName: 'Name',
+    sideNamePlaceholder: 'Armée du Nord',
+    sideColor: 'Colour',
+    addSide: 'Add side',
+    sideBlurb: 'The colour marks every formation on this side, on every map that shows it.',
+
     appointBlurb: 'Appointing a commander does not give anybody a seat. Issue a link when you want somebody to play them.',
 
     // What is wrong with a draft, in the order a reader would find it.
