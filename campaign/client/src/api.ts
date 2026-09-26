@@ -282,6 +282,15 @@ export function teleportUnit(
   return sendCommand(session, { kind: 'teleport_unit', unitId, column });
 }
 
+/** Give a patrol to another formation of its side. */
+export function reassignPatrol(
+  session: Session,
+  unitId: string,
+  parentUnitId: string,
+): Promise<CommandResult> {
+  return sendCommand(session, { kind: 'reassign_patrol', unitId, parentUnitId });
+}
+
 /** Change what a formation is. Every field optional; what is absent is left alone. */
 export function setUnitStats(
   session: Session,

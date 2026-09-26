@@ -25,7 +25,16 @@ import type { Strictness, Violation } from './ruling.js';
 import type { Contact } from './recon.js';
 import type { StandingOrders } from './standing.js';
 import type { PendingDecision, Task } from './task.js';
-import type { Experience, Formation, Trait, Unit, UnitKind, UnitReport } from './unit.js';
+import type {
+  Echelon,
+  Experience,
+  Formation,
+  RoadHour,
+  Trait,
+  Unit,
+  UnitKind,
+  UnitReport,
+} from './unit.js';
 
 export const CAMPAIGN_SCHEMA_VERSION = '1.0';
 export const SUPPORTED_CAMPAIGN_VERSIONS = new Set([CAMPAIGN_SCHEMA_VERSION]);
@@ -105,6 +114,8 @@ export type EventPayload =
   | { readonly kind: 'clock_advanced'; readonly toHours: number }
   /** Referee: put a unit somewhere, no movement rule applying. */
   | { readonly kind: 'unit_teleported'; readonly unitId: string; readonly column: readonly Hex[] }
+  /** Referee: a patrol answers to another formation, and reports what it sees to its commander. */
+  | { readonly kind: 'patrol_reassigned'; readonly unitId: string; readonly parentUnitId: string }
   /** Ground a commander's formations have surveyed, or a referee has simply given them. */
   | {
       readonly kind: 'hexes_surveyed';
@@ -169,7 +180,7 @@ export type EventPayload =
   | {
       readonly kind: 'unit_stat_set';
       readonly unitId: string;
-      readonly changes: UnitStatChanges;
+      readonly changes: UnitStatSet;
     }
   // ---- despatches -------------------------------------------------------
   /** A commander wrote something and put a rider on the road with it. */
@@ -335,19 +346,58 @@ export type EventPayload =
       readonly favouring: string | null;
     };
 
-/** The mutable stats a referee may set directly. Deliberately not every field. */
+/**
+ * The values a referee may set by hand: every stat on a unit.
+ *
+ * Not the unit's identity or structure — its id, its side, its patrols' parentage — and not
+ * where it stands, which `teleport_unit` moves. A formation set here is set outright, with
+ * any change under way dropped: the referee is saying what it is, not ordering it to become so.
+ */
 export interface UnitStatChanges {
+  readonly name?: string;
+  readonly kind?: UnitKind;
   readonly paperStrength?: number;
   readonly fatigue?: number;
   readonly morale?: number;
   readonly provisions?: number;
+  readonly maxProvisions?: number;
   readonly equipment?: number;
+  readonly maxEquipment?: number;
+  readonly guns?: number;
   readonly experience?: Experience;
+  readonly marchSpeedKmh?: number;
+  readonly spacingM?: number;
+  readonly spacingMultiplier?: number;
   readonly formation?: Formation;
+  /**
+   * A change of formation under way, set outright: what it is becoming and the campaign hour
+   * it finishes, or null for none. Set alongside `formation` or without it; a `formation`
+   * set without it drops whatever change was under way.
+   */
+  readonly formationChange?: {
+    readonly to: Formation;
+    readonly completesAtHours: number;
+  } | null;
   readonly traits?: readonly Trait[];
+  /** Hours on the road since the column last rested: what the fatigue table reads. */
   readonly hoursMarchedToday?: number;
+  /**
+   * Hours on the road in the last twenty-four, as one number: what the cap reads.
+   *
+   * Laid down as whole hours running back from the present, which is as much as a referee
+   * saying "they have marched twelve hours today" means.
+   */
+  readonly roadHoursLast24?: number;
   readonly corps?: string | null;
+  readonly echelon?: Echelon;
 }
+
+/** A referee's edit as the log keeps it: the hours on the road by the hour, as the unit holds them. */
+export type UnitStatSet = Omit<UnitStatChanges, 'roadHoursLast24'> & {
+  readonly roadHours?: readonly RoadHour[];
+  /** The hour the hours since a rest were set at, which a rest is then counted from. */
+  readonly restFromHours?: number;
+};
 
 export type EventKind = EventPayload['kind'];
 

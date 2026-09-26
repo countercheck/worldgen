@@ -16,6 +16,7 @@ import type { EventPayload } from '../src/events.js';
 import { key, type Hex, type HexKey } from '../src/hex.js';
 import { makeRng, type Rng } from '../src/rng.js';
 import { marchFatigueAt } from '../src/fatigue.js';
+import { roadHoursWithin } from '../src/movement.js';
 import { advance, despatchNow } from '../src/scheduler.js';
 import { EMPTY_STATE, reduce, type CampaignState } from '../src/state.js';
 import { contestants, contestedHex, type Task } from '../src/task.js';
@@ -1279,10 +1280,10 @@ describe('two columns wanting the same ground', () => {
     expect(after.units.get('red-1')!.column[0]).toEqual({ q: 5, r: 5 });
   });
 
-  it('still counts the wait after midnight only once the column moves again', () => {
-    // The day rolls, the accumulator zeroes, and a column still stuck behind the same
-    // obstruction starts the new day owing nothing until it actually steps off.
-    const red = unit('red-1', 'red', { q: 5, r: 5 }, { hoursMarchedToday: 3 });
+  it('keeps counting the wait across midnight, because standing formed up is no rest', () => {
+    // Midnight hands nothing back. A column stuck behind the same obstruction all night is
+    // on the road the whole time, and owes every hour of it.
+    const red = unit('red-1', 'red', { q: 5, r: 5 }, onRoadFor(3, 22));
     const blue = unit('blue-1', 'blue', { q: 6, r: 5 });
     const state = stateFrom({
       units: [red, blue],
@@ -1292,7 +1293,8 @@ describe('two columns wanting the same ground', () => {
 
     const after = fold(state, advance(state, world, cfg, clean, { hours: 6 }).payloads);
     expect(kinds(advance(state, world, cfg, clean, { hours: 6 }).payloads)).toContain('day_rolled');
-    expect(after.units.get('red-1')!.hoursMarchedToday).toBe(0);
+    expect(after.units.get('red-1')!.hoursMarchedToday).toBeCloseTo(9);
+    expect(roadHoursWithin(after.units.get('red-1')!, after.clockHours)).toBeCloseTo(9);
   });
 });
 

@@ -597,6 +597,13 @@ describe('resting', () => {
     expect(hasRested(cfg, u, 11 + cfg.minRestHoursPerDay)).toBe(true);
   });
 
+  it('counts from the hour a referee set the hours since a rest, when that is later', () => {
+    let u = onRoad(unit('infantry'), 10, 1);
+    u = { ...u, hoursMarchedToday: 9, restFromHours: 40 };
+    expect(hasRested(cfg, u, 40 + cfg.minRestHoursPerDay - 1)).toBe(false);
+    expect(hasRested(cfg, u, 40 + cfg.minRestHoursPerDay)).toBe(true);
+  });
+
   it('is nothing to a column that has not marched since its last', () => {
     expect(hasRested(cfg, unit('infantry'), 100)).toBe(false);
   });

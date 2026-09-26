@@ -28,6 +28,7 @@ export * from './scenario.js';
 export * from './scheduler.js';
 export * from './standing.js';
 export * from './state.js';
+export * from './stats.js';
 export * from './task.js';
 export * from './terrain.js';
 export * from './theme.js';

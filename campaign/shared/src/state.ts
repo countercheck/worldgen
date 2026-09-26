@@ -309,6 +309,11 @@ export function reduce(state: CampaignState, event: LoggedEvent): CampaignState 
     case 'clock_advanced':
       return { ...s, clockHours: p.toHours };
 
+    case 'patrol_reassigned': {
+      const unit = s.units.get(p.unitId);
+      return unit === undefined ? s : withUnit(s, { ...unit, parentUnitId: p.parentUnitId });
+    }
+
     case 'unit_teleported': {
       const unit = s.units.get(p.unitId);
       if (unit === undefined) return s;

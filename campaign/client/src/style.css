@@ -1151,6 +1151,16 @@ p.cmd-details {
   margin-top: 6px;
 }
 
+/* Folded by default: a referee reaches for it rarely, and it is long. */
+.unit-edit > summary {
+  cursor: pointer;
+  list-style: revert;
+}
+
+.unit-edit > summary > h3 {
+  display: inline;
+}
+
 .hours-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));

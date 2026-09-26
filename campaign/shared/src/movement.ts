@@ -16,7 +16,7 @@ import { GRADES, type CampaignConfig, type Grade, type Mover } from './config.js
 import { crossingFor } from './crossing.js';
 import { astar, distance, key, neighbors, type Hex } from './hex.js';
 import { gradeOf, isPassable } from './terrain.js';
-import { hasTrait, type Trait, type Unit } from './unit.js';
+import { hasTrait, type RoadHour, type Trait, type Unit } from './unit.js';
 import { hexAt, type World, type WorldHex } from './world.js';
 
 /** March speed in km/h for a mover on a given grade, after traits. */
@@ -280,13 +280,33 @@ export const marchHoursLeft = (cfg: CampaignConfig, unit: Unit, atHours: number)
  * Whether a column has been off the road long enough to count as rested at `atHours`.
  *
  * Only asked of a column with hours to shed: one that has not marched since its last rest
- * has nothing to reset.
+ * has nothing to reset. The rest runs from the later of its last hour on the road and the
+ * hour a referee set its hours since a rest by hand, so a value set by hand stands until
+ * the column has rested after it. A unit with neither — logged before the hours were
+ * kept — keeps what it was given until it next marches and stops.
  */
 export const hasRested = (cfg: CampaignConfig, unit: Unit, atHours: number): boolean => {
   if (unit.hoursMarchedToday <= 0) return false;
-  const log = unit.roadHours ?? [];
-  const last = log.length === 0 ? null : log[log.length - 1]!.hour;
-  return last === null || Math.floor(atHours) - (last + 1) >= cfg.minRestHoursPerDay;
+  const last = unit.roadHours?.at(-1);
+  const offRoad = Math.max(
+    last === undefined ? -Infinity : last.hour + 1,
+    unit.restFromHours ?? -Infinity,
+  );
+  return Math.floor(atHours) - offRoad >= cfg.minRestHoursPerDay;
+};
+
+/**
+ * `hours` on the road laid down as whole hours running back from `untilHour`, the earliest
+ * taking any fraction: a history for a column somebody says has already marched.
+ */
+export const roadHoursEnding = (hours: number, untilHour: number): RoadHour[] => {
+  const out: RoadHour[] = [];
+  let left = Math.min(hours, HOURS_PER_DAY);
+  for (let hour = Math.floor(untilHour) - 1; left > 1e-9; hour--) {
+    out.unshift({ hour, hours: Math.min(1, left) });
+    left -= 1;
+  }
+  return out;
 };
 
 /**

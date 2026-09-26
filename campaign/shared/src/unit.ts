@@ -15,7 +15,19 @@ import type { Hex } from './hex.js';
 
 export type UnitKind = 'infantry' | 'cavalry' | 'hq' | 'artillery_reserve' | 'garrison' | 'convoy';
 
+/** Every kind, in the order a form offers them. */
+export const UNIT_KINDS: readonly UnitKind[] = [
+  'infantry',
+  'cavalry',
+  'hq',
+  'artillery_reserve',
+  'garrison',
+  'convoy',
+];
+
 export type Formation = 'march' | 'battle' | 'rest' | 'occupation' | 'rout';
+
+export const FORMATIONS: readonly Formation[] = ['march', 'battle', 'rest', 'occupation', 'rout'];
 
 export type Trait =
   /** Wider recon zone, and may field patrols without spending troops. */
@@ -33,8 +45,23 @@ export type Trait =
   /** Can build, repair and demolish bridges. */
   | 'pontooneers';
 
+/** Every trait, in the order a form offers them. */
+export const TRAITS: readonly Trait[] = [
+  'scout',
+  'heavy',
+  'fast',
+  'very_fast',
+  'slow',
+  'very_slow',
+  'long_tail',
+  'foraging',
+  'pontooneers',
+];
+
 /** Experience shifts the fatigue table and sets the morale ceiling. */
 export type Experience = -2 | -1 | 0 | 1 | 2;
+
+export const EXPERIENCES: readonly Experience[] = [-2, -1, 0, 1, 2];
 
 export const EXPERIENCE_NAMES: Readonly<Record<Experience, string>> = {
   [-2]: 'raw',
@@ -204,6 +231,12 @@ export interface Unit {
    * Optional because units logged before it existed do not carry it; absent is no hours.
    */
   readonly roadHours?: readonly RoadHour[];
+  /**
+   * The hour a referee set `hoursMarchedToday` by hand: a rest is counted from here if it
+   * is later than the column's last hour on the road, so the value set is not undone by a
+   * march it finished long before. Absent on a unit nobody has set it for.
+   */
+  readonly restFromHours?: number;
 
   /** Corps grouping. Presentation and combat only — everything tracks individually. */
   readonly corps: string | null;

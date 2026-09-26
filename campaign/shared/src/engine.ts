@@ -22,10 +22,18 @@
 import { type Commander, ridersOf, wouldCycle } from './commander.js';
 import { DEFAULT_CONFIG, type CampaignConfig } from './config.js';
 import { mayWriteTo, planRide, type DespatchBody } from './despatch.js';
-import { planMarch } from './movement.js';
+import { planMarch, roadHoursEnding } from './movement.js';
 import { advance, despatchNow } from './scheduler.js';
 import { contestants, type Task } from './task.js';
-import type { EventPayload, Faction, LoggedEvent, UnitStatChanges, WorldRef } from './events.js';
+import type {
+  EventPayload,
+  Faction,
+  LoggedEvent,
+  UnitStatChanges,
+  UnitStatSet,
+  WorldRef,
+} from './events.js';
+import { unitStatChangesOf, unitStatProblems } from './stats.js';
 import { byCommander, REFEREE, type Actor } from './events.js';
 import { key, type Hex } from './hex.js';
 import { rngFor, type Rng } from './rng.js';
@@ -46,7 +54,7 @@ import {
   standingOrdersProblems,
   type StandingOrders,
 } from './standing.js';
-import { hasTrait, isDivision, type Formation, type Unit } from './unit.js';
+import { hasTrait, isDivision, isPatrol, type Formation, type Unit } from './unit.js';
 import { hexAt, type World } from './world.js';
 
 export type Command =
@@ -143,6 +151,13 @@ export type Command =
       readonly name?: string;
     }
   | { readonly kind: 'teleport_unit'; readonly unitId: string; readonly column: readonly Hex[] }
+  /**
+   * Referee: a patrol answers to another formation of its side from now on.
+   *
+   * Its reports go to that formation's commander, and it counts against that formation's
+   * free patrols for the next one sent out. It is not charged again for being moved.
+   */
+  | { readonly kind: 'reassign_patrol'; readonly unitId: string; readonly parentUnitId: string }
   | { readonly kind: 'reveal'; readonly commanderId: string; readonly coords: readonly Hex[] }
   | { readonly kind: 'conceal'; readonly commanderId: string; readonly coords: readonly Hex[] }
   | { readonly kind: 'set_unit_stats'; readonly unitId: string; readonly changes: UnitStatChanges }
@@ -182,6 +197,7 @@ const REFEREE_ONLY: ReadonlySet<CommandKind> = new Set([
   'remove_unit',
   'advance_clock',
   'teleport_unit',
+  'reassign_patrol',
   'reveal',
   'conceal',
   'set_unit_stats',
@@ -445,17 +461,33 @@ export function check(
 
     case 'set_unit_stats': {
       const u = requireUnit(cmd.unitId);
-      if (u !== undefined) {
-        const c = cmd.changes;
-        if (c.paperStrength !== undefined && c.paperStrength < 0) {
-          v.push(hard(CODES.MALFORMED, 'paperStrength cannot be negative'));
+      const problems = unitStatProblems(cmd.changes);
+      for (const m of problems) v.push(hard(CODES.MALFORMED, m));
+      const change = problems.length === 0 ? cmd.changes.formationChange : undefined;
+      if (u !== undefined && change != null) {
+        // Hard: a change that finished in the past would complete on the next hour as if
+        // it had just happened, and one to what the unit already is completes into nothing.
+        if (change.completesAtHours < state.clockHours) {
+          v.push(hard(CODES.MALFORMED, 'a change of formation finishes now or later, not before'));
         }
-        if (c.fatigue !== undefined && (c.fatigue < 0 || c.fatigue > 100)) {
-          v.push(hard(CODES.MALFORMED, 'fatigue runs from 0 to 100'));
+        if (change.to === (cmd.changes.formation ?? u.formation)) {
+          v.push(hard(CODES.MALFORMED, `${u.name} would be changing into what it already is`));
         }
-        if (c.morale !== undefined && c.morale < 0) {
-          v.push(hard(CODES.MALFORMED, 'morale cannot be negative'));
-        }
+      }
+      break;
+    }
+
+    case 'reassign_patrol': {
+      const patrol = requireUnit(cmd.unitId);
+      const parent = requireUnit(cmd.parentUnitId);
+      if (patrol !== undefined && !isPatrol(patrol)) {
+        v.push(hard(CODES.MALFORMED, `${patrol.name} is a formation, not a patrol`));
+      }
+      if (parent !== undefined && isPatrol(parent)) {
+        v.push(hard(CODES.MALFORMED, `a patrol answers to a formation, and ${parent.name} is a patrol`));
+      }
+      if (patrol !== undefined && parent !== undefined && patrol.faction !== parent.faction) {
+        v.push(hard(CODES.WRONG_FACTION, `${patrol.name} cannot answer to the other side`));
       }
       break;
     }
@@ -858,6 +890,9 @@ export function decide(
         },
       ];
 
+    case 'reassign_patrol':
+      return [{ kind: 'patrol_reassigned', unitId: cmd.unitId, parentUnitId: cmd.parentUnitId }];
+
     case 'teleport_unit':
       return [{ kind: 'unit_teleported', unitId: cmd.unitId, column: cmd.column }];
 
@@ -867,8 +902,27 @@ export function decide(
     case 'conceal':
       return [{ kind: 'hexes_forgotten', commanderId: cmd.commanderId, coords: cmd.coords }];
 
-    case 'set_unit_stats':
-      return [{ kind: 'unit_stat_set', unitId: cmd.unitId, changes: cmd.changes }];
+    case 'set_unit_stats': {
+      // The hours on the road arrive as one number and are kept as the unit keeps them, by
+      // the hour, so the log replays to the same cap without knowing the clock it was set at.
+      // The hours since a rest carry the hour they were set at, so a rest is counted from
+      // then rather than from a march that ended before the referee spoke.
+      const { roadHoursLast24, ...rest } = unitStatChangesOf(cmd.changes);
+      const changes: UnitStatSet = {
+        ...rest,
+        ...(roadHoursLast24 === undefined
+          ? {}
+          : { roadHours: roadHoursEnding(roadHoursLast24, state.clockHours) }),
+        ...(rest.hoursMarchedToday === undefined ? {} : { restFromHours: state.clockHours }),
+        // A formation set by hand is what the unit is now, so a change it was part-way
+        // through must not finish on the hour and undo it — unless the referee set the
+        // change too. Written into the event, so the log says so and replays as it was.
+        ...(rest.formation !== undefined && rest.formationChange === undefined
+          ? { formationChange: null }
+          : {}),
+      };
+      return [{ kind: 'unit_stat_set', unitId: cmd.unitId, changes }];
+    }
 
     case 'declare_battle':
       return [{ kind: 'battle_declared', coords: cmd.coords }];
