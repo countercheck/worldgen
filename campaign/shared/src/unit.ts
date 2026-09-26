@@ -231,6 +231,12 @@ export interface Unit {
    * Optional because units logged before it existed do not carry it; absent is no hours.
    */
   readonly roadHours?: readonly RoadHour[];
+  /**
+   * The hour a referee set `hoursMarchedToday` by hand: a rest is counted from here if it
+   * is later than the column's last hour on the road, so the value set is not undone by a
+   * march it finished long before. Absent on a unit nobody has set it for.
+   */
+  readonly restFromHours?: number;
 
   /** Corps grouping. Presentation and combat only — everything tracks individually. */
   readonly corps: string | null;

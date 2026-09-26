@@ -73,7 +73,9 @@ const CHECKS: { readonly [K in keyof Required<UnitStatChanges>]: Check } = {
       ? null
       : `traits are a list of ${TRAITS.join(', ')}, each once`,
   hoursMarchedToday: atLeast(0, 'hours since the last rest'),
-  roadHoursLast24: between(0, 24, 'hours on the road in the last 24'),
+  // Laid down as the hours just gone, the earliest of twenty-four would already have left
+  // the window the cap reads: 23 is the most that reads back as it was set.
+  roadHoursLast24: between(0, 23, 'hours on the road in the last 24'),
   corps: (v) => (v === null || typeof v === 'string' ? null : 'a corps is a name, or none'),
   echelon: oneOf(ECHELONS, 'echelon'),
 };

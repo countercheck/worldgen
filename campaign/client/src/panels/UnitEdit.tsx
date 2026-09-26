@@ -103,21 +103,32 @@ function draftOf(unit: Unit, clockHours: number): Draft {
 }
 
 /** What the draft changes, against what the unit is now. Empty when nothing. */
-function changesFrom(draft: Draft, was: Draft, clockHours: number): UnitStatChanges {
+function changesFrom(
+  draft: Draft,
+  was: Draft,
+  clockHours: number,
+  underWay: Unit['formationChange'],
+): UnitStatChanges {
   const out: Record<string, unknown> = {};
   if (draft.name !== was.name) out.name = draft.name;
   if (draft.kind !== was.kind) out.kind = draft.kind;
   if (draft.experience !== was.experience) out.experience = draft.experience;
   if (draft.formation !== was.formation) out.formation = draft.formation;
-  if (draft.changeTo !== was.changeTo || draft.changeIn !== was.changeIn) {
+  // A formation sent alone drops the change under way, so when the formation moves the
+  // change is sent with it: what the form shows is what the unit is left with. A change
+  // into the formation now chosen is hidden from the form, and goes with it.
+  const changeMoved = draft.changeTo !== was.changeTo || draft.changeIn !== was.changeIn;
+  if (changeMoved || draft.formation !== was.formation) {
     out.formationChange =
-      draft.changeTo === ''
+      draft.changeTo === '' || draft.changeTo === draft.formation
         ? null
-        : {
-            to: draft.changeTo,
-            completesAtHours:
-              clockHours + (draft.changeIn.trim() === '' ? NaN : Number(draft.changeIn)),
-          };
+        : !changeMoved && underWay != null
+          ? { to: underWay.to, completesAtHours: Math.max(clockHours, underWay.completesAtHours) }
+          : {
+              to: draft.changeTo,
+              completesAtHours:
+                clockHours + (draft.changeIn.trim() === '' ? NaN : Number(draft.changeIn)),
+            };
   }
   if (draft.echelon !== was.echelon && draft.echelon !== null) out.echelon = draft.echelon;
   if (draft.corps !== was.corps) out.corps = draft.corps.trim() === '' ? null : draft.corps;
@@ -162,7 +173,7 @@ export function UnitEdit({
   const [parent, setParent] = useState(unit.parentUnitId ?? '');
   useEffect(() => setParent(unit.parentUnitId ?? ''), [unit.parentUnitId]);
 
-  const changes = changesFrom(draft, was, clockHours);
+  const changes = changesFrom(draft, was, clockHours, unit.formationChange);
   const changed = Object.keys(changes).length > 0;
   const problems = unitStatProblems(changes);
 

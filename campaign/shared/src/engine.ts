@@ -905,11 +905,16 @@ export function decide(
     case 'set_unit_stats': {
       // The hours on the road arrive as one number and are kept as the unit keeps them, by
       // the hour, so the log replays to the same cap without knowing the clock it was set at.
+      // The hours since a rest carry the hour they were set at, so a rest is counted from
+      // then rather than from a march that ended before the referee spoke.
       const { roadHoursLast24, ...rest } = unitStatChangesOf(cmd.changes);
-      const changes: UnitStatSet =
-        roadHoursLast24 === undefined
-          ? rest
-          : { ...rest, roadHours: roadHoursEnding(roadHoursLast24, state.clockHours) };
+      const changes: UnitStatSet = {
+        ...rest,
+        ...(roadHoursLast24 === undefined
+          ? {}
+          : { roadHours: roadHoursEnding(roadHoursLast24, state.clockHours) }),
+        ...(rest.hoursMarchedToday === undefined ? {} : { restFromHours: state.clockHours }),
+      };
       return [{ kind: 'unit_stat_set', unitId: cmd.unitId, changes }];
     }
 

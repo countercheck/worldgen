@@ -280,14 +280,19 @@ export const marchHoursLeft = (cfg: CampaignConfig, unit: Unit, atHours: number)
  * Whether a column has been off the road long enough to count as rested at `atHours`.
  *
  * Only asked of a column with hours to shed: one that has not marched since its last rest
- * has nothing to reset. Nor has one with no hours on the road to measure the rest from —
- * a referee who set its hours since a rest by hand, or a unit logged before the hours were
- * kept — which keeps what it was given until it next marches and stops.
+ * has nothing to reset. The rest runs from the later of its last hour on the road and the
+ * hour a referee set its hours since a rest by hand, so a value set by hand stands until
+ * the column has rested after it. A unit with neither — logged before the hours were
+ * kept — keeps what it was given until it next marches and stops.
  */
 export const hasRested = (cfg: CampaignConfig, unit: Unit, atHours: number): boolean => {
   if (unit.hoursMarchedToday <= 0) return false;
   const last = unit.roadHours?.at(-1);
-  return last !== undefined && Math.floor(atHours) - (last.hour + 1) >= cfg.minRestHoursPerDay;
+  const offRoad = Math.max(
+    last === undefined ? -Infinity : last.hour + 1,
+    unit.restFromHours ?? -Infinity,
+  );
+  return Math.floor(atHours) - offRoad >= cfg.minRestHoursPerDay;
 };
 
 /**

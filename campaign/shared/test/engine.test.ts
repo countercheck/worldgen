@@ -24,6 +24,7 @@ import {
 } from '../src/engine.js';
 import type { Faction, LoggedEvent, WorldRef } from '../src/events.js';
 import { key, type Hex } from '../src/hex.js';
+import { DEFAULT_CONFIG } from '../src/config.js';
 import { roadHoursWithin } from '../src/movement.js';
 import { makeRng, rngFor } from '../src/rng.js';
 import { CODES, RuleViolation } from '../src/ruling.js';
@@ -915,6 +916,36 @@ describe('referee overrides', () => {
       'strict',
     ).state.units.get('red-1')!;
     expect(roadHoursWithin(fresh, out.state.clockHours)).toBe(0);
+  });
+
+  it('keeps hours since a rest set by hand, long after the last march, until it rests', () => {
+    // A march at hour 29, then ten idle hours: a rest measured from the march alone would
+    // be over already, and would wipe the hand-set hours on the next tick.
+    let state = apply({ kind: 'advance_clock', hours: 30 }, setUp(), world, 'strict').state;
+    state = apply(
+      { kind: 'set_unit_stats', unitId: 'red-1', changes: { roadHoursLast24: 1 } },
+      state,
+      world,
+      'strict',
+    ).state;
+    state = apply({ kind: 'advance_clock', hours: 10 }, state, world, 'strict').state;
+    state = apply(
+      { kind: 'set_unit_stats', unitId: 'red-1', changes: { hoursMarchedToday: 9 } },
+      state,
+      world,
+      'strict',
+    ).state;
+
+    const soon = apply({ kind: 'advance_clock', hours: 1 }, state, world, 'strict').state;
+    expect(soon.units.get('red-1')!.hoursMarchedToday).toBe(9);
+
+    const rested = apply(
+      { kind: 'advance_clock', hours: DEFAULT_CONFIG.minRestHoursPerDay + 1 },
+      state,
+      world,
+      'strict',
+    ).state;
+    expect(rested.units.get('red-1')!.hoursMarchedToday).toBe(0);
   });
 
   it('sets a formation outright, dropping any change under way', () => {

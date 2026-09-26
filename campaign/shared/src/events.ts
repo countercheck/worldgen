@@ -395,6 +395,8 @@ export interface UnitStatChanges {
 /** A referee's edit as the log keeps it: the hours on the road by the hour, as the unit holds them. */
 export type UnitStatSet = Omit<UnitStatChanges, 'roadHoursLast24'> & {
   readonly roadHours?: readonly RoadHour[];
+  /** The hour the hours since a rest were set at, which a rest is then counted from. */
+  readonly restFromHours?: number;
 };
 
 export type EventKind = EventPayload['kind'];
