@@ -146,25 +146,25 @@ export interface RiverRun {
 /**
  * Split a river into stretches by the rules' Major/Minor class.
  *
- * A segment takes the class of its upstream end. Rivers run source to mouth, so a major
- * reach carries on into the sea or lake that ends it, while a minor tributary stays thin
- * right up to the major river it joins instead of ending in a stub of wide channel. A
- * hex the rules call no
- * river at all — a mouth in open water, or one the mask has blanked — counts as minor:
- * the generator drew a watercourse there, so something is drawn.
+ * A segment takes the class of its upstream end. Rivers run source to mouth, so a minor
+ * tributary stays thin right up to the major river it joins instead of ending in a stub
+ * of wide channel. Where the upstream end is no river at all — a lake the river passes
+ * through, or a hex the mask has blanked — the segment takes its downstream end's class
+ * instead, so a major outflow leaves its lake wide. A segment with no class at either end
+ * counts as minor: the generator drew a watercourse there, so something is drawn.
  */
 export function riverRuns(river: River, world: World): RiverRun[] {
-  const classOf = (c: Hex): 'major' | 'minor' => {
+  const classOf = (c: Hex): 'major' | 'minor' | 'none' => {
     const hex = hexAt(world, c);
-    return hex !== undefined && riverClass(hex, world) === 'major' ? 'major' : 'minor';
+    return hex === undefined ? 'none' : riverClass(hex, world);
   };
 
   const runs: { cls: 'major' | 'minor'; hexes: Hex[] }[] = [];
-  let prev: { c: Hex; cls: 'major' | 'minor' } | undefined;
+  let prev: { c: Hex; cls: 'major' | 'minor' | 'none' } | undefined;
   for (const c of river.hexes) {
     const here = classOf(c);
     if (prev !== undefined) {
-      const cls = prev.cls;
+      const cls = (prev.cls === 'none' ? here : prev.cls) === 'major' ? 'major' : 'minor';
       const last = runs.at(-1);
       if (last !== undefined && last.cls === cls) last.hexes.push(c);
       else runs.push({ cls, hexes: [prev.c, c] });
