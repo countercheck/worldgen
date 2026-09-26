@@ -914,6 +914,12 @@ export function decide(
           ? {}
           : { roadHours: roadHoursEnding(roadHoursLast24, state.clockHours) }),
         ...(rest.hoursMarchedToday === undefined ? {} : { restFromHours: state.clockHours }),
+        // A formation set by hand is what the unit is now, so a change it was part-way
+        // through must not finish on the hour and undo it — unless the referee set the
+        // change too. Written into the event, so the log says so and replays as it was.
+        ...(rest.formation !== undefined && rest.formationChange === undefined
+          ? { formationChange: null }
+          : {}),
       };
       return [{ kind: 'unit_stat_set', unitId: cmd.unitId, changes }];
     }

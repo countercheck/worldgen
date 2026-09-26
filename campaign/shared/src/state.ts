@@ -375,12 +375,7 @@ export function reduce(state: CampaignState, event: LoggedEvent): CampaignState 
       const changes = Object.fromEntries(
         Object.entries(p.changes).filter(([, v]) => v !== undefined),
       );
-      // A formation set by hand is what the unit is now, so a change it was part-way
-      // through does not finish on the hour and undo it — unless the referee set the
-      // change too.
-      const outright =
-        'formation' in changes && !('formationChange' in changes) ? { formationChange: null } : {};
-      return withUnit(s, { ...unit, ...changes, ...outright });
+      return withUnit(s, { ...unit, ...changes });
     }
 
     case 'despatch_sent':

@@ -957,14 +957,40 @@ describe('referee overrides', () => {
     ).state;
     expect(camping.units.get('red-1')!.formationChange).not.toBeNull();
 
-    const out = apply(
+    const set = apply(
       { kind: 'set_unit_stats', unitId: 'red-1', changes: { formation: 'battle' } },
       camping,
       world,
       'strict',
-    ).state.units.get('red-1')!;
+    );
+    const out = set.state.units.get('red-1')!;
     expect(out.formation).toBe('battle');
     expect(out.formationChange).toBeNull();
+    // The log says the change was dropped, rather than the replay deciding it.
+    expect(set.events[0]!.payload).toMatchObject({ changes: { formationChange: null } });
+  });
+
+  it('replays a logged formation without a change as leaving the change alone', () => {
+    // An event logged before the engine wrote the dropped change into it must replay to
+    // what it did then.
+    const camping = apply(
+      { kind: 'set_formation', unitId: 'red-1', formation: 'rest' },
+      setUp(),
+      world,
+      'strict',
+    ).state;
+    const under = camping.units.get('red-1')!.formationChange;
+    const out = reduce(camping, {
+      seq: camping.nextSeq,
+      clockHours: camping.clockHours,
+      actor: { kind: 'referee' },
+      payload: { kind: 'unit_stat_set', unitId: 'red-1', changes: { formation: 'battle' } },
+      forced: false,
+      strictness: 'strict',
+      bypassed: [],
+    }).units.get('red-1')!;
+    expect(out.formation).toBe('battle');
+    expect(out.formationChange).toEqual(under);
   });
 
   it('sets a change of formation under way, and it finishes when the referee said', () => {
