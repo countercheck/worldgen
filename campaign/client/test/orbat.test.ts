@@ -11,10 +11,28 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_CONFIG, columnLengthKm, maxMorale } from '@campaign/shared';
 
 import { copy } from '../src/copy.js';
-import { commanderFrom, draftProblems, emptyDraft, idFor, unitFrom } from '../src/orbat.js';
+import {
+  commanderFrom,
+  draftProblems,
+  emptyDraft,
+  idFor,
+  startingColor,
+  unitFrom,
+} from '../src/orbat.js';
 
 const cfg = DEFAULT_CONFIG;
 const at = { q: 4, r: 4 };
+
+describe('where the colour picker starts for a new side', () => {
+  it('is a hex colour the engine and the picker both accept', () => {
+    for (let n = 0; n < 12; n++) expect(startingColor(n)).toMatch(/^#[0-9a-f]{6}$/);
+  });
+
+  it('starts each of the first few sides on a different colour', () => {
+    const first = Array.from({ length: 6 }, (_, n) => startingColor(n));
+    expect(new Set(first).size).toBe(first.length);
+  });
+});
 
 describe('an id from a name', () => {
   it('is short, legible, and made of the name', () => {
