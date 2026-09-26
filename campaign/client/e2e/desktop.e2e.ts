@@ -160,6 +160,34 @@ test('sets a formation’s values by hand, and refuses one that will not do', as
   await expect(morale).toHaveValue(was.morale);
 });
 
+test('opens the help from the header, on the referee’s half, and closes it with Escape', async ({
+  page,
+}) => {
+  await page.locator('header').getByRole('button', { name: 'Help', exact: true }).click();
+  const help = page.getByRole('dialog', { name: 'How to use the console' });
+  await expect(help).toBeVisible();
+  await expect(help.getByRole('tab', { name: 'Refereeing' })).toHaveAttribute('aria-selected', 'true');
+  await expect(help.getByRole('heading', { name: 'The clock' })).toBeVisible();
+
+  await help.getByRole('tab', { name: 'Commanding' }).click();
+  await expect(help.getByRole('heading', { name: 'Writing a despatch' })).toBeVisible();
+
+  await page.keyboard.press('Escape');
+  await expect(help).toBeHidden();
+
+  await page.keyboard.press('?');
+  await expect(help).toBeVisible();
+});
+
+test('offers the help on the front page, starting at the beginning', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Help', exact: true }).click();
+  const help = page.getByRole('dialog', { name: 'How to use the console' });
+  await expect(help.getByRole('tab', { name: 'Getting started' })).toHaveAttribute('aria-selected', 'true');
+  await help.getByRole('button', { name: 'Close' }).click();
+  await expect(help).toBeHidden();
+});
+
 test('hands the referee a commander’s link, and the same one when asked again', async ({ page }) => {
   await page.locator('header').getByRole('button', { name: /^Order of battle/ }).click();
   const roster = page.locator('.roster');

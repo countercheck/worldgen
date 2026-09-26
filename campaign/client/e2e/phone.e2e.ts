@@ -198,6 +198,20 @@ test.describe('the More sheet', () => {
     await expect(sheet).toBeHidden();
   });
 
+  test('holds the help, which opens over the map and fits the screen', async ({ page }) => {
+    await moreButton(page).click();
+    await page.getByRole('dialog', { name: 'More' }).getByRole('button', { name: /^Help/ }).click();
+    const help = page.getByRole('dialog', { name: 'How to use the console' });
+    await expect(help).toBeVisible();
+    await expect(page.getByRole('dialog', { name: 'More' })).toBeHidden();
+
+    const width = await page.evaluate(() => document.documentElement.scrollWidth);
+    expect(width).toBeLessThanOrEqual(390);
+
+    await help.getByRole('button', { name: 'Close' }).click();
+    await expect(help).toBeHidden();
+  });
+
   test('offers a commander the shading, and remembers which', async ({ page }) => {
     await takeSeat(page);
     await moreButton(page).click();

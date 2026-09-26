@@ -71,6 +71,7 @@ import { HexMap } from './map/HexMap.js';
 import { Command } from './panels/Command.jsx';
 import { Composer, type Draft } from './panels/Composer.jsx';
 import { ContactPanel } from './panels/ContactPanel.jsx';
+import { Help } from './panels/Help.jsx';
 import { HexPanel } from './panels/HexPanel.js';
 import { DayNight, DaylightControl, StandingOrdersPanel } from './panels/Hours.jsx';
 import { UnitEdit } from './panels/UnitEdit.jsx';
@@ -283,6 +284,7 @@ function Console({
   const [pane, setPane] = useState<Pane>('map');
   const [sheetOpen, setSheetOpen] = useState(false);
   const [more, setMore] = useState(false);
+  const [help, setHelp] = useState(false);
 
   // The order of battle is a drawer on a wide screen and a tab on a phone, and the two
   // have to agree: whatever opens or closes the drawer — the tab, its own Close, pointing
@@ -369,6 +371,19 @@ function Console({
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [more]);
+
+  // `?` opens the help, from anywhere but a field somebody is typing into.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== '?' || e.metaKey || e.ctrlKey || e.altKey) return;
+      const el = e.target as HTMLElement | null;
+      const tag = el?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || el?.isContentEditable === true) return;
+      setHelp(true);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   // `v` cycles how much of the map is washed. Separate from the Escape handler above,
   // which is only bound while a destination is being pointed at.
@@ -743,6 +758,10 @@ function Console({
                 : copy.console.washNone}
           </button>
         )}
+
+        <button className="help-button" title={copy.help.openHint} onClick={() => setHelp(true)}>
+          {copy.help.open}
+        </button>
         </div>
 
         <div className="clock">
@@ -812,8 +831,16 @@ function Console({
           reachDisabled={selectedUnit === null}
           onReach={setShowReach}
           onHome={() => navigate(HOME_HASH)}
+          onHelp={() => {
+            setMore(false);
+            setHelp(true);
+          }}
           onClose={() => setMore(false)}
         />
+      )}
+
+      {help && (
+        <Help role={isReferee ? 'referee' : 'commander'} onClose={() => setHelp(false)} />
       )}
 
       {isReferee && halted !== null && (
