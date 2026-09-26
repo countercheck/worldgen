@@ -820,7 +820,262 @@ export const copy = {
     yourLink: 'Your link:',
     leave: 'Leave',
   },
+
+  /**
+   * How to use the console, behind the Help button.
+   *
+   * Written for somebody who has just been sent a link and has never seen the game, so it
+   * names every control by the words on it. When a control's label changes above, its
+   * mention here changes with it — the two are in one file so that is one search.
+   *
+   * Four topics, and a reader lands on the one for their seat: a commander has no use for
+   * the clock, and a referee reading how to write a despatch is reading the wrong half.
+   * Both halves stay one tab away, because a referee explaining the game to a player wants
+   * to read the player's half.
+   */
+  help: {
+    open: 'Help',
+    openHint: 'How to use this console (?)',
+    heading: 'How to use the console',
+    close: 'Close',
+    topicsLabel: 'Help topics',
+    topics: {
+      start: 'Getting started',
+      map: 'The map',
+      command: 'Commanding',
+      referee: 'Refereeing',
+    },
+
+    guide: {
+      start: [
+        {
+          heading: 'What this is',
+          body: [
+            'A refereed Napoleonic campaign on a generated map, where one hex is one kilometre.',
+            'The referee sees everything and runs the clock. Each commander sees only what the formation they ride with can see, and what has been reported to them by despatch. Everything else is a guess.',
+            'There are no accounts. Every seat is a link.',
+          ],
+        },
+        {
+          heading: 'Starting a campaign',
+          body: [
+            'On the front page, upload a world.json made with worldgen generate --model organic, or press Or run the demonstration for a ready-made scenario.',
+            'You are handed one link per seat and one for yourself as referee. Send each player their own and keep yours. Links are stored only as hashes, so a lost one is reissued rather than looked up. Copy link in the order of battle does that for any commander.',
+          ],
+        },
+        {
+          heading: 'Joining one',
+          body: [
+            'Open the link your referee sent you. Your seat’s token is in the part of the address after the #, which never reaches the server.',
+            'Once it has opened, this browser remembers the link and the address bar changes to the campaign’s own address. That address carries no token and is the one to bookmark.',
+          ],
+        },
+        {
+          heading: 'Coming back',
+          body: [
+            'The front page lists every campaign this browser holds a link for, and which seat it holds. Campaigns, at the top left of the console, takes you there.',
+            'Forget on the front page, or Leave in the sidebar, drops this browser’s link. The campaign itself is untouched.',
+          ],
+        },
+        {
+          heading: 'On a phone',
+          body: [
+            'The sidebar splits into tabs along the bottom: Map, Post (Despatches for a referee), Command for a commander, and Order of battle.',
+            'Whatever you tap on the map slides up in a sheet. Tap its handle to pull it up over the map, and again to push it back down.',
+            'The header’s controls sit behind the ⋯ button: switching seats, shading, reach, the way back to Campaigns, and this help.',
+          ],
+        },
+      ],
+
+      map: [
+        {
+          heading: 'Moving around',
+          body: [
+            'Scroll or pinch to zoom, and drag to pan.',
+            'Hover over a hex, or tap it, to read the ground in the sidebar: terrain, relief, how many hours each arm takes to enter it on and off road, and whether a river there can be crossed.',
+            'Click or tap a formation to select it, and it stays in the sidebar while you read the ground around it.',
+          ],
+        },
+        {
+          heading: 'Reading a symbol',
+          body: [
+            'Formations are NATO symbols in their side’s colour, and a symbol shows exactly as much as is known about it.',
+          ],
+          terms: [
+            ['Solid frame', 'Seen now. What is drawn is true.'],
+            ['Dashed frame', 'Reported, not seen. Either one of your own formations as its last despatch described it, or a sighting of the enemy.'],
+            ['Empty frame', 'Something is there, and nobody can say what.'],
+            ['Icon inside', 'The arm is known: horse, foot or guns.'],
+            ['Marks above', 'The rough size is known.'],
+            ['Ribbon behind', 'The road the column takes up. A division is kilometres of road, not a counter on one hex.'],
+          ],
+        },
+        {
+          heading: 'Shading',
+          body: [
+            'A commander’s map is washed by how much is known. Press v, or the shading button in the header, to cycle through three settings.',
+          ],
+          terms: [
+            ['Watched · marched · unknown', 'Clear where your troops can see now, dimmer where they have been, darkest where nobody of yours has been.'],
+            ['Watched only', 'Everything not in sight right now is dark.'],
+            ['No shading', 'The map as the survey drew it, for reading the terrain.'],
+          ],
+        },
+        {
+          heading: 'Reach',
+          body: [
+            'Select a formation and tick Reach of selected, 10 h to shade every hex it could get to in ten hours of marching.',
+            'It is worked out over the map you hold. For a commander, that makes it only as good as what you know of the country and of who is on the roads.',
+          ],
+        },
+        {
+          heading: 'Keys',
+          terms: [
+            ['v', 'Cycle the shading.'],
+            ['Esc', 'Stop pointing at the map, or close whatever is open.'],
+            ['?', 'Open this help.'],
+          ],
+          body: [],
+        },
+      ],
+
+      command: [
+        {
+          heading: 'Who you are',
+          body: [
+            'You are one officer, riding with one formation. The line across the top of the map says who, and how many hexes you can see from where you stand.',
+            'Your own formation is live. Everything else is dated: the formations under you as they last reported, and the enemy wherever somebody last said they saw them.',
+          ],
+        },
+        {
+          heading: 'Under my command',
+          body: [
+            'The Command tab (below the post on a wide screen) lists your own formation and everybody who answers to you.',
+            'The hour against each is when word of it was written, not where it is now. A formation you last heard from six hours ago could be a long way from its marker.',
+            'Order of battle, in the header, shows your whole side’s chain of command as you know it. A formation marked no word is one nobody has reported on to you.',
+          ],
+        },
+        {
+          heading: 'Giving orders',
+          body: [
+            'Orders are prose. Nothing on the map moves when you click it: you write what you want, and the referee reads it and sets the formation marching.',
+            'Standing orders, under your command, are the exception. They say when the head of your column is on the road each day: when it steps off, when it must be off the road, and how many hours it may march. The column halts at whichever limit comes first, every day, until you change them. Give them with Give these orders; clear them with Lift them.',
+          ],
+        },
+        {
+          heading: 'Writing a despatch',
+          body: [
+            'Press Write a despatch in the post. A rider can be sent to your superior, to anyone directly beneath you, and to anyone on your side you can see. To reach anybody else, write through one of them.',
+            'How long the ride takes is not yours to know. Your rider goes until they find the addressee, and may be stopped on the way without your being told. Whether it arrived, you learn only if they write back.',
+            'The referee is on the list too, as The referee — out of the game. A note to them goes at once, with no rider, and nobody else reads it. Use it for rules questions, or for anything the referee should know.',
+          ],
+        },
+        {
+          heading: 'Reading the post',
+          body: [
+            'In my hand holds what has reached you: when it was written, when it arrived, and how long it was on the road. Anything still riding toward you is invisible until it arrives.',
+            'Forward opens a new despatch with the text already in it, so you can pass it on to whoever needs it.',
+            'Sent lists what you have written.',
+          ],
+        },
+        {
+          heading: 'Contacts',
+          body: [
+            'A contact is a sighting of the enemy, graded by what the patrol that saw it could make out. Select one to read its grade and how long ago it was seen.',
+            'The number on a contact is your staff’s own. Whether two contacts are the same body of troops is your judgement, not a fact you have been given.',
+          ],
+          terms: [
+            ['1', 'Something is there. Nothing more.'],
+            ['2', 'Presence and position.'],
+            ['3', 'Presence, position and the direction of march.'],
+            ['4', 'Rough strength.'],
+            ['5', 'The arm: horse, foot or guns.'],
+            ['6', 'The formation identified by name.'],
+          ],
+        },
+      ],
+
+      referee: [
+        {
+          heading: 'The clock',
+          body: [
+            'Nothing happens until you move the clock. +1 h and +6 h advance it by that much.',
+            'Run is the one you will use most. It advances until something needs a decision and stops there, so you are never told afterwards that two corps met ninety minutes into a six-hour jump.',
+            'The sun or moon beside the hour shows day or night. With nothing selected, the sidebar’s Daylight section sets sunrise and sunset as the season moves. Night marching is charged in fatigue by those hours.',
+          ],
+        },
+        {
+          heading: 'Wants a decision',
+          body: [
+            'Each time the clock stops, the reason joins the queue at the top of the sidebar: a column has come into contact, cannot get across a river, has arrived, is out of provisions, has received a despatch, and so on.',
+            'Each card carries the controls to answer it. March them somewhere points the formation somewhere new. Dealt with clears the card. When two columns contest a hex and neither is faster, Give it to … settles who has it. Dealt with settles nothing, and they will ask again.',
+            'A despatch arriving is a decision too: read it, then march the addressee’s formation as the orders say.',
+            'A patrol running into something tells you how many dice to roll: any 1 and the patrol is lost, otherwise it falls back 2 km.',
+          ],
+        },
+        {
+          heading: 'Marching a formation',
+          body: [
+            'Select a formation and press March them somewhere, then point at the ground on the map. Point again to send them by way of somewhere first. The last place you point at is where they end up. Undo last takes back one point, and March sends them.',
+            'They find their own road between the places you name, and their planned route is drawn on your map in their side’s colour. Halt stops a march.',
+            'Place puts a formation on the ground without marching it. Use it to set up a scenario or correct a mistake. It is logged as what it is.',
+          ],
+        },
+        {
+          heading: 'Formation, patrols and standing orders',
+          body: [
+            'The formation buttons (March, Battle, Rest, Occupation) show how many hours each change takes, and the change finishes on the clock.',
+            'A formation with the Scout trait can Send out a patrol. The first few are free. After that the button shows the troopers each one costs, and that cost is permanent.',
+            'Standing orders work as they do for a commander. Set them yourself for an officer you run, or when a despatch gives them.',
+          ],
+        },
+        {
+          heading: 'Set by hand',
+          body: [
+            'Under a selected formation, Set by hand writes any value onto it outright: strength, fatigue, morale, supply, hours marched, even who it reports to. Use it for whatever happened off the board. Only the fields you change are sent.',
+          ],
+        },
+        {
+          heading: 'Battles',
+          body: [
+            'Press Battle beside the clock and point at the ground being fought over. Point at it again to take it back out. Press Done when the field is drawn.',
+            'Inside a battle the traffic rules stop applying, since the formations there are intermingled. The map does not resolve the fighting. That is for you and the players.',
+          ],
+        },
+        {
+          heading: 'The post',
+          body: [
+            'The Despatches tab (below the queue on a wide screen) logs every despatch: who wrote it, where the rider has got to, and whether it arrived, was lost or was captured. Riders are drawn on your map and on nobody else’s.',
+            'Write on a commander’s behalf sends a despatch in the name of an officer you run, or for a player who handed you an order on paper. It rides and can be intercepted like any other.',
+          ],
+        },
+        {
+          heading: 'The order of battle',
+          body: [
+            'Order of battle, in the header, is where you set up the game. Start with + side for each army, with a name and colour. Then + army command for the top of each chain, + subordinate under a formation, and + officer for a second officer riding with a formation. Each new formation asks you to point at the ground it stands on.',
+            'Appointing a commander does not give anybody a seat. Copy link on a commander gives you the link to send to whoever plays them, and asking again gives the same link.',
+          ],
+        },
+        {
+          heading: 'Seeing as a commander',
+          body: [
+            'The seat buttons in the header (behind ⋯ on a phone) switch this console to any commander whose link you hold. It genuinely asks the server as that commander, so you see only what they see. Switch back with Referee.',
+          ],
+        },
+      ],
+    } as Readonly<Record<HelpTopic, readonly HelpSection[]>>,
+  },
 };
+
+/** One entry in the help: a heading, some paragraphs, and optionally a list of terms. */
+export interface HelpSection {
+  readonly heading: string;
+  readonly body: readonly string[];
+  readonly terms?: readonly (readonly [string, string])[];
+}
+
+/** The help's tabs, in the order they are shown. */
+export type HelpTopic = 'start' | 'map' | 'command' | 'referee';
 
 /** A trigger in the referee's language, falling back to a sentence for an unknown one. */
 export const triggerLabel = (trigger: string): string =>

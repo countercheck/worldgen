@@ -18,6 +18,7 @@ import { DEMO_FACTIONS, demoCommands, parseWorld, type Faction } from '@campaign
 
 import { createCampaign, fetchView, issueSeatToken, sendCommand, type Session } from './api.js';
 import { copy } from './copy.js';
+import { Help } from './panels/Help.jsx';
 import { campaignHash, navigate } from './route.js';
 import { forgetCampaign, joinLink, listCampaigns, type CampaignSummary, type HeldTokens } from './session.js';
 
@@ -92,6 +93,7 @@ export function Join({
     seats: { id: string; label: string; link: string }[];
   } | null>(null);
   const [pending, setPending] = useState<Joined | null>(null);
+  const [help, setHelp] = useState(false);
 
   const run = async (make: () => Promise<Joined>): Promise<void> => {
     setError(null);
@@ -166,9 +168,14 @@ export function Join({
   }
 
   return (
+    <>
+    {help && <Help role={null} onClose={() => setHelp(false)} />}
     <div className="join">
       <h1>{copy.join.title}</h1>
       <p className="muted">{copy.join.blurb}</p>
+      <button className="help-button" title={copy.help.openHint} onClick={() => setHelp(true)}>
+        {copy.help.open}
+      </button>
 
       {notice !== undefined && <p className="error">{notice}</p>}
       {busy !== null && <p className="busy">{busy}</p>}
@@ -231,5 +238,6 @@ export function Join({
         <p className="muted">{copy.join.joinBlurb}</p>
       </section>
     </div>
+    </>
   );
 }

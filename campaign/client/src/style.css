@@ -1743,3 +1743,119 @@ button.more-home {
     min-height: 44px;
   }
 }
+
+/* ---- help ------------------------------------------------------------------
+   A dialog in the middle of a wide screen, and the same bottom sheet as More on a phone.
+   It borrows More's sheet and head so the two read as one family of overlay. */
+
+button.help-button {
+  background: none;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  font: inherit;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+button.help-button:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.help-backdrop {
+  align-items: center;
+  justify-content: center;
+}
+
+.help-sheet {
+  max-width: 760px;
+  max-height: 85dvh;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding-bottom: 20px;
+}
+
+.help-topics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.help-topics button {
+  min-height: 36px;
+  padding: 0 14px;
+  font: inherit;
+  font-size: 14px;
+  color: var(--muted);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  cursor: pointer;
+}
+
+.help-topics button.on {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.help-body {
+  line-height: 1.5;
+}
+
+.help-body h3 {
+  margin: 18px 0 6px;
+  font-size: 15px;
+  color: var(--accent);
+}
+
+.help-body section:first-child h3 {
+  margin-top: 4px;
+}
+
+.help-body p {
+  margin: 0 0 8px;
+}
+
+.help-body dl {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 14px;
+  margin: 4px 0 8px;
+}
+
+.help-body dl > div {
+  display: contents;
+}
+
+.help-body dt {
+  font-weight: 600;
+}
+
+.help-body dd {
+  margin: 0;
+  color: var(--muted);
+}
+
+@media (max-width: 700px) {
+  .help-backdrop {
+    align-items: flex-end;
+  }
+
+  .help-sheet {
+    max-width: none;
+    border-width: 1px 0 0;
+    border-radius: 16px 16px 0 0;
+    padding-bottom: calc(20px + env(safe-area-inset-bottom));
+  }
+
+  /* Terms stack under each other: a phone has no room for two columns of prose. */
+  .help-body dl {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
+
+  .help-body dd {
+    margin-bottom: 6px;
+  }
+}
