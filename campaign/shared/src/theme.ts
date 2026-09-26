@@ -34,6 +34,18 @@ export interface RoadStyle {
   readonly dash?: readonly number[];
 }
 
+/**
+ * One class of watercourse. `width` is a fraction of the hex radius.
+ *
+ * Keyed by the rules' Major/Minor split (`riverClass`) rather than by the generator's
+ * flow rank, so the map shows the line that decides whether a column can ford — a river
+ * drawn wide is one you cannot wade.
+ */
+export interface RiverStyle {
+  readonly color: Color;
+  readonly width: number;
+}
+
 /** A palette keyed by the enum values `world.json` carries. */
 export type ColorMap = Readonly<Record<string, Color>>;
 
@@ -76,6 +88,13 @@ export interface Theme {
   readonly soil: ColorMap;
   readonly landUse: ColorMap;
   readonly road: Readonly<Record<string, RoadStyle>>;
+  readonly river: Readonly<Record<'major' | 'minor', RiverStyle>>;
+  /**
+   * A pale band drawn under every road. The road colours are browns, and a brown line on
+   * dense forest or escarpment is close to invisible; the casing gives it an edge on any
+   * ground without changing the colour that says which tier it is.
+   */
+  readonly roadCasing: Color;
   /** Ground a faction has never observed. */
   readonly fog: Color;
   /** The veil over ground not under observation. See `WashStyle`. */
@@ -92,6 +111,14 @@ export const DEFAULT_THEME: Theme = {
   soil: SOIL_COLORS,
   landUse: LAND_USE_COLORS,
   road: ROAD_STYLE,
+  // Not from `palette.ts` either: the Python renderer draws rivers by flow rank and has no
+  // Major/Minor line. Width carries the distinction and hue backs it up, so it survives
+  // both the wash and a reader who cannot tell the two blues apart.
+  river: {
+    major: { color: '#1d4fa8', width: 0.34 },
+    minor: { color: '#5fa0e6', width: 0.1 },
+  },
+  roadCasing: 'rgba(250,244,228,0.9)',
   fog: FOG_COLOR,
   // Not from `palette.ts`: the Python renderer draws a finished map of a whole country and
   // has no notion of who is looking at it. The wash only means anything on a screen being
@@ -110,6 +137,8 @@ export interface ThemeOverrides {
   readonly soil?: ColorMap;
   readonly landUse?: ColorMap;
   readonly road?: Readonly<Record<string, RoadStyle>>;
+  readonly river?: Partial<Record<'major' | 'minor', RiverStyle>>;
+  readonly roadCasing?: Color;
   readonly fog?: Color;
   readonly wash?: Partial<WashStyle>;
   readonly fallback?: Color;
@@ -131,6 +160,8 @@ export function resolveTheme(overrides?: ThemeOverrides): Theme {
     soil: { ...DEFAULT_THEME.soil, ...overrides.soil },
     landUse: { ...DEFAULT_THEME.landUse, ...overrides.landUse },
     road: { ...DEFAULT_THEME.road, ...overrides.road },
+    river: { ...DEFAULT_THEME.river, ...overrides.river },
+    roadCasing: overrides.roadCasing ?? DEFAULT_THEME.roadCasing,
     fog: overrides.fog ?? DEFAULT_THEME.fog,
     // Per key like the palettes above: a referee who wants the unwatched ground darker
     // should not have to restate the colour and the other two bands to say so.
