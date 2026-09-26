@@ -115,3 +115,45 @@ test('gives a formation standing orders, and lifts them', async ({ page }) => {
   await sidebar.getByRole('button', { name: 'Lift them' }).click();
   await expect(sidebar.getByText(/^None given\./)).toBeVisible();
 });
+
+test('sets a formation’s values by hand, and refuses one that will not do', async ({ page }) => {
+  const sidebar = page.locator('.sidebar');
+  await sidebar.locator('.unit-list button').first().click();
+  const form = sidebar.locator('.unit-edit');
+  await form.getByText('Set by hand').click();
+  const save = form.getByRole('button', { name: 'Set these' });
+
+  await form.getByLabel('Fatigue').fill('101');
+  await expect(form.getByText('fatigue runs from 0 to 100')).toBeVisible();
+  await expect(save).toBeDisabled();
+  await form.getByRole('button', { name: 'Undo changes' }).click();
+
+  const morale = form.getByLabel('Morale');
+  const road = form.getByLabel('On the road, last 24 h');
+  const was = { morale: await morale.inputValue(), road: await road.inputValue() };
+  await morale.fill('7');
+  await road.fill('12');
+  await save.click();
+  // Taken: the form now reads what the unit is, with nothing left to send.
+  await expect(save).toBeDisabled();
+  await expect(morale).toHaveValue('7');
+  await expect(road).toHaveValue('12');
+
+  // A change under way, set by hand: it holds, and is cleared the same way.
+  const changeTo = form.getByLabel('Changing to');
+  await changeTo.selectOption('rest');
+  await form.getByLabel('Finishes in, h').fill('3');
+  await save.click();
+  await expect(save).toBeDisabled();
+  await expect(changeTo).toHaveValue('rest');
+  await expect(form.getByLabel('Finishes in, h')).toHaveValue('3');
+  await changeTo.selectOption('');
+  await save.click();
+  await expect(changeTo).toHaveValue('');
+
+  // Put it back, so the campaign every other test opens is as it was.
+  await morale.fill(was.morale);
+  await road.fill(was.road);
+  await save.click();
+  await expect(morale).toHaveValue(was.morale);
+});

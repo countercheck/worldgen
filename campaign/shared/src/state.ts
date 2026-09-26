@@ -309,6 +309,11 @@ export function reduce(state: CampaignState, event: LoggedEvent): CampaignState 
     case 'clock_advanced':
       return { ...s, clockHours: p.toHours };
 
+    case 'patrol_reassigned': {
+      const unit = s.units.get(p.unitId);
+      return unit === undefined ? s : withUnit(s, { ...unit, parentUnitId: p.parentUnitId });
+    }
+
     case 'unit_teleported': {
       const unit = s.units.get(p.unitId);
       if (unit === undefined) return s;
@@ -370,7 +375,12 @@ export function reduce(state: CampaignState, event: LoggedEvent): CampaignState 
       const changes = Object.fromEntries(
         Object.entries(p.changes).filter(([, v]) => v !== undefined),
       );
-      return withUnit(s, { ...unit, ...changes });
+      // A formation set by hand is what the unit is now, so a change it was part-way
+      // through does not finish on the hour and undo it — unless the referee set the
+      // change too.
+      const outright =
+        'formation' in changes && !('formationChange' in changes) ? { formationChange: null } : {};
+      return withUnit(s, { ...unit, ...changes, ...outright });
     }
 
     case 'despatch_sent':

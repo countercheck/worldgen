@@ -18,6 +18,7 @@ import {
   check,
   decide,
   EMPTY_STATE,
+  isRefereeCommand,
   REFEREE,
   type Command,
 } from '../src/engine.js';
@@ -46,7 +47,7 @@ import {
   presentUnderArms,
   type Unit,
 } from '../src/unit.js';
-import type { Commander } from '../src/commander.js';
+import { commanderOf, type Commander } from '../src/commander.js';
 import { parseWorld, type World } from '../src/world.js';
 
 const world: World = parseWorld(world32);
@@ -861,6 +862,169 @@ describe('referee overrides', () => {
 
     expect(out.state.units.get('red-1')!.corps).toBe('I Corps');
   });
+
+  it('lets the referee set every stat on a unit by hand', () => {
+    const changes = {
+      name: 'Division Friant',
+      kind: 'cavalry',
+      paperStrength: 3100,
+      fatigue: 40,
+      morale: 7,
+      provisions: 3,
+      maxProvisions: 50,
+      equipment: 2,
+      maxEquipment: 35,
+      guns: 12,
+      experience: 2,
+      marchSpeedKmh: 4.5,
+      spacingM: 2,
+      spacingMultiplier: 1.4,
+      formation: 'battle',
+      traits: ['scout', 'long_tail'],
+      hoursMarchedToday: 9,
+      corps: 'III Corps',
+      echelon: 'brigade',
+    } as const;
+    const out = apply(
+      { kind: 'set_unit_stats', unitId: 'red-1', changes },
+      setUp(),
+      world,
+      'strict',
+    );
+    expect(out.ok, out.violations.map((v) => v.message).join('; ')).toBe(true);
+    expect(out.state.units.get('red-1')).toMatchObject(changes);
+  });
+
+  it('sets the hours on the road the cap reads, running back from now', () => {
+    const state = apply({ kind: 'advance_clock', hours: 30 }, setUp(), world, 'strict').state;
+    const out = apply(
+      { kind: 'set_unit_stats', unitId: 'red-1', changes: { roadHoursLast24: 12.5 } },
+      state,
+      world,
+      'strict',
+    );
+    const unit = out.state.units.get('red-1')!;
+    expect(roadHoursWithin(unit, out.state.clockHours)).toBeCloseTo(12.5);
+    expect(unit.roadHours!.at(-1)!.hour).toBe(out.state.clockHours - 1);
+
+    // And to nothing, which is a column with its whole day in front of it.
+    const fresh = apply(
+      { kind: 'set_unit_stats', unitId: 'red-1', changes: { roadHoursLast24: 0 } },
+      out.state,
+      world,
+      'strict',
+    ).state.units.get('red-1')!;
+    expect(roadHoursWithin(fresh, out.state.clockHours)).toBe(0);
+  });
+
+  it('sets a formation outright, dropping any change under way', () => {
+    const camping = apply(
+      { kind: 'set_formation', unitId: 'red-1', formation: 'rest' },
+      setUp(),
+      world,
+      'strict',
+    ).state;
+    expect(camping.units.get('red-1')!.formationChange).not.toBeNull();
+
+    const out = apply(
+      { kind: 'set_unit_stats', unitId: 'red-1', changes: { formation: 'battle' } },
+      camping,
+      world,
+      'strict',
+    ).state.units.get('red-1')!;
+    expect(out.formation).toBe('battle');
+    expect(out.formationChange).toBeNull();
+  });
+
+  it('sets a change of formation under way, and it finishes when the referee said', () => {
+    const state = setUp();
+    const out = applyOrThrow(
+      {
+        kind: 'set_unit_stats',
+        unitId: 'red-1',
+        changes: { formationChange: { to: 'rest', completesAtHours: state.clockHours + 3 } },
+      },
+      state,
+      world,
+      'strict',
+    );
+    expect(out.state.units.get('red-1')!.formationChange).toEqual({
+      to: 'rest',
+      completesAtHours: state.clockHours + 3,
+    });
+    const later = applyOrThrow({ kind: 'advance_clock', hours: 4 }, out.state, world, 'strict');
+    expect(later.state.units.get('red-1')!.formation).toBe('rest');
+    expect(later.state.units.get('red-1')!.formationChange).toBeNull();
+
+    // Set with a formation, the change is kept rather than dropped.
+    const both = applyOrThrow(
+      {
+        kind: 'set_unit_stats',
+        unitId: 'red-1',
+        changes: {
+          formation: 'battle',
+          formationChange: { to: 'march', completesAtHours: state.clockHours + 1 },
+        },
+      },
+      state,
+      world,
+      'strict',
+    ).state.units.get('red-1')!;
+    expect(both.formation).toBe('battle');
+    expect(both.formationChange?.to).toBe('march');
+
+    // And cleared by null.
+    const cleared = applyOrThrow(
+      { kind: 'set_unit_stats', unitId: 'red-1', changes: { formationChange: null } },
+      out.state,
+      world,
+      'strict',
+    ).state.units.get('red-1')!;
+    expect(cleared.formationChange).toBeNull();
+  });
+
+  it('refuses a change of formation that finished in the past, or into what it is', () => {
+    const state = applyOrThrow({ kind: 'advance_clock', hours: 5 }, setUp(), world, 'strict').state;
+    const refused = (formationChange: unknown): boolean =>
+      !apply(
+        { kind: 'set_unit_stats', unitId: 'red-1', changes: { formationChange } } as unknown as Command,
+        state,
+        world,
+        'permissive',
+        { force: true },
+      ).ok;
+    expect(refused({ to: 'rest', completesAtHours: state.clockHours - 1 })).toBe(true);
+    expect(refused({ to: 'march', completesAtHours: state.clockHours + 1 })).toBe(true);
+    expect(refused({ to: 'rest' })).toBe(true);
+    expect(refused({ to: 'rest', completesAtHours: state.clockHours + 1, why: 'x' })).toBe(true);
+    expect(refused({ to: 'rest', completesAtHours: state.clockHours })).toBe(false);
+  });
+
+  it('refuses a value that is not the kind of thing the field holds, even when forced', () => {
+    const refused = (changes: unknown): boolean => {
+      const out = apply(
+        { kind: 'set_unit_stats', unitId: 'red-1', changes } as unknown as Command,
+        setUp(),
+        world,
+        'permissive',
+        { force: true },
+      );
+      return !out.ok && out.violations.every((v) => v.code === CODES.MALFORMED);
+    };
+    expect(refused(undefined)).toBe(true);
+    expect(refused({ fatigue: 101 })).toBe(true);
+    expect(refused({ paperStrength: -1 })).toBe(true);
+    expect(refused({ morale: '12' })).toBe(true);
+    expect(refused({ kind: 'dragoons' })).toBe(true);
+    expect(refused({ experience: 3 })).toBe(true);
+    expect(refused({ traits: ['scout', 'scout'] })).toBe(true);
+    expect(refused({ name: '  ' })).toBe(true);
+    expect(refused({ roadHoursLast24: 25 })).toBe(true);
+    // Identity, sides and position are not stats.
+    expect(refused({ id: 'red-9' })).toBe(true);
+    expect(refused({ faction: 'blue' })).toBe(true);
+    expect(refused({ column: [] })).toBe(true);
+  });
 });
 
 describe('replay', () => {
@@ -1430,6 +1594,38 @@ describe('a patrol and the troops it came from', () => {
       'lenient',
     ).state;
   };
+
+  it('can be given to another formation of its side, and answers to it from then on', () => {
+    const out = applyOrThrow(
+      { kind: 'reassign_patrol', unitId: 'vedette', parentUnitId: 'red-1' },
+      detached(),
+      world,
+      'strict',
+    );
+    const patrol = out.state.units.get('vedette')!;
+    expect(parentOf(out.state, patrol)?.id).toBe('red-1');
+    expect(commanderOf(out.state, 'vedette')?.id).toBe(commanderOf(out.state, 'red-1')?.id);
+    expect(patrolsOf(out.state, 'red-2')).toHaveLength(0);
+    expect(patrolsOf(out.state, 'red-1').map((u) => u.id)).toEqual(['vedette']);
+    expect(snapshot(replay(out.events, detached()))).toEqual(snapshot(out.state));
+  });
+
+  it('is reassigned only as a patrol, to a formation, on its own side', () => {
+    const refused = (unitId: string, parentUnitId: string): boolean =>
+      !apply({ kind: 'reassign_patrol', unitId, parentUnitId }, detached(), world, 'permissive', {
+        force: true,
+      }).ok;
+    expect(refused('red-1', 'red-2')).toBe(true); // a formation is not a patrol
+    expect(refused('vedette', 'blue-1')).toBe(true); // the other side
+    expect(refused('vedette', 'vedette')).toBe(true); // to a patrol
+    expect(refused('vedette', 'nobody')).toBe(true);
+  });
+
+  it('is the referee’s to reassign, not a commander’s', () => {
+    expect(
+      isRefereeCommand({ kind: 'reassign_patrol', unitId: 'vedette', parentUnitId: 'red-1' }),
+    ).toBe(true);
+  });
 
   it('points back at its parent, which is where its condition is read from', () => {
     const state = detached();

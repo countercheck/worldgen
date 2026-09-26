@@ -18,12 +18,14 @@ import {
   ECHELON_MARKS,
   ECHELONS,
   EXPERIENCE_NAMES,
+  EXPERIENCES,
+  TRAITS,
+  UNIT_KINDS,
   type CampaignConfig,
   type Commander,
   type Echelon,
   type Experience,
   type Hex,
-  type Trait,
   type UnitKind,
   type Unit,
 } from '@campaign/shared';
@@ -38,28 +40,6 @@ import {
   type UnitDraft,
 } from '../orbat.js';
 
-const KINDS: UnitKind[] = [
-  'infantry',
-  'cavalry',
-  'hq',
-  'artillery_reserve',
-  'garrison',
-  'convoy',
-];
-
-const TRAITS: Trait[] = [
-  'scout',
-  'heavy',
-  'fast',
-  'very_fast',
-  'slow',
-  'very_slow',
-  'long_tail',
-  'foraging',
-  'pontooneers',
-];
-
-const EXPERIENCES: Experience[] = [-2, -1, 0, 1, 2];
 
 /** A commander as these forms need one. */
 interface Officer {
@@ -151,7 +131,7 @@ export function RaiseForm({
             onChange={(e) => setDraft({ ...draft, kind: e.target.value as UnitKind })}
             disabled={busy}
           >
-            {KINDS.map((k) => (
+            {UNIT_KINDS.map((k) => (
               <option key={k} value={k}>
                 {prettify(k)}
               </option>

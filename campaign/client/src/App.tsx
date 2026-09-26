@@ -37,12 +37,14 @@ import {
   clearTask,
   detachPatrol,
   fetchView,
+  reassignPatrol,
   resolveDecision,
   sendDespatch,
   writeToReferee,
   setDaylight,
   setFormation,
   setStandingOrders,
+  setUnitStats,
   setTask,
   subscribe,
   teleportUnit,
@@ -69,6 +71,7 @@ import { Composer, type Draft } from './panels/Composer.jsx';
 import { ContactPanel } from './panels/ContactPanel.jsx';
 import { HexPanel } from './panels/HexPanel.js';
 import { DayNight, DaylightControl, StandingOrdersPanel } from './panels/Hours.jsx';
+import { UnitEdit } from './panels/UnitEdit.jsx';
 import { More } from './panels/More.jsx';
 import { Post } from './panels/Post.jsx';
 import { DecisionQueue, DespatchLog } from './panels/Referee.jsx';
@@ -1352,6 +1355,21 @@ function Console({
                     : board.units.get(shownUnit.parentUnitId);
                 return parent === undefined ? {} : { parent };
               })()}
+            />
+          )}
+
+          {isReferee && shownUnit !== null && (
+            <UnitEdit
+              key={shownUnit.id}
+              unit={shownUnit}
+              clockHours={view.campaign.clockHours}
+              formations={[...board.units.values()].filter(
+                (u) => u.faction === shownUnit.faction && u.parentUnitId == null,
+              )}
+              onSave={(changes) => setUnitStats(session, shownUnit.id, changes).then(refusal)}
+              onReassign={(parentUnitId) =>
+                reassignPatrol(session, shownUnit.id, parentUnitId).then(refusal)
+              }
             />
           )}
 

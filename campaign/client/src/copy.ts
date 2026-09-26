@@ -277,6 +277,41 @@ export const copy = {
     lift: 'Lift them',
   },
 
+  unitEdit: {
+    heading: 'Set by hand',
+    blurb: 'Write any value onto the formation outright, for what happened off the board. Only what you change is sent. A formation set here is set at once, with no hours to change it; a change under way is set beside it, and finishes when you say.',
+    fields: {
+      name: 'Name',
+      kind: 'Arm',
+      echelon: 'Echelon',
+      experience: 'Experience',
+      formation: 'Formation',
+      changeTo: 'Changing to',
+      changeIn: 'Finishes in, h',
+      parent: 'Reports to',
+      corps: 'Corps',
+      traits: 'Traits',
+      paperStrength: 'Paper strength',
+      fatigue: 'Fatigue',
+      morale: 'Morale',
+      provisions: 'Provisions',
+      maxProvisions: 'Most provisions',
+      equipment: 'Equipment',
+      maxEquipment: 'Most equipment',
+      guns: 'Guns',
+      marchSpeedKmh: 'March speed, km/h',
+      spacingM: 'Spacing, m a soldier',
+      spacingMultiplier: 'Spacing multiplier',
+      hoursMarchedToday: 'Hours since last rest',
+      roadHoursLast24: 'On the road, last 24 h',
+    },
+    hoursHint: 'Hours on the road in the last 24 are what the march cap reads; hours since the last rest are what the fatigue table reads. Setting the first lays them down as the hours just gone.',
+    save: 'Set these',
+    reset: 'Undo changes',
+    noChange: 'No change',
+    reassign: 'Give it to them',
+  },
+
   // -------------------------------------------------------------------------
   // What a commander has: their own formation, and their memory of the rest
   // -------------------------------------------------------------------------
