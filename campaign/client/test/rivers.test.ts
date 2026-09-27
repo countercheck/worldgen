@@ -65,6 +65,13 @@ describe('splitting a river by class', () => {
     expect(runs[0].hexes).toHaveLength(3);
   });
 
+  it('leaves a lake wide when a major river flows out of it', () => {
+    // The third hex is lake: no river tag, so `riverClass` calls it none.
+    const runs = riverRuns(along(4), worldOf([2000, 3000, 0, 4000]));
+    expect(runs.map((r) => r.cls)).toEqual(['major']);
+    expect(runs[0].hexes).toHaveLength(4);
+  });
+
   it('draws a hex the mask has blanked as minor rather than dropping it', () => {
     const world = worldOf([10, 20]);
     const runs = riverRuns({ hexes: [...along(2).hexes, { q: 9, r: 9 }], flowVolume: 0 }, world);
