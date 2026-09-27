@@ -22,7 +22,7 @@ import { AXIAL, key, OFFSET, type Hex, type HexKey, type Layout } from './hex.js
  * see what it wrote most recently. Widen this deliberately, having checked that the
  * fields below actually survive the older shape.
  */
-export const SUPPORTED_SCHEMA_VERSIONS = new Set(['1.8', '1.9']);
+export const SUPPORTED_SCHEMA_VERSIONS = new Set(['1.8', '1.9', '1.10']);
 
 export type TerrainClass = 'open_water' | 'inland_water' | 'coast' | 'land';
 
@@ -80,6 +80,8 @@ export interface RoadEdge {
 export interface River {
   readonly hexes: readonly Hex[];
   readonly flowVolume: number;
+  /** Empty for a river too small to have been named, or from a world before 1.10. */
+  readonly name: string;
 }
 
 export interface Settlement {
@@ -88,6 +90,10 @@ export interface Settlement {
   readonly role: string;
   readonly population: number;
   readonly name: string;
+  /** The people who named it. Empty before schema 1.10. */
+  readonly culture: string;
+  /** What the name meant to them — "ford on the Vassa". Empty before schema 1.10. */
+  readonly etymology: string;
 }
 
 export interface Ferry {
@@ -327,6 +333,8 @@ export function parseWorld(raw: unknown): World {
         role: str(s.role, `settlements[${i}].role`),
         population: num(s.population, `settlements[${i}].population`),
         name: str(s.name, `settlements[${i}].name`),
+        culture: str(s.culture ?? '', `settlements[${i}].culture`),
+        etymology: str(s.etymology ?? '', `settlements[${i}].etymology`),
       }))
     : [];
 
@@ -346,6 +354,7 @@ export function parseWorld(raw: unknown): World {
           ? (r.hexes as unknown[]).map((h, j) => coord(h, `rivers[${i}].hexes[${j}]`))
           : [],
         flowVolume: num(r.flow_volume ?? 0, `rivers[${i}].flow_volume`),
+        name: str(r.name ?? '', `rivers[${i}].name`),
       }))
     : [];
 

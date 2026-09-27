@@ -27,6 +27,12 @@ _FORBIDDEN = {
         "render": "core must not draw",
         "export": "core does no file I/O",
     },
+    "naming": {
+        "stages": "naming is a vocabulary stages use, not a stage",
+        "analysis": "naming must not read a report card either",
+        "render": "naming must not draw",
+        "export": "naming does no file I/O",
+    },
     "analysis": {
         "render": "analysis returns numbers, not pictures",
         "export": "analysis does no file I/O",

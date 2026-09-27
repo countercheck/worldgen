@@ -49,6 +49,13 @@ flowchart TB
         DN[drainage.drainage_metrics]
     end
 
+    subgraph NAMING["naming/ — place-name vocabulary, used by NamingStage"]
+        SITE[site.read_site<br/>ground -> meanings]
+        LANG[conlang.Language<br/>meanings -> words]
+        CREG[regions.culture_regions]
+        NREG[registry.NameRegistry]
+    end
+
     DV --> DN
     WS --> DN
 
@@ -63,6 +70,10 @@ flowchart TB
     PIPE --> WS
     SEQ --- PRE
     SEQ --- RC
+    SEQ -->|NamingStage| SITE
+    SEQ -->|NamingStage| LANG
+    SEQ -->|NamingStage| CREG
+    SEQ -->|NamingStage| NREG
     WS --- HEX
     WS --- GRID
     SEQ -.reads.-> CFG
@@ -80,6 +91,8 @@ flowchart TB
     PNG --- LEG
     SVG --- RIV
     PNG --- RIV
+    SVG --- LBL[labels<br/>shared placement]
+    PNG --- LBL
     DV -.->|TerrainLabel| HEX
     SVG -.->|TerrainLabel| HEX
 
@@ -87,6 +100,7 @@ flowchart TB
     style STAGES fill:#eefaee
     style EXPORT fill:#fff4e6
     style RENDER fill:#f6eeff
+    style NAMING fill:#eefaf6
 ```
 
 ## Generation pipeline (run order)
@@ -108,9 +122,10 @@ flowchart LR
     L --> M[VillagePlacement]
     M --> N[VillageTrack]
     N --> O[VillageCultivation]
+    O --> Q[Naming]
 
     A -.-> S(["WorldState<br/>hexes · rivers · roads<br/>settlements · ferries"])
-    O -.-> S
+    Q -.-> S
 ```
 
 ## What owns which quantity
@@ -129,6 +144,7 @@ computes. The short version:
 | `moisture`, `temperature` | Climate | *after* hydrology — it reads river tags |
 | `biome`, `land_cover` | Biome, LandCover | |
 | settlements, roads | CityTown onward | |
+| settlement and river names, `culture`, `etymology` | Naming | last in both models; placeholders until then |
 
 ## Structural notes
 
@@ -142,6 +158,10 @@ computes. The short version:
   and cultivation must exist before `VillagePlacementStage` will site villages.
 - **The stage list lives in `worldgen/stages/__init__.py` and nowhere else**; the CLI and
   the tests both read it from there.
+- **`NamingStage` is last in both models, and must stay last.** Tier, role and population
+  are final only after every settlement stage, and a stage appended at the end draws the
+  last child seed, so turning naming off (`naming_cultures: 0`) gives the same world with
+  placeholder names. `naming/` imports `core/` only; `tests/test_layering.py` checks it.
 
 ### Two splits that are easy to undo by accident
 

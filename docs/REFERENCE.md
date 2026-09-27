@@ -40,6 +40,7 @@ shape every map.
    - [3.13 Village Placement](#313-village-placement)
    - [3.14 Village Tracks](#314-village-tracks)
    - [3.15 Village Cultivation](#315-village-cultivation)
+   - [3.16 Naming](#316-naming)
 4. [Configuration Reference](#4-configuration-reference)
 5. [In-Code Constants](#5-in-code-constants)
 6. [Outputs](#6-outputs)
@@ -2052,6 +2053,46 @@ interfere with the cultivation frontier signal used by VillagePlacement.
 
 ---
 
+### 3.16 Naming
+
+[stages/naming.py](../worldgen/stages/naming.py) — `NamingStage`, last in both models;
+vocabulary in [naming/](../worldgen/naming/)
+
+Replaces the placeholder names settlements are founded with (`grassland_market_3`) and
+names the major rivers. Last because tier, role and population are only final after every
+settlement stage, and because a stage appended at the end draws the last child seed:
+`naming_cultures: 0` gives the same world with placeholder names.
+
+1. **Languages.** `naming_cultures` languages are invented from the stage's RNG
+   (`naming.conlang.Language`): a sound inventory, a syllable shape, a spelling table,
+   head-first or head-last compounding, and how often names are phrases or wear down where
+   their parts meet. A language makes one word per meaning, seeded from the meaning, so
+   "ford" is the same syllable in every ford town. With `naming_substrate`, one more
+   language is invented for the rivers.
+2. **Culture regions.** Homelands are spread by farthest-point sampling over the land, then
+   every hex goes to the homeland that reaches it cheapest. A step costs one hex, plus
+   climb over `naming_region_climb_m`, plus `naming_region_river_cost` onto a river of
+   `naming_great_river_km2` or more, plus `naming_region_water_cost` per water hex — so
+   frontiers fall on ridges and great rivers.
+3. **Rivers**, largest catchment first, down to `naming_river_min_catchment_km2`: named in
+   the substrate language, or by whoever holds the mouth.
+4. **Settlements**, cities first. `naming.site.read_site` reads the hex and its ring into
+   weighted *heads* (ford, bridge, mouth, falls, pass, harbour, mine, clearing, hill,
+   shore, and per-tier heads such as farm, hamlet, town, stronghold) and *qualifiers*
+   (land cover, trees and beasts of the biome, colour, rich soil, high ground, salt, great
+   or little, and the compass point from the nearest bigger place within
+   `naming_direction_radius`). A head is drawn by squared weight; a qualifier from the
+   site's, a founder's name (`naming_founder_weight`), or a nearby named river
+   (`naming_river_weight`). A name longer than `naming_max_letters`, or within
+   `naming_min_edit_distance` edits of any name already given, is redrawn.
+
+Each settlement records its `culture` and an English `etymology` ("ford on the Vassa");
+`metadata["cultures"]` lists the languages. Labels on the SVG and PNG exports are placed by
+[export/labels.py](../worldgen/export/labels.py): sized by tier, rivers italic along their
+middle reach, and none overlapping.
+
+---
+
 ## 4. Configuration Reference
 
 All defaults live in [worldgen/core/config.py](../worldgen/core/config.py).
@@ -2544,6 +2585,25 @@ placed where its only escape requires one.
 | `road_secondary_pct` | `float` | `0.30` | Next fraction, which become SECONDARY |
 | `road_track_pct` | `float` | `0.60` | Currently unused by InterurbanRoadStage — TRACK is reserved for village connectors. Kept so the three percentages sum to 1.0 |
 | `road_tier_gap_max_edges` | `int` | `12` | Longest lower-class stretch promoted where a road of one class stops and resumes across it (`fill_tier_gaps`). 0 turns it off |
+
+### 4.20 Naming — § [3.16](#316-naming)
+
+| Param | Type | Default | Effect |
+|---|---|---|---|
+| `naming_cultures` | `int` | `3` | Culture regions, each with an invented language. 0 turns naming off and keeps the placeholder names. Validated `≥ 0` |
+| `naming_substrate` | `bool` | `true` | An older people named the rivers and the present ones kept the names. `false`: each river is named by whoever holds its mouth |
+| `naming_region_climb_m` | `float` | `150.0` | Metres of climb costing as much as one hex of level going when culture regions spread |
+| `naming_region_river_cost` | `float` | `8.0` | Added for crossing a great river, in hexes of level going |
+| `naming_region_water_cost` | `float` | `2.0` | Added per hex of open or inland water crossed |
+| `naming_great_river_km2` | `float` | `1000.0` | Catchment above which a river is great: a frontier between peoples, and named in two syllables. About the top 3% of rivers on a 128x128 map |
+| `naming_river_min_catchment_km2` | `float` | `200.0` | Rivers draining at least this much are named. About a quarter of rivers on a 128x128 map |
+| `naming_min_edit_distance` | `int` | `2` | Single-letter edits any two names must be apart; capped at a quarter of the shorter name. Validated `≥ 1` |
+| `naming_max_letters` | `int` | `12` | Longest settlement name before another is drawn. Validated `≥ 4` |
+| `naming_hill_relief_m` | `float` | `100.0` | Relief at which a site can be named for its hill |
+| `naming_high_elevation_m` | `float` | `800.0` | Elevation above which a site can be called high |
+| `naming_direction_radius` | `int` | `12` | How near a bigger place must be for a settlement to be named for the side of it it lies on |
+| `naming_founder_weight` | `float` | `0.4` | Weight of a founder's name as a qualifier, against about 1–2 for a site's strongest feature |
+| `naming_river_weight` | `float` | `3.0` | Weight of a nearby named river as a qualifier (Avonmouth, Stratford-on-Avon) |
 
 ---
 

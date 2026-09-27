@@ -981,6 +981,48 @@ class WorldConfig:
     # Settlement placement
     settlement_min_reachable: int = 100  # min hexes reachable below cap grade
 
+    # Naming. Settlements are named for what their site is — a ford, a marsh, a mine — in
+    # languages invented from the seed, one per culture region, and the big rivers by an
+    # older people whose names the newcomers kept. 0 cultures turns naming off and leaves
+    # the placeholder names the stages found settlements with.
+    naming_cultures: int = 3
+    # Whether an older people named the rivers before the present ones arrived, as Celtic
+    # river names outlived Celtic speech across England. False: each river is named by
+    # whoever holds its mouth.
+    naming_substrate: bool = True
+    # Culture regions spread from their homelands at a cost, so frontiers fall where
+    # crossing is hard. Metres of climb that cost as much as a hex of level going.
+    naming_region_climb_m: float = 150.0
+    # What crossing a great river adds to a culture's spread, in hexes of level going.
+    naming_region_river_cost: float = 8.0
+    # What each hex of open or inland water adds, in hexes of level going.
+    naming_region_water_cost: float = 2.0
+    # Catchment above which a river is a great river: a frontier between peoples, and a
+    # name a town would take. 1,000 km2 is about the top 3% of rivers on a 128x128 map.
+    naming_great_river_km2: float = 1000.0
+    # Rivers draining at least this much are named. 200 km2 names about a quarter of the
+    # rivers on a 128x128 map — every one a reader would trace.
+    naming_river_min_catchment_km2: float = 200.0
+    # How far apart any two names on the map must be, in single-letter edits. 2 refuses
+    # Tharnos beside Tharnas; 1 only refuses exact repeats.
+    naming_min_edit_distance: int = 2
+    # Longest name, in letters, a settlement may be given before another is drawn.
+    naming_max_letters: int = 12
+    # Metres of command over the ground below at which a site is a hill and can be named
+    # for one. 100 is about the top 15% of settlement sites on a 128x128 map.
+    naming_hill_relief_m: float = 100.0
+    # Elevation above which a site can be called high.
+    naming_high_elevation_m: float = 800.0
+    # A place can be named for the side of a bigger one it lies on — Norton, Sutton — when
+    # that bigger place is within this many hexes.
+    naming_direction_radius: int = 12
+    # How often a name is a founder's rather than the ground's, against a weight of about
+    # 1-2 for a site's strongest feature.
+    naming_founder_weight: float = 0.4
+    # How strongly a town on a named river takes the river's name — Avonmouth, Stratford-
+    # on-Avon — against the same scale.
+    naming_river_weight: float = 3.0
+
     # Validation last, after every field it validates.  It used to sit in the middle
     # of the field list, ahead of 89 of the settings it checks — legal, because the
     # dataclass machinery assigns every field before calling this, but it read as
@@ -1337,6 +1379,31 @@ class WorldConfig:
             raise ValueError(
                 f"settlement_min_reachable must be >= 1, got {self.settlement_min_reachable}"
             )
+        if self.naming_cultures < 0:
+            raise ValueError(f"naming_cultures must be >= 0, got {self.naming_cultures}")
+        if self.naming_min_edit_distance < 1:
+            raise ValueError(
+                f"naming_min_edit_distance must be >= 1, got {self.naming_min_edit_distance}"
+            )
+        if self.naming_direction_radius < 0:
+            raise ValueError(
+                f"naming_direction_radius must be >= 0, got {self.naming_direction_radius}"
+            )
+        if self.naming_max_letters < 4:
+            raise ValueError(f"naming_max_letters must be >= 4, got {self.naming_max_letters}")
+        for name in (
+            "naming_region_climb_m",
+            "naming_region_river_cost",
+            "naming_region_water_cost",
+            "naming_great_river_km2",
+            "naming_river_min_catchment_km2",
+            "naming_hill_relief_m",
+            "naming_high_elevation_m",
+            "naming_founder_weight",
+            "naming_river_weight",
+        ):
+            if getattr(self, name) < 0:
+                raise ValueError(f"{name} must be >= 0, got {getattr(self, name)}")
         for name in (
             "cultivation_city_radius",
             "cultivation_town_radius",

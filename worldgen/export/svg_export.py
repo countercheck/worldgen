@@ -15,7 +15,7 @@ from ..render.debug_viewer import (
     TERRAIN_COLORS,
     is_fog,
 )
-from . import legend, rivers
+from . import labels, legend, rivers
 
 
 @dataclass
@@ -629,12 +629,39 @@ def render(ws: WorldState, config: SVGConfig | None = None) -> str:
         out.append("  </g>")
 
     if "labels" in layers:
-        out.append('  <g id="layer-labels" font-family="sans-serif" font-size="7" fill="black">')
-        for s in ws.settlements:
-            px, py = axial_to_pixel(s.coord, size)
-            cx, cy = px + ox, py + oy - size - 2
+
+        def centre(coord):
+            px, py = axial_to_pixel(coord, size)
+            return px + ox, py + oy
+
+        placed = labels.place_labels(
+            ws,
+            centre,
+            size,
+            settlements="settlements" in layers,
+            rivers="rivers" in layers,
+        )
+        # A pale halo under every name, painted as the text's own stroke, so a name stays
+        # legible over dark forest or a road running under it.
+        halo = max(1.0, size / 6.0)
+        out.append(
+            '  <g id="layer-labels" font-family="sans-serif" fill="black"'
+            f' stroke="#ffffff" stroke-opacity="0.8" stroke-width="{halo:.2f}"'
+            ' stroke-linejoin="round" paint-order="stroke">'
+        )
+        for lb in placed:
+            attrs = f' font-size="{lb.size:.2f}"'
+            if lb.bold:
+                attrs += ' font-weight="bold"'
+            if lb.river:
+                attrs += (
+                    f' font-family="serif" font-style="italic" fill="{config.river_casing_color}"'
+                    f' transform="rotate({lb.angle:.1f} {lb.x:.2f} {lb.y:.2f})"'
+                    ' class="river-label"'
+                )
             out.append(
-                f'    <text x="{cx:.2f}" y="{cy:.2f}" text-anchor="middle">{_xml_escape(s.name)}</text>'
+                f'    <text x="{lb.x:.2f}" y="{lb.y:.2f}" text-anchor="middle"'
+                f' dominant-baseline="central"{attrs}>{_xml_escape(lb.text)}</text>'
             )
         out.append("  </g>")
 

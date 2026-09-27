@@ -194,6 +194,10 @@ class Settlement:
     role: "SettlementRole"
     population: int
     name: str
+    # Which people named it, and what the name meant when they did — "ford on the Vassa".
+    # Empty until `NamingStage` runs, and for a world written before names were made.
+    culture: str = ""
+    etymology: str = ""
 
 
 class SettlementTier(Enum):

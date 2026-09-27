@@ -644,6 +644,27 @@ road_track_pct: 0.60      # Remainder classified as tracks. Default: 0.60
 road_tier_gap_max_edges: 12 # Longest lower-class stretch promoted where a road of one class stops and resumes across it. Tiers are cut per edge on traffic, so where two routes part for a hex and rejoin, a trunk road dips a class for a kilometre and comes back; this fills the dip. Only from where a road of that class stops — a connector leaving the middle of one trunk for another keeps its class. 0 turns it off. Default: 12
 
 # ---------------------------------------------------------------------------
+# Naming: settlements and rivers named in languages invented from the seed
+# ---------------------------------------------------------------------------
+# A settlement is named for what its site is — a ford, a marsh, a mine, a river it
+# stands on — in the language of the culture region it falls in. The same meaning is
+# the same word everywhere in one language, so names share parts the way real ones do.
+naming_cultures: 3                     # Culture regions, each with its own language. 0 turns naming off and keeps the placeholder names. Default: 3
+naming_substrate: true                 # An older people named the rivers, and the present ones kept the names (Celtic rivers in English counties). false: each river is named by whoever holds its mouth. Default: true
+naming_region_climb_m: 150.0           # Culture regions spread from homelands at a cost, so frontiers fall where crossing is hard. Metres of climb costing as much as one hex of level going. Default: 150.0
+naming_region_river_cost: 8.0          # Added to a culture's spread for crossing a great river, in hexes of level going. Default: 8.0
+naming_region_water_cost: 2.0          # Added per hex of open or inland water crossed, in hexes of level going. Default: 2.0
+naming_great_river_km2: 1000.0         # Catchment above which a river is a great river: a frontier between peoples. About the top 3% of rivers on a 128x128 map. Default: 1000.0
+naming_river_min_catchment_km2: 200.0  # Rivers draining at least this much are named. About a quarter of the rivers on a 128x128 map. Default: 200.0
+naming_min_edit_distance: 2            # How many single-letter edits apart any two names must be. 2 refuses Tharnos beside Tharnas; 1 refuses only exact repeats. Default: 2
+naming_max_letters: 12                 # Longest settlement name, in letters, before another is drawn. Default: 12
+naming_hill_relief_m: 100.0            # Metres of command over the ground below at which a site can be named for its hill. Default: 100.0
+naming_high_elevation_m: 800.0         # Elevation above which a site can be called high. Default: 800.0
+naming_direction_radius: 12            # A place can be named for the side of a bigger one it lies on (Norton, Sutton) when that bigger place is within this many hexes. Default: 12
+naming_founder_weight: 0.4             # How often a name is a founder's rather than the ground's, against about 1-2 for a site's strongest feature. Default: 0.4
+naming_river_weight: 3.0               # How strongly a town on a named river takes its name (Avonmouth, Stratford-on-Avon), on the same scale. Default: 3.0
+
+# ---------------------------------------------------------------------------
 # Export  (used by: worldgen export --config worldgen.yaml ...)
 # CLI flags --style, --color-mode, --hex-size, --padding, --layers override these.
 # ---------------------------------------------------------------------------

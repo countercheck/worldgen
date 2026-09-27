@@ -33,6 +33,7 @@ function worldOf(catchments: readonly number[]): World {
 const along = (n: number): River => ({
   hexes: Array.from({ length: n }, (_, q): Hex => ({ q, r: 0 })),
   flowVolume: 0,
+  name: '',
 });
 
 describe('splitting a river by class', () => {
@@ -74,7 +75,7 @@ describe('splitting a river by class', () => {
 
   it('draws a hex the mask has blanked as minor rather than dropping it', () => {
     const world = worldOf([10, 20]);
-    const runs = riverRuns({ hexes: [...along(2).hexes, { q: 9, r: 9 }], flowVolume: 0 }, world);
+    const runs = riverRuns({ hexes: [...along(2).hexes, { q: 9, r: 9 }], flowVolume: 0, name: '' }, world);
     expect(runs.map((r) => r.cls)).toEqual(['minor']);
     expect(runs[0].hexes).toHaveLength(3);
   });

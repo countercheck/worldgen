@@ -1,5 +1,6 @@
 import math
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -16,7 +17,7 @@ from ..render.debug_viewer import (
     TERRAIN_COLORS,
     is_fog,
 )
-from . import legend, rivers
+from . import labels, legend, rivers
 
 
 @dataclass
@@ -268,6 +269,92 @@ def _draw_legend_glyph(draw: ImageDraw.ImageDraw, row, cx, cy, g: float, color_m
     else:  # "river" — matches the rivers layer's colour
         lw = max(1, round(2 * g / legend.SYMBOL_BOX))
         draw.line([(cx - g / 2, cy), (cx + g / 2, cy)], fill=(58, 120, 201), width=lw)
+
+
+_LABEL_HALO = (255, 255, 255)
+_RIVER_LABEL = _RIVER_CASING
+
+
+# Names are written in whatever letters their language spells with — â, š, ö — and PIL's
+# built-in face has none of those, so it draws a box for each. The DejaVu faces matplotlib
+# ships cover Latin in full, and matplotlib is already a dependency.
+_LABEL_FACES = {
+    (False, False): "DejaVuSans.ttf",
+    (True, False): "DejaVuSans-Bold.ttf",
+    (False, True): "DejaVuSerif-Italic.ttf",
+}
+
+
+def _label_font(px: float, cache: dict, bold: bool = False, italic: bool = False):
+    key = (max(6, round(px)), bold, italic)
+    if key not in cache:
+        import matplotlib
+
+        face = Path(matplotlib.get_data_path()) / "fonts" / "ttf" / _LABEL_FACES[(bold, italic)]
+        try:
+            cache[key] = ImageFont.truetype(str(face), key[0])
+        except OSError:
+            try:
+                cache[key] = ImageFont.load_default(size=key[0])
+            except (TypeError, AttributeError, OSError):
+                # Pillow < 10.1 has no scalable default; every label comes out one size.
+                cache[key] = ImageFont.load_default()
+    return cache[key]
+
+
+def _draw_labels(img, draw, ws: WorldState, size: float, ox: float, oy: float, layers) -> None:
+    """Settlement and river names, placed by `labels.place_labels`.
+
+    A river's name is drawn onto its own small canvas, turned, and pasted, since
+    `ImageDraw` cannot set text at an angle.
+    """
+    fonts: dict = {}
+
+    def measure(text: str, px: float, bold: bool) -> tuple[float, float]:
+        x0, y0, x1, y1 = draw.textbbox((0, 0), text, font=_label_font(px, fonts, bold))
+        return x1 - x0, y1 - y0
+
+    def centre(coord):
+        px, py = axial_to_pixel(coord, size)
+        return px + ox, py + oy
+
+    placed = labels.place_labels(
+        ws,
+        centre,
+        size,
+        measure,
+        settlements="settlements" in layers,
+        rivers="rivers" in layers,
+    )
+    halo = max(1, round(size / 8))
+    for lb in placed:
+        font = _label_font(lb.size, fonts, lb.bold, lb.italic)
+        fill = _RIVER_LABEL if lb.river else (0, 0, 0)
+        x0, y0, x1, y1 = draw.textbbox((0, 0), lb.text, font=font)
+        w, h = x1 - x0, y1 - y0
+        if not lb.angle:
+            draw.text(
+                (lb.x - w / 2 - x0, lb.y - h / 2 - y0),
+                lb.text,
+                fill=fill,
+                font=font,
+                stroke_width=halo,
+                stroke_fill=_LABEL_HALO,
+            )
+            continue
+        pad = 2 * halo
+        tile = Image.new("RGBA", (w + 2 * pad, h + 2 * pad), (0, 0, 0, 0))
+        ImageDraw.Draw(tile).text(
+            (pad - x0, pad - y0),
+            lb.text,
+            fill=(*fill, 255),
+            font=font,
+            stroke_width=halo,
+            stroke_fill=(*_LABEL_HALO, 255),
+        )
+        # PIL turns anticlockwise for a positive angle; the placement is clockwise.
+        tile = tile.rotate(-lb.angle, resample=Image.Resampling.BICUBIC, expand=True)
+        img.paste(tile, (round(lb.x - tile.width / 2), round(lb.y - tile.height / 2)), tile)
 
 
 def _legend_font(config: PNGConfig):
@@ -538,17 +625,7 @@ def render(ws: WorldState, config: PNGConfig | None = None) -> Image.Image:
             _draw_settlement(draw, s.tier, px + ox, py + oy, role=s.role)
 
     if "labels" in layers:
-        try:
-            font = ImageFont.load_default()
-        except Exception:
-            font = None
-        for s in ws.settlements:
-            px, py = axial_to_pixel(s.coord, size)
-            cx, cy = int(px + ox), int(py + oy)
-            bbox = draw.textbbox((0, 0), s.name, font=font)
-            tw = bbox[2] - bbox[0]
-            th = bbox[3] - bbox[1]
-            draw.text((cx - tw // 2, cy - int(size) - th - 2), s.name, fill=(0, 0, 0), font=font)
+        _draw_labels(img, draw, ws, size, ox, oy, layers)
 
     # Legend last so it paints over anything that reaches into the corner.
     if legend_m is not None:
