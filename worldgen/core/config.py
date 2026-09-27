@@ -14,6 +14,11 @@ HEIGHTMAP_MODES = ("elevation", "coastline")
 # what a world is, and core must not import from stages to validate itself.
 MODELS = ("classic", "organic")
 
+# The hand-written naming cultures `WorldConfig.naming_packs` may name. Listed here for the
+# same reason as MODELS — the config validates itself without importing a layer above it —
+# and a test holds it equal to `worldgen.naming.packs.PACKS`.
+CULTURE_PACKS = ("arabic", "english", "french", "norse", "slavic", "welsh")
+
 
 @dataclass(frozen=True)
 class ClimateContext:
@@ -990,6 +995,13 @@ class WorldConfig:
     # river names outlived Celtic speech across England. False: each river is named by
     # whoever holds its mouth.
     naming_substrate: bool = True
+    # Hand-written culture packs for the regions, in order: the first region speaks the
+    # first pack, and so on; regions past the end of the list get invented languages.
+    # One of: arabic, english, french, norse, slavic, welsh. At most naming_cultures.
+    naming_packs: tuple[str, ...] = ()
+    # A pack for the older people who named the rivers, in place of an invented language:
+    # "welsh" under "english" is England. Empty for an invented one.
+    naming_substrate_pack: str = ""
     # Culture regions spread from their homelands at a cost, so frontiers fall where
     # crossing is hard. Metres of climb that cost as much as a hex of level going.
     naming_region_climb_m: float = 150.0
@@ -1006,7 +1018,9 @@ class WorldConfig:
     # How far apart any two names on the map must be, in single-letter edits. 2 refuses
     # Tharnos beside Tharnas; 1 only refuses exact repeats.
     naming_min_edit_distance: int = 2
-    # Longest name, in letters, a settlement may be given before another is drawn.
+    # Longest word, in letters, a settlement's name may have before another is drawn — a
+    # word, so Villeneuve-sur-Lot passes and a twenty-letter run-on compound does not. The
+    # whole name may run to twice this.
     naming_max_letters: int = 12
     # Metres of command over the ground below at which a site is a hill and can be named
     # for one. 100 is about the top 15% of settlement sites on a 128x128 map.
@@ -1381,6 +1395,19 @@ class WorldConfig:
             )
         if self.naming_cultures < 0:
             raise ValueError(f"naming_cultures must be >= 0, got {self.naming_cultures}")
+        self.naming_packs = tuple(self.naming_packs)
+        for pack in (*self.naming_packs, self.naming_substrate_pack or "english"):
+            if pack not in CULTURE_PACKS:
+                raise ValueError(
+                    f"unknown culture pack {pack!r}; choose from {', '.join(CULTURE_PACKS)}"
+                )
+        if len(set(self.naming_packs)) != len(self.naming_packs):
+            raise ValueError(f"naming_packs names a pack twice: {list(self.naming_packs)}")
+        if len(self.naming_packs) > self.naming_cultures:
+            raise ValueError(
+                f"naming_packs lists {len(self.naming_packs)} packs for "
+                f"{self.naming_cultures} naming_cultures; raise naming_cultures or drop a pack"
+            )
         if self.naming_min_edit_distance < 1:
             raise ValueError(
                 f"naming_min_edit_distance must be >= 1, got {self.naming_min_edit_distance}"

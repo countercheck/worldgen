@@ -1,0 +1,148 @@
+"""Culture packs: naming cultures written by hand from real place-name elements.
+
+A generated language is endless and alien. A pack is the other thing a map sometimes
+wants: names a reader half-recognises, because they are built from the elements real
+places are built from — English -ford and -ton, Norse -by and -thwaite, Welsh aber- and
+pont-, French -ville and plessis, Slavic brod and hradište, Arabic jisr and kafr.
+
+Each pack is data: for every meaning in `site.GENERICS` and `site.SPECIFICS`, the words
+that culture used for it, and a handful of templates for how those words go together.
+`PackCulture` turns that data into the `Culture` protocol the stage speaks, so a pack and
+a generated language are interchangeable region by region.
+
+Templates are `str.format` strings over lower-case parts, title-cased at the end:
+
+    {h}   the head, a word from `heads`
+    {q}   a qualifier from `quals`, used as it stands
+    {a}   the same qualifier agreeing with the head: a trailing "~" in the qualifier is
+          replaced by the ending for the head's gender (Slavic adjectives)
+    {p}   a founder's name
+    {r}   a river's name
+
+A qualifier's "~" is simply dropped where it is used as {q}, which is how a Slavic stem
+makes a one-word name — dubov~ gives Dubovec as well as Dubová Hora.
+"""
+
+import re
+import zlib
+from collections.abc import Mapping
+from dataclasses import dataclass, field
+
+import numpy as np
+
+from ..culture import Qualifier
+
+
+@dataclass(frozen=True)
+class Pack:
+    key: str
+    # What the people are called, and so what their region is called on the map.
+    name: str
+    heads: Mapping[str, tuple[str, ...]]
+    quals: Mapping[str, tuple[str, ...]]
+    # How a head and a qualifier combine; one is drawn per name.
+    compound: tuple[str, ...]
+    # How a head and a founder's name combine.
+    founder: tuple[str, ...]
+    # How a head and the river it stands on combine.
+    river_on: tuple[str, ...]
+    # Personal names are built as first + second, as most early naming systems built them.
+    person_first: tuple[str, ...]
+    river_roots: tuple[str, ...]
+    person_second: tuple[str, ...] = ("",)
+    # How a river root becomes a river's name; {root} is the root.
+    river_patterns: tuple[str, ...] = ("{root}",)
+    bare: tuple[str, ...] = ("{h}",)
+    # Words left in lower case inside a name: of, on, the.
+    particles: frozenset[str] = frozenset()
+    # Grammatical gender of each head word, and the adjective ending each gender takes.
+    genders: Mapping[str, str] = field(default_factory=dict)
+    endings: Mapping[str, str] = field(default_factory=dict)
+
+
+_SEPARATORS = re.compile(r"([ -])")
+_ELIDED = re.compile(r"^([ld])'(.)(.*)$")
+
+
+def _pick(options: tuple[str, ...], rng: np.random.Generator) -> str:
+    return options[int(rng.integers(len(options)))]
+
+
+class PackCulture:
+    """A `Culture` that names from a `Pack`."""
+
+    def __init__(self, pack: Pack):
+        self.pack = pack
+        self.name = pack.name
+
+    def _title(self, text: str) -> str:
+        parts = _SEPARATORS.split(text)
+        out = []
+        for i, part in enumerate(parts):
+            if i and part in self.pack.particles:
+                out.append(part)
+            elif m := _ELIDED.match(part):
+                out.append(m.group(1) + "'" + m.group(2).upper() + m.group(3))
+            else:
+                out.append(part[:1].upper() + part[1:])
+        # Three of a letter running together is always a join, never a word.
+        return re.sub(r"(.)\1\1", r"\1\1", "".join(out))
+
+    def place_name(
+        self, generic: str, qualifier: Qualifier | None, rng: np.random.Generator
+    ) -> str:
+        pack = self.pack
+        head = _pick(pack.heads[generic], rng)
+        parts = {"h": head.lower()}
+        if qualifier is None:
+            template = _pick(pack.bare, rng)
+        elif qualifier.kind == "meaning":
+            word = _pick(pack.quals[qualifier.value], rng).lower()
+            ending = pack.endings.get(pack.genders.get(head, ""), "")
+            parts["q"] = word.replace("~", "")
+            parts["a"] = word.replace("~", ending)
+            template = _pick(pack.compound, rng)
+        elif qualifier.relation == "on":
+            parts["r"] = qualifier.value.lower()
+            template = _pick(pack.river_on, rng)
+        else:
+            parts["p"] = qualifier.value.lower()
+            template = _pick(pack.founder, rng)
+        return self._title(template.format(**parts))
+
+    def _persons(self) -> list[str]:
+        return [
+            f + s
+            for f in self.pack.person_first
+            for s in self.pack.person_second
+            if f.lower() != s.lower()
+        ]
+
+    def _rivers(self) -> list[str]:
+        return [
+            pattern.format(root=root)
+            for pattern in self.pack.river_patterns
+            for root in self.pack.river_roots
+        ]
+
+    def proper_name(self, key: str, syllables: int) -> str:
+        """A founder's or a river's name, stable for a key.
+
+        *syllables* means nothing to a pack — its names are whole words — so it is used to
+        step to the next name instead, which is what a caller raising it is asking for:
+        something different. Past the end of the list, two names are joined, so a caller
+        that keeps asking always eventually gets one it has not seen.
+        """
+        kind = key.split(":", 1)[0]
+        if kind == "people":
+            return self.name
+        names = self._rivers() if kind == "river" else self._persons()
+        h = zlib.crc32(key.encode())
+        n = len(names)
+        first = names[(h + syllables) % n]
+        if syllables < n:
+            return self._title(first)
+        return self._title(first + names[(h // n + syllables // n) % n].lower())
+
+
+__all__ = ["Pack", "PackCulture"]

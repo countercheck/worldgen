@@ -2086,6 +2086,15 @@ settlement stage, and because a stage appended at the end draws the last child s
    (`naming_river_weight`). A name longer than `naming_max_letters`, or within
    `naming_min_edit_distance` edits of any name already given, is redrawn.
 
+**Culture packs.** A region can speak a hand-written pack instead of an invented language
+(`naming_packs`, `naming_substrate_pack`): data modules in
+[naming/packs/](../worldgen/naming/packs/) giving, for every head and qualifier above, the
+words a real naming tradition used — English -ford/-ton, Norse -by/-thwaite, Welsh
+aber-/pont-, French -ville/plessis, Slavic brod/hradište with gender agreement, Arabic
+jisr/kafr — and templates for how they combine. Languages are invented for every region
+either way and then replaced, so choosing packs never changes what the other regions are
+called.
+
 Each settlement records its `culture` and an English `etymology` ("ford on the Vassa");
 `metadata["cultures"]` lists the languages. Labels on the SVG and PNG exports are placed by
 [export/labels.py](../worldgen/export/labels.py): sized by tier, rivers italic along their
@@ -2592,13 +2601,15 @@ placed where its only escape requires one.
 |---|---|---|---|
 | `naming_cultures` | `int` | `3` | Culture regions, each with an invented language. 0 turns naming off and keeps the placeholder names. Validated `≥ 0` |
 | `naming_substrate` | `bool` | `true` | An older people named the rivers and the present ones kept the names. `false`: each river is named by whoever holds its mouth |
+| `naming_packs` | `list[str]` | `[]` | Hand-written culture packs for the regions, in order; regions past the end get invented languages. Any of `arabic`, `english`, `french`, `norse`, `slavic`, `welsh`. Validated: known, no repeats, at most `naming_cultures` |
+| `naming_substrate_pack` | `str` | `""` | A pack for the people who named the rivers in place of an invented language — `welsh` under `english` is England. Empty for an invented one |
 | `naming_region_climb_m` | `float` | `150.0` | Metres of climb costing as much as one hex of level going when culture regions spread |
 | `naming_region_river_cost` | `float` | `8.0` | Added for crossing a great river, in hexes of level going |
 | `naming_region_water_cost` | `float` | `2.0` | Added per hex of open or inland water crossed |
 | `naming_great_river_km2` | `float` | `1000.0` | Catchment above which a river is great: a frontier between peoples, and named in two syllables. About the top 3% of rivers on a 128x128 map |
 | `naming_river_min_catchment_km2` | `float` | `200.0` | Rivers draining at least this much are named. About a quarter of rivers on a 128x128 map |
 | `naming_min_edit_distance` | `int` | `2` | Single-letter edits any two names must be apart; capped at a quarter of the shorter name. Validated `≥ 1` |
-| `naming_max_letters` | `int` | `12` | Longest settlement name before another is drawn. Validated `≥ 4` |
+| `naming_max_letters` | `int` | `12` | Longest word in a settlement's name before another is drawn; the whole name may run to twice this, so phrase names like Villeneuve-sur-Lot pass. Validated `≥ 4` |
 | `naming_hill_relief_m` | `float` | `100.0` | Relief at which a site can be named for its hill |
 | `naming_high_elevation_m` | `float` | `800.0` | Elevation above which a site can be called high |
 | `naming_direction_radius` | `int` | `12` | How near a bigger place must be for a settlement to be named for the side of it it lies on |

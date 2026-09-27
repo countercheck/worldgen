@@ -17,6 +17,8 @@ edits them in place; this replaces them all at once at the end, rather than aski
 stage that founds a settlement to know about languages.
 """
 
+import re
+
 import numpy as np
 
 from ..core.hex import Hex, HexCoord, Settlement, SettlementTier, TerrainClass
@@ -25,6 +27,7 @@ from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
 from ..naming import (
     GLOSS,
+    Culture,
     Language,
     NameRegistry,
     Qualifier,
@@ -32,6 +35,7 @@ from ..naming import (
     culture_regions,
     read_site,
 )
+from ..naming.packs import PACKS, PackCulture
 
 _WATER = (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
 _TIER_ORDER = {SettlementTier.CITY: 0, SettlementTier.TOWN: 1, SettlementTier.VILLAGE: 2}
@@ -69,8 +73,15 @@ def _pick(options: dict, rng: np.random.Generator):
     return keys[int(np.searchsorted(np.cumsum(weights) / total, rng.random(), side="right"))]
 
 
-def _letters(name: str) -> int:
-    return sum(ch.isalpha() for ch in name)
+def _fits(name: str, max_letters: int) -> bool:
+    """No word longer than *max_letters*, and the whole no longer than twice that.
+
+    By the word, because a phrase name is legitimately long — Villeneuve-sur-Lot — where a
+    run-on compound of the same length is not.
+    """
+    words = re.split(r"[ -]", name)
+    letters = [sum(ch.isalpha() for ch in w) for w in words]
+    return max(letters) <= max_letters and sum(letters) <= 2 * max_letters
 
 
 class NamingStage(GeneratorStage):
@@ -80,12 +91,13 @@ class NamingStage(GeneratorStage):
             return state
         rng = self.rng
 
-        cultures = self._languages(cfg.naming_cultures, rng)
-        substrate = (
-            self._languages(1, rng, taken={c.name for c in cultures})[0]
-            if (cfg.naming_substrate)
-            else None
-        )
+        cultures = self._cultures(cfg.naming_cultures, cfg.naming_packs, rng)
+        substrate = None
+        if cfg.naming_substrate:
+            # Invented even when a pack replaces it, so the draws after it do not move.
+            substrate = self._languages(1, rng, {c.name for c in cultures})[0]
+            if cfg.naming_substrate_pack:
+                substrate = PackCulture(PACKS[cfg.naming_substrate_pack])
         regions = culture_regions(
             state.hexes,
             len(cultures),
@@ -107,10 +119,25 @@ class NamingStage(GeneratorStage):
                 state.hexes, s, culture, river_at, anchors.get(s.coord), registry, rng
             )
 
-        state.metadata["cultures"] = [{"name": c.name, "role": "regional"} for c in cultures] + (
-            [{"name": substrate.name, "role": "substrate"}] if substrate else []
+        def record(culture, role: str) -> dict:
+            pack = culture.pack.key if isinstance(culture, PackCulture) else None
+            return {"name": culture.name, "role": role, "pack": pack}
+
+        state.metadata["cultures"] = [record(c, "regional") for c in cultures] + (
+            [record(substrate, "substrate")] if substrate else []
         )
         return state
+
+    @classmethod
+    def _cultures(cls, n: int, packs: tuple[str, ...], rng: np.random.Generator) -> list:
+        """One culture per region: the named packs first, invented languages for the rest.
+
+        Languages are invented for every region either way and then replaced, so choosing
+        packs does not shift the draws that invent the rest — a pack swapped in for region
+        one leaves region three speaking what it did.
+        """
+        invented = cls._languages(n, rng, {PACKS[k].name for k in packs})
+        return [PackCulture(PACKS[k]) for k in packs] + invented[len(packs) :]
 
     @staticmethod
     def _languages(n: int, rng: np.random.Generator, taken: set[str] | None = None):
@@ -202,7 +229,7 @@ class NamingStage(GeneratorStage):
         self,
         hexes: dict[HexCoord, Hex],
         s: Settlement,
-        culture: Language,
+        culture: Culture,
         river_at,
         anchor: HexCoord | None,
         registry: NameRegistry,
@@ -242,7 +269,7 @@ class NamingStage(GeneratorStage):
                 etymology = f"{founder}'s {GLOSS[generic]}"
 
             name = culture.place_name(generic, qualifier, rng)
-            if _letters(name) <= cfg.naming_max_letters and registry.accepts(name):
+            if _fits(name, cfg.naming_max_letters) and registry.accepts(name):
                 break
         else:
             # Every draw collided or ran long. A founder's name grows a syllable at a time

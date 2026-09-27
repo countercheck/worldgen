@@ -617,13 +617,15 @@ road_tier_gap_max_edges: 12 # Longest lower-class stretch promoted where a road 
 # the same word everywhere in one language, so names share parts the way real ones do.
 naming_cultures: 3                     # Culture regions, each with its own language. 0 turns naming off and keeps the placeholder names. Default: 3
 naming_substrate: true                 # An older people named the rivers, and the present ones kept the names (Celtic rivers in English counties). false: each river is named by whoever holds its mouth. Default: true
+naming_packs: []                       # Hand-written culture packs for the regions, in order; regions past the end of the list get invented languages. Any of: arabic, english, french, norse, slavic, welsh. At most naming_cultures entries. e.g. [english, norse]. Default: []
+naming_substrate_pack: ""              # A pack for the people who named the rivers, in place of an invented language. welsh under english is England. Empty for an invented one. Default: ""
 naming_region_climb_m: 150.0           # Culture regions spread from homelands at a cost, so frontiers fall where crossing is hard. Metres of climb costing as much as one hex of level going. Default: 150.0
 naming_region_river_cost: 8.0          # Added to a culture's spread for crossing a great river, in hexes of level going. Default: 8.0
 naming_region_water_cost: 2.0          # Added per hex of open or inland water crossed, in hexes of level going. Default: 2.0
 naming_great_river_km2: 1000.0         # Catchment above which a river is a great river: a frontier between peoples. About the top 3% of rivers on a 128x128 map. Default: 1000.0
 naming_river_min_catchment_km2: 200.0  # Rivers draining at least this much are named. About a quarter of the rivers on a 128x128 map. Default: 200.0
 naming_min_edit_distance: 2            # How many single-letter edits apart any two names must be. 2 refuses Tharnos beside Tharnas; 1 refuses only exact repeats. Default: 2
-naming_max_letters: 12                 # Longest settlement name, in letters, before another is drawn. Default: 12
+naming_max_letters: 12                 # Longest word in a settlement's name, in letters, before another is drawn; the whole name may run to twice this, so Villeneuve-sur-Lot passes. Default: 12
 naming_hill_relief_m: 100.0            # Metres of command over the ground below at which a site can be named for its hill. Default: 100.0
 naming_high_elevation_m: 800.0         # Elevation above which a site can be called high. Default: 800.0
 naming_direction_radius: 12            # A place can be named for the side of a bigger one it lies on (Norton, Sutton) when that bigger place is within this many hexes. Default: 12
