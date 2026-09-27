@@ -462,12 +462,13 @@ class WorldConfig:
     #     rural = (1 - s) * sum(food)                  * people_per_food
     #
     # so `rural / town = (1 - s) / (s * mean weight)`, and the mean haulage weight over a
-    # catchment is about 0.31. 0.32 puts 16% of the people in market towns of any size;
-    # England c. 1300 had ~10% in towns over 2,000 and ~5% more in small boroughs (Dyer).
-    # 0.20 gave 7%, too rural even for the period,
-    # and it could not be fixed with `people_per_food` because that scales both sides at
-    # once.
-    marketable_surplus_fraction: float = 0.32
+    # catchment is about 0.31. The default 0.40, with `yield_multiplier` 1.7, is England
+    # c. 1800: 25% of the people in market towns of any size, against 27.5% in towns over
+    # 5,000 in the 1801 census (Wrigley). 0.32 is England c. 1300, 16% against ~15% (Dyer);
+    # 0.20 gave 7%, too rural for any period, and it could not be fixed with
+    # `people_per_food` because that scales both sides at once. It also plants markets,
+    # since siting counts surplus: 0.40 gives ~104 on a 128x128 map against ~85 at 0.32.
+    marketable_surplus_fraction: float = 0.40
     # Naismith's rule: this many metres of ascent cost as much as one hex of level
     # ground. Catchments are walked, not engineered, so they use this rather than
     # road_delta_elevation_per_hex, which prices a graded road and is five times stricter than a
@@ -575,7 +576,8 @@ class WorldConfig:
     # construction rather than by calibration.
     #
     # Set from the rural side, because that is where there is a figure to hit: 180 puts a
-    # temperate 128x128 map at 38-43 people per km2; England in 1290 was 31-36 (Campbell
+    # temperate 128x128 map at 38-43 people per km2 at yield_multiplier 1.0 (58-63 at the
+    # 1.7 default, against 59 in the 1801 census); England in 1290 was 31-36 (Campbell
     # 2008; Broadberry et al. 2015), or 38-46 on the older 5-6M estimates. It was
     # 400 when it sized settlements alone and nothing else read it; at that value the
     # countryside came out at 88 per km2, which is Belgium in 1900.
@@ -725,9 +727,11 @@ class WorldConfig:
     yield_arable: float = 1.0
     yield_pasture: float = 0.55
     yield_wood: float = 0.30
-    # Farming technology, as one multiplier on the arable and pasture yields. 1.0 is
-    # England c.1300; see the era table in worldgen.yaml.
-    yield_multiplier: float = 1.0
+    # Farming technology, as one multiplier on the arable and pasture yields. The default
+    # 1.7 is England c. 1800, after the clover and turnip rotations and before guano and
+    # chemical fertiliser: 58-63 people per km2 against the 1801 census's 59. 1.0 is
+    # England c. 1300. See the era table in worldgen.yaml.
+    yield_multiplier: float = 1.7
     # Where clearing stops, as a fraction of the best rent the settlement can reach.
     # Relative rather than absolute, and that is the substance of it: a market with a
     # floodplain has a high bar and leaves its hillsides to sheep, while a market on

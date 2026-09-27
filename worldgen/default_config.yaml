@@ -365,7 +365,7 @@ yield_wood: 0.30     # Still under trees; nobody has cleared it. Default: 0.30
 #   Ancient, core (Roman Italy c. AD 14)  0.75   0.42     180      25-30 / 25-35% [a]      35-38 / 24% / 6-7 / 24-27k
 #   Medieval, thin (Scotland c. 1300)     0.5    0.25     60       6-13 / <10%             9-10 / 8% / 1 / ~2.5k
 #   Medieval, typical (England, northern  1.0    0.32     180      30-40 / ~15% [b]        39-43 / 16% / 5 / 19-20k
-#     France c. 1300) - the defaults
+#     France c. 1300)
 #   Medieval, dense (Flanders, northern   2.0    0.45     180      60-80 / 20-35% [c]      69-80 / 30% / 13-15 / 64-68k
 #     Italy c. 1300)
 #   Early modern (England c. 1700)        1.1    0.35     180      ~39 / 17% (>5k) [d]     42-46 / 19% / 6-7 / 24-26k
@@ -373,14 +373,14 @@ yield_wood: 0.30     # Still under trees; nobody has cleared it. Default: 0.30
 #     c. 1650)
 #   Improved farming (England c. 1800;    1.7    0.40     180      59 / 27.5% (>5k)        58-63 / 25% / 10-11 / 41-46k
 #     rotation and marl, before guano
-#     and chemical fertiliser)
+#     and chemical fertiliser) - the defaults
 #   Improved farming, dense (Belgium      4.0    0.45     180      125-134 / ~30% (>5k)    123-146 / 31% / 19-22 / 122-128k
 #     c. 1830)
 #
 #   [a] The low count (Beloch, Brunt: 6-7.5M). The high count (Lo Cascio: 12-14M) gives
 #       ~50/km2 and 15-20% urban. The map sits between the two.
 #   [b] England 1290 was 4.0M (Campbell 2008) to 4.75M (Broadberry et al. 2015). Older
-#       estimates of 5-6M gave 38-46/km2, which is where the defaults sit; people_per_food
+#       estimates of 5-6M gave 38-46/km2, which is where this row sits; people_per_food
 #       160 lands mid-range. Urban: ~10% in towns over 2,000 plus ~5% in small boroughs
 #       (Dyer). Northern France: ~40/km2 from the 1328 hearth count.
 #   [c] Flanders 33-36% (Prevenier); centre-north Italy 20-25% in towns over 5,000
@@ -411,7 +411,7 @@ yield_wood: 0.30     # Still under trees; nobody has cleared it. Default: 0.30
 # Wrigley (1967, 1985) and Wrigley and Schofield (1981) for early modern England; de Vries,
 # European Urbanization 1500-1800 (1984), and de Vries and van der Woude (1997) for urban
 # shares and the Dutch Republic; Letters, Gazetteer of Markets and Fairs (2005).
-yield_multiplier: 1.0 # Farming technology, as one multiplier on yield_arable and yield_pasture. 1.0 is England c. 1300; see the table above. Default: 1.0
+yield_multiplier: 1.7 # Farming technology, as one multiplier on yield_arable and yield_pasture. 1.7 is England c. 1800, 1.0 England c. 1300; see the table above. Default: 1.7
 
 # Where clearing stops, as a fraction of the best rent the settlement can reach. Relative
 # rather than absolute, and that is the substance of it: a market with a floodplain has a
@@ -484,8 +484,8 @@ rural_field_radius: 2.5    # The daily walk to the fields; sets cultivated exten
 haulage_range_land: 40.0   # Travel cost at which bulk food is worth nothing overland. Default: 40.0
 haulage_transship_cost: 8.0 # What it costs to get a cargo onto the water and off again, charged once at each land-water transition, in the same units as haulage_range_land. Without it the sea is a teleport: at a fifteenth the cost per hex a cargo once afloat crosses the map for nothing, every coastal market reaches every other, and the city tier flattens. Default: 8.0
 haulage_range_water_mult: 15.0 # How much further the same cargo goes by water. Diocletian's Price Edict prices land carriage at 28-56x sea and 6-11x river for the same tonne-kilometre (Duncan-Jones: sea 1, river 4.9, wagon 28, pack animal 56). This is why large pre-industrial cities sit on navigable water and inland ones stay small: nothing gates a city, water simply extends what can feed it. Default: 15.0
-marketable_surplus_fraction: 0.32 # What leaves the farm: not only what the household sells but the rent, the tithe and the dues, all of which end up feeding somebody in a town. It is the one number setting the ratio between town and countryside — rural/town = (1 - s) / (s x mean haulage weight) — so 0.32 puts 16% of the people in market towns of any size; England c. 1300 had ~10% in towns over 2,000 and ~5% more in small boroughs (Dyer). Default: 0.32
-people_per_food: 180.0     # People fed per unit of food, and the one scale factor for the whole population of the map — settlements and countryside alike, which is what makes the two reconcile by construction. Set from the rural side because that is where there is a figure to hit: 180 puts a temperate 128x128 map at 38 people per km2 against England's ~35 in 1300. At the old 400 the countryside came out at 88 per km2, which is Belgium in 1900. Default: 180
+marketable_surplus_fraction: 0.40 # What leaves the farm: not only what the household sells but the rent, the tithe and the dues, all of which end up feeding somebody in a town. It is the one number setting the ratio between town and countryside — rural/town = (1 - s) / (s x mean haulage weight) — so 0.40, with yield_multiplier 1.7, puts 25% of the people in market towns of any size, against 27.5% in towns over 5,000 in England's 1801 census (Wrigley). 0.32 is England c. 1300. It also plants markets, since siting counts surplus: ~104 at 0.40 against ~85 at 0.32. See the era table. Default: 0.40
+people_per_food: 180.0     # People fed per unit of food, and the one scale factor for the whole population of the map — settlements and countryside alike, which is what makes the two reconcile by construction. Set from the rural side because that is where there is a figure to hit: 180 puts a temperate 128x128 map at 58-63 people per km2 at the default yield_multiplier of 1.7, against England's 59 in the 1801 census, and at 38-43 at 1.0 (England c. 1300 was 30-40). At the old 400 the countryside came out at 88 per km2, which is Belgium in 1900. Default: 180
 travel_ascent_per_hex: 125.0 # Naismith's rule: metres of ascent that cost as much as one hex of level ground. Catchments are walked, not engineered, so they use this rather than road_delta_elevation_per_hex, which prices a graded road and is about five times stricter than a walker has reason to be. Default: 125
 travel_ford_cost: 8.0      # Getting across away from a crossing, per multiple of the wadeable span, charged on each land–river edge. Deliberately has no fixed term, unlike road_river_crossing_base: that base is the capital of building a bridge, and somebody walking to market pays no capital — what stops them is how much water is in the way. Default: 8.0
 

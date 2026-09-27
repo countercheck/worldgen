@@ -37,6 +37,12 @@ def soil_value(soil: SoilQuality | None, cfg) -> float:
 def potential_food(hx, cfg) -> float:
     """What one hex could contribute to a catchment, if it were worked as well as it can be.
 
+    As well as it can be *under baseline husbandry* — England c. 1300. `yield_multiplier`
+    is better technique on top of this and lifts only `actual_food`, so at the c. 1800
+    default a ploughed hex yields more than its potential. That is deliberate: siting and
+    land use read this surface, and better farming fed more people from the same market
+    network rather than planting a denser one.
+
     Water and wetland are valued in their own right rather than by a soil class, because
     neither is ploughland: the sea is a fishery and a bog is a bog. Water is deliberately
     non-zero — scoring it at nothing penalised coastal sites twice over, once for the waste
