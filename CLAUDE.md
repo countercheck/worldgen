@@ -45,6 +45,19 @@ fails on a layer importing one above it. Add a rule there when you add one here.
 - Key invariants: rivers reach ocean, no uphill flow, city separation respected,
   road paths connected, JSON round-trips losslessly, same seed → same output
 
+## Worktrees (required)
+
+All work happens in a git worktree, never in the main checkout. Before editing any
+file, create one under `.claude/worktrees/<name>` on its own branch (the `EnterWorktree`
+tool does this; by hand: `git worktree add .claude/worktrees/<name> -b <branch> master`).
+`.claude/worktrees/` is gitignored.
+
+- One task, one worktree, one branch. Don't reuse another session's worktree.
+- The main checkout's `.venv` works from a worktree: `python3 -m pytest` run from the
+  worktree root imports the worktree's `worldgen/`, not the editable install's.
+- `campaign/node_modules` is not shared — run `npm install` in the worktree's `campaign/`.
+- Remove the worktree once its branch is merged: `git worktree remove .claude/worktrees/<name>`.
+
 ## Pre-commit checks
 
 The pre-commit hook runs `ruff check` and `pytest` before every commit.

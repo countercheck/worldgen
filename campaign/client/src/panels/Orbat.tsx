@@ -25,6 +25,7 @@ import {
   type Commander,
   type Echelon,
   type Experience,
+  type Faction,
   type Hex,
   type UnitKind,
   type Unit,
@@ -36,6 +37,7 @@ import {
   draftProblems,
   emptyDraft,
   idFor,
+  startingColor,
   unitFrom,
   type UnitDraft,
 } from '../orbat.js';
@@ -347,6 +349,78 @@ export function AppointForm({
       </div>
 
       <p className="muted small">{copy.orbat.appointBlurb}</p>
+    </div>
+  );
+}
+
+/**
+ * A new side: a name and a colour, both the referee's.
+ *
+ * The picker opens on a colour well away from the sides already raised, so two sides
+ * added in a hurry do not come out the same shade. It is only where the picker starts;
+ * nothing is coloured until the referee adds the side.
+ */
+export function FactionForm({
+  factions,
+  onAdd,
+  onCancel,
+  busy,
+}: {
+  factions: readonly Faction[];
+  onAdd: (faction: Faction) => void;
+  onCancel: () => void;
+  busy: boolean;
+}) {
+  const [name, setName] = useState('');
+  const [color, setColor] = useState(() => startingColor(factions.length));
+
+  return (
+    <div className="orbat-form">
+      <p className="muted small">{copy.orbat.newSide}</p>
+      <div className="orbat-grid">
+        <label>
+          <span>{copy.orbat.sideName}</span>
+          <input
+            value={name}
+            placeholder={copy.orbat.sideNamePlaceholder}
+            onChange={(e) => setName(e.target.value)}
+            disabled={busy}
+          />
+        </label>
+
+        <label>
+          <span>{copy.orbat.sideColor}</span>
+          <input
+            type="color"
+            className="color-pick"
+            value={color}
+            onChange={(e) => setColor(e.target.value)}
+            disabled={busy}
+          />
+        </label>
+      </div>
+
+      <div className="despatch-actions">
+        <button
+          className="primary"
+          disabled={busy || name.trim() === ''}
+          onClick={() =>
+            onAdd({
+              id: idFor(name, new Set(factions.map((f) => f.id))),
+              name: name.trim(),
+              color,
+            })
+          }
+        >
+          <span className="swatch small" style={{ background: color }} />
+          {copy.orbat.addSide}
+        </button>
+        <button onClick={onCancel} disabled={busy}>
+          {copy.orbat.cancel}
+        </button>
+      </div>
+
+      <p className="muted small">{copy.orbat.sideBlurb}</p>
     </div>
   );
 }

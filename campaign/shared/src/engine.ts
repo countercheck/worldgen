@@ -304,6 +304,15 @@ export function check(
       if (state.factions.has(cmd.faction.id)) {
         v.push(hard(CODES.DUPLICATE_ID, `faction ${cmd.faction.id} already exists`));
       }
+      // Checked here because a side is now named and coloured by hand. The colour goes
+      // straight into every marker, so anything other than a hex colour is refused
+      // rather than drawn as nothing.
+      if (cmd.faction.id.trim() === '' || cmd.faction.name.trim() === '') {
+        v.push(hard(CODES.MALFORMED, 'a side needs an id and a name'));
+      }
+      if (!/^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(cmd.faction.color)) {
+        v.push(hard(CODES.MALFORMED, `${cmd.faction.color} is not a colour`));
+      }
       break;
 
     case 'add_commander': {

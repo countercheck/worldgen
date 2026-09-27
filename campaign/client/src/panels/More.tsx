@@ -29,6 +29,7 @@ export function More({
   reachDisabled,
   onReach,
   onHome,
+  onHelp,
   onClose,
 }: {
   identities: readonly Identity[];
@@ -41,6 +42,7 @@ export function More({
   reachDisabled: boolean;
   onReach: (on: boolean) => void;
   onHome: () => void;
+  onHelp: () => void;
   onClose: () => void;
 }) {
   return (
@@ -116,6 +118,11 @@ export function More({
         <button className="more-home" onClick={onHome}>
           {copy.console.home}
           <span className="muted small">{copy.console.homeHint}</span>
+        </button>
+
+        <button className="more-home" onClick={onHelp}>
+          {copy.help.open}
+          <span className="muted small">{copy.help.heading}</span>
         </button>
       </section>
     </div>

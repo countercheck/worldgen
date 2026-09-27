@@ -32,6 +32,7 @@ import {
   presentUnderArms,
   type CampaignConfig,
   type Commander,
+  type Faction,
   type Hex,
   type PublicCommander,
   type PublicFaction,
@@ -48,7 +49,7 @@ import {
   type FormationNode,
   type RosterLine,
 } from '../roster.js';
-import { AppointForm, RaiseForm } from './Orbat.jsx';
+import { AppointForm, FactionForm, RaiseForm } from './Orbat.jsx';
 
 /** The referee's order-of-battle controls. Absent for a commander, who raises nothing. */
 export interface OrbatEditing {
@@ -57,6 +58,13 @@ export interface OrbatEditing {
   readonly onPlace: () => void;
   readonly onRaise: (unit: Unit, commander: Commander) => void;
   readonly onAppoint: (commander: Commander) => void;
+  /** Add a side. A campaign starts with none. */
+  readonly onAddFaction: (faction: Faction) => void;
+  /**
+   * The join link for a commander's seat: the one this browser already holds, or a new one.
+   * Rejects when the server will not issue it.
+   */
+  readonly linkFor: (commanderId: string) => Promise<string>;
   /** A form was closed without raising anything: forget the hex it was pointed at. */
   readonly onDiscard: () => void;
   readonly busy: boolean;
@@ -67,7 +75,14 @@ export interface OrbatEditing {
 type Editing =
   | { readonly kind: 'raise'; readonly superiorId: string | null }
   | { readonly kind: 'appoint'; readonly unitId: string }
+  | { readonly kind: 'side' }
   | null;
+
+/** A commander's link, as far as the referee has got in asking for it. */
+type LinkState =
+  | { readonly kind: 'fetching' }
+  | { readonly kind: 'shown'; readonly link: string; readonly copied: boolean }
+  | { readonly kind: 'failed'; readonly why: string };
 
 export function Roster({
   open,
@@ -109,6 +124,7 @@ export function Roster({
   const [folded, setFolded] = useState<ReadonlySet<string>>(new Set());
   const [shown, setShown] = useState<ReadonlySet<string>>(new Set());
   const [form, setForm] = useState<Editing>(null);
+  const [links, setLinks] = useState<Readonly<Record<string, LinkState>>>({});
 
   const trees = commandTrees({
     factions: factions.map((f) => f.id),
@@ -129,6 +145,53 @@ export function Roster({
   const closeForm = (): void => {
     setForm(null);
     editing?.onDiscard();
+  };
+
+  /**
+   * Put a commander's link in front of the referee, and on the clipboard where allowed.
+   *
+   * Shown as well as copied. The clipboard needs a secure page and, on some phones, a
+   * gesture it will not count after a network round trip, and a copy that silently fails
+   * leaves the referee pasting whatever they copied last.
+   */
+  const copyLink = (commanderId: string): void => {
+    if (editing === undefined) return;
+    setLinks((l) => ({ ...l, [commanderId]: { kind: 'fetching' } }));
+    editing
+      .linkFor(commanderId)
+      .then(async (link) => {
+        let copied = false;
+        try {
+          await navigator.clipboard.writeText(link);
+          copied = true;
+        } catch {
+          /* Shown below instead, to be copied by hand. */
+        }
+        setLinks((l) => ({ ...l, [commanderId]: { kind: 'shown', link, copied } }));
+      })
+      .catch((err: unknown) => {
+        const why = String((err as Error).message ?? err);
+        setLinks((l) => ({ ...l, [commanderId]: { kind: 'failed', why } }));
+      });
+  };
+
+  const linkLine = (commanderId: string): ReactNode => {
+    const state = links[commanderId];
+    if (state === undefined || state.kind === 'fetching') return null;
+    if (state.kind === 'failed') {
+      return <p className="error small">{copy.roster.linkFailed(state.why)}</p>;
+    }
+    return (
+      <div className="cmd-link">
+        <p className="muted small">{state.copied ? copy.roster.linkCopied : copy.roster.linkToCopy}</p>
+        <code
+          className="link"
+          onClick={(e) => window.getSelection()?.selectAllChildren(e.currentTarget)}
+        >
+          {state.link}
+        </code>
+      </div>
+    );
   };
 
   const officers = commanders.map((c) => ({ id: c.id, name: c.name, faction: c.faction }));
@@ -252,7 +315,19 @@ export function Roster({
               {copy.roster.addSubordinate}
             </button>
           )}
+          {editing !== undefined && (
+            <button
+              className="cmd-action"
+              title={copy.roster.copyLinkHint}
+              disabled={links[c.id]?.kind === 'fetching'}
+              onClick={() => copyLink(c.id)}
+            >
+              {links[c.id]?.kind === 'fetching' ? copy.roster.fetchingLink : copy.roster.copyLink}
+            </button>
+          )}
         </div>
+
+        {linkLine(c.id)}
 
         <ul className="cmd-rides">{formationRow(c.formation)}</ul>
 
@@ -276,7 +351,7 @@ export function Roster({
         </button>
       </header>
 
-      {factions.length > 1 && (
+      {(factions.length > 1 || (editing !== undefined && factions.length > 0)) && (
         <div className="tabs" role="tablist">
           {factions.map((f) => (
             <button
@@ -294,23 +369,51 @@ export function Roster({
               <span className="muted"> · {units.filter((u) => u.faction === f.id).length}</span>
             </button>
           ))}
+          {editing !== undefined && (
+            <button
+              className={`tab${form?.kind === 'side' ? ' on' : ''}`}
+              onClick={() => setForm(form?.kind === 'side' ? null : { kind: 'side' })}
+            >
+              {copy.roster.addSide}
+            </button>
+          )}
         </div>
       )}
 
       <div className="roster-body">
         {editing?.error != null && <p className="error">{editing.error}</p>}
 
+        {editing !== undefined && factions.length === 0 && (
+          <p className="muted small">{copy.roster.noSides}</p>
+        )}
+
+        {editing !== undefined && (form?.kind === 'side' || factions.length === 0) && (
+          <FactionForm
+            // Remounted per count, so the picker starts afresh away from the side just added.
+            key={factions.length}
+            factions={factions}
+            onAdd={(faction) => {
+              editing.onAddFaction(faction);
+              setTab(faction.id);
+              setForm(null);
+            }}
+            onCancel={() => setForm(null)}
+            busy={editing.busy}
+          />
+        )}
+
         {role === 'commander' && reports.length > 0 && (
           <p className="muted small">{copy.roster.asLastHeard}</p>
         )}
 
-        {current === undefined || (current.roots.length === 0 && current.uncommanded.length === 0) ? (
+        {factions.length === 0 ? null : current === undefined ||
+          (current.roots.length === 0 && current.uncommanded.length === 0) ? (
           <p className="muted small">{copy.roster.empty}</p>
         ) : (
           <ul className="cmd-tree cmd-top">{current.roots.map((c) => commanderNode(c, true))}</ul>
         )}
 
-        {editing !== undefined && (
+        {editing !== undefined && faction !== undefined && (
           <div className="despatch-actions">
             <button
               onClick={() =>
