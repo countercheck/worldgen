@@ -1599,9 +1599,11 @@ describe('patrols', () => {
 
     const land = [...world.hexes.values()].filter((h) => h.terrainClass === 'land');
     const start = state.units.get('vedette')!.column[0]!;
-    const goal = land.find(
-      (h) => Math.abs(h.coord.q - start.q) + Math.abs(h.coord.r - start.r) > 6,
-    )!.coord;
+    // The farthest land there is, so the ride lasts most of the day whatever the fixture's
+    // geography. "The first hex more than six away" was a short ride on some seeds.
+    const away = (h: (typeof land)[number]) =>
+      Math.abs(h.coord.q - start.q) + Math.abs(h.coord.r - start.r);
+    const goal = land.reduce((far, h) => (away(h) > away(far) ? h : far)).coord;
 
     const ordered = applyOrThrow(
       { kind: 'set_task', unitId: 'vedette', destination: goal },

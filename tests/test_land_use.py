@@ -113,8 +113,10 @@ def test_only_ploughable_soil_is_ploughed(used):
 
 def test_working_land_never_yields_more_than_the_ground_allows(used):
     cfg = WorldConfig(**used.metadata["config"])
+    # Potential is the ground under baseline husbandry; `yield_multiplier` is the era's
+    # technique on top of it.
     for hx in used.hexes.values():
-        assert actual_food(hx, cfg) <= potential_food(hx, cfg) + 1e-9
+        assert actual_food(hx, cfg) <= potential_food(hx, cfg) * cfg.yield_multiplier + 1e-9
 
 
 def test_only_the_plough_gets_the_whole_of_it(used):
@@ -127,7 +129,7 @@ def test_only_the_plough_gets_the_whole_of_it(used):
     for hx in _land(used):
         if hx.soil is SoilQuality.UNUSABLE or potential_food(hx, cfg) == 0.0:
             continue
-        full = actual_food(hx, cfg) == pytest.approx(potential_food(hx, cfg))
+        full = actual_food(hx, cfg) == pytest.approx(potential_food(hx, cfg) * cfg.yield_multiplier)
         assert full == (hx.land_use is LandUse.ARABLE), (
             f"{hx.coord} is {hx.land_use} and yields "
             f"{actual_food(hx, cfg):.2f} of {potential_food(hx, cfg):.2f}"
@@ -148,14 +150,16 @@ def test_the_countryside_holds_the_people_the_markets_do_not(used):
     rural = sum(h.rural_population for h in used.hexes.values())
     town = sum(s.population for s in used.settlements)
     assert rural > town, "more people should live on the land than in the towns"
-    assert rural / (rural + town) > 0.8, (
+    # England in 1801, the default era, had 27.5% in towns over 5,000 (Wrigley); the map
+    # counts every market town, so it may run a little higher, but not past 30%.
+    assert rural / (rural + town) > 0.7, (
         f"only {100 * rural / (rural + town):.0f}% of the map's people are rural; "
         "a pre-industrial society is not that urban"
     )
 
 
 def test_rural_density_is_pre_industrial(used):
-    """England in 1300 carried about 35 people per km2, and a hex is 1 km2.
+    """England and Wales carried 59 people per km2 in 1801, the default era, and a hex is 1 km2.
 
     A figure that came out at 90 would mean `people_per_food` had been calibrated on the
     settlements alone and left to say something absurd about the countryside — which is
@@ -164,7 +168,7 @@ def test_rural_density_is_pre_industrial(used):
     land = _land(used)
     total = sum(h.rural_population for h in land) + sum(s.population for s in used.settlements)
     density = total / len(land)
-    assert 15.0 < density < 60.0, f"{density:.1f} people per km2"
+    assert 20.0 < density < 80.0, f"{density:.1f} people per km2"
 
 
 def test_nobody_lives_on_ground_that_feeds_nobody(used):

@@ -11,9 +11,10 @@ from worldgen.core.config import WorldConfig
 from worldgen.core.errors import RoutingError
 from worldgen.core.hex import Hex, TerrainClass
 from worldgen.core.hex_grid import astar, distance
-from worldgen.core.world_state import River
+from worldgen.core.world_state import River, RoadTier, road_edge_key
 from worldgen.stages.road_cost import (
     ferry_link,
+    fill_tier_gaps,
     make_road_edge_cost,
     reachable_under_constraint,
     river_crossing_edge_cost,
@@ -22,6 +23,7 @@ from worldgen.stages.road_cost import (
     road_edge_cost,
     slope_edge_cost,
     terrain_base_cost,
+    tier_near,
     water_edge_cost,
 )
 
@@ -537,3 +539,74 @@ def test_ferry_link_raises_when_nothing_lies_outside_the_component():
             lambda hx: terrain_base_cost(hx, cfg),
             make_road_edge_cost(cfg, blocked),
         )
+
+
+# -- tier gaps ---------------------------------------------------------------
+
+P, S, T = RoadTier.PRIMARY, RoadTier.SECONDARY, RoadTier.TRACK
+
+
+def _line(tiers):
+    """A straight road along r = 0 whose i-th edge has tiers[i]."""
+    return {road_edge_key((i, 0), (i + 1, 0)): t for i, t in enumerate(tiers)}
+
+
+def test_fill_tier_gaps_promotes_a_dip_between_two_primary_ends():
+    edges = _line([P, P, S, T, P, P])
+    assert fill_tier_gaps(edges, 6) == 2
+    assert set(edges.values()) == {P}
+
+
+def test_fill_tier_gaps_leaves_a_dip_longer_than_the_limit():
+    edges = _line([P, S, S, S, P])
+    assert fill_tier_gaps(edges, 2) == 0
+    assert list(edges.values()) == [P, S, S, S, P]
+
+
+def test_fill_tier_gaps_zero_is_off():
+    edges = _line([P, S, P])
+    assert fill_tier_gaps(edges, 0) == 0
+    assert edges[road_edge_key((1, 0), (2, 0))] is S
+
+
+def test_fill_tier_gaps_fills_secondary_dips_too():
+    edges = _line([S, T, S])
+    fill_tier_gaps(edges, 6)
+    assert set(edges.values()) == {S}
+
+
+def test_fill_tier_gaps_keeps_a_connector_between_two_trunks():
+    """A secondary leaving the middle of one primary for the middle of another is a
+    junction road, not a break in either trunk."""
+    edges = _line([P, P])  # (0,0)-(2,0), passing through (1,0)
+    edges.update({road_edge_key((0, 3), (1, 3)): P, road_edge_key((1, 3), (2, 3)): P})
+    edges.update({road_edge_key((1, 0), (1, 1)): S, road_edge_key((1, 1), (1, 2)): S})
+    edges[road_edge_key((1, 2), (1, 3))] = S
+    assert fill_tier_gaps(edges, 6) == 0
+
+
+def test_fill_tier_gaps_ignores_a_lane_back_onto_the_same_road():
+    """Two ends of one primary network are already joined; a lane between them is a
+    shortcut the traffic declined."""
+    edges = _line([P, P, P, P])
+    edges.update({road_edge_key((0, 0), (0, 1)): T, road_edge_key((4, 0), (4, 1)): T})
+    for q in range(4):
+        edges[road_edge_key((q, 1), (q + 1, 1))] = T
+    assert fill_tier_gaps(edges, 6) == 0
+
+
+def test_fill_tier_gaps_closes_a_trunk_stopping_short_of_another():
+    """One primary ends a hex from the middle of a second: the T is closed."""
+    edges = _line([P, P])  # (0,0)-(2,0), passing through (1,0)
+    edges.update({road_edge_key((1, 3), (1, 4)): P, road_edge_key((1, 4), (1, 5)): P})
+    edges.update({road_edge_key((1, 0), (1, 1)): S, road_edge_key((1, 1), (1, 2)): S})
+    edges[road_edge_key((1, 2), (1, 3))] = S
+    assert fill_tier_gaps(edges, 6) == 3
+
+
+def test_tier_near_reads_the_best_road_within_reach():
+    edges = _line([T, T, P, S])
+    assert tier_near(edges, (0, 0), 1) is T
+    assert tier_near(edges, (0, 0), 3) is P
+    assert tier_near(edges, (4, 0), 1) is S
+    assert tier_near(edges, (9, 9), 5) is T

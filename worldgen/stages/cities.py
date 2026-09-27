@@ -6,11 +6,11 @@ big each one grows.  Nothing in that model can produce a city, because a city is
 large market.  It is a place fed from beyond a day's reach.
 
 What makes that possible is bulk haulage, and what makes bulk haulage possible is water.
-Diocletian's Price Edict puts land carriage at roughly fifty-five times sea and eleven
-times river for the same tonne-kilometre, so the range over which a place can be
-provisioned is not a property of the place — it is a property of what lies around it.  A
-town on a navigable river or a sheltered coast draws on fifteen times the reach of one the
-same size inland, and that single multiplier is the whole of the difference.
+Diocletian's Price Edict puts land carriage at 28-56 times sea and 6-11 times river for
+the same tonne-kilometre, so the range over which a place can be provisioned is not a
+property of the place — it is a property of what lies around it.  A town on a navigable
+river or a sheltered coast draws on fifteen times the reach of one the same size inland,
+and that single multiplier is the whole of the difference.
 
 So this stage founds nothing.  It asks of each market how much *other* markets' surplus
 can reach it, promotes the ones that clear `city_min_draw`, and moves the surplus it
@@ -18,14 +18,22 @@ absorbs off the markets that sent it.  The size gap between a port and an inland
 produced by one constant rather than by a rule that says ports are bigger.
 """
 
-import heapq
-
-from ..core.hex import SettlementTier
-from ..core.hex_grid import neighbors
+from ..core.hex import SettlementTier, TerrainClass
+from ..core.hex_grid import distance, hex_range
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
 from .habitability import actual_food
-from .haulage import gather, make_bulk_cost, usable_fraction
+from .haulage import bulk_routes, gather, navigable, usable_fraction
+
+# How a cargo travels on a hex, ranked so the quay of a change is the lower-ranked side:
+# the land hex where a cart meets a boat, or the river hex where a barge meets a ship.
+_LAND, _INLAND_WATER, _SEA = 0, 1, 2
+
+
+def _mode(hx, cfg) -> int:
+    if hx.terrain_class is TerrainClass.OPEN_WATER:
+        return _SEA
+    return _INLAND_WATER if navigable(hx, cfg) else _LAND
 
 
 class CityPromotionStage(GeneratorStage):
@@ -40,13 +48,28 @@ class CityPromotionStage(GeneratorStage):
             return state
 
         draw = self._market_draw(hexes, cfg)
-        reach = {s.coord: self._bulk_reach(hexes, s.coord, cfg) for s in markets}
+        routes = {s.coord: self._bulk_routes(hexes, s.coord, cfg) for s in markets}
+        reach = {coord: cost for coord, (cost, _) in routes.items()}
 
-        promoted, absorbed = self._promote(markets, draw, reach, cfg)
-        if not promoted:
-            return state
+        promoted, _ = self._promote(markets, draw, reach, cfg)
+        if promoted:
+            # Promotion decides which markets are cities; how big each grows is decided by
+            # where the countryside's surplus actually goes, which is the allocation.
+            absorbed = self._allocate(markets, promoted, draw, reach, cfg)
+            toward = {coord: way for coord, (_, way) in routes.items()}
+            self._resize(state, markets, absorbed, draw, promoted, cfg, toward)
+            self._trade(state, cfg)
 
-        self._resize(state, markets, absorbed, draw, promoted, cfg)
+        # The second road to a city: a town grown past `city_min_population`, which after
+        # transshipment is an entrepôt that feeds nobody's hinterland but handles everyone's.
+        if cfg.city_min_population > 0:
+            for s in markets:
+                if s.tier is SettlementTier.TOWN and s.population >= cfg.city_min_population:
+                    s.tier = SettlementTier.CITY
+                    s.name = s.name.replace("_market_", "_city_")
+                    promoted.append(s.coord)
+        if promoted:
+            state.metadata["cities"] = sorted(promoted)
         return state
 
     # -- what each market already gathers -------------------------------------
@@ -71,43 +94,41 @@ class CityPromotionStage(GeneratorStage):
 
     @staticmethod
     def _bulk_reach(hexes, seat, cfg) -> dict:
-        """Cost of hauling bulk to *seat* from anywhere within `haulage_range_land`.
+        """Cost of hauling bulk to *seat* from anywhere within `haulage_range_land`."""
+        return CityPromotionStage._bulk_routes(hexes, seat, cfg)[0]
 
-        A second Dijkstra, over `make_bulk_cost` rather than `make_travel_cost`. That
-        distinction is the whole stage: travel cost makes water impassable, because a
-        catchment is ground somebody works, while a cargo goes by ship. Using the wrong one
-        here does not fail loudly — it silently makes every city inland, because the reach
-        then measures nothing but how central a market is on land.
+    @staticmethod
+    def _bulk_routes(hexes, seat, cfg) -> tuple[dict, dict]:
+        """`bulk_routes` to one seat: the cost of hauling bulk there, and the way."""
+        return bulk_routes(hexes, [seat], cfg)
 
-        Returns cost keyed by coord, over hexes within budget.
+    # -- transshipment --------------------------------------------------------
+
+    @staticmethod
+    def _break_points(source, seat, toward, hexes, cfg) -> list:
+        """The quays a cargo from *source* to *seat* crosses: every change in how it travels.
+
+        Cart to boat, boat to cart, and barge to ship where a navigable river meets the sea.
+        The quay is the lower-ranked side of the change — the land hex, or the river hex at
+        the mouth — because that is where the warehouses and the porters stand.
         """
-        node_cost, edge_cost = make_bulk_cost(hexes, cfg)
-        budget = cfg.haulage_range_land
+        quays = []
+        here = source
+        while here != seat:
+            nxt = toward.get(here)
+            if nxt is None:
+                break
+            a, b = _mode(hexes[here], cfg), _mode(hexes[nxt], cfg)
+            if a != b:
+                quays.append(here if a < b else nxt)
+            here = nxt
+        return quays
 
-        cost: dict = {seat: 0.0}
-        heap = [(0.0, seat)]
-        while heap:
-            d, coord = heapq.heappop(heap)
-            if d > cost.get(coord, float("inf")):
-                continue
-            hx = hexes[coord]
-            for n in neighbors(coord):
-                n_hx = hexes.get(n)
-                if n_hx is None:
-                    continue
-                # The search expands outward from the seat, but the cargo travels the
-                # other way — so each relaxation prices the step *n -> here*, toward the
-                # seat. Getting the edge direction wrong does not fail loudly: slope is
-                # the only asymmetric term, so it silently inflates the draw of every
-                # market the country rises toward.
-                step = node_cost(n_hx) + edge_cost(n_hx, hx)
-                if step == float("inf"):
-                    continue
-                nd = d + step
-                if nd < budget and nd < cost.get(n, float("inf")):
-                    cost[n] = nd
-                    heapq.heappush(heap, (nd, n))
-        return cost
+    @staticmethod
+    def _handler(quay, seats, radius):
+        """The settlement that handles cargo at *quay*: the nearest within *radius*, if any."""
+        near = [(distance(quay, c), c) for c in hex_range(quay, radius) if c in seats]
+        return min(near)[1] if near else None
 
     # -- promotion ------------------------------------------------------------
 
@@ -126,21 +147,22 @@ class CityPromotionStage(GeneratorStage):
         absorbed: dict = {}
 
         while True:
-            best, best_take = None, None
+            best, best_take, best_total = None, None, -1.0
             for seat in seats:
                 if seat in absorbed:
                     continue
-                take = {
+                offered = {
                     other: remaining.get(other, 0.0)
                     * usable_fraction(reach[seat][other], cfg.haulage_range_land)
                     for other in seats
                     if other != seat and other in reach[seat]
                 }
-                total = sum(take.values())
-                if best_take is None or total > sum(best_take.values()):
-                    best, best_take = seat, take
+                total = sum(offered.values())
+                if total > best_total:
+                    best, best_total = seat, total
+                    best_take = self._nearest_share(offered, reach[seat], total, cfg)
 
-            if best is None or sum(best_take.values()) < cfg.city_min_draw:
+            if best is None or best_total < cfg.city_min_draw:
                 break
 
             promoted.append(best)
@@ -150,9 +172,85 @@ class CityPromotionStage(GeneratorStage):
 
         return promoted, absorbed
 
+    @staticmethod
+    def _allocate(markets, promoted, draw, reach, cfg) -> dict:
+        """Where each market's shipped surplus goes: split between the cities by their pull.
+
+        Grain went where it fetched most after carriage, not to the nearest buyer. A big city
+        has more buyers and pays more, so it outbids a small one even from further off —
+        London drew on Norfolk and Yorkshire past towns that were nearer the farms — while
+        carriage still means the nearest city takes most. So a city's pull on a market is
+        its size times `usable_fraction` of the haul, and the market's shipment is split in
+        proportion to pull raised to `city_pull_sharpness`: very high sends everything to the
+        best-paying city, 0 splits it evenly, and in between the nearest city takes most with
+        a tail going to the great city further off.
+
+        A market ships `city_draw_share` of its surplus, and each city receives its share of
+        that times the part that survives the haul. Cities themselves ship nothing: they are
+        where the food goes.
+
+        Pull follows the size a city grows to, and that size follows the pull — which is how
+        a capital comes to dominate. Measured on founding sizes alone every candidate is a
+        market of a few hundred, size separates nothing, and distance decides it all: the
+        largest city came out barely bigger than the second. So the split is worked out
+        `city_pull_rounds` times, each round pulling with the sizes the last one produced.
+        """
+        cities = sorted(set(promoted))
+        start = {s.coord: s.population for s in markets}
+        survives = {
+            m: {
+                c: usable_fraction(reach[c][m], cfg.haulage_range_land)
+                for c in cities
+                if m in reach[c] and reach[c][m] < cfg.haulage_range_land
+            }
+            for m in sorted(start)
+            if m not in cities and draw.get(m, 0.0) > 0.0
+        }
+
+        size = {c: float(start[c]) for c in cities}
+        absorbed: dict = {}
+        for _ in range(max(1, cfg.city_pull_rounds)):
+            absorbed = {c: {} for c in cities}
+            for m, offers in survives.items():
+                pull = {c: (f * size[c]) ** cfg.city_pull_sharpness for c, f in offers.items()}
+                total = sum(pull.values())
+                if total <= 0.0:
+                    continue
+                shipped = draw[m] * cfg.city_draw_share
+                for c, p in pull.items():
+                    taken = shipped * (p / total) * offers[c]
+                    if taken > 0.0:
+                        absorbed[c][m] = taken
+            # The people who would follow that food, as `_resize` will move them.
+            size = {
+                c: start[c] + sum(start[m] * min(1.0, t / draw[m]) for m, t in absorbed[c].items())
+                for c in cities
+            }
+        return absorbed
+
+    @staticmethod
+    def _nearest_share(offered, cost, total, cfg) -> dict:
+        """What a city actually takes of what is *offered*: `city_draw_share` of it, nearest first.
+
+        Promotion is judged on everything that can reach a place; the take is capped. A city
+        that took all of it drained the half of the map its water reach covers, and every
+        city after the first was sized on leftovers. Filling from the cheapest source first
+        means the markets at the gates feed the city outright and the far ones keep their
+        surplus for a city of their own.
+        """
+        budget = total * cfg.city_draw_share
+        take: dict = {}
+        for other in sorted(offered, key=lambda o: (cost[o], o)):
+            if budget <= 0.0:
+                break
+            amount = min(offered[other], budget)
+            take[other] = amount
+            budget -= amount
+        return take
+
     # -- sizing ---------------------------------------------------------------
 
-    def _resize(self, state, markets, absorbed, draw, promoted, cfg):
+    def _resize(self, state, markets, absorbed, draw, promoted, cfg, toward=None):
         """Move the absorbed surplus onto the cities and off the markets that sent it.
 
         Conserved, deliberately. A city is not new food; it is the same countryside
@@ -185,6 +283,13 @@ class CityPromotionStage(GeneratorStage):
         city promoted before it, so its own draw is not all still its own: charging every
         seat exactly what was taken from it is what makes the books balance instead of
         counting the overlap twice.
+
+        Given *toward*, each city's routes home, every cargo also pays its way through the
+        ports it changes mode at on the way: `transship_share` of the people it feeds stay
+        with the settlement handling each quay between its source and the city, off the
+        city's gain. Still conserved — the handlers
+        eat out of the cargo they handle — so an entrepôt grows on trade that feeds somebody
+        else, which is how a river mouth can outgrow the hinterland it stands in.
         """
         by_coord = {s.coord: s for s in markets}
         start = {coord: s.population for coord, s in by_coord.items()}
@@ -196,6 +301,16 @@ class CityPromotionStage(GeneratorStage):
                 return 0.0
             return start[source] * min(1.0, taken / total)
 
+        share = cfg.transship_share if toward is not None else 0.0
+        handled: dict = {}
+        # Every flow, as [origin q, r, destination q, r, people it feeds, kind], for the
+        # road stage to carry: freight wears roads as travellers do.
+        freight: list = []
+        # Quays nobody stands at, keyed (quay, seat): the cargo through each and the people
+        # it would support. The city keeps them for now; `ResourceStage` founds a port on
+        # the busiest and moves them there.
+        unhandled: dict = {}
+
         lost: dict = {}
         gained: dict = {}
         for seat, take in absorbed.items():
@@ -203,6 +318,28 @@ class CityPromotionStage(GeneratorStage):
                 people = moved(other, taken)
                 lost[other] = lost.get(other, 0.0) + people
                 gained[seat] = gained.get(seat, 0.0) + people
+                if toward is not None and people > 0.0:
+                    freight.append([*other, *seat, round(people, 3), "food"])
+                if share <= 0.0:
+                    continue
+                paid = 0.0
+                for quay in self._break_points(other, seat, toward[seat], state.hexes, cfg):
+                    handler = self._handler(quay, by_coord, cfg.transship_radius)
+                    # Loading at its own market is part of what the market already is, and
+                    # unloading at the city is part of the city: only the places between
+                    # earn a living off the trade.
+                    if handler in (seat, other):
+                        continue
+                    cut = min(people * share, people - paid)
+                    if handler is None:
+                        food, kept = unhandled.get((quay, seat), (0.0, 0.0))
+                        unhandled[(quay, seat)] = (food + taken, kept + cut)
+                        paid += cut
+                        continue
+                    gained[handler] = gained.get(handler, 0.0) + cut
+                    gained[seat] -= cut
+                    paid += cut
+                    handled[handler] = handled.get(handler, 0.0) + taken
 
         for coord, settlement in by_coord.items():
             if coord in absorbed:
@@ -213,6 +350,99 @@ class CityPromotionStage(GeneratorStage):
                 settlement.population = max(1, round(settlement.population + delta))
 
         state.metadata["cities"] = sorted(promoted)
+        if handled:
+            state.metadata["transshipment"] = [
+                [q, r, round(food, 3)] for (q, r), food in sorted(handled.items())
+            ]
+        if unhandled:
+            state.metadata["unhandled_quays"] = [
+                [q, r, sq, sr, round(food, 3), round(people, 3)]
+                for ((q, r), (sq, sr)), (food, people) in sorted(unhandled.items())
+            ]
+        if freight:
+            state.metadata["freight"] = freight
+
+    # -- manufactured trade ---------------------------------------------------
+
+    def _trade(self, state, cfg) -> None:
+        """Manufactured goods between the cities, paying their way through every quay.
+
+        Raw goods run from the countryside to a city; what the cities make runs between
+        them, and that is the trade the great entrepôts and portage towns lived on — the
+        provisioning alone is too short-haul to pass through much of anything. Each city
+        puts `manufactured_trade_share` of its people's worth into trade, split between the
+        cities it can reach by their size times the share of a cargo that survives the
+        haul. Manufactures are worth more per ton than grain, so they go
+        `manufactured_range_mult` times as far.
+
+        Each shipment follows its bulk route and pays `transship_share` of itself at every
+        change of mode on the way, as provisioning does, to whoever stands at the quay —
+        drawn half from each of the two cities, so the books still balance. Quays nobody
+        stands at are left for `ResourceStage` to found a port on, as provisioning's are.
+        """
+        if cfg.manufactured_trade_share <= 0.0:
+            return
+        hexes = state.hexes
+        cities = sorted(s.coord for s in state.settlements if s.tier is SettlementTier.CITY)
+        if len(cities) < 2:
+            return
+        by_coord = {s.coord: s for s in state.settlements}
+        pop = {c: by_coord[c].population for c in cities}
+        budget = cfg.haulage_range_land * cfg.manufactured_range_mult
+        routes = {c: bulk_routes(hexes, [c], cfg, budget=budget) for c in cities}
+
+        handled = {(q, r): f for q, r, f in state.metadata.get("transshipment", [])}
+        unhandled: dict = {}
+        for q, r, sq, sr, food, people in state.metadata.get("unhandled_quays", []):
+            unhandled[((q, r), (sq, sr))] = (food, people)
+        freight = state.metadata.setdefault("freight", [])
+        delta: dict = {}
+
+        for origin in cities:
+            weight = {}
+            for dest in cities:
+                cost = routes[dest][0].get(origin)
+                if dest != origin and cost is not None:
+                    weight[dest] = pop[dest] * usable_fraction(cost, budget)
+            weight = {d: w for d, w in weight.items() if w > 0.0}
+            total = sum(weight.values())
+            if total <= 0.0:
+                continue
+            out = pop[origin] * cfg.manufactured_trade_share
+            for dest, w in sorted(weight.items()):
+                volume = out * w / total
+                freight.append([*origin, *dest, round(volume, 3), "goods"])
+                food = volume / cfg.people_per_food
+                paid = 0.0
+                quays = self._break_points(origin, dest, routes[dest][1], hexes, cfg)
+                for quay in quays:
+                    handler = self._handler(quay, by_coord, cfg.transship_radius)
+                    if handler in (origin, dest):
+                        continue
+                    cut = min(volume * cfg.transship_share, volume - paid)
+                    paid += cut
+                    if handler is None:
+                        for seat in (origin, dest):
+                            f, p = unhandled.get((quay, seat), (0.0, 0.0))
+                            unhandled[(quay, seat)] = (f + food / 2, p + cut / 2)
+                        continue
+                    delta[handler] = delta.get(handler, 0.0) + cut
+                    delta[origin] = delta.get(origin, 0.0) - cut / 2
+                    delta[dest] = delta.get(dest, 0.0) - cut / 2
+                    handled[handler] = handled.get(handler, 0.0) + food
+
+        for coord, d in delta.items():
+            s = by_coord[coord]
+            s.population = max(1, round(s.population + d))
+        if handled:
+            state.metadata["transshipment"] = [
+                [q, r, round(f, 3)] for (q, r), f in sorted(handled.items())
+            ]
+        if unhandled:
+            state.metadata["unhandled_quays"] = [
+                [q, r, sq, sr, round(f, 3), round(p, 3)]
+                for ((q, r), (sq, sr)), (f, p) in sorted(unhandled.items())
+            ]
 
 
 __all__ = ["CityPromotionStage"]

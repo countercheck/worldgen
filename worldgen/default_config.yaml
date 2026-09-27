@@ -24,6 +24,7 @@ model: classic          # Settlement and road model: classic | organic. The --mo
 # Elevation is metres above sea level, so sea level is zero by definition and is not a
 # setting. How the map looks is set by how high the land stands and how deep the sea lies.
 max_elevation_m: 1500.0  # Highest ground above sea level. The map's vertical scale, and the single most consequential setting for what country this is: 800 gives downland, 1500 mixed uplands, 3000 an Alpine massif. Default: 1500
+elevation_hypsometry_exponent: 2.0 # How lopsided the land is: each land height becomes top x (e / top) ^ k, applied after erosion. 1.0 keeps the noise's bell around half the range, leaving a quarter of the land at 25-30% of the peak and navigable rivers falling ~10 m/km, a torrent. 2.0 puts half the land in the lowest tenth of the range and navigable rivers at 1-2 m/km. Generated terrain only. Default: 2.0
 seabed_depth_m: 200.0    # How deep the sea floor lies at the map edge. A continental shelf, not an abyss. How much of the map ends up underwater follows from this and max_elevation_m. Default: 200
 coast_max_elevation_m: 100.0 # Land no higher than this beside the sea is coast. Default: 100
 
@@ -182,6 +183,7 @@ alluvium_quantile: 0.98       # Depth treated as full, for the droplet term only
 # accumulation — which gave desert and rainforest alike 5.6% of their land under channel.
 channel_min_discharge: 6000.0    # Catchment km2 x runoff mm needed to cut a channel — also the dial that decides whether the network branches at all: a basin shows only as many stream orders as its area divides into channel-sized pieces. 6000 is 12.5 km2, a channel ~7 m across and knee deep. Default: 6000
 navigable_min_discharge: 60000.0 # ...and to float a boat. Default: 150000
+cataract_min_drop_m: 20.0 # Metres a barge-sized river falls through one hex before it is a cataract: no boat passes, cargo portages round it, and the fall drives mills. 20 m/km is a 2% gradient, strong rapids at a kilometre to the hex. 0 turns cataracts off. Default: 20.0
 river_flow_continuous: false # Record a flow figure on every draining land hex, not only on hexes that carry a channel. Off by default: it is a diagnostic for inspecting the drainage field in the viewer, and turning it on does not add rivers to the map. Default: false
 # Rain the ground and its plants take before anything runs off. Rises with temperature,
 # which is why cold country sheds nearly all its rain and the taiga is full of rivers.
@@ -337,6 +339,83 @@ yield_arable: 1.0    # Cleared and under the plough. Default: 1.0
 yield_pasture: 0.55  # Grazed. Default: 0.55
 yield_wood: 0.30     # Still under trees; nobody has cleared it. Default: 0.30
 
+# ---------------------------------------------------------------------------
+# Era and region: how many people the land carries
+# ---------------------------------------------------------------------------
+# Three settings set an era, and they do different jobs:
+#
+#   yield_multiplier            Farming technology: rotation, manure, marl, clover. Scales
+#                               arable and pasture yields; the wood and the fishery are left
+#                               alone, so doubling it raises density by about 55%, not 100%.
+#                               The market network does not move (markets are sited on
+#                               potential yield), but more of them grow into cities.
+#   marketable_surplus_fraction What leaves the farm, which sets the share of people in
+#                               towns. Also plants more markets, since siting counts surplus.
+#   people_per_food             Scales every population linearly and moves nothing else. Use
+#                               it for thin countries: yield_multiplier cannot take density
+#                               much below ~23/km2, because the wood and the fishery still
+#                               feed people at any yield.
+#
+# Measured on seeds 42 and 7 (temperate 128x128, organic model, city_draw_share 0.7,
+# city_pull_sharpness 1.25, elevation_hypsometry_exponent 2.0).
+# "Target" is the historical figure; "map" is what these settings produced. Largest city
+# is the largest on the map.
+#
+#   Era / region                          yield  surplus  people   target                  map
+#                                         mult   fraction per_food km2 / urban             km2 / urban / cities / largest
+#   Ancient, frontier province            0.5    0.30     72       10-25 / ~10%            13-14 / 14% / 3-4 / 4-5k
+#     (Roman Britain, Gaul c. AD 150)
+#   Ancient, core (Roman Italy c. AD 14)  0.75   0.42     145      25-30 / 25-35% [a]      34-36 / 26% / 8 / 18-21k
+#   Medieval, thin (Scotland c. 1300)     0.5    0.25     48       6-13 / <10%             9 / 9% / 2 / 2-3k
+#   Medieval, typical (England, northern  1.0    0.32     145      30-40 / ~15% [b]        39-40 / 18% / 6-7 / 13-15k
+#     France c. 1300)
+#   Medieval, dense (Flanders, northern   2.0    0.45     145      60-80 / 20-35% [c]      72-74 / 32% / 14 / 34-39k
+#     Italy c. 1300)
+#   Early modern (England c. 1700)        1.1    0.35     145      ~39 / 17% (>5k) [d]     43 / 21% / 8 / 16-19k
+#   Early modern, dense (Dutch Republic   1.5    0.55     145      55-60 / 40-45% (>2.5k)  59 / 41% / 14-15 / 40-44k
+#     c. 1650)
+#   Improved farming (England c. 1800;    1.7    0.40     145      59 / 27.5% (>5k)        60-61 / 27% / 10-11 / 23-26k
+#     rotation and marl, before guano
+#     and chemical fertiliser) - the defaults
+#   Improved farming, dense (Belgium      4.0    0.45     145      125-134 / ~30% (>5k)    132-134 / 33% / 34-35 / 47-70k
+#     c. 1830)
+#
+#   [a] The low count (Beloch, Brunt: 6-7.5M). The high count (Lo Cascio: 12-14M) gives
+#       ~50/km2 and 15-20% urban. The map sits between the two.
+#   [b] England 1290 was 4.0M (Campbell 2008) to 4.75M (Broadberry et al. 2015). Older
+#       estimates of 5-6M gave 38-46/km2, which is where this row sits; people_per_food
+#       130 lands mid-range. Urban: ~10% in towns over 2,000 plus ~5% in small boroughs
+#       (Dyer). Northern France: ~40/km2 from the 1328 hearth count.
+#   [c] Flanders 33-36% (Prevenier); centre-north Italy 20-25% in towns over 5,000
+#       (Malanima).
+#   [d] France c. 1700 was as dense (~40/km2) but only ~10% urban in towns over 10,000;
+#       lower the surplus fraction for it.
+#
+# Urban share means nothing without a town-size threshold: England's >5k and >10k series
+# differ by 4-8 points. The map counts every market, down to a few hundred people, which
+# is looser than any historical series, so expect it a few points above a >5k figure.
+#
+# Density changed little net from 1300 to 1700, but not by standing still: the Black Death
+# took 30-50%, Europe recovered c. 1550-1600 (England c. 1630-50), and the 17th-century
+# crisis stalled it again. The step up is improved farming: English wheat went from 7-10
+# bushels an acre c. 1300 (Campbell) to 21-22 by 1800 (Turner, Beckett and Afton; Allen),
+# much of it gained 1600-1700.
+#
+# Thinner than the "thin" row: Norway and Sweden c. 1300 were 1-2/km2. Density is linear
+# in people_per_food, so scale it down in proportion.
+#
+# The rank-size rule puts the largest city at about twice the second. Real capitals were
+# often far more dominant: London c. 1700 was ~20 times Norwich, Paris 5-7 times Lyon.
+# city_draw_share, below city_min_draw, shifts people between the largest city and the
+# rest without changing either total; 1.0 moves towards a dominant capital.
+#
+# Sources: Scheidel (2008) and Wilson (2011) for Rome; Campbell (2000, 2008), Broadberry,
+# Campbell et al., British Economic Growth 1270-1870 (2015), and Dyer for medieval England;
+# Wrigley (1967, 1985) and Wrigley and Schofield (1981) for early modern England; de Vries,
+# European Urbanization 1500-1800 (1984), and de Vries and van der Woude (1997) for urban
+# shares and the Dutch Republic; Letters, Gazetteer of Markets and Fairs (2005).
+yield_multiplier: 1.7 # Farming technology, as one multiplier on yield_arable and yield_pasture. 1.7 is England c. 1800, 1.0 England c. 1300; see the table above. Default: 1.7
+
 # Where clearing stops, as a fraction of the best rent the settlement can reach. Relative
 # rather than absolute, and that is the substance of it: a market with a floodplain has a
 # high bar and leaves its hillsides to sheep, while a market on uniformly thin ground has a
@@ -355,6 +434,7 @@ habitability_coast_bonus: 0.25      # Flat bonus if the hex or a neighbour is co
 habitability_hill_bonus: 0.15       # Bonus for a site overlooking the ground beside it. Default: 0.15
 habitability_hill_relief_m: 75.0    # Metres of drop a site must command to be paid that bonus in full; below it the bonus scales down, so a knoll and a bluff are not worth the same. Default: 75.0
 habitability_confluence_bonus: 0.10 # Flat bonus on a river junction (this hex only). Default: 0.10
+habitability_mill_bonus: 0.15 # Site bonus for standing on or beside a cataract: water power for a mill. Default: 0.15
 
 # --- the classic model: counts and spacing are inputs -----------------------
 # Used by `generate --model classic`. The map is told how many cities and towns to have
@@ -406,10 +486,11 @@ crossing_use_cost: 0.5        # Cost of using an existing ford or bridge. Defaul
 #                                water ratio below, not this absolute.
 rural_field_radius: 2.5    # The daily walk to the fields; sets cultivated extent. Default: 2.5
 haulage_range_land: 40.0   # Travel cost at which bulk food is worth nothing overland. Default: 40.0
-haulage_transship_cost: 8.0 # What it costs to get a cargo onto the water and off again, charged once at each land-water transition, in the same units as haulage_range_land. Without it the sea is a teleport: at a fifteenth the cost per hex a cargo once afloat crosses the map for nothing, every coastal market reaches every other, and the city tier flattens. Default: 8.0
-haulage_range_water_mult: 15.0 # How much further the same cargo goes by water. Diocletian's Price Edict prices land carriage at roughly 55x sea and 11x river for the same tonne-kilometre. This is why large pre-industrial cities sit on navigable water and inland ones stay small: nothing gates a city, water simply extends what can feed it. Default: 15.0
-marketable_surplus_fraction: 0.32 # What leaves the farm: not only what the household sells but the rent, the tithe and the dues, all of which end up feeding somebody in a town. It is the one number setting the ratio between town and countryside — rural/town = (1 - s) / (s x mean haulage weight) — so 0.32 puts 13% of the people in towns, the range England and France sat in around 1300. Default: 0.32
-people_per_food: 180.0     # People fed per unit of food, and the one scale factor for the whole population of the map — settlements and countryside alike, which is what makes the two reconcile by construction. Set from the rural side because that is where there is a figure to hit: 180 puts a temperate 128x128 map at 38 people per km2 against England's ~35 in 1300. At the old 400 the countryside came out at 88 per km2, which is Belgium in 1900. Default: 180
+haulage_transship_cost: 4.0 # What it costs to get a cargo onto the water and off again, charged once at each land-water transition, in the same units as haulage_range_land. Without it the sea is a teleport. 4.0, half the old 8.0: at 8 the portage round a cataract cost so much of the 40-unit budget that the markets above a fall stopped supplying the city below it; at 4 portage trade rises about fivefold and the city tier holds (at 2 the largest port swallows its neighbours). Default: 4.0
+haulage_river_transship_cost: 1.0 # The transship charge where the water is a navigable river or a lake rather than the open sea: a barge ties up at a bank, where a sea-going ship wants a harbour. A cataract portage is two of these. At 1.0 portage trade runs 2-6 times what it does at the sea charge on seeds 42/7/3, and the city tier holds; much lower thins it. Default: 1.0
+haulage_range_water_mult: 15.0 # How much further the same cargo goes by water. Diocletian's Price Edict prices land carriage at 28-56x sea and 6-11x river for the same tonne-kilometre (Duncan-Jones: sea 1, river 4.9, wagon 28, pack animal 56). This is why large pre-industrial cities sit on navigable water and inland ones stay small: nothing gates a city, water simply extends what can feed it. Default: 15.0
+marketable_surplus_fraction: 0.40 # What leaves the farm: not only what the household sells but the rent, the tithe and the dues, all of which end up feeding somebody in a town. It is the one number setting the ratio between town and countryside — rural/town = (1 - s) / (s x mean haulage weight) — so 0.40, with yield_multiplier 1.7, puts 25% of the people in market towns of any size, against 27.5% in towns over 5,000 in England's 1801 census (Wrigley). 0.32 is England c. 1300. It also plants markets, since siting counts surplus: ~104 at 0.40 against ~85 at 0.32. See the era table. Default: 0.40
+people_per_food: 145.0     # People fed per unit of food, and the one scale factor for the whole population of the map — settlements and countryside alike, which is what makes the two reconcile by construction. Set from the rural side because that is where there is a figure to hit: 145 puts a temperate 128x128 map at 61 people per km2 at the default yield_multiplier of 1.7, against England's 59 in the 1801 census, and at 38-39 at 1.0 (England c. 1300 was 30-40). It was 180 until elevation_hypsometry_exponent laid most land low: flat ground farms better, and density rose by a quarter. At the old 400 the countryside came out at 88 per km2, which is Belgium in 1900. Default: 145
 travel_ascent_per_hex: 125.0 # Naismith's rule: metres of ascent that cost as much as one hex of level ground. Catchments are walked, not engineered, so they use this rather than road_delta_elevation_per_hex, which prices a graded road and is about five times stricter than a walker has reason to be. Default: 125
 travel_ford_cost: 8.0      # Getting across away from a crossing, per multiple of the wadeable span, charged on each land–river edge. Deliberately has no fixed term, unlike road_river_crossing_base: that base is the capital of building a bridge, and somebody walking to market pays no capital — what stops them is how much water is in the way. Default: 8.0
 
@@ -423,7 +504,33 @@ market_day_radius: 10.0     # A day's return: out, business done, and home. Defa
 market_kernel_decay: 4.0    # d0 in the 1/(1 + d/d0) share a market takes from each hex it reaches. Default: 4.0
 market_min_separation: 5    # A suppression disc only, to stop two markets sharing a hexside. Real spacing comes from competition for surplus, which is what makes markets dense on rich ground and sparse on poor — a fixed separation cannot express that. Default: 5
 city_min_draw: 40.0 # How much other markets' surplus must reach a town before it is a city. The density knob for the tier above the market, and the same shape as market_viability_floor below it: an absolute threshold on what can be gathered, not a target count. A market gathers a countryside inside a day's cart; a city gathers markets, over haulage_range_land with water counting fifteen times — so the number is not comparable to the floor. 40.0 gives 2 cities on a temperate coast and none on an arid map, and it survived the soil recalibration unchanged: the surplus fraction rose by 1.6x while actual food fell, and the two shifts cancelled. Default: 40.0
-market_viability_floor: 24.0 # The one density knob, replacing target_city_count and target_town_count both: stop planting once the best remaining site scores below this. Calibrated to ~70–85 markets at 128x128 (England had ~700 markets in ~130,000 km2; this map is about an eighth of that): on a temperate map with continent_falloff_edges = [south], seeds 42/7/3/11/19 give 76–92 markets. An absolute threshold on gathered surplus rather than a target, so density follows the land: the same value yields 20 markets on an arid map and 76 on a temperate one. Lowering it raises the rural population too, and that is a real feedback rather than rounding — more markets mean more catchments, more catchments mean more ground cleared, and cleared ground feeds more people than the wood it replaced. Default: 24.0
+city_draw_share: 0.7 # Share of its marketable surplus a market ships to the cities, split between them by pull (city_pull_sharpness). Also caps how much a candidate counts towards promotion, nearest markets first, which is what stops the first city promoted from claiming half the map. Default: 0.7
+city_pull_sharpness: 1.25 # How hard the best-paying city pulls a market's grain from the others. A city's pull is its size times the share of the cargo that survives the haul; a market splits its shipment in proportion to pull to this power. Very high sends everything to the best-paying city; 0 splits it evenly. 1.25 puts the largest city at 1.8-2.3x the second on seeds 42 and 7. Default: 1.25
+city_pull_rounds: 4 # Rounds of that split, each pulling with the sizes the last produced: pull follows size and size follows pull, which is how a capital comes to dominate. 1 pulls with founding sizes, when every candidate is a market of a few hundred and distance decides everything. Default: 4
+manufactured_trade_share: 0.1 # Share of each city's people's worth put into manufactured trade with the other cities, split by size and haul. The shipments pay transship_share at every quay and portage on the way, drawn half from each city. 0 turns city-to-city trade off. Default: 0.1
+manufactured_range_mult: 3.0 # How many times haulage_range_land manufactures travel: worth more per ton than grain, so carried further. Default: 3.0
+transship_share: 0.2 # Every change in how a city's cargo travels on its way (cart to boat, boat to cart, barge to ship at a river mouth) leaves this share of the people it feeds with the settlement handling that quay, off the city's gain. Conserved: the handlers eat out of the cargo. Only the places between the source market and the city are paid. 0.2 turns a quay town with next to no hinterland into a trade town of 3-5k on seeds 42/7/3. 0 turns it off. Default: 0.2
+transship_radius: 2 # How far from a quay, in hexes, the settlement that handles it may stand. Default: 2
+city_min_population: 5000 # A town that grows past this becomes a city whatever it draws: the entrepot, which handles a hinterland's trade rather than eating its food. 5,000 is the common historical urban threshold. 0 turns it off. Default: 5000
+# Resource settlements: ports at unattended quays, mines on the ore, lumber camps in the woods.
+# Each is fed from beyond itself, like a city: its workforce is drawn from the settlements
+# that can haul food to it, so the map's total population does not change.
+port_min_population: 250 # A port is founded at an unattended quay (or waterfront of quays within transship_radius) whose trade share reaches this many people. 0 turns ports off.. Default: 250
+ore_min_relief_m: 200.0 # Relief a hex needs to carry ore. About the top 8% of land on a temperate map. Default: 200.0
+ore_deposits_per_1000_km2: 5.0 # Expected deposits per 1000 km² of ground above ore_min_relief_m, drawn as a Poisson count. 0 turns mines off. Default: 5.0
+ore_min_separation: 8 # Hexes between deposits. Default: 8
+ore_haul_range_mult: 2.0 # How many times haulage_range_land smelted ore is carried to an outlet (a city or a port-role settlement); a deposit with none in reach goes unworked. About 1 suits iron and coal, 3 or more lead, tin and silver. Default: 2.0
+mine_workforce: 400.0 # Mean people a seam employs. Default: 400.0
+mine_workforce_sigma: 0.5 # Lognormal spread of a seam's workforce around the mean. Default: 0.5
+lumber_radius: 4 # Radius over which a camp counts the woodland it works. Default: 4
+lumber_min_score: 35.0 # Woodland within lumber_radius, discounted by the bulk haul to the nearest city, that a camp must reach. 0 turns camps off. Default: 35.0
+lumber_min_separation: 10 # Hexes between camps. Default: 10
+timber_float_min_discharge: 15000.0 # Discharge (km² × mm) a river needs to float logs: below navigable_min_discharge, since timber was driven down rivers far too small for a barge. Default: 15000.0
+lumber_people_per_wood_hex: 3.0 # People a camp employs per wooded hex it works. Default: 3.0
+resource_attach_radius: 1 # A workforce joins a settlement this close instead of founding a village beside it. Default: 1
+resource_draw_share: 0.25 # The most of its haulage-weighted population any settlement sends to feed a new workforce. Validated in (0, 1]. Default: 0.25
+resource_min_population: 30 # A village the food within reach cannot bring to this size is not founded. Default: 30
+market_viability_floor: 24.0 # The one density knob, replacing target_city_count and target_town_count both: stop planting once the best remaining site scores below this. Calibrated to ~70–85 markets at 128x128 (first set against ~700 English markets in ~130,000 km2, an eighth of which is ~87; Letters' Gazetteer puts market grants by 1300 nearer 1,750, though many never traded, so the true count is uncertain and this may run sparse): on a temperate map with continent_falloff_edges = [south], seeds 42/7/3/11/19 give 76–92 markets. An absolute threshold on gathered surplus rather than a target, so density follows the land: the same value yields 20 markets on an arid map and 76 on a temperate one. Lowering it raises the rural population too, and that is a real feedback rather than rounding — more markets mean more catchments, more catchments mean more ground cleared, and cleared ground feeds more people than the wood it replaced. Default: 24.0
 
 # Chokepoints: the settlement tier below the market, founded on bridgeheads and passes
 # that carry real traffic. These are the places that exist because the road has no choice
@@ -464,6 +571,8 @@ road_flat_cost: 1.0       # Cost multiplier for flat hexes. Default: 1.0
 # Travellers come from population, not tier: a market of 6,200 wears a deeper road out of its gates than one of 900.
 road_travellers_per_pop: 0.04 # Simulated travellers emitted per head of population. 0.04 keeps the total near what the old per-tier counts gave (about 8,000 over 74 markets on a 128x128 map). Default: 0.04
 road_travellers_max: 500      # Cap per settlement, so one large city cannot drown the map. Reached above 12,500 people. Default: 500
+road_raw_freight_per_person: 0.01 # Road journeys a raw-goods flow (provisioning into a city, ore from a mine) puts on its route per person it feeds. Bulk went short distances or by water, so this is low: it wears the spokes into each city without taking the primary tier from the roads between cities. Timber floats and wears no road. Default: 0.01
+road_goods_freight_per_person: 0.2 # Road journeys a manufactured-goods flow between two cities puts on its route per person it feeds: the carrier and wagon trade the main roads carried. At 0.2 the land legs of city-to-city trade routes are all secondary or better and their primary share rises by 5-8 points; much higher spreads the fixed primary tier thinner and lowers it. Default: 0.2
 road_gravity_exponent: 2.5   # Distance-decay exponent for the gravity model: a destination's appeal is pop / distance**this. 2.5 rather than the 1.5 a modern model would use, because a laden cart is not a lorry — at 1.5 a traveller was nearly as likely to make for a town 40 km off as one 10 km away, and 72% of every possible pair of settlements ended up with a road of its own. Default: 2.5
 road_pheromone_factor: 0.1   # How strongly existing traffic attracts new routes. Default: 0.1
 
@@ -498,6 +607,7 @@ road_river_traffic_min: 1 # Minimum traffic for a river hex to qualify as a draw
 road_primary_pct: 0.10    # Top fraction of traffic share classified as primary roads. Default: 0.10
 road_secondary_pct: 0.30  # Next fraction classified as secondary roads. Default: 0.30
 road_track_pct: 0.60      # Remainder classified as tracks. Default: 0.60
+road_tier_gap_max_edges: 12 # Longest lower-class stretch promoted where a road of one class stops and resumes across it. Tiers are cut per edge on traffic, so where two routes part for a hex and rejoin, a trunk road dips a class for a kilometre and comes back; this fills the dip. Only from where a road of that class stops — a connector leaving the middle of one trunk for another keeps its class. 0 turns it off. Default: 12
 
 # ---------------------------------------------------------------------------
 # Export  (used by: worldgen export --config worldgen.yaml ...)

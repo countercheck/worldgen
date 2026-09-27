@@ -20,6 +20,7 @@ mutation, so it can be unit-tested on synthetic grids.
 
 import heapq
 
+from ..core.hex import TerrainClass
 from ..core.hex_grid import neighbors
 from .crossings import river_span
 from .road_cost import WATER, is_river
@@ -54,17 +55,41 @@ def navigable(hx, cfg) -> bool:
     """
     if hx.terrain_class in WATER:
         return True
+    if not is_river(hx) or "cataract" in hx.tags:
+        return False
+    return carries_a_barge(hx, cfg)
+
+
+def carries_a_barge(hx, cfg) -> bool:
+    """Enough water to float a barge, whatever the reach is doing.
+
+    `navigable` less the cataract test, because `CataractStage` has to ask this of a reach
+    to decide whether it is a cataract — a small steep river is only a brook.
+    """
+    discharge = hx.catchment_km2 * cfg.runoff_mm(cfg.mean_precip_mm)
+    return discharge >= cfg.navigable_min_discharge
+
+
+def floatable(hx, cfg) -> bool:
+    """True where timber can be floated: open water, or a river carrying enough to drive logs.
+
+    A lower bar than `navigable`. Logs were driven and rafted down rivers far too small for
+    a barge, but not down a brook: `timber_float_min_discharge` is that bar, in the same
+    km2 x mm of discharge.
+    """
+    if hx.terrain_class in WATER:
+        return True
     if not is_river(hx):
         return False
     discharge = hx.catchment_km2 * cfg.runoff_mm(cfg.mean_precip_mm)
-    return discharge >= cfg.navigable_min_discharge
+    return discharge >= cfg.timber_float_min_discharge
 
 
 def haulage_range(hx, cfg) -> float:
     """The distance bulk goods can travel from *hx* before they are worth nothing.
 
-    Water multiplies it.  Diocletian's Price Edict prices land carriage at roughly 55x sea
-    and 11x river for the same tonne-kilometre, so the multiplier — not the absolute land
+    Water multiplies it.  Diocletian's Price Edict prices land carriage at 28-56x sea and
+    6-11x river for the same tonne-kilometre, so the multiplier — not the absolute land
     range — is the well-attested half of this pair.
     """
     if navigable(hx, cfg):
@@ -144,8 +169,8 @@ def make_bulk_cost(hexes, cfg):
     settlement claim a strait.  A cargo is not a farmer: it goes by ship, and before the
     railway that was the only way to move anything heavy any distance at all.
 
-    Diocletian's Price Edict puts land carriage at roughly fifty-five times sea and eleven
-    times river for the same tonne-kilometre.  `haulage_range_water_mult` stands in for both
+    Diocletian's Price Edict puts land carriage at 28-56 times sea and 6-11 times river for
+    the same tonne-kilometre (Duncan-Jones: sea 1, river 4.9, wagon 28, pack animal 56).  `haulage_range_water_mult` stands in for both
     at fifteen, applied as a *divisor on the step* rather than a larger budget, so the reach
     it buys runs along the water rather than in a circle around the port.
 
@@ -167,12 +192,66 @@ def make_bulk_cost(hexes, cfg):
     def bulk_edge(from_hx, to_hx) -> float:
         afloat_from, afloat_to = navigable(from_hx, cfg), navigable(to_hx, cfg)
         if afloat_from != afloat_to:
-            return cfg.haulage_transship_cost  # over the quay, one way or the other
+            # Over the quay, one way or the other, priced by the water it meets. A sea-going
+            # ship wants a harbour; a barge ties up at a bank, and a lake boat is the same
+            # inland craft, so a river or lake landing costs `haulage_river_transship_cost`.
+            water = from_hx if afloat_from else to_hx
+            if water.terrain_class is TerrainClass.OPEN_WATER:
+                return cfg.haulage_transship_cost
+            return cfg.haulage_river_transship_cost
         if afloat_from:
             return 0.0  # already afloat: no ascent, and a navigable river is a road
         return edge_cost(from_hx, to_hx)
 
     return bulk_node, bulk_edge
+
+
+def bulk_routes(hexes, seats, cfg, budget: float | None = None) -> tuple[dict, dict]:
+    """Cost of hauling bulk to the nearest of *seats* from anywhere within `haulage_range_land`.
+
+    A Dijkstra over `make_bulk_cost` rather than `make_travel_cost`. That distinction is the
+    whole of what a city is: travel cost makes water impassable, because a catchment is
+    ground somebody works, while a cargo goes by ship. Using the wrong one does not fail
+    loudly — it silently makes every city inland, because the reach then measures nothing
+    but how central a place is on land.
+
+    Returns cost keyed by coord, over hexes within budget, and each hex's next step toward
+    the seat — the route a cargo from there takes, which transshipment walks. With several
+    seats it answers "how cheaply can a cargo from here reach any of them". *budget*
+    defaults to `haulage_range_land`, the range of grain; a cargo worth more per ton, like
+    smelted ore, is worth carrying further.
+    """
+    node_cost, edge_cost = make_bulk_cost(hexes, cfg)
+    if budget is None:
+        budget = cfg.haulage_range_land
+
+    cost: dict = {seat: 0.0 for seat in seats}
+    toward: dict = {}
+    heap = [(0.0, seat) for seat in sorted(seats)]
+    heapq.heapify(heap)
+    while heap:
+        d, coord = heapq.heappop(heap)
+        if d > cost.get(coord, float("inf")):
+            continue
+        hx = hexes[coord]
+        for n in neighbors(coord):
+            n_hx = hexes.get(n)
+            if n_hx is None:
+                continue
+            # The search expands outward from the seat, but the cargo travels the other
+            # way — so each relaxation prices the step *n -> here*, toward the seat.
+            # Getting the edge direction wrong does not fail loudly: slope is the only
+            # asymmetric term, so it silently inflates the draw of every place the country
+            # rises toward.
+            step = node_cost(n_hx) + edge_cost(n_hx, hx)
+            if step == float("inf"):
+                continue
+            nd = d + step
+            if nd < budget and nd < cost.get(n, float("inf")):
+                cost[n] = nd
+                toward[n] = coord
+                heapq.heappush(heap, (nd, n))
+    return cost, toward
 
 
 def ford_cost(from_hx, to_hx, hexes, cfg) -> float:

@@ -59,9 +59,13 @@ ROAD_TIER_RANK = {RoadTier.TRACK: 0, RoadTier.SECONDARY: 1, RoadTier.PRIMARY: 2}
 # from the elevations, because it records where sediment *travelled* rather than what
 # shape the ground ended up in.  Re-render an old world and its alluvium map is blank;
 # regenerate to get one.
-SCHEMA_VERSION = "1.8"
+#
+# 1.9 adds two settlement roles, "mining" and "lumber", founded by `ResourceStage`. Nothing
+# else changed shape, so a 1.8 file loads as it always did; the bump is for readers, which
+# may not know the new role values.
+SCHEMA_VERSION = "1.9"
 SUPPORTED_SCHEMA_VERSIONS = frozenset(
-    {"1.0", "1.1", "1.2", "1.3", "1.4", "1.5", "1.6", "1.7", "1.8"}
+    {"1.0", "1.1", "1.2", "1.3", "1.4", "1.5", "1.6", "1.7", "1.8", "1.9"}
 )
 
 

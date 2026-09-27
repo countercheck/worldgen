@@ -16,6 +16,7 @@ from ..core.hex import (
 )
 from ..core.hex_grid import axial_to_pixel, road_polylines
 from ..core.world_state import RoadTier, WorldState
+from . import glyphs
 
 # Degrees Celsius spanned by the temperature ramp. Fixed rather than per-map so two
 # worlds can be compared by eye.
@@ -410,6 +411,18 @@ def render_svg(state: WorldState, attribute: str, hex_size: float = 20) -> str:
                 out.append(
                     f'    <rect x="{cx - r:.2f}" y="{cy - r:.2f}" width="{2 * r:.2f}"'
                     f' height="{2 * r:.2f}" fill="white" stroke="black" stroke-width="0.8"/>'
+                )
+            elif s.role in glyphs.ROLE_GLYPH:
+                # A mine or a lumber camp, drawn as its tool in a white disc.
+                r = glyphs.DISC_RADIUS
+                (a, b), head, width = glyphs.placed(glyphs.ROLE_GLYPH[s.role], cx, cy, r)
+                pts = " ".join(f"{x:.2f},{y:.2f}" for x, y in head)
+                out.append(
+                    f'    <circle cx="{cx:.2f}" cy="{cy:.2f}" r="{r:.2f}" fill="white"'
+                    f' stroke="black" stroke-width="0.8"/>'
+                    f'<line x1="{a[0]:.2f}" y1="{a[1]:.2f}" x2="{b[0]:.2f}" y2="{b[1]:.2f}"'
+                    f' stroke="#3b2a1a" stroke-width="{width:.2f}" stroke-linecap="round"/>'
+                    f'<polygon points="{pts}" fill="#2b2b2b"/>'
                 )
             else:
                 out.append(

@@ -9,10 +9,17 @@ the two can gain a legend row or change placement without drifting apart.
 import math
 from dataclasses import dataclass
 
-from ..core.hex import DEFAULT_TERRAIN_BANDS, SettlementTier, terrain_bands, terrain_label
+from ..core.hex import (
+    DEFAULT_TERRAIN_BANDS,
+    SettlementRole,
+    SettlementTier,
+    terrain_bands,
+    terrain_label,
+)
 from ..core.hex_grid import road_polylines, road_water_transitions
 from ..core.world_state import RoadTier, WorldState
 from ..render.debug_viewer import is_fog
+from ..render.glyphs import ROLE_GLYPH
 
 # Stand-in steps for the continuous greyscale used by color_mode="elevation".
 ELEVATION_RAMP = (0.1, 0.3, 0.5, 0.7, 0.9)
@@ -78,12 +85,13 @@ class LegendRow:
 
     *kind* selects the glyph the exporter draws; *sample* carries whatever that glyph
     needs — a representative `Hex` for "fill" (so each exporter can run it through its own
-    fill lookup), a `RoadTier` for "road", a `SettlementTier` for "settlement", and nothing
-    for "ramp" or "river".
+    fill lookup), a `RoadTier` for "road", a `SettlementTier` for "settlement", a
+    `SettlementRole` for "resource" (a mining or lumber village, drawn as its tool), and
+    nothing for "ramp" or "river".
     """
 
     kind: str  # "fill" | "ramp" | "river" | "road" | "anchorage"
-    #       | "ford" | "bridge" | "settlement"
+    #       | "ford" | "bridge" | "settlement" | "resource"
     label: str
     sample: object = None
 
@@ -224,6 +232,15 @@ def rows(ws: WorldState, color_mode: str, layers: set[str]) -> list[LegendRow]:
         for tier in SettlementTier:
             if tier in present_tiers:
                 out.append(LegendRow("settlement", _label(tier), tier))
+        present_roles = {s.role for s in ws.settlements if s.tier is SettlementTier.VILLAGE} & set(
+            ROLE_GLYPH
+        )
+        for role, label in (
+            (SettlementRole.MINING, "Mine"),
+            (SettlementRole.LUMBER, "Lumber camp"),
+        ):
+            if role in present_roles:
+                out.append(LegendRow("resource", label, role))
 
     return out
 

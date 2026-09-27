@@ -2,14 +2,15 @@ from collections import defaultdict, deque
 from heapq import heappop, heappush
 
 from ..core.errors import RoutingError
-from ..core.hex import SettlementTier, TerrainClass
+from ..core.hex import SettlementRole, SettlementTier, TerrainClass
 from ..core.hex_grid import astar_to_any, distance, neighbors
 from ..core.pipeline import GeneratorStage
-from ..core.world_state import Ferry, RoadTier, WorldState, road_edge_key
+from ..core.world_state import ROAD_TIER_RANK, Ferry, RoadTier, WorldState, road_edge_key
 from .road_cost import (
     add_traffic,
     as_road_edges,
     ferry_link,
+    fill_tier_gaps,
     is_river,
     make_road_edge_cost,
     pheromone_discount,
@@ -21,7 +22,15 @@ from .road_cost import (
     tag_river_crossings,
     tag_switchbacks,
     terrain_base_cost,
+    tier_near,
 )
+
+# The road the connectivity guarantee lays to a stranded place, by the best place on it.
+_ROAD_FOR_TIER = {
+    SettlementTier.CITY: RoadTier.PRIMARY,
+    SettlementTier.TOWN: RoadTier.SECONDARY,
+    SettlementTier.VILLAGE: RoadTier.TRACK,
+}
 
 
 class InterurbanRoadStage(GeneratorStage):
@@ -34,9 +43,14 @@ class InterurbanRoadStage(GeneratorStage):
     def run(self, state: WorldState) -> WorldState:
         hexes = state.hexes
         cfg = self.config
-        # Only city and town settlements participate
+        # Cities and towns, and the villages `ResourceStage` founds: a mine or a lumber camp
+        # has to be reached by road or its ore and timber go nowhere. Other villages are
+        # placed after this stage and joined by stages of their own.
         settlements = [
-            s for s in state.settlements if s.tier in (SettlementTier.CITY, SettlementTier.TOWN)
+            s
+            for s in state.settlements
+            if s.tier in (SettlementTier.CITY, SettlementTier.TOWN)
+            or s.role in (SettlementRole.MINING, SettlementRole.LUMBER)
         ]
         if not settlements:
             return state
@@ -89,6 +103,28 @@ class InterurbanRoadStage(GeneratorStage):
         n_s = len(settlements)
         s_index = {s.coord: i for i, s in enumerate(settlements)}
 
+        def journey(origin, dest, n) -> None:
+            """Route *origin* to *dest* and wear the road by *n* journeys along it."""
+            key = (min(origin, dest), max(origin, dest))
+            if key in canonical_routes:
+                path = canonical_routes[key]
+            else:
+                path = self._route(
+                    hexes, origin, dest, net_adj, node_cost, edge_cost, home_cache, net_version[0]
+                )
+                if path is None or len(path) < 2:
+                    return
+                canonical_routes[key] = path
+
+            for c in path:
+                hex_traffic[c] += n
+            for a, b in zip(path, path[1:], strict=False):
+                edge_traffic[road_edge_key(a, b)] += n
+                if b not in net_adj[a]:
+                    net_adj[a].add(b)
+                    net_adj[b].add(a)
+                    net_version[0] += 1
+
         for origin_s in travellers:
             oi = s_index[origin_s.coord]
             dists = [max(1, distance(origin_s.coord, c)) for c in coords_arr]
@@ -101,34 +137,26 @@ class InterurbanRoadStage(GeneratorStage):
                 continue
             probs = [w / total_w for w in weights]
             di = int(self.rng.choice(n_s, p=probs))
-            dest_coord = coords_arr[di]
+            journey(origin_s.coord, coords_arr[di], 1.0)
 
-            key = (min(origin_s.coord, dest_coord), max(origin_s.coord, dest_coord))
-            if key in canonical_routes:
-                path = canonical_routes[key]
-            else:
-                path = self._route(
-                    hexes,
-                    origin_s.coord,
-                    dest_coord,
-                    net_adj,
-                    node_cost,
-                    edge_cost,
-                    home_cache,
-                    net_version[0],
-                )
-                if path is None or len(path) < 2:
-                    continue
-                canonical_routes[key] = path
-
-            for c in path:
-                hex_traffic[c] += 1.0
-            for a, b in zip(path, path[1:], strict=False):
-                edge_traffic[road_edge_key(a, b)] += 1.0
-                if b not in net_adj[a]:
-                    net_adj[a].add(b)
-                    net_adj[b].add(a)
-                    net_version[0] += 1
+        # Freight wears roads as travellers do. Every flow the settlement stages recorded
+        # puts journeys on its route in proportion to the people it feeds, at two rates.
+        # Raw goods — provisioning from market to city, ore from the mines — are bulk that
+        # went short distances or by water, and wear the spokes into each city at
+        # `road_raw_freight_per_person`. Manufactures between cities are the carrier and
+        # wagon trade the main roads were built for, at `road_goods_freight_per_person`.
+        # With one rate, provisioning outweighed the goods trade and its spokes took the
+        # primary tier from the roads between cities. Timber is left off: it floats, and a
+        # lumber camp's road is its river. Busiest first, as the travellers are.
+        rate = {"goods": cfg.road_goods_freight_per_person}
+        rate["food"] = rate["ore"] = cfg.road_raw_freight_per_person
+        flows = state.metadata.get("freight", [])
+        for oq, or_, dq, dr, people, kind in sorted(flows, key=lambda f: (-f[4], f[:4])):
+            if kind in rate:
+                n = people * rate[kind]
+                origin, dest = (oq, or_), (dq, dr)
+                if n > 0.0 and origin in hexes and dest in hexes and origin != dest:
+                    journey(origin, dest, n)
 
         # Tier is a property of an edge, not of a journey.  It used to be taken per hex and
         # then collapsed onto whole routes by `_path_min_tier`, which handed a 157-hex route
@@ -224,6 +252,11 @@ class InterurbanRoadStage(GeneratorStage):
         # Last of all, on tiers: the connectivity guarantee and the land join both lay
         # roads of their own, and either can skirt a town like any other route.
         route_through_settlements(road_edges, hexes, settled, cfg, blocked)
+
+        # Tiers are cut per edge, so where two routes part for a hex or two and rejoin, the
+        # traffic splits between the branches and a trunk road steps down and back up again.
+        # A road does not change class for a kilometre and change back; fill the dip.
+        fill_tier_gaps(road_edges, cfg.road_tier_gap_max_edges)
 
         anchors = settled | {c for f in state.ferries for c in (f.a, f.b)}
         # A land network reaching no settlement is a residue of the traffic threshold; one
@@ -416,8 +449,22 @@ class InterurbanRoadStage(GeneratorStage):
                         best = path
                 if best is None:
                     continue
+                # The join carries on the roads it meets at either end, so it takes the
+                # lower of the two. It used to be a TRACK always, and the commonest join is
+                # a trunk road whose sea leg was just split off above — which left a primary
+                # road running to a shore, a lane round the bay, and the primary road again
+                # on the far side. Read within a couple of hexes of each end rather than at
+                # the end hex itself: the cheapest place to leave a piece is often a lane a
+                # hex off the trunk's end, and `fill_tier_gaps` closes that hex. Not the
+                # best road anywhere on each piece, which made a primary of every join
+                # whose piece had a trunk somewhere in it — 164 edges on seed 42.
+                tier = min(
+                    tier_near(road_edges, best[0], 2),
+                    tier_near(road_edges, best[-1], 2),
+                    key=ROAD_TIER_RANK.__getitem__,
+                )
                 for a, b in zip(best, best[1:], strict=False):
-                    road_edges.setdefault(road_edge_key(a, b), RoadTier.TRACK)
+                    road_edges.setdefault(road_edge_key(a, b), tier)
                 joined |= set(best) | unit
                 added += 1
         return added
@@ -488,12 +535,28 @@ class InterurbanRoadStage(GeneratorStage):
 
         plain_edge = make_road_edge_cost(cfg, blocked, settled)
 
-        def adopt(path) -> None:
-            """Lay *path* into the network as primary, without demoting anything."""
+        def adopt(path, tier) -> None:
+            """Lay *path* into the network at *tier*, without demoting anything."""
             for a, b in zip(path, path[1:], strict=False):
                 road_adj[a].add(b)
                 road_adj[b].add(a)
-                road_edges.setdefault(road_edge_key(a, b), RoadTier.PRIMARY)
+                road_edges.setdefault(road_edge_key(a, b), tier)
+
+        def tier_for(coord) -> RoadTier:
+            """The road a stranded piece of the network deserves: by the best place on it.
+
+            This used to be PRIMARY always, from when only a city could be stranded; once
+            the resource villages joined the network it was handing a lumber camp of 120 a
+            trunk road. The piece is judged on everything it holds, because a village can
+            stand between the main network and a city cut off behind it.
+            """
+            piece = bfs_component(coord) | {coord}
+            best = max(
+                (_ROAD_FOR_TIER[s.tier] for s in places if s.coord in piece),
+                key=ROAD_TIER_RANK.__getitem__,
+                default=RoadTier.TRACK,
+            )
+            return best
 
         ferries: list[Ferry] = []
         # Settlements the terrain puts beyond both road and ferry. Reported, not raised.
@@ -519,7 +582,7 @@ class InterurbanRoadStage(GeneratorStage):
                     hexes, iso.coord, main & place_coords, plain_cost, plain_edge
                 )
                 if best_path:
-                    adopt(best_path)
+                    adopt(best_path, tier_for(iso.coord))
                     main |= bfs_component(iso.coord)
                     progressed = True
                     break
@@ -551,8 +614,9 @@ class InterurbanRoadStage(GeneratorStage):
                     main.add(iso.coord)
                     continue
                 ferries.append(ferry)
+                tier = tier_for(iso.coord)
                 for fp in ferry_paths:
-                    adopt(fp)
+                    adopt(fp, tier)
                 main |= bfs_component(iso.coord)
                 main.add(ferry.a)
                 main.add(ferry.b)

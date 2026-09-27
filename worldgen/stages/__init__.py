@@ -40,6 +40,7 @@ def default_stages(model: str = "classic") -> tuple[type["GeneratorStage"], ...]
         raise ValueError(f"Unknown pipeline model {model!r}. Supported: {', '.join(MODELS)}")
 
     from .biomes import BiomeStage
+    from .cataracts import CataractStage
     from .city_town import CityTownStage
     from .climate import ClimateStage
     from .cultivation import CultivationStage, VillageCultivationStage
@@ -63,6 +64,9 @@ def default_stages(model: str = "classic") -> tuple[type["GeneratorStage"], ...]
         TerrainClassificationStage,
         WaterBodiesStage,
         HydrologyStage,
+        # Straight after the rivers exist: `navigable` is read from habitability on, and a
+        # cataract has to be marked before anything asks whether a boat can load there.
+        CataractStage,
         ClimateStage,
         BiomeStage,
         # Soil before cover, because cover depends on it: good ground carries wildwood
@@ -80,6 +84,7 @@ def default_stages(model: str = "classic") -> tuple[type["GeneratorStage"], ...]
         from .crossings import CrossingStage
         from .land_use import LandUseStage
         from .markets import MarketStage
+        from .resources import ResourceStage
 
         return physical + (
             # Crossings before markets, deliberately: a bridging point is the cheapest
@@ -95,6 +100,10 @@ def default_stages(model: str = "classic") -> tuple[type["GeneratorStage"], ...]
             # Cities before roads: promotion changes populations, and population is what
             # decides how many travellers a place sends.
             CityPromotionStage,
+            # Resources after cities, because a port is founded on the trade a city's
+            # provisioning routes leave unattended, and a lumber camp needs a city to sell
+            # to; before roads, so the network reaches the mines and the camps.
+            ResourceStage,
             # Interim: the classic road stages still run over the new settlements, so
             # there is something to look at in the viewer. Markets are all TOWN tier for
             # now, which is what InterurbanRoadStage expects. Trade roads replace this

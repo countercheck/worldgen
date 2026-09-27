@@ -28,6 +28,7 @@ import {
   type WorldHex,
 } from '@campaign/shared';
 
+import { drawGlyph, ROLE_GLYPH } from './glyphs.js';
 import { drawSymbol, symbolSize, type SymbolSpec } from './symbols.js';
 
 export type { SymbolSpec } from './symbols.js';
@@ -244,6 +245,12 @@ function drawSettlements(ctx: CanvasRenderingContext2D, world: World, view: View
   const r = Math.max(2, view.size * 0.28);
   for (const s of world.settlements) {
     const p = toScreen(s.coord, view);
+    // A mine or a lumber camp is drawn as its tool, a little larger so the tool reads.
+    const glyph = ROLE_GLYPH[s.role];
+    if (glyph !== undefined) {
+      drawGlyph(ctx, glyph, p.x, p.y, Math.max(3, r * 0.8));
+      continue;
+    }
     ctx.fillStyle = '#fff';
     ctx.strokeStyle = '#222';
     ctx.lineWidth = 1;

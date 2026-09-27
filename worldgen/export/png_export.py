@@ -6,6 +6,7 @@ from PIL import Image, ImageDraw, ImageFont
 from ..core.hex import DEFAULT_TERRAIN_BANDS, SettlementTier, terrain_bands, terrain_label
 from ..core.hex_grid import axial_to_pixel, neighbors, road_polylines
 from ..core.world_state import RoadTier, WorldState
+from ..render import glyphs
 from ..render.debug_viewer import (
     BIOME_COLORS,
     FOG_COLOR,
@@ -189,11 +190,26 @@ def _draw_crossing(draw: ImageDraw.ImageDraw, kind: str, cx, cy, angle: float, s
             draw.line([at(x, -sep * 1.7), at(x, sep * 1.7)], fill=_CROSSING_INK, width=lw)
 
 
-def _draw_settlement(draw: ImageDraw.ImageDraw, tier: SettlementTier, cx, cy, scale: float = 1.0):
+def _draw_role(draw: ImageDraw.ImageDraw, glyph, cx, cy, scale: float = 1.0) -> None:
+    """A pickaxe or an axe in a white disc: a village that exists for a trade."""
+    r = glyphs.DISC_RADIUS * scale
+    (a, b), head, width = glyphs.placed(glyph, cx, cy, r)
+    draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=(255, 255, 255), outline=(0, 0, 0))
+    draw.line([a, b], fill=(59, 42, 26), width=max(1, round(width)))
+    draw.polygon(list(head), fill=(43, 43, 43))
+
+
+def _draw_settlement(
+    draw: ImageDraw.ImageDraw, tier: SettlementTier, cx, cy, scale: float = 1.0, role=None
+):
     """One settlement symbol centred on (cx, cy).
 
-    Shared by the settlements layer and the legend so the two can never drift apart.
+    Shared by the settlements layer and the legend so the two can never drift apart. A
+    mining or lumber village is drawn as its tool (`glyphs`) rather than as a plain village.
     """
+    if tier == SettlementTier.VILLAGE and role in glyphs.ROLE_GLYPH:
+        _draw_role(draw, glyphs.ROLE_GLYPH[role], cx, cy, scale)
+        return
     if tier == SettlementTier.CITY:
         draw.polygon(
             _star_pts(cx, cy, outer=6.0 * scale, inner=2.5 * scale),
@@ -232,6 +248,8 @@ def _draw_legend_glyph(draw: ImageDraw.ImageDraw, row, cx, cy, g: float, color_m
             fill=_get_hex_fill(row.sample, color_mode),
             outline=(85, 85, 85),
         )
+    elif row.kind == "resource":
+        _draw_role(draw, glyphs.ROLE_GLYPH[row.sample], cx, cy, scale=g / legend.SYMBOL_BOX)
     elif row.kind == "settlement":
         _draw_settlement(draw, row.sample, cx, cy, scale=g / legend.SYMBOL_BOX)
     elif row.kind == "anchorage":
@@ -517,7 +535,7 @@ def render(ws: WorldState, config: PNGConfig | None = None) -> Image.Image:
     if "settlements" in layers:
         for s in ws.settlements:
             px, py = axial_to_pixel(s.coord, size)
-            _draw_settlement(draw, s.tier, px + ox, py + oy)
+            _draw_settlement(draw, s.tier, px + ox, py + oy, role=s.role)
 
     if "labels" in layers:
         try:

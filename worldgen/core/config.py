@@ -105,6 +105,10 @@ class WorldConfig:
     # ends up under water follows from this and seabed_depth_m rather than being set
     # directly, which is the honest way round.
     max_elevation_m: float = 1500.0
+    # How lopsided the land is: each land height becomes top * (e / top) ** k. 1.0 keeps
+    # the noise's bell around half the range; above 1 most ground lies low and the heights
+    # are a small fraction, as real land does. Generated terrain only.
+    elevation_hypsometry_exponent: float = 2.0
     # How deep the sea floor lies at the map edge, in metres below sea level. A
     # continental shelf, not an abyss — the falloff blends the border down to this,
     # and a shallow shelf makes a gentler coast than a plunge would.
@@ -420,8 +424,8 @@ class WorldConfig:
     #                               cargo.  The softest number here — what is actually
     #                               well attested is the ratio below, not this absolute.
     haulage_range_land: float = 40.0
-    # Diocletian's Price Edict prices land carriage at roughly 55x sea and 11x river for
-    # the same tonne-kilometre.  This multiplier is why large pre-industrial cities sit on
+    # Diocletian's Price Edict prices land carriage at 28-56x sea and 6-11x river for the
+    # same tonne-kilometre (Duncan-Jones: sea 1, river 4.9, wagon 28, pack animal 56).  This multiplier is why large pre-industrial cities sit on
     # navigable water and inland ones stay small: nothing gates a city, water simply
     # extends what can feed it.
     haulage_range_water_mult: float = 15.0
@@ -436,7 +440,11 @@ class WorldConfig:
     # not worth the trouble while a long haul plainly is. That asymmetry is the shape of
     # pre-industrial trade, and it is why a few great ports emerge rather than a coastline
     # of equals.
-    haulage_transship_cost: float = 8.0
+    haulage_transship_cost: float = 4.0
+    # The same charge where the water is a navigable river or a lake: a barge ties up at a
+    # bank, where a sea-going ship wants a harbour. A cataract portage is two of these. At
+    # 1.0 portage trade runs 2-6 times what it does at the sea charge on seeds 42/7/3.
+    haulage_river_transship_cost: float = 1.0
     # river_flow at or above which a river floats a boat. Below it a river is something
     # you ford, not something you ship grain down.
     # Discharge at which a river will float a boat, in the same km2 x mm as
@@ -450,6 +458,12 @@ class WorldConfig:
     # upper quartile of river discharge here and gives 236 navigable hexes, which is a trunk
     # navigable through the lower half of its length rather than at its mouth alone.
     navigable_min_discharge: float = 60000.0
+    # Metres a barge-sized river falls through one hex before it is a cataract: no boat
+    # passes, cargo portages round it, and the fall drives mills. 20 m/km is a 2% gradient,
+    # strong rapids at a kilometre to the hex; about 15% of barge-sized river hexes on a
+    # temperate map reach it once `elevation_hypsometry_exponent` has laid the lowland flat.
+    # 0 turns cataracts off.
+    cataract_min_drop_m: float = 20.0
     # What leaves the farm: not only what the household sells, but the rent, the tithe and
     # the dues, all of which end up feeding somebody in a town. Sizing markets off the
     # *surplus* rather than the production is why the tier ratios come out right without
@@ -462,11 +476,13 @@ class WorldConfig:
     #     rural = (1 - s) * sum(food)                  * people_per_food
     #
     # so `rural / town = (1 - s) / (s * mean weight)`, and the mean haulage weight over a
-    # catchment is about 0.31. 0.32 puts 13% of the people in towns, which is the range
-    # England and France sat in around 1300 — 0.20 gave 7%, too rural even for the period,
-    # and it could not be fixed with `people_per_food` because that scales both sides at
-    # once.
-    marketable_surplus_fraction: float = 0.32
+    # catchment is about 0.31. The default 0.40, with `yield_multiplier` 1.7, is England
+    # c. 1800: 25% of the people in market towns of any size, against 27.5% in towns over
+    # 5,000 in the 1801 census (Wrigley). 0.32 is England c. 1300, 16% against ~15% (Dyer);
+    # 0.20 gave 7%, too rural for any period, and it could not be fixed with
+    # `people_per_food` because that scales both sides at once. It also plants markets,
+    # since siting counts surplus: 0.40 gives ~104 on a 128x128 map against ~85 at 0.32.
+    marketable_surplus_fraction: float = 0.40
     # Naismith's rule: this many metres of ascent cost as much as one hex of level
     # ground. Catchments are walked, not engineered, so they use this rather than
     # road_delta_elevation_per_hex, which prices a graded road and is five times stricter than a
@@ -573,16 +589,20 @@ class WorldConfig:
     # the map — settlements and countryside alike, which is what makes the two reconcile by
     # construction rather than by calibration.
     #
-    # Set from the rural side, because that is where there is a figure to hit: 180 puts a
-    # temperate 128x128 map at 38 people per km2, and England in 1300 was about 35. It was
-    # 400 when it sized settlements alone and nothing else read it; at that value the
-    # countryside came out at 88 per km2, which is Belgium in 1900.
+    # Set from the rural side, because that is where there is a figure to hit: 145 puts a
+    # temperate 128x128 map at 61 people per km2 at the 1.7 default yield_multiplier,
+    # against 59 in the 1801 census, and at 38-39 at 1.0; England in 1290 was 31-36
+    # (Campbell 2008; Broadberry et al. 2015), or 38-46 on the older 5-6M estimates. It was
+    # 180 until `elevation_hypsometry_exponent` laid most of the land low — flat ground
+    # farms better, and density rose by a quarter — and 400 when it sized settlements alone
+    # and nothing else read it, when the countryside came out at 88 per km2, which is
+    # Belgium in 1900.
     #
     # The market towns that follow have a median near 450 and a largest around 20,000. That
     # is a lower median than the figure this used to be tuned to, and the right one: England
-    # carried some 700 markets and most of them were villages with a charter, at 300-1000
-    # people. Only the top of the distribution reached the thousands.
-    people_per_food: float = 180.0
+    # had some 1,750 market grants by 1300 (Letters' Gazetteer) and most were villages with
+    # a charter, at 300-1000 people. Only the top of the distribution reached the thousands.
+    people_per_food: float = 145.0
 
     # Market centres. A market goes where it can gather the most surplus inside a day's
     # return — central-place logic with a real transport cost rather than an abstract one.
@@ -594,8 +614,9 @@ class WorldConfig:
     market_min_separation: int = 5
     # The one density knob, replacing target_city_count and target_town_count both: stop
     # planting once the best remaining site scores below this. Calibrated to ~70-85 markets
-    # at 128x128 (England had ~700 markets in ~130,000 km2; this map is about an eighth of
-    # that): on a temperate map with continent_falloff_edges = ("south",), seeds 42/7/3/11/19
+    # at 128x128 (first set against ~700 English markets in ~130,000 km2, an eighth of which
+    # is ~87; Letters' Gazetteer puts market grants by 1300 nearer 1,750, though many never
+    # traded, so the true count is uncertain and this may run sparse): on a temperate map with continent_falloff_edges = ("south",), seeds 42/7/3/11/19
     # give 74-81 markets — one per ~205 km2 of land, which is a 15 km lattice, with each
     # market about 10 km from its nearest neighbour. Those two figures bracket Bracton's
     # 6 2/3-mile rule read as a third of a day out and back, and observed English market
@@ -671,6 +692,73 @@ class WorldConfig:
     # on a small island — but it means a small map grows no cities at this value, and that
     # this figure belongs to a 128x128 world.
     city_min_draw: float = 40.0
+    # Share of its surplus a market ships to the cities, split between them by pull (below).
+    # It also caps what a candidate counts towards promotion, nearest markets first: at 1.0
+    # the first city promoted claimed half the map and the rest were sized on leftovers.
+    city_draw_share: float = 0.7
+    # How hard the best-paying city pulls a market's grain away from the others. Each city's
+    # pull is its size times the share of the cargo that survives the haul, and a market
+    # splits its shipment in proportion to pull raised to this power: very high sends it all
+    # to the best-paying city, 0 splits it evenly.
+    city_pull_sharpness: float = 1.25
+    # Rounds of that split, each pulling with the sizes the last produced: pull follows size
+    # and size follows pull, which is how a capital comes to dominate. 1 pulls with the
+    # founding sizes alone, when every candidate is a market of a few hundred.
+    city_pull_rounds: int = 4
+    # Manufactured goods between the cities: each puts this share of its people's worth
+    # into trade, split between the cities in reach by size and haul, and the shipments pay
+    # transship_share at every quay on the way — the trade entrepôts and portage towns lived
+    # on. 0 turns it off.
+    manufactured_trade_share: float = 0.1
+    # Manufactures are worth more per ton than grain, so they go this many times further.
+    manufactured_range_mult: float = 3.0
+    # Transshipment: every change in how a city's cargo travels — cart to boat, barge to
+    # ship — leaves this share of the people it feeds with the settlement handling that
+    # quay, the nearest within `transship_radius`. Conserved: the handlers eat out of the
+    # cargo, off the city's gain. Only the places between source and city are paid. 0.2
+    # turns a quay town with next to no hinterland into a trade town of 3-5k on seeds
+    # 42/7/3, one of which passes city_min_population; 0 turns it off.
+    transship_share: float = 0.2
+    transship_radius: int = 2
+    # A town that grows past this becomes a city whatever it draws: the entrepôt, which
+    # handles a hinterland's trade rather than eating its food. 0 turns it off.
+    city_min_population: int = 5000
+
+    # Resource settlements (`ResourceStage`): places fed from beyond themselves, like a
+    # city, founded on something other than farmland. Every workforce is drawn from the
+    # settlements that can haul food to it, none giving more than `resource_draw_share` of
+    # its haulage-weighted population, so the map's total is unchanged.
+    # A port is founded at an unattended quay whose trade supports at least this many.
+    port_min_population: int = 250
+    # Ore lies in the hills: deposits are drawn over ground with this much relief, at this
+    # many per 1000 km2 of it, weighted towards the higher, and this far apart.
+    ore_min_relief_m: float = 200.0
+    ore_deposits_per_1000_km2: float = 5.0
+    ore_min_separation: int = 8
+    # Smelted ore is worth more per ton than grain, so it is carried further overland to an
+    # outlet (a city, or a settlement a boat can load at): this many times
+    # `haulage_range_land`. A deposit with no outlet in reach goes unworked. About 1 suits
+    # iron and coal, which needed water; 3 or more suits lead, tin and silver, which went by
+    # packhorse to the nearest river port.
+    ore_haul_range_mult: float = 2.0
+    # People a seam employs, drawn lognormally around the mean with this sigma.
+    mine_workforce: float = 400.0
+    mine_workforce_sigma: float = 0.5
+    # Lumber camps: woodland counted within `lumber_radius`, discounted by the bulk haul to
+    # the nearest city, must reach `lumber_min_score`; camps this far apart, employing this
+    # many per wooded hex around them.
+    # Discharge, in km2 x mm, a river needs to float logs: below `navigable_min_discharge`,
+    # because timber was driven down rivers far too small for a barge, but not down a brook.
+    timber_float_min_discharge: float = 15000.0
+    lumber_radius: int = 4
+    lumber_min_score: float = 35.0
+    lumber_min_separation: int = 10
+    lumber_people_per_wood_hex: float = 3.0
+    # A workforce joins a settlement this close instead of founding a village beside it.
+    resource_attach_radius: int = 1
+    resource_draw_share: float = 0.25
+    # A village that the food within reach cannot bring to this size is not founded.
+    resource_min_population: int = 30
 
     # Cultivation radii — also the catchment each tier is scored on by HabitabilityStage
     cultivation_city_radius: int = 8
@@ -717,6 +805,11 @@ class WorldConfig:
     yield_arable: float = 1.0
     yield_pasture: float = 0.55
     yield_wood: float = 0.30
+    # Farming technology, as one multiplier on the arable and pasture yields. The default
+    # 1.7 is England c. 1800, after the clover and turnip rotations and before guano and
+    # chemical fertiliser: 58-63 people per km2 against the 1801 census's 59. 1.0 is
+    # England c. 1300. See the era table in worldgen.yaml.
+    yield_multiplier: float = 1.7
     # Where clearing stops, as a fraction of the best rent the settlement can reach.
     # Relative rather than absolute, and that is the substance of it: a market with a
     # floodplain has a high bar and leaves its hillsides to sheep, while a market on
@@ -750,6 +843,8 @@ class WorldConfig:
     # floodplain beside a bluff collected it.
     habitability_hill_relief_m: float = 75.0
     habitability_confluence_bonus: float = 0.10
+    # A site beside a cataract has water power for a mill.
+    habitability_mill_bonus: float = 0.15
 
     # World scale
     hex_size_m: float = 1000.0  # metres per hex
@@ -775,6 +870,12 @@ class WorldConfig:
     # A cap, so one large city cannot drown the map. Reached only by a settlement above
     # 12,500 people, which on these maps means a real city rather than a market town.
     road_travellers_max: int = 500
+    # Journeys a freight flow puts on its route per person it feeds, alongside the
+    # travellers. Raw goods (provisioning, ore) were bulk that went short or by water and
+    # wear the spokes into a city; manufactures between cities were the carrier trade the
+    # main roads carried, and are weighted to match. 0 leaves that kind off the roads.
+    road_raw_freight_per_person: float = 0.01
+    road_goods_freight_per_person: float = 0.2
     # How sharply a destination's appeal falls with distance: weight is pop / d**this.
     #
     # 2.5 rather than the 1.5 a modern gravity model would use, because a laden cart is not
@@ -870,6 +971,12 @@ class WorldConfig:
     road_primary_pct: float = 0.10
     road_secondary_pct: float = 0.30
     road_track_pct: float = 0.60
+    # Tiers are cut per edge, so where traffic splits across two neighbouring hexes for a
+    # step a trunk road dips a class and comes back. `fill_tier_gaps` promotes a lower-class
+    # stretch of at most this many edges running from an end of a class to another piece of
+    # it. 0 turns it off. 12 covers the longest gap measured on seeds 3, 7 and 42: 11 edges,
+    # two land joins meeting at a stray one-edge lane between two primary ends.
+    road_tier_gap_max_edges: int = 12
 
     # Settlement placement
     settlement_min_reachable: int = 100  # min hexes reachable below cap grade
@@ -1159,6 +1266,51 @@ class WorldConfig:
             raise ValueError(
                 f"haulage_transship_cost must be >= 0, got {self.haulage_transship_cost}"
             )
+        if self.elevation_hypsometry_exponent <= 0:
+            raise ValueError(
+                "elevation_hypsometry_exponent must be > 0, got "
+                f"{self.elevation_hypsometry_exponent}"
+            )
+        if self.yield_multiplier <= 0:
+            raise ValueError(f"yield_multiplier must be > 0, got {self.yield_multiplier}")
+        if not 0.0 <= self.transship_share <= 0.5:
+            raise ValueError(f"transship_share must be in [0, 0.5], got {self.transship_share}")
+        if self.transship_radius < 0:
+            raise ValueError(f"transship_radius must be >= 0, got {self.transship_radius}")
+        for name in (
+            "port_min_population",
+            "ore_deposits_per_1000_km2",
+            "ore_min_separation",
+            "ore_haul_range_mult",
+            "city_pull_sharpness",
+            "haulage_river_transship_cost",
+            "city_pull_rounds",
+            "manufactured_trade_share",
+            "manufactured_range_mult",
+            "road_raw_freight_per_person",
+            "road_goods_freight_per_person",
+            "cataract_min_drop_m",
+            "habitability_mill_bonus",
+            "timber_float_min_discharge",
+            "mine_workforce",
+            "mine_workforce_sigma",
+            "lumber_radius",
+            "lumber_min_score",
+            "lumber_min_separation",
+            "lumber_people_per_wood_hex",
+            "resource_attach_radius",
+            "resource_min_population",
+        ):
+            if getattr(self, name) < 0:
+                raise ValueError(f"{name} must be >= 0, got {getattr(self, name)}")
+        if not 0.0 < self.resource_draw_share <= 1.0:
+            raise ValueError(
+                f"resource_draw_share must be in (0, 1], got {self.resource_draw_share}"
+            )
+        if self.city_min_population < 0:
+            raise ValueError(f"city_min_population must be >= 0, got {self.city_min_population}")
+        if not 0.0 < self.city_draw_share <= 1.0:
+            raise ValueError(f"city_draw_share must be in (0, 1], got {self.city_draw_share}")
         if self.city_min_draw <= 0:
             raise ValueError(f"city_min_draw must be > 0, got {self.city_min_draw}")
         if self.road_settlement_skirt_cost < 0:
@@ -1172,6 +1324,10 @@ class WorldConfig:
         if self.road_travellers_max < 1:
             raise ValueError(f"road_travellers_max must be >= 1, got {self.road_travellers_max}")
         # Below 2.0 the rule can never fire: a detour is two legs where there was one.
+        if self.road_tier_gap_max_edges < 0:
+            raise ValueError(
+                f"road_tier_gap_max_edges must be >= 0, got {self.road_tier_gap_max_edges}"
+            )
         if self.road_settlement_detour_max_mult < 2.0:
             raise ValueError(
                 "road_settlement_detour_max_mult must be >= 2.0 (a detour is two legs "

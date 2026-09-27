@@ -108,12 +108,15 @@ def test_clearing_is_worth_something():
     assert ploughed > grazed > wooded > waste == 0.0
 
 
-def test_actual_never_exceeds_potential():
-    cfg = WorldConfig()
-    for soil in SoilQuality:
-        for use in LandUse:
-            hx = _hex(soil, use=use)
-            assert actual_food(hx, cfg) <= potential_food(hx, cfg) + 1e-12
+def test_actual_never_exceeds_potential_at_the_era_s_technique():
+    """Potential is the soil under baseline husbandry; `yield_multiplier` is better technique
+    on top of it, so no use of the ground beats potential times that multiplier."""
+    for mult in (1.0, 1.7):
+        cfg = WorldConfig(yield_multiplier=mult)
+        for soil in SoilQuality:
+            for use in LandUse:
+                hx = _hex(soil, use=use)
+                assert actual_food(hx, cfg) <= potential_food(hx, cfg) * mult + 1e-12
 
 
 def test_ground_with_no_use_yet_reads_at_its_potential():
@@ -278,3 +281,20 @@ def test_reproducibility():
             assert getattr(s1.hexes[coord], field) == getattr(s2.hexes[coord], field), (
                 f"{field} differs at {coord} between identical seeds"
             )
+
+
+def test_yield_multiplier_lifts_worked_ground_only():
+    """Farming technology feeds more people from ploughland and pasture; the wood, the
+    fishery and the potential that siting reads are untouched."""
+    base, better = WorldConfig(yield_multiplier=1.0), WorldConfig(yield_multiplier=2.0)
+    for use in (LandUse.ARABLE, LandUse.PASTURE):
+        hx = _hex(SoilQuality.ARABLE, use=use)
+        assert actual_food(hx, better) == pytest.approx(2.0 * actual_food(hx, base))
+    wood = _hex(SoilQuality.ARABLE, use=LandUse.WOOD)
+    assert actual_food(wood, better) == actual_food(wood, base)
+    assert potential_food(wood, better) == potential_food(wood, base)
+
+
+def test_yield_multiplier_must_be_positive():
+    with pytest.raises(ValueError, match="yield_multiplier"):
+        WorldConfig(yield_multiplier=0.0)

@@ -37,6 +37,12 @@ def soil_value(soil: SoilQuality | None, cfg) -> float:
 def potential_food(hx, cfg) -> float:
     """What one hex could contribute to a catchment, if it were worked as well as it can be.
 
+    As well as it can be *under baseline husbandry* — England c. 1300. `yield_multiplier`
+    is better technique on top of this and lifts only `actual_food`, so at the c. 1800
+    default a ploughed hex yields more than its potential. That is deliberate: siting and
+    land use read this surface, and better farming fed more people from the same market
+    network rather than planting a denser one.
+
     Water and wetland are valued in their own right rather than by a soil class, because
     neither is ploughland: the sea is a fishery and a bog is a bog. Water is deliberately
     non-zero — scoring it at nothing penalised coastal sites twice over, once for the waste
@@ -72,9 +78,13 @@ def actual_food(hx, cfg) -> float:
     base = potential_food(hx, cfg)
     if hx.land_use is None or hx.land_cover is LandCover.OPEN_WATER:
         return base
+    # `yield_multiplier` is farming technology — rotation, manure, marl, clover — so it
+    # lifts worked ground and leaves the wood and the fishery alone. It is applied here and
+    # not to `potential_food`, which siting and land use read: better farming fed more
+    # people from the same market network rather than planting a denser one.
     return base * {
-        LandUse.ARABLE: cfg.yield_arable,
-        LandUse.PASTURE: cfg.yield_pasture,
+        LandUse.ARABLE: cfg.yield_arable * cfg.yield_multiplier,
+        LandUse.PASTURE: cfg.yield_pasture * cfg.yield_multiplier,
         LandUse.WOOD: cfg.yield_wood,
     }.get(hx.land_use, 0.0)
 
@@ -118,6 +128,10 @@ def site_bonus(coord, hx, hexes, cfg) -> float:
 
     if "confluence" in hx.tags:
         bonus += cfg.habitability_confluence_bonus
+
+    # Water power: a mill wants a great fall of water, and the greatest are at a cataract.
+    if "cataract" in hx.tags or any("cataract" in n.tags for n in nbrs):
+        bonus += cfg.habitability_mill_bonus
 
     return bonus
 
