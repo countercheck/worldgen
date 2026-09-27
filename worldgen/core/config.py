@@ -420,8 +420,8 @@ class WorldConfig:
     #                               cargo.  The softest number here — what is actually
     #                               well attested is the ratio below, not this absolute.
     haulage_range_land: float = 40.0
-    # Diocletian's Price Edict prices land carriage at roughly 55x sea and 11x river for
-    # the same tonne-kilometre.  This multiplier is why large pre-industrial cities sit on
+    # Diocletian's Price Edict prices land carriage at 28-56x sea and 6-11x river for the
+    # same tonne-kilometre (Duncan-Jones: sea 1, river 4.9, wagon 28, pack animal 56).  This multiplier is why large pre-industrial cities sit on
     # navigable water and inland ones stay small: nothing gates a city, water simply
     # extends what can feed it.
     haulage_range_water_mult: float = 15.0
@@ -462,8 +462,9 @@ class WorldConfig:
     #     rural = (1 - s) * sum(food)                  * people_per_food
     #
     # so `rural / town = (1 - s) / (s * mean weight)`, and the mean haulage weight over a
-    # catchment is about 0.31. 0.32 puts 13% of the people in towns, which is the range
-    # England and France sat in around 1300 — 0.20 gave 7%, too rural even for the period,
+    # catchment is about 0.31. 0.32 puts 16% of the people in market towns of any size;
+    # England c. 1300 had ~10% in towns over 2,000 and ~5% more in small boroughs (Dyer).
+    # 0.20 gave 7%, too rural even for the period,
     # and it could not be fixed with `people_per_food` because that scales both sides at
     # once.
     marketable_surplus_fraction: float = 0.32
@@ -574,14 +575,15 @@ class WorldConfig:
     # construction rather than by calibration.
     #
     # Set from the rural side, because that is where there is a figure to hit: 180 puts a
-    # temperate 128x128 map at 38 people per km2, and England in 1300 was about 35. It was
+    # temperate 128x128 map at 38-43 people per km2; England in 1290 was 31-36 (Campbell
+    # 2008; Broadberry et al. 2015), or 38-46 on the older 5-6M estimates. It was
     # 400 when it sized settlements alone and nothing else read it; at that value the
     # countryside came out at 88 per km2, which is Belgium in 1900.
     #
     # The market towns that follow have a median near 450 and a largest around 20,000. That
     # is a lower median than the figure this used to be tuned to, and the right one: England
-    # carried some 700 markets and most of them were villages with a charter, at 300-1000
-    # people. Only the top of the distribution reached the thousands.
+    # had some 1,750 market grants by 1300 (Letters' Gazetteer) and most were villages with
+    # a charter, at 300-1000 people. Only the top of the distribution reached the thousands.
     people_per_food: float = 180.0
 
     # Market centres. A market goes where it can gather the most surplus inside a day's
@@ -594,8 +596,9 @@ class WorldConfig:
     market_min_separation: int = 5
     # The one density knob, replacing target_city_count and target_town_count both: stop
     # planting once the best remaining site scores below this. Calibrated to ~70-85 markets
-    # at 128x128 (England had ~700 markets in ~130,000 km2; this map is about an eighth of
-    # that): on a temperate map with continent_falloff_edges = ("south",), seeds 42/7/3/11/19
+    # at 128x128 (first set against ~700 English markets in ~130,000 km2, an eighth of which
+    # is ~87; Letters' Gazetteer puts market grants by 1300 nearer 1,750, though many never
+    # traded, so the true count is uncertain and this may run sparse): on a temperate map with continent_falloff_edges = ("south",), seeds 42/7/3/11/19
     # give 74-81 markets — one per ~205 km2 of land, which is a 15 km lattice, with each
     # market about 10 km from its nearest neighbour. Those two figures bracket Bracton's
     # 6 2/3-mile rule read as a third of a day out and back, and observed English market

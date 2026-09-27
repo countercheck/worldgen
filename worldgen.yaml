@@ -389,35 +389,62 @@ yield_wood: 0.30     # Still under trees; nobody has cleared it. Default: 0.30
 #                               feed people at any yield.
 #
 # Measured on seeds 42 and 7 (temperate 128x128, organic model, city_draw_share 0.7).
-# "Target" is the historical range; "map" is what these settings produced. Largest city
+# "Target" is the historical figure; "map" is what these settings produced. Largest city
 # is the largest on the map.
 #
-#   Era / region                          yield  surplus  people  target        map
-#                                         mult   fraction per_food km2 / urban  km2 / urban / cities / largest
-#   Ancient, frontier province            0.5    0.30     90      10-20 / ~10%   14-15 / 12% / 2 / 5-6k
-#     (Roman Britain, Gaul c. AD 100)
-#   Ancient, core (Roman Italy c. AD 14)  0.75   0.42     180     25-35 / 20-25% 35-38 / 24% / 6-7 / 24-27k
-#   Medieval, thin (Scotland, Scandinavia 0.5    0.25     60      5-15 / <10%    9-10 / 8% / 1 / ~2.5k
-#     c. 1300)
-#   Medieval, typical (England, northern  1.0    0.32     180     35-45 / 10-15% 39-43 / 16% / 5 / 19-20k
+#   Era / region                          yield  surplus  people   target                  map
+#                                         mult   fraction per_food km2 / urban             km2 / urban / cities / largest
+#   Ancient, frontier province            0.5    0.30     90       10-25 / ~10%            14-15 / 12% / 2 / 5-6k
+#     (Roman Britain, Gaul c. AD 150)
+#   Ancient, core (Roman Italy c. AD 14)  0.75   0.42     180      25-30 / 25-35% [a]      35-38 / 24% / 6-7 / 24-27k
+#   Medieval, thin (Scotland c. 1300)     0.5    0.25     60       6-13 / <10%             9-10 / 8% / 1 / ~2.5k
+#   Medieval, typical (England, northern  1.0    0.32     180      30-40 / ~15% [b]        39-43 / 16% / 5 / 19-20k
 #     France c. 1300) - the defaults
-#   Medieval, dense (Flanders, northern   2.0    0.45     180     60-80 / 20-30% 69-80 / 30% / 13-15 / 64-68k
+#   Medieval, dense (Flanders, northern   2.0    0.45     180      60-80 / 20-35% [c]      69-80 / 30% / 13-15 / 64-68k
 #     Italy c. 1300)
-#   Early modern (England, France c. 1700) 1.1   0.35     180     35-45 / 15-18% 42-46 / 19% / 6-7 / 24-26k
-#   Early modern, dense (Holland c. 1650) 1.5    0.55     180     60+ / 40-50%   57-67 / 40% / 14-16 / ~72k
-#   Improved farming (England c. 1800;    2.0    0.40     180     ~60 / 20-28%   66-71 / 25% / 11-13 / 48-53k
-#     rotation, marl and guano, before
-#     chemical fertiliser)
-#   Improved farming, dense (Belgium      4.0    0.45     180     ~130 / ~30%    123-146 / 31% / 19-22 / 122-128k
+#   Early modern (England c. 1700)        1.1    0.35     180      ~39 / 17% (>5k) [d]     42-46 / 19% / 6-7 / 24-26k
+#   Early modern, dense (Dutch Republic   1.5    0.55     180      55-60 / 40-45% (>2.5k)  57-67 / 40% / 14-16 / ~72k
+#     c. 1650)
+#   Improved farming (England c. 1800;    1.7    0.40     180      59 / 27.5% (>5k)        58-63 / 25% / 10-11 / 41-46k
+#     rotation and marl, before guano
+#     and chemical fertiliser)
+#   Improved farming, dense (Belgium      4.0    0.45     180      125-134 / ~30% (>5k)    123-146 / 31% / 19-22 / 122-128k
 #     c. 1830)
 #
-# Density barely moves from 1300 to 1700: the Black Death took the medieval gains and
-# Europe only regained them around 1600. The step up is improved farming after 1750.
-# The "thin" rows set people_per_food rather than yield, so their town sizes are scaled
-# down with everything else. Historical ranges are standard figures (Beloch and Scheidel
-# for Rome, Campbell and Broadberry for medieval England, de Vries for urban shares).
+#   [a] The low count (Beloch, Brunt: 6-7.5M). The high count (Lo Cascio: 12-14M) gives
+#       ~50/km2 and 15-20% urban. The map sits between the two.
+#   [b] England 1290 was 4.0M (Campbell 2008) to 4.75M (Broadberry et al. 2015). Older
+#       estimates of 5-6M gave 38-46/km2, which is where the defaults sit; people_per_food
+#       160 lands mid-range. Urban: ~10% in towns over 2,000 plus ~5% in small boroughs
+#       (Dyer). Northern France: ~40/km2 from the 1328 hearth count.
+#   [c] Flanders 33-36% (Prevenier); centre-north Italy 20-25% in towns over 5,000
+#       (Malanima).
+#   [d] France c. 1700 was as dense (~40/km2) but only ~10% urban in towns over 10,000;
+#       lower the surplus fraction for it.
+#
+# Urban share means nothing without a town-size threshold: England's >5k and >10k series
+# differ by 4-8 points. The map counts every market, down to a few hundred people, which
+# is looser than any historical series, so expect it a few points above a >5k figure.
+#
+# Density changed little net from 1300 to 1700, but not by standing still: the Black Death
+# took 30-50%, Europe recovered c. 1550-1600 (England c. 1630-50), and the 17th-century
+# crisis stalled it again. The step up is improved farming: English wheat went from 7-10
+# bushels an acre c. 1300 (Campbell) to 21-22 by 1800 (Turner, Beckett and Afton; Allen),
+# much of it gained 1600-1700.
+#
+# Thinner than the "thin" row: Norway and Sweden c. 1300 were 1-2/km2. Density is linear
+# in people_per_food, so scale it down in proportion.
+#
+# The rank-size rule puts the largest city at about twice the second. Real capitals were
+# often far more dominant: London c. 1700 was ~20 times Norwich, Paris 5-7 times Lyon.
 # city_draw_share, below city_min_draw, shifts people between the largest city and the
-# rest without changing either total.
+# rest without changing either total; 1.0 moves towards a dominant capital.
+#
+# Sources: Scheidel (2008) and Wilson (2011) for Rome; Campbell (2000, 2008), Broadberry,
+# Campbell et al., British Economic Growth 1270-1870 (2015), and Dyer for medieval England;
+# Wrigley (1967, 1985) and Wrigley and Schofield (1981) for early modern England; de Vries,
+# European Urbanization 1500-1800 (1984), and de Vries and van der Woude (1997) for urban
+# shares and the Dutch Republic; Letters, Gazetteer of Markets and Fairs (2005).
 yield_multiplier: 1.0 # Farming technology, as one multiplier on yield_arable and yield_pasture. 1.0 is England c. 1300; see the table above. Default: 1.0
 
 # Where clearing stops, as a fraction of the best rent the settlement can reach. Relative
@@ -490,8 +517,8 @@ crossing_use_cost: 0.5        # Cost of using an existing ford or bridge. Defaul
 rural_field_radius: 2.5    # The daily walk to the fields; sets cultivated extent. Default: 2.5
 haulage_range_land: 40.0   # Travel cost at which bulk food is worth nothing overland. Default: 40.0
 haulage_transship_cost: 8.0 # What it costs to get a cargo onto the water and off again, charged once at each land-water transition, in the same units as haulage_range_land. Without it the sea is a teleport: at a fifteenth the cost per hex a cargo once afloat crosses the map for nothing, every coastal market reaches every other, and the city tier flattens. Default: 8.0
-haulage_range_water_mult: 15.0 # How much further the same cargo goes by water. Diocletian's Price Edict prices land carriage at roughly 55x sea and 11x river for the same tonne-kilometre. This is why large pre-industrial cities sit on navigable water and inland ones stay small: nothing gates a city, water simply extends what can feed it. Default: 15.0
-marketable_surplus_fraction: 0.32 # What leaves the farm: not only what the household sells but the rent, the tithe and the dues, all of which end up feeding somebody in a town. It is the one number setting the ratio between town and countryside — rural/town = (1 - s) / (s x mean haulage weight) — so 0.32 puts 13% of the people in towns, the range England and France sat in around 1300. Default: 0.32
+haulage_range_water_mult: 15.0 # How much further the same cargo goes by water. Diocletian's Price Edict prices land carriage at 28-56x sea and 6-11x river for the same tonne-kilometre (Duncan-Jones: sea 1, river 4.9, wagon 28, pack animal 56). This is why large pre-industrial cities sit on navigable water and inland ones stay small: nothing gates a city, water simply extends what can feed it. Default: 15.0
+marketable_surplus_fraction: 0.32 # What leaves the farm: not only what the household sells but the rent, the tithe and the dues, all of which end up feeding somebody in a town. It is the one number setting the ratio between town and countryside — rural/town = (1 - s) / (s x mean haulage weight) — so 0.32 puts 16% of the people in market towns of any size; England c. 1300 had ~10% in towns over 2,000 and ~5% more in small boroughs (Dyer). Default: 0.32
 people_per_food: 180.0     # People fed per unit of food, and the one scale factor for the whole population of the map — settlements and countryside alike, which is what makes the two reconcile by construction. Set from the rural side because that is where there is a figure to hit: 180 puts a temperate 128x128 map at 38 people per km2 against England's ~35 in 1300. At the old 400 the countryside came out at 88 per km2, which is Belgium in 1900. Default: 180
 travel_ascent_per_hex: 125.0 # Naismith's rule: metres of ascent that cost as much as one hex of level ground. Catchments are walked, not engineered, so they use this rather than road_delta_elevation_per_hex, which prices a graded road and is about five times stricter than a walker has reason to be. Default: 125
 travel_ford_cost: 8.0      # Getting across away from a crossing, per multiple of the wadeable span, charged on each land–river edge. Deliberately has no fixed term, unlike road_river_crossing_base: that base is the capital of building a bridge, and somebody walking to market pays no capital — what stops them is how much water is in the way. Default: 8.0
@@ -507,7 +534,7 @@ market_kernel_decay: 4.0    # d0 in the 1/(1 + d/d0) share a market takes from e
 market_min_separation: 5    # A suppression disc only, to stop two markets sharing a hexside. Real spacing comes from competition for surplus, which is what makes markets dense on rich ground and sparse on poor — a fixed separation cannot express that. Default: 5
 city_min_draw: 40.0 # How much other markets' surplus must reach a town before it is a city. The density knob for the tier above the market, and the same shape as market_viability_floor below it: an absolute threshold on what can be gathered, not a target count. A market gathers a countryside inside a day's cart; a city gathers markets, over haulage_range_land with water counting fifteen times — so the number is not comparable to the floor. 40.0 gives 2 cities on a temperate coast and none on an arid map, and it survived the soil recalibration unchanged: the surplus fraction rose by 1.6x while actual food fell, and the two shifts cancelled. Default: 40.0
 city_draw_share: 0.7 # Share of what can reach it that a promoted city actually takes, filled from the nearest markets outward. 1.0 takes everything: the first city drains the half of the map its water reach covers and the rest are sized on leftovers. 0.7 gives 5-7 cities with the largest about 1.5-1.9x the second; 0.5 gives 6-9 of more even size. Total urban population does not change. Default: 0.7
-market_viability_floor: 24.0 # The one density knob, replacing target_city_count and target_town_count both: stop planting once the best remaining site scores below this. Calibrated to ~70–85 markets at 128x128 (England had ~700 markets in ~130,000 km2; this map is about an eighth of that): on a temperate map with continent_falloff_edges = [south], seeds 42/7/3/11/19 give 76–92 markets. An absolute threshold on gathered surplus rather than a target, so density follows the land: the same value yields 20 markets on an arid map and 76 on a temperate one. Lowering it raises the rural population too, and that is a real feedback rather than rounding — more markets mean more catchments, more catchments mean more ground cleared, and cleared ground feeds more people than the wood it replaced. Default: 24.0
+market_viability_floor: 24.0 # The one density knob, replacing target_city_count and target_town_count both: stop planting once the best remaining site scores below this. Calibrated to ~70–85 markets at 128x128 (first set against ~700 English markets in ~130,000 km2, an eighth of which is ~87; Letters' Gazetteer puts market grants by 1300 nearer 1,750, though many never traded, so the true count is uncertain and this may run sparse): on a temperate map with continent_falloff_edges = [south], seeds 42/7/3/11/19 give 76–92 markets. An absolute threshold on gathered surplus rather than a target, so density follows the land: the same value yields 20 markets on an arid map and 76 on a temperate one. Lowering it raises the rural population too, and that is a real feedback rather than rounding — more markets mean more catchments, more catchments mean more ground cleared, and cleared ground feeds more people than the wood it replaced. Default: 24.0
 
 # Chokepoints: the settlement tier below the market, founded on bridgeheads and passes
 # that carry real traffic. These are the places that exist because the road has no choice

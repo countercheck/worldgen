@@ -63,8 +63,8 @@ def navigable(hx, cfg) -> bool:
 def haulage_range(hx, cfg) -> float:
     """The distance bulk goods can travel from *hx* before they are worth nothing.
 
-    Water multiplies it.  Diocletian's Price Edict prices land carriage at roughly 55x sea
-    and 11x river for the same tonne-kilometre, so the multiplier — not the absolute land
+    Water multiplies it.  Diocletian's Price Edict prices land carriage at 28-56x sea and
+    6-11x river for the same tonne-kilometre, so the multiplier — not the absolute land
     range — is the well-attested half of this pair.
     """
     if navigable(hx, cfg):
@@ -144,8 +144,8 @@ def make_bulk_cost(hexes, cfg):
     settlement claim a strait.  A cargo is not a farmer: it goes by ship, and before the
     railway that was the only way to move anything heavy any distance at all.
 
-    Diocletian's Price Edict puts land carriage at roughly fifty-five times sea and eleven
-    times river for the same tonne-kilometre.  `haulage_range_water_mult` stands in for both
+    Diocletian's Price Edict puts land carriage at 28-56 times sea and 6-11 times river for
+    the same tonne-kilometre (Duncan-Jones: sea 1, river 4.9, wagon 28, pack animal 56).  `haulage_range_water_mult` stands in for both
     at fifteen, applied as a *divisor on the step* rather than a larger budget, so the reach
     it buys runs along the water rather than in a circle around the port.
 

@@ -6,11 +6,11 @@ big each one grows.  Nothing in that model can produce a city, because a city is
 large market.  It is a place fed from beyond a day's reach.
 
 What makes that possible is bulk haulage, and what makes bulk haulage possible is water.
-Diocletian's Price Edict puts land carriage at roughly fifty-five times sea and eleven
-times river for the same tonne-kilometre, so the range over which a place can be
-provisioned is not a property of the place — it is a property of what lies around it.  A
-town on a navigable river or a sheltered coast draws on fifteen times the reach of one the
-same size inland, and that single multiplier is the whole of the difference.
+Diocletian's Price Edict puts land carriage at 28-56 times sea and 6-11 times river for
+the same tonne-kilometre, so the range over which a place can be provisioned is not a
+property of the place — it is a property of what lies around it.  A town on a navigable
+river or a sheltered coast draws on fifteen times the reach of one the same size inland,
+and that single multiplier is the whole of the difference.
 
 So this stage founds nothing.  It asks of each market how much *other* markets' surplus
 can reach it, promotes the ones that clear `city_min_draw`, and moves the surplus it
