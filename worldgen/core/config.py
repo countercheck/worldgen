@@ -21,6 +21,7 @@ CULTURE_PACKS = (
     "arabic",
     "english",
     "french",
+    "hive",
     "hobbitish",
     "khuzdul",
     "norse",
@@ -1010,7 +1011,8 @@ class WorldConfig:
     # Hand-written culture packs for the regions, in order: the first region speaks the
     # first pack, and so on; regions past the end of the list get invented languages.
     # One of: arabic, english, french, norse, slavic, welsh, or Tolkien's sindarin,
-    # quenya, khuzdul, rohirric, hobbitish. At most naming_cultures.
+    # quenya, khuzdul, rohirric, hobbitish, or hive (an insect people). At most
+    # naming_cultures.
     naming_packs: tuple[str, ...] = ()
     # A pack for the older people who named the rivers, in place of an invented language:
     # "welsh" under "english" is England. Empty for an invented one.

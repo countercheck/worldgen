@@ -25,7 +25,7 @@ makes a one-word name — dubov~ gives Dubovec as well as Dubová Hora.
 
 import re
 import zlib
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -63,6 +63,15 @@ class Pack:
     # Spelling fixes applied to a finished name, as (regex, replacement) pairs — Quenya
     # writes a final ë but drops the diaeresis once the word is inside a compound.
     fixes: tuple[tuple[str, str], ...] = ()
+    # Templates that differ by rank, keyed "compound", "founder", "river_on" or "bare",
+    # each a tuple of three template tuples for rank 0 (city), 1 (town) and 2 (village).
+    # A kind not listed uses the rank-blind field of the same name.
+    ranked: Mapping[str, tuple[tuple[str, ...], ...]] = field(default_factory=dict)
+    # A pack that makes its own proper names — (key, syllables, rank) -> name — in place
+    # of drawing them from `person_first` and `river_roots`.
+    proper: Callable[[str, int, int], str] | None = None
+    # How a founder is glossed in the etymology, over {p} the founder and {h} the head.
+    founder_gloss: str = "{p}'s {h}"
 
 
 _SEPARATORS = re.compile(r"([ -])")
@@ -79,6 +88,13 @@ class PackCulture:
     def __init__(self, pack: Pack):
         self.pack = pack
         self.name = pack.name
+        self.founder_gloss = pack.founder_gloss
+
+    def _templates(self, kind: str, rank: int) -> tuple[str, ...]:
+        by_rank = self.pack.ranked.get(kind)
+        if by_rank is not None:
+            return by_rank[min(max(rank, 0), len(by_rank) - 1)]
+        return getattr(self.pack, kind)
 
     def _title(self, text: str) -> str:
         parts = _SEPARATORS.split(text)
@@ -102,25 +118,29 @@ class PackCulture:
         return re.sub(r"(.)\1\1", r"\1\1", name)
 
     def place_name(
-        self, generic: str, qualifier: Qualifier | None, rng: np.random.Generator
+        self,
+        generic: str,
+        qualifier: Qualifier | None,
+        rng: np.random.Generator,
+        rank: int = 1,
     ) -> str:
         pack = self.pack
         head = _pick(pack.heads[generic], rng)
         parts = {"h": head.lower()}
         if qualifier is None:
-            template = _pick(pack.bare, rng)
+            template = _pick(self._templates("bare", rank), rng)
         elif qualifier.kind == "meaning":
             word = _pick(pack.quals[qualifier.value], rng).lower()
             ending = pack.endings.get(pack.genders.get(head, ""), "")
             parts["q"] = word.replace("~", "")
             parts["a"] = word.replace("~", ending)
-            template = _pick(pack.compound, rng)
+            template = _pick(self._templates("compound", rank), rng)
         elif qualifier.relation == "on":
             parts["r"] = qualifier.value.lower()
-            template = _pick(pack.river_on, rng)
+            template = _pick(self._templates("river_on", rank), rng)
         else:
             parts["p"] = qualifier.value.lower()
-            template = _pick(pack.founder, rng)
+            template = _pick(self._templates("founder", rank), rng)
         return self._title(template.format(**parts))
 
     def _persons(self) -> list[str]:
@@ -138,7 +158,7 @@ class PackCulture:
             for root in self.pack.river_roots
         ]
 
-    def proper_name(self, key: str, syllables: int) -> str:
+    def proper_name(self, key: str, syllables: int, rank: int = 1) -> str:
         """A founder's or a river's name, stable for a key.
 
         *syllables* means nothing to a pack — its names are whole words — so it is used to
@@ -149,6 +169,8 @@ class PackCulture:
         kind = key.split(":", 1)[0]
         if kind == "people":
             return self.name
+        if self.pack.proper is not None:
+            return self._title(self.pack.proper(key, syllables, rank))
         names = self._rivers() if kind == "river" else self._persons()
         h = zlib.crc32(key.encode())
         n = len(names)

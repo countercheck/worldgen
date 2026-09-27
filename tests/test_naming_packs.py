@@ -140,3 +140,30 @@ def test_quenya_drops_the_diaeresis_inside_a_compound():
     for _ in range(20):
         name = culture.place_name("harbour", Qualifier("meaning", "white"), rng)
         assert "ë" not in name[:-1], name
+
+
+def test_the_hive_names_a_queens_seat_with_ceremony_and_an_outpost_tersely():
+    culture = PackCulture(PACKS["hive"])
+    rng = np.random.default_rng(6)
+    phrases = ("-of-the-", "-Under-", "-Beside-")
+    for _ in range(20):
+        queens = culture.place_name("burgh", Qualifier("meaning", "marsh"), rng, rank=0)
+        outpost = culture.place_name("enclosure", Qualifier("meaning", "marsh"), rng, rank=2)
+        assert any(p in queens for p in phrases), queens
+        assert not any(p in outpost for p in phrases), outpost
+
+
+def test_the_hive_tongue_buzzes_for_queens_and_clicks_for_workers():
+    """The two registers share no telltale letters: a buzz has no stops, a click no hum."""
+    from worldgen.naming.packs.hive import tongue
+
+    for i in range(50):
+        buzz = tongue(f"person:{i}", 2, rank=0)
+        click = tongue(f"person:{i}", 2, rank=2)
+        assert not set("k'qxc") & set(buzz), buzz
+        assert not set("vrsmngo") & set(click), click
+
+
+def test_the_hive_glosses_a_founder_as_a_swarm():
+    culture = PackCulture(PACKS["hive"])
+    assert culture.founder_gloss.format(p="Tchix", h="larder") == "larder of the Tchix swarm"

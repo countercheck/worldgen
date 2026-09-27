@@ -9,6 +9,7 @@ from . import (
     arabic,
     english,
     french,
+    hive,
     hobbitish,
     khuzdul,
     norse,
@@ -35,6 +36,8 @@ PACKS: dict[str, Pack] = {
         khuzdul.PACK,
         rohirric.PACK,
         hobbitish.PACK,
+        # Not human at all.
+        hive.PACK,
     )
 }
 

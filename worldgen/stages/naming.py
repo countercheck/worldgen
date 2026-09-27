@@ -184,9 +184,12 @@ class NamingStage(GeneratorStage):
             syllables = (
                 2 if catchment >= cfg.naming_great_river_km2 else 2 + int(rng.random() < 0.3)
             )
+            river_rank = 0 if catchment >= cfg.naming_great_river_km2 else 2
             name = ""
             for attempt in range(_ATTEMPTS):
-                candidate = namer.proper_name(f"river:{i}:{attempt}", syllables + attempt // 8)
+                candidate = namer.proper_name(
+                    f"river:{i}:{attempt}", syllables + attempt // 8, rank=river_rank
+                )
                 if registry.accepts(candidate):
                     name = candidate
                     break
@@ -243,6 +246,9 @@ class NamingStage(GeneratorStage):
         # Squared, so a site's most striking feature wins most of the time without always
         # winning: a map of towns each named for its single best feature is monotonous.
         heads = {k: w * w for k, w in site.generics.items()}
+        rank = _TIER_ORDER[s.tier]
+        # How this culture glosses a founder: a person's farm, or a swarm's larder.
+        founder_gloss = getattr(culture, "founder_gloss", "{p}'s {h}")
 
         for attempt in range(_ATTEMPTS):
             generic = _pick(heads, rng)
@@ -264,11 +270,13 @@ class NamingStage(GeneratorStage):
             else:
                 # One syllable first, as the names buried in -ingham and -by mostly were;
                 # a second only if the short ones keep colliding.
-                founder = culture.proper_name(f"person:{s.coord}:{attempt}", 1 + attempt // 8)
+                founder = culture.proper_name(
+                    f"person:{s.coord}:{attempt}", 1 + attempt // 8, rank=rank
+                )
                 qualifier = Qualifier("proper", founder, "of")
-                etymology = f"{founder}'s {GLOSS[generic]}"
+                etymology = founder_gloss.format(p=founder, h=GLOSS[generic])
 
-            name = culture.place_name(generic, qualifier, rng)
+            name = culture.place_name(generic, qualifier, rng, rank=rank)
             if _fits(name, cfg.naming_max_letters) and registry.accepts(name):
                 break
         else:
@@ -277,10 +285,12 @@ class NamingStage(GeneratorStage):
             generic = max(site.generics, key=lambda k: (site.generics[k], k))
             syllables = 1
             while True:
-                founder = culture.proper_name(f"person:{s.coord}:fallback", syllables)
-                name = culture.place_name(generic, Qualifier("proper", founder, "of"), rng)
+                founder = culture.proper_name(f"person:{s.coord}:fallback", syllables, rank=rank)
+                name = culture.place_name(
+                    generic, Qualifier("proper", founder, "of"), rng, rank=rank
+                )
                 if name not in registry:
-                    etymology = f"{founder}'s {GLOSS[generic]}"
+                    etymology = founder_gloss.format(p=founder, h=GLOSS[generic])
                     break
                 syllables += 1
 

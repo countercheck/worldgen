@@ -36,15 +36,25 @@ class Culture(Protocol):
     name: str
 
     def place_name(
-        self, generic: str, qualifier: Qualifier | None, rng: np.random.Generator
+        self,
+        generic: str,
+        qualifier: Qualifier | None,
+        rng: np.random.Generator,
+        rank: int = 1,
     ) -> str:
-        """A place name with *generic* as its head, qualified or bare."""
+        """A place name with *generic* as its head, qualified or bare.
+
+        *rank* is how high the place stands — 0 a city, 1 a town, 2 a village. Most
+        cultures name every rank alike and ignore it; one that does not (a hive, whose
+        queen's seat is named with ceremony and whose outposts are not) reads it.
+        """
         ...
 
-    def proper_name(self, key: str, syllables: int) -> str:
+    def proper_name(self, key: str, syllables: int, rank: int = 1) -> str:
         """A name that means nothing any more — a river's, a founder's.
 
-        The same *key* gives the same name every time in one culture.
+        The same *key* gives the same name every time in one culture. *rank* is as for
+        `place_name`; for a river, 0 is a great river and 2 a lesser one.
         """
         ...
 

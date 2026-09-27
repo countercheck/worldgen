@@ -217,7 +217,11 @@ class Language:
         return " ".join(out)
 
     def place_name(
-        self, generic: str, qualifier: Qualifier | None, rng: np.random.Generator
+        self,
+        generic: str,
+        qualifier: Qualifier | None,
+        rng: np.random.Generator,
+        rank: int = 1,
     ) -> str:
         head = self.word(generic)
         if qualifier is None:
@@ -254,7 +258,7 @@ class Language:
         second = second[:1].upper() + second[1:] if self.joiner else second.lower()
         return first[:1].upper() + first[1:] + self.joiner + second
 
-    def proper_name(self, key: str, syllables: int) -> str:
+    def proper_name(self, key: str, syllables: int, rank: int = 1) -> str:
         return self.spell(self.word_of_length(key, syllables)).capitalize()
 
     def word_of_length(self, key: str, syllables: int) -> str:
