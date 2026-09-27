@@ -2601,7 +2601,7 @@ placed where its only escape requires one.
 |---|---|---|---|
 | `naming_cultures` | `int` | `3` | Culture regions, each with an invented language. 0 turns naming off and keeps the placeholder names. Validated `≥ 0` |
 | `naming_substrate` | `bool` | `true` | An older people named the rivers and the present ones kept the names. `false`: each river is named by whoever holds its mouth |
-| `naming_packs` | `list[str]` | `[]` | Hand-written culture packs for the regions, in order; regions past the end get invented languages. Any of `arabic`, `english`, `french`, `norse`, `slavic`, `welsh`. Validated: known, no repeats, at most `naming_cultures` |
+| `naming_packs` | `list[str]` | `[]` | Hand-written culture packs for the regions, in order; regions past the end get invented languages. Any of `arabic`, `english`, `french`, `norse`, `slavic`, `welsh`, or Tolkien's `sindarin`, `quenya`, `khuzdul`, `rohirric`, `hobbitish`. Validated: known, no repeats, at most `naming_cultures` |
 | `naming_substrate_pack` | `str` | `""` | A pack for the people who named the rivers in place of an invented language — `welsh` under `english` is England. Empty for an invented one |
 | `naming_region_climb_m` | `float` | `150.0` | Metres of climb costing as much as one hex of level going when culture regions spread |
 | `naming_region_river_cost` | `float` | `8.0` | Added for crossing a great river, in hexes of level going |

@@ -121,3 +121,22 @@ def test_choosing_packs_leaves_the_invented_regions_alone(packed):
     plain = build_world(model="classic", width=64, height=64)
     assert plain.metadata["cultures"][2]["name"] == packed.metadata["cultures"][2]["name"]
     assert [s.coord for s in plain.settlements] == [s.coord for s in packed.settlements]
+
+
+def test_khuzdul_keeps_the_part_after_a_hyphen_lower_case():
+    """Khazad-dûm, not Khazad-Dûm."""
+    culture = PackCulture(PACKS["khuzdul"])
+    rng = np.random.default_rng(4)
+    hyphenated = [culture.place_name("hall", Qualifier("meaning", "red"), rng) for _ in range(20)]
+    hyphenated = [n for n in hyphenated if "-" in n]
+    assert hyphenated
+    assert all(n.split("-", 1)[1][0].islower() for n in hyphenated), hyphenated
+
+
+def test_quenya_drops_the_diaeresis_inside_a_compound():
+    """Ninquë alone, but Ninquelondë: ë is only written at the end of a word."""
+    culture = PackCulture(PACKS["quenya"])
+    rng = np.random.default_rng(5)
+    for _ in range(20):
+        name = culture.place_name("harbour", Qualifier("meaning", "white"), rng)
+        assert "ë" not in name[:-1], name

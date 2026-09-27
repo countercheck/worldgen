@@ -17,7 +17,19 @@ MODELS = ("classic", "organic")
 # The hand-written naming cultures `WorldConfig.naming_packs` may name. Listed here for the
 # same reason as MODELS — the config validates itself without importing a layer above it —
 # and a test holds it equal to `worldgen.naming.packs.PACKS`.
-CULTURE_PACKS = ("arabic", "english", "french", "norse", "slavic", "welsh")
+CULTURE_PACKS = (
+    "arabic",
+    "english",
+    "french",
+    "hobbitish",
+    "khuzdul",
+    "norse",
+    "quenya",
+    "rohirric",
+    "sindarin",
+    "slavic",
+    "welsh",
+)
 
 
 @dataclass(frozen=True)
@@ -997,7 +1009,8 @@ class WorldConfig:
     naming_substrate: bool = True
     # Hand-written culture packs for the regions, in order: the first region speaks the
     # first pack, and so on; regions past the end of the list get invented languages.
-    # One of: arabic, english, french, norse, slavic, welsh. At most naming_cultures.
+    # One of: arabic, english, french, norse, slavic, welsh, or Tolkien's sindarin,
+    # quenya, khuzdul, rohirric, hobbitish. At most naming_cultures.
     naming_packs: tuple[str, ...] = ()
     # A pack for the older people who named the rivers, in place of an invented language:
     # "welsh" under "english" is England. Empty for an invented one.

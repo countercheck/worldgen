@@ -58,6 +58,11 @@ class Pack:
     # Grammatical gender of each head word, and the adjective ending each gender takes.
     genders: Mapping[str, str] = field(default_factory=dict)
     endings: Mapping[str, str] = field(default_factory=dict)
+    # Whether a part after a hyphen is capitalised: Gué-du-Chêne, but Khazad-dûm.
+    hyphen_caps: bool = True
+    # Spelling fixes applied to a finished name, as (regex, replacement) pairs — Quenya
+    # writes a final ë but drops the diaeresis once the word is inside a compound.
+    fixes: tuple[tuple[str, str], ...] = ()
 
 
 _SEPARATORS = re.compile(r"([ -])")
@@ -79,14 +84,22 @@ class PackCulture:
         parts = _SEPARATORS.split(text)
         out = []
         for i, part in enumerate(parts):
-            if i and part in self.pack.particles:
+            # A particle, or anything after a hyphen in a pack that does not capitalise
+            # there, is left as it stands.
+            keep = part in self.pack.particles or (
+                parts[i - 1] == "-" and not self.pack.hyphen_caps
+            )
+            if i and keep:
                 out.append(part)
             elif m := _ELIDED.match(part):
                 out.append(m.group(1) + "'" + m.group(2).upper() + m.group(3))
             else:
                 out.append(part[:1].upper() + part[1:])
+        name = "".join(out)
+        for pattern, replacement in self.pack.fixes:
+            name = re.sub(pattern, replacement, name)
         # Three of a letter running together is always a join, never a word.
-        return re.sub(r"(.)\1\1", r"\1\1", "".join(out))
+        return re.sub(r"(.)\1\1", r"\1\1", name)
 
     def place_name(
         self, generic: str, qualifier: Qualifier | None, rng: np.random.Generator
