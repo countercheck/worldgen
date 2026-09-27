@@ -195,6 +195,31 @@ def apply_tilt(arr: np.ndarray, cfg, w: int, h: int) -> np.ndarray:
     return arr + gx * qf + gy * rf
 
 
+def apply_hypsometry(arr: np.ndarray, cfg) -> np.ndarray:
+    """Push the land down towards the coast, leaving the sea, the shoreline and the peak alone.
+
+    Noise comes out as a bell around half the range, so a raw field has as much ground at
+    700 m as at 70 m — and erosion, which carves valleys rather than lowering plateaux, only
+    moves the bottom decile. Real land is lopsided: most of it lies low and the high ground
+    is a small fraction. Each land height becomes `top * (e / top) ** k`, so with
+    `elevation_hypsometry_exponent` k above 1 the middle sinks while zero stays the
+    shoreline and the highest point stays the highest. 1.0 leaves the field as it is.
+
+    Applied by `ErosionStage` to the eroded field, not here to the raw one. Run before
+    erosion it put so much ground within a few metres of the sea that erosion cut a quarter
+    of the land below it, and the drowned hollows came out as lakes; after erosion it only
+    lowers ground that is already land, so the coastline is erosion's and no hex drowns.
+    """
+    k = cfg.elevation_hypsometry_exponent
+    land = arr > 0.0
+    if k == 1.0 or not land.any():
+        return arr
+    top = arr[land].max()
+    out = arr.copy()
+    out[land] = top * (arr[land] / top) ** k
+    return out
+
+
 def write_elevations(state: WorldState, arr: np.ndarray) -> None:
     """Copy a (width, height) field onto the hexes.
 

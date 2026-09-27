@@ -142,7 +142,8 @@ flowchart TD
         Tcls[TerrainClassificationStage<br/><i>hex.terrain_class</i>]
         Wbod[WaterBodiesStage<br/><i>splits OCEAN vs LAKE; fixes COAST</i>]
         Hydr[HydrologyStage<br/><i>state.rivers, hex.river_flow, river tags</i>]
-        Elev --> Eros --> Tcls --> Wbod --> Hydr
+        Cata[CataractStage<br/><i>cataract tags</i>]
+        Elev --> Eros --> Tcls --> Wbod --> Hydr --> Cata
     end
 
     subgraph Climate["Climate &amp; Cover"]
@@ -163,7 +164,7 @@ flowchart TD
         Hab --> Cit --> Iur --> Cul --> Vil --> Vtk --> Vcul
     end
 
-    Hydr --> Clim
+    Cata --> Clim
     Lcov --> Hab
     Vcul --> End([WorldState])
 
@@ -770,6 +771,30 @@ Nine steps, top to bottom in
   for every river hex, and `0.0` for everything else.
 - If `True`: every draining land hex gets a normalised flow value (handy
   if you want to render the underlying drainage gradient).
+
+---
+
+### 3.5a Cataracts
+
+[cataracts.py](../worldgen/stages/cataracts.py), both models, straight after hydrology. A
+river hex that carries a barge (`navigable_min_discharge`) and falls at least
+`cataract_min_drop_m` through the hex is tagged `cataract`. Three things follow:
+
+- **A barrier.** `navigable` is false on a cataract, so a cargo afloat must land above it
+  and load again below. The tag goes out in the world file for anything else — a campaign
+  movement rule — that cares whether a boat can pass.
+- **A portage.** Landing and reloading is a change of mode, so `CityPromotionStage` pays
+  the quays either side (§ [3.10d](#310d-resource-settlements--organic)). In practice the
+  portage trade is small: two quay charges and a land hop are a large share of
+  `haulage_range_land`, so the markets above a cataract mostly stop sending to the city
+  below it. A cataract cuts a river's hinterland more than it funnels trade — the great
+  portage towns lived on long-distance trade, which the model does not yet route.
+- **A mill site.** `site_bonus` pays a site on or beside a cataract
+  `habitability_mill_bonus`.
+
+It has to run before `HabitabilityStage`, which reads `navigable` to score harbours. At
+20 m/km a temperate 128x128 map carries 14-65 cataract hexes in 6-28 stretches, about 15% of
+barge-sized river hexes once `elevation_hypsometry_exponent` has laid the lowland flat.
 
 ---
 
@@ -2053,6 +2078,7 @@ country the map is comes from the two vertical-scale settings below.
 | Param | Type | Default | Range | Effect |
 |---|---|---|---|---|
 | `max_elevation_m` | `float` | `1500.0` | `> 0` | Highest ground above sea level. The single most consequential setting for what country this is: `800` gives downland, `1500` mixed uplands, `3000` an Alpine massif |
+| `elevation_hypsometry_exponent` | `float` | `2.0` | `> 0` | How lopsided the land is. Applied by `ErosionStage` to the eroded field: each land height becomes top × (e / top)^k, so sea level and the peak stay put and the middle sinks. 1.0 keeps the noise's bell around half the range — a quarter of the land at 25-30% of the peak, and navigable rivers falling ~10 m/km, a torrent. 2.0 puts half the land in the lowest tenth of the range and navigable rivers at 1-2 m/km. Applied after erosion rather than before: before, it put so much ground within metres of the sea that erosion drowned a quarter of the land into lakes. Generated terrain only |
 | `seabed_depth_m` | `float` | `200.0` | `> 0` | How deep the sea floor lies at the map edge. A continental shelf, not an abyss. How much of the map ends up underwater follows from this and `max_elevation_m` |
 | `coast_max_elevation_m` | `float` | `100.0` | `≥ 0` | Land no higher than this beside the sea is classed COAST |
 | `noise_octaves` | `int` | `6` | ≥ 1 | Number of fBm octaves. Higher = more detail at the cost of speed |
@@ -2181,6 +2207,7 @@ no navigable river at all, and tropical 12.6%.
 |---|---|---|---|---|
 | `channel_min_discharge` | `float` | `6000.0` | `> 0` | Catchment km² × runoff mm needed to cut a channel. Also the dial that decides whether the drainage *network* branches: a basin shows only as many Strahler orders as its area divides into channel-sized pieces, so basin ÷ threshold sets the branching. At the old `20000` (41.7 km²) that ratio was about five on a 64 km map — no seed reached third order and first-order streams outnumbered second by nine to one, against Horton's three to five. `6000` is 12.5 km², by the humid-temperate regional curve `W = 2.5·A^0.4` a channel ~7 m across and ~0.6 m deep — a watercourse a cart must ford — and it leaves 88% of the land dry |
 | `navigable_min_discharge` | `float` | `60000.0` | `> channel` | ...and to float a boat. Consumed by the haulage model: a navigable hex multiplies a city's supply reach |
+| `cataract_min_drop_m` | `float` | `20.0` | `>= 0` | Metres a barge-sized river falls through one hex before it is a cataract: no boat passes, cargo portages round it, and the fall drives mills (§ [3.5a](#35a-cataracts)). 20 m/km is a 2% gradient, strong rapids at a kilometre to the hex. 0 turns cataracts off |
 | `evapotranspiration_base_mm` | `float` | `50.0` | `≥ 0` | Rain the ground and its plants take before anything runs off, even at freezing |
 | `evapotranspiration_per_c_mm` | `float` | `30.0` | `≥ 0` | ...plus this much per degree of mean temperature. Why cold country sheds nearly all its rain and the taiga is full of rivers |
 | `min_runoff_mm` | `float` | `25.0` | `≥ 0` | Floor, so even a desert drains its largest valleys |
@@ -2284,6 +2311,7 @@ desert, too wet is `food_drowned_precip_mm`. Water and wetland ignore it.
 | `habitability_hill_bonus` | `float` | `0.15` | ≥ 0 | For a site overlooking the ground beside it, scaled by `habitability_hill_relief_m` |
 | `habitability_hill_relief_m` | `float` | `75.0` | `> 0` (validated) | Metres of drop a site must command to be paid that bonus in full; below it the bonus scales down. It used to be paid flat to any ROLLING hex with a FLAT neighbour, which asked two band questions and got the wrong answer to both — a knoll and a bluff were worth the same, and a level floodplain beside a bluff collected the bonus for standing *under* the drop that commands it |
 | `habitability_confluence_bonus` | `float` | `0.10` | ≥ 0 | Flat, on a river junction (this hex only) |
+| `habitability_mill_bonus` | `float` | `0.15` | `>= 0` | Site bonus for standing on or beside a cataract: water power for a mill |
 
 Bonuses are binary within each term: a hex with one river neighbour scores the same as one
 ringed by six, and adjacency is radius 1 only.
@@ -2322,7 +2350,7 @@ is the model's core claim and is enforced in `__post_init__`.
 | `haulage_transship_cost` | `float` | `8.0` | What it costs to get a cargo onto the water and off again, charged once at each land↔water transition, in the same units as `haulage_range_land`. Without it the sea is a teleport: at a fifteenth the cost per hex a cargo once afloat crosses the map for nothing, so every coastal market reached 55 of 74 others and the tier it exists to create flattened completely. A quay is real capital — wharfage, lighters, the risk — and charging it makes a short hop not worth the trouble while a long haul plainly is. That asymmetry is the shape of pre-industrial trade, and why a few great ports emerge rather than a coastline of equals. Validated `≥ 0` |
 | `haulage_range_water_mult` | `float` | `15.0` | `≥ 1` | How much further the same cargo goes by water. Diocletian's Price Edict prices land carriage at 28–56× sea and 6–11× river per tonne-kilometre (Duncan-Jones: sea 1, river 4.9, wagon 28, pack animal 56). **This is why large pre-industrial cities sit on navigable water and inland ones stay small**: nothing gates a city, water simply extends what can feed it |
 | `marketable_surplus_fraction` | `float` | `0.40` | `(0, 1]` | Share of what a farming household grows that can leave for a market; it eats the rest. Sets the share of people in towns: 0.40 with `yield_multiplier` 1.7 is England c. 1800 (25% in market towns on the map, 27.5% over 5,000 in 1801); 0.32 is England c. 1300. Sizing markets off the *surplus* rather than the production is why the tier ratios come out right without target counts |
-| `people_per_food` | `float` | `400.0` | `> 0` | People supported per unit of haulage-weighted food. Calibrated so market towns land in their historical 500–2500 band: across five seeds at 128×128 this gives medians of 1260–1700 and a largest of 4200–5450 |
+| `people_per_food` | `float` | `145.0` | `> 0` | People fed per unit of food, and the one scale factor for the whole population of the map, settlements and countryside alike. 145 puts a temperate 128x128 map at 61 people per km² at the c. 1800 defaults, against 59 in England and Wales's 1801 census. It was 180 before `elevation_hypsometry_exponent` laid most land low, since flat ground farms better. Density is linear in it, so it is also the knob for a country thinner than the era table's rows |
 | `travel_ascent_per_hex` | `float` | `125.0` | `> 0` | Naismith's rule: metres of ascent costing as much as one hex of level ground. Catchments are *walked*, not engineered, so they use this rather than `road_slope_cost` — that curve prices grading a road and saturates at ten times base, which over eroded terrain shrinks a catchment to a third of its proper reach |
 | `travel_ford_cost` | `float` | `8.0` | `≥ 0` | Getting across away from a crossing, per multiple of the wadeable span, charged on each land–river edge. Deliberately has no fixed term, unlike `road_river_crossing_base`: that base is the capital of *building* a bridge, and somebody walking to market pays no capital |
 

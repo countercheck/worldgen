@@ -8,6 +8,7 @@ from ..core.hex_grid import distance as hex_distance
 from ..core.hex_grid import neighbors as hex_neighbors
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
+from .elevation import apply_hypsometry
 
 try:
     import numba as _numba
@@ -809,9 +810,13 @@ class ErosionStage(GeneratorStage):
                 for row in range(h):
                     state.hexes[state.coord_at(col, row)].alluvium = float(alluvium[col, row])
 
+        metres = arr * span - cfg.seabed_depth_m
+        # Reshape the eroded land so most of it lies low (`apply_hypsometry`). Generated
+        # terrain only: an imported heightmap is a picture of somewhere, with its own curve.
+        if not cfg.heightmap_path:
+            metres = apply_hypsometry(metres, cfg)
         for col in range(w):
             for row in range(h):
-                metres = float(arr[col, row]) * span - cfg.seabed_depth_m
-                state.hexes[state.coord_at(col, row)].elevation = metres
+                state.hexes[state.coord_at(col, row)].elevation = float(metres[col, row])
 
         return state

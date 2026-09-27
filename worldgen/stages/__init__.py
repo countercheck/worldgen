@@ -40,6 +40,7 @@ def default_stages(model: str = "classic") -> tuple[type["GeneratorStage"], ...]
         raise ValueError(f"Unknown pipeline model {model!r}. Supported: {', '.join(MODELS)}")
 
     from .biomes import BiomeStage
+    from .cataracts import CataractStage
     from .city_town import CityTownStage
     from .climate import ClimateStage
     from .cultivation import CultivationStage, VillageCultivationStage
@@ -63,6 +64,9 @@ def default_stages(model: str = "classic") -> tuple[type["GeneratorStage"], ...]
         TerrainClassificationStage,
         WaterBodiesStage,
         HydrologyStage,
+        # Straight after the rivers exist: `navigable` is read from habitability on, and a
+        # cataract has to be marked before anything asks whether a boat can load there.
+        CataractStage,
         ClimateStage,
         BiomeStage,
         # Soil before cover, because cover depends on it: good ground carries wildwood

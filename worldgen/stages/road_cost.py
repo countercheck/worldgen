@@ -438,6 +438,14 @@ def detour_is_allowed(hexes, settled, cfg, blocked, a, seat, b) -> bool:
     so a skirt refused for a 30% grade or a channel crossing read as a defect.
     """
 
+    # A road that already arrives at a settlement is not passing one by. Without this, two
+    # settlements side by side bent a road back and forth for ever: routing it through the
+    # one laid a leg skirting the other, and routing that through the other laid a leg
+    # skirting the first. Every leg a bend lays ends at a settlement, so with this rule one
+    # pass is final.
+    if a in settled or b in settled:
+        return False
+
     def leg_cost(start, end) -> float:
         return (
             terrain_base_cost(hexes[end], cfg)

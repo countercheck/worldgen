@@ -24,6 +24,7 @@ model: classic          # Settlement and road model: classic | organic. The --mo
 # Elevation is metres above sea level, so sea level is zero by definition and is not a
 # setting. How the map looks is set by how high the land stands and how deep the sea lies.
 max_elevation_m: 1500.0  # Highest ground above sea level. The map's vertical scale, and the single most consequential setting for what country this is: 800 gives downland, 1500 mixed uplands, 3000 an Alpine massif. Default: 1500
+elevation_hypsometry_exponent: 2.0 # How lopsided the land is: each land height becomes top x (e / top) ^ k, applied after erosion. 1.0 keeps the noise's bell around half the range, leaving a quarter of the land at 25-30% of the peak and navigable rivers falling ~10 m/km, a torrent. 2.0 puts half the land in the lowest tenth of the range and navigable rivers at 1-2 m/km. Generated terrain only. Default: 2.0
 seabed_depth_m: 200.0    # How deep the sea floor lies at the map edge. A continental shelf, not an abyss. How much of the map ends up underwater follows from this and max_elevation_m. Default: 200
 coast_max_elevation_m: 100.0 # Land no higher than this beside the sea is coast. Default: 100
 
@@ -182,6 +183,7 @@ alluvium_quantile: 0.98       # Depth treated as full, for the droplet term only
 # accumulation — which gave desert and rainforest alike 5.6% of their land under channel.
 channel_min_discharge: 6000.0    # Catchment km2 x runoff mm needed to cut a channel — also the dial that decides whether the network branches at all: a basin shows only as many stream orders as its area divides into channel-sized pieces. 6000 is 12.5 km2, a channel ~7 m across and knee deep. Default: 6000
 navigable_min_discharge: 60000.0 # ...and to float a boat. Default: 150000
+cataract_min_drop_m: 20.0 # Metres a barge-sized river falls through one hex before it is a cataract: no boat passes, cargo portages round it, and the fall drives mills. 20 m/km is a 2% gradient, strong rapids at a kilometre to the hex. 0 turns cataracts off. Default: 20.0
 river_flow_continuous: false # Record a flow figure on every draining land hex, not only on hexes that carry a channel. Off by default: it is a diagnostic for inspecting the drainage field in the viewer, and turning it on does not add rivers to the map. Default: false
 # Rain the ground and its plants take before anything runs off. Rises with temperature,
 # which is why cold country sheds nearly all its rain and the taiga is full of rivers.
@@ -354,34 +356,35 @@ yield_wood: 0.30     # Still under trees; nobody has cleared it. Default: 0.30
 #                               much below ~23/km2, because the wood and the fishery still
 #                               feed people at any yield.
 #
-# Measured on seeds 42 and 7 (temperate 128x128, organic model, city_draw_share 0.7).
+# Measured on seeds 42 and 7 (temperate 128x128, organic model, city_draw_share 0.7,
+# elevation_hypsometry_exponent 2.0).
 # "Target" is the historical figure; "map" is what these settings produced. Largest city
 # is the largest on the map.
 #
 #   Era / region                          yield  surplus  people   target                  map
 #                                         mult   fraction per_food km2 / urban             km2 / urban / cities / largest
-#   Ancient, frontier province            0.5    0.30     90       10-25 / ~10%            14-15 / 12% / 2 / 5-6k
+#   Ancient, frontier province            0.5    0.30     72       10-25 / ~10%            13-14 / 14% / 3 / 6-7k
 #     (Roman Britain, Gaul c. AD 150)
-#   Ancient, core (Roman Italy c. AD 14)  0.75   0.42     180      25-30 / 25-35% [a]      35-38 / 24% / 6-7 / 24-27k
-#   Medieval, thin (Scotland c. 1300)     0.5    0.25     60       6-13 / <10%             9-10 / 8% / 1 / ~2.5k
-#   Medieval, typical (England, northern  1.0    0.32     180      30-40 / ~15% [b]        39-43 / 16% / 5 / 19-20k
+#   Ancient, core (Roman Italy c. AD 14)  0.75   0.42     145      25-30 / 25-35% [a]      34-35 / 26% / 8-9 / 25-32k
+#   Medieval, thin (Scotland c. 1300)     0.5    0.25     48       6-13 / <10%             9 / 9% / 2 / 2.5-3k
+#   Medieval, typical (England, northern  1.0    0.32     145      30-40 / ~15% [b]        38-39 / 18% / 5-7 / 20-24k
 #     France c. 1300)
-#   Medieval, dense (Flanders, northern   2.0    0.45     180      60-80 / 20-35% [c]      69-80 / 30% / 13-15 / 64-68k
+#   Medieval, dense (Flanders, northern   2.0    0.45     145      60-80 / 20-35% [c]      71-73 / 32% / 14-16 / 64-79k
 #     Italy c. 1300)
-#   Early modern (England c. 1700)        1.1    0.35     180      ~39 / 17% (>5k) [d]     42-46 / 19% / 6-7 / 24-26k
-#   Early modern, dense (Dutch Republic   1.5    0.55     180      55-60 / 40-45% (>2.5k)  57-67 / 40% / 14-16 / ~72k
+#   Early modern (England c. 1700)        1.1    0.35     145      ~39 / 17% (>5k) [d]     41-43 / 21% / 7-8 / 25-30k
+#   Early modern, dense (Dutch Republic   1.5    0.55     145      55-60 / 40-45% (>2.5k)  59-61 / 41% / 16-18 / 71-84k
 #     c. 1650)
-#   Improved farming (England c. 1800;    1.7    0.40     180      59 / 27.5% (>5k)        58-63 / 25% / 10-11 / 41-46k
+#   Improved farming (England c. 1800;    1.7    0.40     145      59 / 27.5% (>5k)        61 / 27% / 11-13 / 46-59k
 #     rotation and marl, before guano
 #     and chemical fertiliser) - the defaults
-#   Improved farming, dense (Belgium      4.0    0.45     180      125-134 / ~30% (>5k)    123-146 / 31% / 19-22 / 122-128k
+#   Improved farming, dense (Belgium      4.0    0.45     145      125-134 / ~30% (>5k)    130-132 / 33% / 21-22 / 121-149k
 #     c. 1830)
 #
 #   [a] The low count (Beloch, Brunt: 6-7.5M). The high count (Lo Cascio: 12-14M) gives
 #       ~50/km2 and 15-20% urban. The map sits between the two.
 #   [b] England 1290 was 4.0M (Campbell 2008) to 4.75M (Broadberry et al. 2015). Older
 #       estimates of 5-6M gave 38-46/km2, which is where this row sits; people_per_food
-#       160 lands mid-range. Urban: ~10% in towns over 2,000 plus ~5% in small boroughs
+#       130 lands mid-range. Urban: ~10% in towns over 2,000 plus ~5% in small boroughs
 #       (Dyer). Northern France: ~40/km2 from the 1328 hearth count.
 #   [c] Flanders 33-36% (Prevenier); centre-north Italy 20-25% in towns over 5,000
 #       (Malanima).
@@ -431,6 +434,7 @@ habitability_coast_bonus: 0.25      # Flat bonus if the hex or a neighbour is co
 habitability_hill_bonus: 0.15       # Bonus for a site overlooking the ground beside it. Default: 0.15
 habitability_hill_relief_m: 75.0    # Metres of drop a site must command to be paid that bonus in full; below it the bonus scales down, so a knoll and a bluff are not worth the same. Default: 75.0
 habitability_confluence_bonus: 0.10 # Flat bonus on a river junction (this hex only). Default: 0.10
+habitability_mill_bonus: 0.15 # Site bonus for standing on or beside a cataract: water power for a mill. Default: 0.15
 
 # --- the classic model: counts and spacing are inputs -----------------------
 # Used by `generate --model classic`. The map is told how many cities and towns to have
@@ -485,7 +489,7 @@ haulage_range_land: 40.0   # Travel cost at which bulk food is worth nothing ove
 haulage_transship_cost: 8.0 # What it costs to get a cargo onto the water and off again, charged once at each land-water transition, in the same units as haulage_range_land. Without it the sea is a teleport: at a fifteenth the cost per hex a cargo once afloat crosses the map for nothing, every coastal market reaches every other, and the city tier flattens. Default: 8.0
 haulage_range_water_mult: 15.0 # How much further the same cargo goes by water. Diocletian's Price Edict prices land carriage at 28-56x sea and 6-11x river for the same tonne-kilometre (Duncan-Jones: sea 1, river 4.9, wagon 28, pack animal 56). This is why large pre-industrial cities sit on navigable water and inland ones stay small: nothing gates a city, water simply extends what can feed it. Default: 15.0
 marketable_surplus_fraction: 0.40 # What leaves the farm: not only what the household sells but the rent, the tithe and the dues, all of which end up feeding somebody in a town. It is the one number setting the ratio between town and countryside — rural/town = (1 - s) / (s x mean haulage weight) — so 0.40, with yield_multiplier 1.7, puts 25% of the people in market towns of any size, against 27.5% in towns over 5,000 in England's 1801 census (Wrigley). 0.32 is England c. 1300. It also plants markets, since siting counts surplus: ~104 at 0.40 against ~85 at 0.32. See the era table. Default: 0.40
-people_per_food: 180.0     # People fed per unit of food, and the one scale factor for the whole population of the map — settlements and countryside alike, which is what makes the two reconcile by construction. Set from the rural side because that is where there is a figure to hit: 180 puts a temperate 128x128 map at 58-63 people per km2 at the default yield_multiplier of 1.7, against England's 59 in the 1801 census, and at 38-43 at 1.0 (England c. 1300 was 30-40). At the old 400 the countryside came out at 88 per km2, which is Belgium in 1900. Default: 180
+people_per_food: 145.0     # People fed per unit of food, and the one scale factor for the whole population of the map — settlements and countryside alike, which is what makes the two reconcile by construction. Set from the rural side because that is where there is a figure to hit: 145 puts a temperate 128x128 map at 61 people per km2 at the default yield_multiplier of 1.7, against England's 59 in the 1801 census, and at 38-39 at 1.0 (England c. 1300 was 30-40). It was 180 until elevation_hypsometry_exponent laid most land low: flat ground farms better, and density rose by a quarter. At the old 400 the countryside came out at 88 per km2, which is Belgium in 1900. Default: 145
 travel_ascent_per_hex: 125.0 # Naismith's rule: metres of ascent that cost as much as one hex of level ground. Catchments are walked, not engineered, so they use this rather than road_delta_elevation_per_hex, which prices a graded road and is about five times stricter than a walker has reason to be. Default: 125
 travel_ford_cost: 8.0      # Getting across away from a crossing, per multiple of the wadeable span, charged on each land–river edge. Deliberately has no fixed term, unlike road_river_crossing_base: that base is the capital of building a bridge, and somebody walking to market pays no capital — what stops them is how much water is in the way. Default: 8.0
 

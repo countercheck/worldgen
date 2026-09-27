@@ -54,8 +54,17 @@ def navigable(hx, cfg) -> bool:
     """
     if hx.terrain_class in WATER:
         return True
-    if not is_river(hx):
+    if not is_river(hx) or "cataract" in hx.tags:
         return False
+    return carries_a_barge(hx, cfg)
+
+
+def carries_a_barge(hx, cfg) -> bool:
+    """Enough water to float a barge, whatever the reach is doing.
+
+    `navigable` less the cataract test, because `CataractStage` has to ask this of a reach
+    to decide whether it is a cataract — a small steep river is only a brook.
+    """
     discharge = hx.catchment_km2 * cfg.runoff_mm(cfg.mean_precip_mm)
     return discharge >= cfg.navigable_min_discharge
 

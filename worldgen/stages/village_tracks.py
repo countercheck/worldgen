@@ -31,8 +31,16 @@ class VillageTrackStage(GeneratorStage):
         # otherwise be a legal target — leaving a track that runs into the water and
         # stops there.  A track has to join the network on dry land; the route it takes
         # to get there may still cross water, which stays bracketed by its own endpoints.
+        #
+        # Read off `road_edges`, not `road_connections`: the connections include the sea legs,
+        # so the dry landing of a boat crossing with no land road at it passed as "road". A
+        # village tracked to one joined the world by boat only, and several villages doing
+        # so made a network of their own on the same landmass as the real one.
         road_hex_set = {
-            c for c, hx in hexes.items() if hx.road_connections and hx.terrain_class not in WATER
+            c
+            for edge in state.road_edges
+            for c in edge
+            if c in hexes and hexes[c].terrain_class not in WATER
         }
         # Also include city/town coords as valid targets
         settled_major = {

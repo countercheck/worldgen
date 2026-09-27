@@ -51,10 +51,13 @@ FIXTURE = (
 )
 
 # Chosen because it carries everything `test_the_world_fixture_still_exercises_what_the_
-# typescript_tests_need` asks for. Seed 7 stopped carrying a secondary road once
-# `fill_tier_gaps` began closing short dips in trunk roads; 13 and 16 were the seeds in
-# 1-31 that still carry all three tiers at 32x32.
-SEED = 13
+# typescript_tests_need` asks for, which not every seed does at 32x32 — at one point
+# `fill_tier_gaps` left seed 7 with no secondary road and the fixture moved to 13, then
+# `elevation_hypsometry_exponent` reshaped the terrain and 13 lost one in turn. Seed 1 was
+# the first that carries everything and also passes the campaign suites unchanged — several
+# of those ride a unit across the fixture and read how far it got. If a change drops one,
+# search for a seed that restores it rather than weakening the test.
+SEED = 1
 SIZE = 32
 MODEL = "organic"
 PLACES = 4

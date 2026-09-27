@@ -112,10 +112,15 @@ def test_a_default_map_carries_no_permanent_snow():
 
 
 def test_relief_alone_brings_the_snowline_into_reach():
-    """And raising the ground is all it takes — no per-map alpine setting."""
-    _, _, land = _cold_country("boreal", max_elevation_m=2400.0)
+    """And raising the ground is all it takes — no per-map alpine setting.
+
+    3000 m rather than the 2400 this once used: `elevation_hypsometry_exponent` lays most
+    land low and leaves only a sliver near the peak, so 2400 m of relief keeps its summit
+    but no longer has enough ground up there to clear the snowline.
+    """
+    _, _, land = _cold_country("boreal", max_elevation_m=3000.0)
     assert any(h.biome is Biome.ALPINE for h in land), (
-        "2400 m of subarctic relief reached no bare ground at all"
+        "3000 m of subarctic relief reached no bare ground at all"
     )
 
 

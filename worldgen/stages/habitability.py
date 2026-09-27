@@ -129,6 +129,10 @@ def site_bonus(coord, hx, hexes, cfg) -> float:
     if "confluence" in hx.tags:
         bonus += cfg.habitability_confluence_bonus
 
+    # Water power: a mill wants a great fall of water, and the greatest are at a cataract.
+    if "cataract" in hx.tags or any("cataract" in n.tags for n in nbrs):
+        bonus += cfg.habitability_mill_bonus
+
     return bonus
 
 

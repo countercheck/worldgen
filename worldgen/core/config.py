@@ -105,6 +105,10 @@ class WorldConfig:
     # ends up under water follows from this and seabed_depth_m rather than being set
     # directly, which is the honest way round.
     max_elevation_m: float = 1500.0
+    # How lopsided the land is: each land height becomes top * (e / top) ** k. 1.0 keeps
+    # the noise's bell around half the range; above 1 most ground lies low and the heights
+    # are a small fraction, as real land does. Generated terrain only.
+    elevation_hypsometry_exponent: float = 2.0
     # How deep the sea floor lies at the map edge, in metres below sea level. A
     # continental shelf, not an abyss — the falloff blends the border down to this,
     # and a shallow shelf makes a gentler coast than a plunge would.
@@ -450,6 +454,12 @@ class WorldConfig:
     # upper quartile of river discharge here and gives 236 navigable hexes, which is a trunk
     # navigable through the lower half of its length rather than at its mouth alone.
     navigable_min_discharge: float = 60000.0
+    # Metres a barge-sized river falls through one hex before it is a cataract: no boat
+    # passes, cargo portages round it, and the fall drives mills. 20 m/km is a 2% gradient,
+    # strong rapids at a kilometre to the hex; about 15% of barge-sized river hexes on a
+    # temperate map reach it once `elevation_hypsometry_exponent` has laid the lowland flat.
+    # 0 turns cataracts off.
+    cataract_min_drop_m: float = 20.0
     # What leaves the farm: not only what the household sells, but the rent, the tithe and
     # the dues, all of which end up feeding somebody in a town. Sizing markets off the
     # *surplus* rather than the production is why the tier ratios come out right without
@@ -575,18 +585,20 @@ class WorldConfig:
     # the map — settlements and countryside alike, which is what makes the two reconcile by
     # construction rather than by calibration.
     #
-    # Set from the rural side, because that is where there is a figure to hit: 180 puts a
-    # temperate 128x128 map at 38-43 people per km2 at yield_multiplier 1.0 (58-63 at the
-    # 1.7 default, against 59 in the 1801 census); England in 1290 was 31-36 (Campbell
-    # 2008; Broadberry et al. 2015), or 38-46 on the older 5-6M estimates. It was
-    # 400 when it sized settlements alone and nothing else read it; at that value the
-    # countryside came out at 88 per km2, which is Belgium in 1900.
+    # Set from the rural side, because that is where there is a figure to hit: 145 puts a
+    # temperate 128x128 map at 61 people per km2 at the 1.7 default yield_multiplier,
+    # against 59 in the 1801 census, and at 38-39 at 1.0; England in 1290 was 31-36
+    # (Campbell 2008; Broadberry et al. 2015), or 38-46 on the older 5-6M estimates. It was
+    # 180 until `elevation_hypsometry_exponent` laid most of the land low — flat ground
+    # farms better, and density rose by a quarter — and 400 when it sized settlements alone
+    # and nothing else read it, when the countryside came out at 88 per km2, which is
+    # Belgium in 1900.
     #
     # The market towns that follow have a median near 450 and a largest around 20,000. That
     # is a lower median than the figure this used to be tuned to, and the right one: England
     # had some 1,750 market grants by 1300 (Letters' Gazetteer) and most were villages with
     # a charter, at 300-1000 people. Only the top of the distribution reached the thousands.
-    people_per_food: float = 180.0
+    people_per_food: float = 145.0
 
     # Market centres. A market goes where it can gather the most surplus inside a day's
     # return — central-place logic with a real transport cost rather than an abstract one.
@@ -812,6 +824,8 @@ class WorldConfig:
     # floodplain beside a bluff collected it.
     habitability_hill_relief_m: float = 75.0
     habitability_confluence_bonus: float = 0.10
+    # A site beside a cataract has water power for a mill.
+    habitability_mill_bonus: float = 0.15
 
     # World scale
     hex_size_m: float = 1000.0  # metres per hex
@@ -1227,6 +1241,11 @@ class WorldConfig:
             raise ValueError(
                 f"haulage_transship_cost must be >= 0, got {self.haulage_transship_cost}"
             )
+        if self.elevation_hypsometry_exponent <= 0:
+            raise ValueError(
+                "elevation_hypsometry_exponent must be > 0, got "
+                f"{self.elevation_hypsometry_exponent}"
+            )
         if self.yield_multiplier <= 0:
             raise ValueError(f"yield_multiplier must be > 0, got {self.yield_multiplier}")
         if not 0.0 <= self.transship_share <= 0.5:
@@ -1238,6 +1257,8 @@ class WorldConfig:
             "ore_deposits_per_1000_km2",
             "ore_min_separation",
             "ore_haul_range_mult",
+            "cataract_min_drop_m",
+            "habitability_mill_bonus",
             "timber_float_min_discharge",
             "mine_workforce",
             "mine_workforce_sigma",
