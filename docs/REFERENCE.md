@@ -1715,6 +1715,17 @@ A canonical route's tier is the **highest** tier any hex on it earned
 Routes whose hexes are all below the traffic threshold are dropped
 entirely.
 
+#### Tier gaps — [road_cost.py `fill_tier_gaps`](../worldgen/stages/road_cost.py)
+
+Tiers are cut per edge, so where two routes take neighbouring hexes for a step the traffic
+splits and a trunk road dips a class and comes back. After the network is built, a
+lower-class stretch of at most `road_tier_gap_max_edges` edges running from the end of a
+PRIMARY (then SECONDARY) road to another, unconnected piece of that class is promoted to
+it. A connector leaving the middle of one trunk for another keeps its class.
+
+The land join that reconnects a road split by a sea leg takes the lower of the best tiers
+within two hexes of each of its ends, rather than always TRACK.
+
 #### Connectivity guarantee — [interurban_roads.py:198–276](../worldgen/stages/interurban_roads.py#L198)
 
 If the traffic-driven graph leaves any city in a separate component,
@@ -2410,6 +2421,7 @@ placed where its only escape requires one.
 | `road_primary_pct` | `float` | `0.10` | Top fraction of eligible hexes, by traffic, that become PRIMARY |
 | `road_secondary_pct` | `float` | `0.30` | Next fraction, which become SECONDARY |
 | `road_track_pct` | `float` | `0.60` | Currently unused by InterurbanRoadStage — TRACK is reserved for village connectors. Kept so the three percentages sum to 1.0 |
+| `road_tier_gap_max_edges` | `int` | `12` | Longest lower-class stretch promoted where a road of one class stops and resumes across it (`fill_tier_gaps`). 0 turns it off |
 
 ---
 

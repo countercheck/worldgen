@@ -870,6 +870,12 @@ class WorldConfig:
     road_primary_pct: float = 0.10
     road_secondary_pct: float = 0.30
     road_track_pct: float = 0.60
+    # Tiers are cut per edge, so where traffic splits across two neighbouring hexes for a
+    # step a trunk road dips a class and comes back. `fill_tier_gaps` promotes a lower-class
+    # stretch of at most this many edges running from an end of a class to another piece of
+    # it. 0 turns it off. 12 covers the longest gap measured on seeds 3, 7 and 42: 11 edges,
+    # two land joins meeting at a stray one-edge lane between two primary ends.
+    road_tier_gap_max_edges: int = 12
 
     # Settlement placement
     settlement_min_reachable: int = 100  # min hexes reachable below cap grade
@@ -1172,6 +1178,10 @@ class WorldConfig:
         if self.road_travellers_max < 1:
             raise ValueError(f"road_travellers_max must be >= 1, got {self.road_travellers_max}")
         # Below 2.0 the rule can never fire: a detour is two legs where there was one.
+        if self.road_tier_gap_max_edges < 0:
+            raise ValueError(
+                f"road_tier_gap_max_edges must be >= 0, got {self.road_tier_gap_max_edges}"
+            )
         if self.road_settlement_detour_max_mult < 2.0:
             raise ValueError(
                 "road_settlement_detour_max_mult must be >= 2.0 (a detour is two legs "

@@ -516,6 +516,126 @@ def as_road_edges(tiers, hexes) -> dict:
     return out
 
 
+def tier_near(road_edges, node, hops) -> RoadTier:
+    """The highest tier of any road within *hops* edges of *node*, along the roads.
+
+    TRACK where no road comes that close. Walked along the network rather than measured as
+    the crow flies, so a trunk on the far side of a ridge is not "near".
+    """
+    adj: dict = {}
+    for a, b in road_edges:
+        adj.setdefault(a, []).append(b)
+        adj.setdefault(b, []).append(a)
+    best = RoadTier.TRACK
+    seen, frontier = {node}, [node]
+    for _ in range(hops):
+        nxt = []
+        for c in frontier:
+            for n in adj.get(c, ()):
+                tier = road_edges[road_edge_key(c, n)]
+                if ROAD_TIER_RANK[tier] > ROAD_TIER_RANK[best]:
+                    best = tier
+                if n not in seen:
+                    seen.add(n)
+                    nxt.append(n)
+        frontier = nxt
+    return best
+
+
+def fill_tier_gaps(road_edges, max_edges) -> int:
+    """Promote a short lower-class stretch that a road of one class stops and resumes across.
+
+    Tiers are cut per edge on traffic, so where two routes take neighbouring hexes for a
+    step and then rejoin, the traffic splits between the branches and neither branch makes
+    the cut: a primary road runs to a point, turns secondary for a kilometre, and carries on
+    primary. Nobody builds a road like that.
+
+    A gap is a path of at most *max_edges* lower-tier edges from an **end** of the tier —
+    a node where exactly one road of that tier stops — to any part of that tier's network it
+    is not already joined to. The other side may be an end too, the dip proper, or the
+    middle of another road, where one trunk stops a hex short of meeting a second. Those two
+    conditions are what separate a gap from a real junction. A secondary road leaving the
+    middle of one trunk for the middle of another starts from no end, so it is a connector
+    and keeps its class; and a lane between two points of the same primary road is a
+    shortcut the traffic declined, not a break in it.
+
+    Primary first, then secondary, so a secondary gap is judged on the primary network as
+    it will be drawn. Mutates *road_edges* (key -> tier); returns how many edges changed.
+    """
+    if max_edges <= 0:
+        return 0
+
+    promoted = 0
+    for tier in (RoadTier.PRIMARY, RoadTier.SECONDARY):
+        rank = ROAD_TIER_RANK[tier]
+        adj: dict = {}
+        for a, b in road_edges:
+            adj.setdefault(a, []).append(b)
+            adj.setdefault(b, []).append(a)
+
+        def of_tier(a, b, rank=rank):
+            return ROAD_TIER_RANK[road_edges[road_edge_key(a, b)]] >= rank
+
+        # Union-find over the tier's own network, so a join made here counts for the next.
+        parent: dict = {}
+
+        def find(n, parent=parent):
+            parent.setdefault(n, n)
+            while parent[n] != n:
+                parent[n] = parent[parent[n]]
+                n = parent[n]
+            return n
+
+        on_tier = set()
+        for a, b in road_edges:
+            if of_tier(a, b):
+                on_tier |= {a, b}
+                parent[find(a)] = find(b)
+        ends = sorted(n for n in on_tier if sum(of_tier(n, m) for m in adj[n]) == 1)
+        end_set = set(ends)
+
+        for start in ends:
+            if start not in end_set:
+                continue
+            # Breadth-first over lower-tier edges, so the shortest gap is the one filled;
+            # neighbours sorted so the same network always fills the same way.
+            prev = {start: None}
+            frontier = [start]
+            found = None
+            for _ in range(max_edges):
+                nxt = []
+                for c in frontier:
+                    for n in sorted(adj[c]):
+                        if n in prev or of_tier(c, n):
+                            continue
+                        prev[n] = c
+                        if n in on_tier:
+                            # Reaching the tier ends the search either way: another
+                            # piece of it is the gap closed, and its own piece is a
+                            # junction the path may not pass through.
+                            if find(n) != find(start):
+                                found = n
+                                break
+                            continue
+                        nxt.append(n)
+                    if found:
+                        break
+                if found or not nxt:
+                    break
+                frontier = nxt
+            if found is None:
+                continue
+            c = found
+            while prev[c] is not None:
+                road_edges[road_edge_key(c, prev[c])] = tier
+                promoted += 1
+                c = prev[c]
+            parent[find(found)] = find(start)
+            end_set -= {start, found}
+
+    return promoted
+
+
 def prune_orphan_roads(road_edges, anchors) -> int:
     """Drop any part of the network that connects nothing.
 

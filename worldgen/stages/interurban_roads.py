@@ -5,11 +5,12 @@ from ..core.errors import RoutingError
 from ..core.hex import SettlementTier, TerrainClass
 from ..core.hex_grid import astar_to_any, distance, neighbors
 from ..core.pipeline import GeneratorStage
-from ..core.world_state import Ferry, RoadTier, WorldState, road_edge_key
+from ..core.world_state import ROAD_TIER_RANK, Ferry, RoadTier, WorldState, road_edge_key
 from .road_cost import (
     add_traffic,
     as_road_edges,
     ferry_link,
+    fill_tier_gaps,
     is_river,
     make_road_edge_cost,
     pheromone_discount,
@@ -21,6 +22,7 @@ from .road_cost import (
     tag_river_crossings,
     tag_switchbacks,
     terrain_base_cost,
+    tier_near,
 )
 
 
@@ -225,6 +227,11 @@ class InterurbanRoadStage(GeneratorStage):
         # roads of their own, and either can skirt a town like any other route.
         route_through_settlements(road_edges, hexes, settled, cfg, blocked)
 
+        # Tiers are cut per edge, so where two routes part for a hex or two and rejoin, the
+        # traffic splits between the branches and a trunk road steps down and back up again.
+        # A road does not change class for a kilometre and change back; fill the dip.
+        fill_tier_gaps(road_edges, cfg.road_tier_gap_max_edges)
+
         anchors = settled | {c for f in state.ferries for c in (f.a, f.b)}
         # A land network reaching no settlement is a residue of the traffic threshold; one
         # reaching only a shore is a road to a harbour, which is a road to somewhere.
@@ -416,8 +423,22 @@ class InterurbanRoadStage(GeneratorStage):
                         best = path
                 if best is None:
                     continue
+                # The join carries on the roads it meets at either end, so it takes the
+                # lower of the two. It used to be a TRACK always, and the commonest join is
+                # a trunk road whose sea leg was just split off above — which left a primary
+                # road running to a shore, a lane round the bay, and the primary road again
+                # on the far side. Read within a couple of hexes of each end rather than at
+                # the end hex itself: the cheapest place to leave a piece is often a lane a
+                # hex off the trunk's end, and `fill_tier_gaps` closes that hex. Not the
+                # best road anywhere on each piece, which made a primary of every join
+                # whose piece had a trunk somewhere in it — 164 edges on seed 42.
+                tier = min(
+                    tier_near(road_edges, best[0], 2),
+                    tier_near(road_edges, best[-1], 2),
+                    key=ROAD_TIER_RANK.__getitem__,
+                )
                 for a, b in zip(best, best[1:], strict=False):
-                    road_edges.setdefault(road_edge_key(a, b), RoadTier.TRACK)
+                    road_edges.setdefault(road_edge_key(a, b), tier)
                 joined |= set(best) | unit
                 added += 1
         return added

@@ -532,6 +532,7 @@ road_river_traffic_min: 1 # Minimum traffic for a river hex to qualify as a draw
 road_primary_pct: 0.10    # Top fraction of traffic share classified as primary roads. Default: 0.10
 road_secondary_pct: 0.30  # Next fraction classified as secondary roads. Default: 0.30
 road_track_pct: 0.60      # Remainder classified as tracks. Default: 0.60
+road_tier_gap_max_edges: 12 # Longest lower-class stretch promoted where a road of one class stops and resumes across it. Tiers are cut per edge on traffic, so where two routes part for a hex and rejoin, a trunk road dips a class for a kilometre and comes back; this fills the dip. Only from where a road of that class stops — a connector leaving the middle of one trunk for another keeps its class. 0 turns it off. Default: 12
 
 # ---------------------------------------------------------------------------
 # Export  (used by: worldgen export --config worldgen.yaml ...)
