@@ -5,6 +5,7 @@ from pathlib import Path
 from ..core.hex import DEFAULT_TERRAIN_BANDS, SettlementTier, terrain_bands, terrain_label
 from ..core.hex_grid import axial_to_pixel, neighbors, road_polylines
 from ..core.world_state import RoadTier, WorldState
+from ..render import glyphs
 from ..render.debug_viewer import (
     BIOME_COLORS,
     FOG_COLOR,
@@ -190,13 +191,32 @@ def _crossing_marker(kind: str, cx: float, cy: float, angle: float, scale: float
     return "".join(body)
 
 
-def _settlement_marker(tier: SettlementTier, cx: float, cy: float, scale: float = 1.0) -> str:
+def _role_marker(glyph, cx: float, cy: float, scale: float = 1.0) -> str:
+    """A pickaxe or an axe in a white disc: a village that exists for a trade."""
+    r = glyphs.DISC_RADIUS * scale
+    (a, b), head, width = glyphs.placed(glyph, cx, cy, r)
+    pts = " ".join(f"{x:.2f},{y:.2f}" for x, y in head)
+    return (
+        f'<g><circle cx="{cx:.2f}" cy="{cy:.2f}" r="{r:.2f}"'
+        f' fill="white" stroke="black" stroke-width="0.8"/>'
+        f'<line x1="{a[0]:.2f}" y1="{a[1]:.2f}" x2="{b[0]:.2f}" y2="{b[1]:.2f}"'
+        f' stroke="#3b2a1a" stroke-width="{width:.2f}" stroke-linecap="round"/>'
+        f'<polygon points="{pts}" fill="#2b2b2b"/></g>'
+    )
+
+
+def _settlement_marker(
+    tier: SettlementTier, cx: float, cy: float, scale: float = 1.0, role=None
+) -> str:
     """One settlement symbol centred on (cx, cy).
 
     Shared by the settlements layer and the legend so the two can never drift apart.
     *scale* multiplies the symbol geometry only — the hairline stroke stays constant so
-    small legend glyphs keep a crisp outline.
+    small legend glyphs keep a crisp outline. A mining or lumber village is drawn as its
+    tool (`glyphs`) rather than as a plain village.
     """
+    if tier == SettlementTier.VILLAGE and role in glyphs.ROLE_GLYPH:
+        return _role_marker(glyphs.ROLE_GLYPH[role], cx, cy, scale)
     if tier == SettlementTier.CITY:
         pts = _star_points(cx, cy, outer=6.0 * scale, inner=2.5 * scale)
         return f'<polygon points="{pts}" fill="gold" stroke="black" stroke-width="0.8"/>'
@@ -242,6 +262,8 @@ def _legend_glyph(
             f' stroke="#555555" stroke-width="0.5"/>'
         )
 
+    if row.kind == "resource":
+        return _role_marker(glyphs.ROLE_GLYPH[row.sample], cx, cy, scale=g / legend.SYMBOL_BOX)
     if row.kind == "settlement":
         # Same helper as the settlements layer, so the symbols can never diverge.
         return _settlement_marker(row.sample, cx, cy, scale=g / legend.SYMBOL_BOX)
@@ -603,7 +625,7 @@ def render(ws: WorldState, config: SVGConfig | None = None) -> str:
         out.append('  <g id="layer-settlements">')
         for s in ws.settlements:
             px, py = axial_to_pixel(s.coord, size)
-            out.append(f"    {_settlement_marker(s.tier, px + ox, py + oy)}")
+            out.append(f"    {_settlement_marker(s.tier, px + ox, py + oy, role=s.role)}")
         out.append("  </g>")
 
     if "labels" in layers:
