@@ -20,6 +20,7 @@ mutation, so it can be unit-tested on synthetic grids.
 
 import heapq
 
+from ..core.hex import TerrainClass
 from ..core.hex_grid import neighbors
 from .crossings import river_span
 from .road_cost import WATER, is_river
@@ -191,7 +192,13 @@ def make_bulk_cost(hexes, cfg):
     def bulk_edge(from_hx, to_hx) -> float:
         afloat_from, afloat_to = navigable(from_hx, cfg), navigable(to_hx, cfg)
         if afloat_from != afloat_to:
-            return cfg.haulage_transship_cost  # over the quay, one way or the other
+            # Over the quay, one way or the other, priced by the water it meets. A sea-going
+            # ship wants a harbour; a barge ties up at a bank, and a lake boat is the same
+            # inland craft, so a river or lake landing costs `haulage_river_transship_cost`.
+            water = from_hx if afloat_from else to_hx
+            if water.terrain_class is TerrainClass.OPEN_WATER:
+                return cfg.haulage_transship_cost
+            return cfg.haulage_river_transship_cost
         if afloat_from:
             return 0.0  # already afloat: no ascent, and a navigable river is a road
         return edge_cost(from_hx, to_hx)

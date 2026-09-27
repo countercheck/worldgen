@@ -190,3 +190,11 @@ def test_ore_is_worked_only_where_it_can_get_out(mult, worked):
     state.settlements = [city]
     ResourceStage(cfg, np.random.default_rng(0))._mines(state, lambda c: True)
     assert bool(_founded(state, SettlementRole.MINING)) is worked
+
+
+def test_ore_is_shipped_to_the_cities_as_freight():
+    state = _resourced()
+    if not _founded(state, SettlementRole.MINING):
+        pytest.skip("no mine on this map")
+    kinds = {f[5] for f in state.metadata.get("freight", [])}
+    assert "ore" in kinds

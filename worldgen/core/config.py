@@ -440,7 +440,11 @@ class WorldConfig:
     # not worth the trouble while a long haul plainly is. That asymmetry is the shape of
     # pre-industrial trade, and it is why a few great ports emerge rather than a coastline
     # of equals.
-    haulage_transship_cost: float = 8.0
+    haulage_transship_cost: float = 4.0
+    # The same charge where the water is a navigable river or a lake: a barge ties up at a
+    # bank, where a sea-going ship wants a harbour. A cataract portage is two of these. At
+    # 1.0 portage trade runs 2-6 times what it does at the sea charge on seeds 42/7/3.
+    haulage_river_transship_cost: float = 1.0
     # river_flow at or above which a river floats a boat. Below it a river is something
     # you ford, not something you ship grain down.
     # Discharge at which a river will float a boat, in the same km2 x mm as
@@ -688,11 +692,26 @@ class WorldConfig:
     # on a small island — but it means a small map grows no cities at this value, and that
     # this figure belongs to a 128x128 world.
     city_min_draw: float = 40.0
-    # Share of what can reach it that a promoted city actually takes, from the nearest
-    # markets outward. 1.0 takes everything: the first city drains half the map and the rest
-    # are sized on leftovers. 0.7 gives 5-7 cities on seeds 42/7/3, the largest about
-    # 1.5-1.9x the second, which is near the rank-size rule.
+    # Share of its surplus a market ships to the cities, split between them by pull (below).
+    # It also caps what a candidate counts towards promotion, nearest markets first: at 1.0
+    # the first city promoted claimed half the map and the rest were sized on leftovers.
     city_draw_share: float = 0.7
+    # How hard the best-paying city pulls a market's grain away from the others. Each city's
+    # pull is its size times the share of the cargo that survives the haul, and a market
+    # splits its shipment in proportion to pull raised to this power: very high sends it all
+    # to the best-paying city, 0 splits it evenly.
+    city_pull_sharpness: float = 1.25
+    # Rounds of that split, each pulling with the sizes the last produced: pull follows size
+    # and size follows pull, which is how a capital comes to dominate. 1 pulls with the
+    # founding sizes alone, when every candidate is a market of a few hundred.
+    city_pull_rounds: int = 4
+    # Manufactured goods between the cities: each puts this share of its people's worth
+    # into trade, split between the cities in reach by size and haul, and the shipments pay
+    # transship_share at every quay on the way — the trade entrepôts and portage towns lived
+    # on. 0 turns it off.
+    manufactured_trade_share: float = 0.1
+    # Manufactures are worth more per ton than grain, so they go this many times further.
+    manufactured_range_mult: float = 3.0
     # Transshipment: every change in how a city's cargo travels — cart to boat, barge to
     # ship — leaves this share of the people it feeds with the settlement handling that
     # quay, the nearest within `transship_radius`. Conserved: the handlers eat out of the
@@ -851,6 +870,12 @@ class WorldConfig:
     # A cap, so one large city cannot drown the map. Reached only by a settlement above
     # 12,500 people, which on these maps means a real city rather than a market town.
     road_travellers_max: int = 500
+    # Journeys a freight flow puts on its route per person it feeds, alongside the
+    # travellers. Raw goods (provisioning, ore) were bulk that went short or by water and
+    # wear the spokes into a city; manufactures between cities were the carrier trade the
+    # main roads carried, and are weighted to match. 0 leaves that kind off the roads.
+    road_raw_freight_per_person: float = 0.01
+    road_goods_freight_per_person: float = 0.2
     # How sharply a destination's appeal falls with distance: weight is pop / d**this.
     #
     # 2.5 rather than the 1.5 a modern gravity model would use, because a laden cart is not
@@ -1257,6 +1282,13 @@ class WorldConfig:
             "ore_deposits_per_1000_km2",
             "ore_min_separation",
             "ore_haul_range_mult",
+            "city_pull_sharpness",
+            "haulage_river_transship_cost",
+            "city_pull_rounds",
+            "manufactured_trade_share",
+            "manufactured_range_mult",
+            "road_raw_freight_per_person",
+            "road_goods_freight_per_person",
             "cataract_min_drop_m",
             "habitability_mill_bonus",
             "timber_float_min_discharge",

@@ -54,8 +54,8 @@ class ResourceStage(GeneratorStage):
             return reach_cache[coord] >= cfg.settlement_min_reachable
 
         self._ports(state, reachable)
-        self._mines(state, reachable)
-        self._lumber(state, reachable)
+        worked = self._mines(state, reachable) + self._lumber(state, reachable)
+        self._ship(state, worked)
         return state
 
     # -- ports ----------------------------------------------------------------
@@ -122,7 +122,7 @@ class ResourceStage(GeneratorStage):
 
     # -- mines ----------------------------------------------------------------
 
-    def _mines(self, state, reachable) -> None:
+    def _mines(self, state, reachable) -> list:
         """Ore deposits in high ground, each worked by a village or by the town beside it.
 
         Deposits are drawn at random over hexes with at least `ore_min_relief_m` of relief,
@@ -135,14 +135,14 @@ class ResourceStage(GeneratorStage):
         cfg = self.config
         hexes = state.hexes
         if cfg.ore_deposits_per_1000_km2 <= 0:
-            return
+            return []
         outlets = [
             s.coord
             for s in state.settlements
             if s.tier is SettlementTier.CITY or s.role is SettlementRole.PORT
         ]
         if not outlets:
-            return
+            return []
         to_outlet, _ = bulk_routes(
             hexes, outlets, cfg, budget=cfg.haulage_range_land * cfg.ore_haul_range_mult
         )
@@ -153,7 +153,7 @@ class ResourceStage(GeneratorStage):
             if hx.terrain_class not in WATER and hx.relief >= cfg.ore_min_relief_m
         )
         if not upland:
-            return
+            return []
         wanted = int(self.rng.poisson(len(upland) / 1000.0 * cfg.ore_deposits_per_1000_km2))
         weights = [hexes[c].relief for c in upland]
         total = sum(weights)
@@ -177,16 +177,20 @@ class ResourceStage(GeneratorStage):
         # ore out never changes the size of the next.
         sizes = self.rng.lognormal(0.0, cfg.mine_workforce_sigma, size=len(deposits))
         worked = 0
+        output: list = []
         for coord, size in zip(deposits, sizes, strict=True):
             if coord not in to_outlet or not reachable(coord):
                 continue
             need = cfg.mine_workforce * float(size)
-            self._work(state, coord, need, SettlementRole.MINING, "mine", worked)
+            done = self._work(state, coord, need, SettlementRole.MINING, "mine", worked)
+            if done is not None:
+                output.append(done)
             worked += 1
+        return output
 
     # -- lumber ---------------------------------------------------------------
 
-    def _lumber(self, state, reachable) -> None:
+    def _lumber(self, state, reachable) -> list:
         """Camps in the big woods, on water that floats the timber out towards a city.
 
         A camp's worth is the woodland within `lumber_radius`, discounted by how far the
@@ -199,7 +203,7 @@ class ResourceStage(GeneratorStage):
         hexes = state.hexes
         cities = [s.coord for s in state.settlements if s.tier is SettlementTier.CITY]
         if not cities or cfg.lumber_min_score <= 0:
-            return
+            return []
         to_city, _ = bulk_routes(hexes, cities, cfg)
 
         wood = {c for c, hx in hexes.items() if hx.land_use is LandUse.WOOD}
@@ -220,6 +224,7 @@ class ResourceStage(GeneratorStage):
         scored.sort()
 
         camps: list = []
+        output: list = []
         for _, coord, mass in scored:
             if any(distance(coord, c) < cfg.lumber_min_separation for c in camps):
                 continue
@@ -227,11 +232,53 @@ class ResourceStage(GeneratorStage):
                 continue
             camps.append(coord)
             need = mass * cfg.lumber_people_per_wood_hex
-            self._work(state, coord, need, SettlementRole.LUMBER, "lumber", len(camps) - 1)
+            done = self._work(state, coord, need, SettlementRole.LUMBER, "lumber", len(camps) - 1)
+            if done is not None:
+                output.append(done)
+        return output
+
+    # -- where the output goes ------------------------------------------------
+
+    def _ship(self, state, worked) -> None:
+        """Record where each mine's ore and each camp's timber goes, for the roads to carry.
+
+        Raw goods go where they fetch most after carriage, as grain does: split between the
+        cities in reach by size times the share that survives the haul, raised to
+        `city_pull_sharpness`. Ore is carried `ore_haul_range_mult` times as far as grain;
+        timber as far as grain. Volume is the workforce, in the same people-it-feeds units
+        as every other freight flow. Nothing moves population here — the workforce was
+        already drawn — so this is freight for `InterurbanRoadStage` and no more.
+        """
+        cfg = self.config
+        if not worked:
+            return
+        hexes = state.hexes
+        cities = sorted(
+            (s.coord, s.population) for s in state.settlements if s.tier is SettlementTier.CITY
+        )
+        if not cities:
+            return
+        widest = cfg.haulage_range_land * max(1.0, cfg.ore_haul_range_mult)
+        # One search per city, read by every mine and camp: cost of hauling there.
+        to = {c: bulk_routes(hexes, [c], cfg, budget=widest)[0] for c, _ in cities}
+        freight = state.metadata.setdefault("freight", [])
+        for origin, people, role in worked:
+            ore = role is SettlementRole.MINING
+            reach = cfg.haulage_range_land * (cfg.ore_haul_range_mult if ore else 1.0)
+            pull = {}
+            for c, pop in cities:
+                cost = to[c].get(origin)
+                if c != origin and cost is not None and cost < reach:
+                    pull[c] = (pop * usable_fraction(cost, reach)) ** cfg.city_pull_sharpness
+            total = sum(pull.values())
+            for c, p in sorted(pull.items()):
+                if p > 0.0:
+                    volume = people * p / total
+                    freight.append([*origin, *c, round(volume, 3), "ore" if ore else "timber"])
 
     # -- feeding a workforce --------------------------------------------------
 
-    def _work(self, state, coord, need, role, kind, index) -> None:
+    def _work(self, state, coord, need, role, kind, index):
         """Put *need* people to work at *coord*, fed by whoever can haul food there.
 
         The town next door takes them on if there is one within `resource_attach_radius` —
@@ -251,7 +298,7 @@ class ResourceStage(GeneratorStage):
         people, senders = self._draw(state, site, need, exclude=host)
         if host is not None:
             host.population += people
-            return
+            return (host.coord, people, role)
         if people < cfg.resource_min_population:
             # Too little food reaches it: give the people back rather than found a hamlet
             # nobody could feed.
@@ -259,6 +306,7 @@ class ResourceStage(GeneratorStage):
                 s.population += n
             return
         self._found(state, coord, SettlementTier.VILLAGE, role, people, kind, index)
+        return (coord, people, role)
 
     def _draw(self, state, site, need, exclude=None) -> tuple[int, list]:
         """Move up to *need* people to *site* from the settlements that can feed it.

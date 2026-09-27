@@ -1598,6 +1598,36 @@ camps.
 
 ---
 
+### 3.10e City Provisioning, Trade and Freight — `organic`
+
+[cities.py](../worldgen/stages/cities.py). Promotion picks which markets become cities
+(§ [3.10b](#310b-market-centres--organic) for how markets are planted); what each city
+grows to is decided by where the countryside's surplus goes, and by the trade between the
+cities.
+
+- **Provisioning goes where it fetches most.** Each market ships `city_draw_share` of its
+  surplus, split between the cities in reach by *pull* — a city's size times the share of
+  the cargo that survives the haul — raised to `city_pull_sharpness`. A big city outbids a
+  near small one, as London drew grain from Norfolk and Yorkshire past nearer towns, while
+  carriage still gives the nearest city most. The split runs `city_pull_rounds` times, each
+  pulling with the sizes the last produced, so a capital can come to dominate. People
+  follow the food, so population is conserved: urban share is set by the surplus fraction,
+  and pull only decides how it divides between cities and towns.
+- **Manufactures run between the cities.** Each city puts `manufactured_trade_share` of its
+  people's worth into trade with the cities within `haulage_range_land` ×
+  `manufactured_range_mult`, split by size and haul. Every shipment pays `transship_share`
+  at each change of mode on its route to whoever stands at the quay, drawn half from each
+  city; quays nobody stands at are left for a port (§ [3.10d](#310d-resource-settlements--organic)).
+- **Freight wears the roads.** Every flow — provisioning, manufactures, and ore from the
+  mines, which goes to the best-paying city by the same pull — is recorded in
+  `metadata["freight"]` as `[origin q, r, destination q, r, people it feeds, kind]`.
+  `InterurbanRoadStage` puts journeys on each route: `road_raw_freight_per_person` for
+  provisioning and ore, `road_goods_freight_per_person` for manufactures. Timber floats and
+  wears no road. On seeds 42 and 7, 54-67% of city-to-city goods by weight goes by sea, and
+  the land legs of those routes are all secondary or better.
+
+---
+
 ### 3.11 Interurban Roads
 
 [stages/interurban_roads.py](../worldgen/stages/interurban_roads.py)
@@ -2347,7 +2377,8 @@ is the model's core claim and is enforced in `__post_init__`.
 | `rural_field_radius` | `float` | `2.5` | `> 0` | The daily walk out to the fields; sets cultivated extent. Chisholm: cropping intensity falls off past ~1 km, and land past 3–4 km is grazing or waste |
 | `market_day_radius` | `float` | `10.0` | `> rural_field_radius` | Out to market, business done, and home inside a day. Bracton held markets should stand 6⅔ miles apart, being a third of a twenty-mile day out and a third back; English market towns do cluster at 10–15 km |
 | `haulage_range_land` | `float` | `40.0` | `> market_day_radius` | Travel cost at which bulk food is worth nothing overland — the team has eaten the cargo. The softest figure here; what is well attested is the ratio below |
-| `haulage_transship_cost` | `float` | `8.0` | What it costs to get a cargo onto the water and off again, charged once at each land↔water transition, in the same units as `haulage_range_land`. Without it the sea is a teleport: at a fifteenth the cost per hex a cargo once afloat crosses the map for nothing, so every coastal market reached 55 of 74 others and the tier it exists to create flattened completely. A quay is real capital — wharfage, lighters, the risk — and charging it makes a short hop not worth the trouble while a long haul plainly is. That asymmetry is the shape of pre-industrial trade, and why a few great ports emerge rather than a coastline of equals. Validated `≥ 0` |
+| `haulage_transship_cost` | `float` | `4.0` | What it costs to get a cargo onto the water and off again, charged once at each land-water transition, in the same units as `haulage_range_land`. Without it the sea is a teleport. 4.0, half the old 8.0: at 8 the portage round a cataract cost so much of the 40-unit budget that the markets above a fall stopped supplying the city below it; at 4 portage trade rises about fivefold and the city tier holds (at 2 the largest port swallows its neighbours). |
+| `haulage_river_transship_cost` | `float` | `1.0` | The transship charge where the water is a navigable river or a lake rather than the open sea: a barge ties up at a bank, where a sea-going ship wants a harbour. A cataract portage is two of these. At 1.0 portage trade runs 2-6 times what it does at the sea charge on seeds 42/7/3, and the city tier holds; much lower thins it |
 | `haulage_range_water_mult` | `float` | `15.0` | `≥ 1` | How much further the same cargo goes by water. Diocletian's Price Edict prices land carriage at 28–56× sea and 6–11× river per tonne-kilometre (Duncan-Jones: sea 1, river 4.9, wagon 28, pack animal 56). **This is why large pre-industrial cities sit on navigable water and inland ones stay small**: nothing gates a city, water simply extends what can feed it |
 | `marketable_surplus_fraction` | `float` | `0.40` | `(0, 1]` | Share of what a farming household grows that can leave for a market; it eats the rest. Sets the share of people in towns: 0.40 with `yield_multiplier` 1.7 is England c. 1800 (25% in market towns on the map, 27.5% over 5,000 in 1801); 0.32 is England c. 1300. Sizing markets off the *surplus* rather than the production is why the tier ratios come out right without target counts |
 | `people_per_food` | `float` | `145.0` | `> 0` | People fed per unit of food, and the one scale factor for the whole population of the map, settlements and countryside alike. 145 puts a temperate 128x128 map at 61 people per km² at the c. 1800 defaults, against 59 in England and Wales's 1801 census. It was 180 before `elevation_hypsometry_exponent` laid most land low, since flat ground farms better. Density is linear in it, so it is also the knob for a country thinner than the era table's rows |
@@ -2361,7 +2392,11 @@ the surplus it draws on is depleted, and the scan repeats until nothing clears t
 | Param | Type | Default | Range | Effect |
 |---|---|---|---|---|
 | `city_min_draw` | `float` | `40.0` | How much *other markets'* surplus must be able to reach a town before it is a city. The one density knob for the tier above the market, and the same shape as `market_viability_floor` below it: an absolute threshold on what can be gathered rather than a target count, so a rich coast grows several cities and a landlocked desert grows none. Not comparable to the floor — a market gathers a countryside inside a day's cart, a city gathers *markets* over `haulage_range_land` with water counting fifteen times. At `40.0`: 2 cities on a temperate coast (20,781 / 12,397 against a median town of 445), 1 on a mediterranean map, **0 on an arid one whether coastal or landlocked**. It survived the soil recalibration unchanged, which is worth recording rather than assuming — the surplus fraction rose by 1.6× while actual food fell, and the two shifts cancelled. Validated `> 0` |
-| `city_draw_share` | `float` | `0.7` | Share of what can reach it that a promoted city actually takes, filled from the nearest markets outward. Promotion is still judged on the full amount. 1.0 takes everything, so the first city drains the half of the map its water reach covers; 0.7 gives 5-7 cities with the largest about 1.5-1.9× the second; 0.5 gives 6-9 of more even size. Total urban population does not change. Validated in (0, 1] |
+| `city_draw_share` | `float` | `0.7` | Share of its marketable surplus a market ships to the cities, split between them by pull (`city_pull_sharpness`). Also caps how much a candidate counts towards promotion, nearest markets first, which is what stops the first city promoted from claiming half the map. Validated in (0, 1] |
+| `city_pull_sharpness` | `float` | `1.25` | How hard the best-paying city pulls a market's grain from the others. A city's pull is its size times the share of the cargo that survives the haul; a market splits its shipment in proportion to pull to this power. Very high sends everything to the best-paying city; 0 splits it evenly. 1.25 puts the largest city at 1.8-2.3x the second on seeds 42 and 7 |
+| `city_pull_rounds` | `int` | `4` | Rounds of that split, each pulling with the sizes the last produced: pull follows size and size follows pull, which is how a capital comes to dominate. 1 pulls with founding sizes, when every candidate is a market of a few hundred and distance decides everything |
+| `manufactured_trade_share` | `float` | `0.1` | Share of each city's people's worth put into manufactured trade with the other cities, split by size and haul. The shipments pay `transship_share` at every quay and portage on the way, drawn half from each city. 0 turns city-to-city trade off |
+| `manufactured_range_mult` | `float` | `3.0` | How many times `haulage_range_land` manufactures travel: worth more per ton than grain, so carried further |
 | `transship_share` | `float` | `0.2` | Transshipment: every change in how a city's cargo travels on its way — cart to boat, boat to cart, barge to ship at a river mouth — leaves this share of the people it feeds with the settlement handling that quay (the nearest within `transship_radius`), off the city's gain. Conserved; only the places between the source market and the city are paid, since loading and unloading are already part of those two. 0.2 turns a quay town with next to no hinterland into a trade town of 3-5k on seeds 42/7/3. Handled cargo per settlement is written to `metadata["transshipment"]` as `[q, r, food]`. Validated in [0, 0.5] |
 | `transship_radius` | `int` | `2` | How far from a quay, in hexes, its handling settlement may stand. Validated `>= 0` |
 | `city_min_population` | `int` | `5000` | A town that grows past this becomes a city whatever it draws — the entrepôt, which handles a hinterland's trade rather than eating its food. 0 turns it off. Validated `>= 0` |
@@ -2449,6 +2484,8 @@ taxed at escarpment rates because the bluff above it fell inside the averaging w
 |---|---|---|---|---|
 | `road_travellers_per_pop` | `float` | `0.04` | `> 0` | Travellers emitted per head of population. Replaces the three per-tier counts, which made a market of 6,200 and one of 900 each send the same hundred people — population entered only on the *destination* side of the gravity term, so every origin wore the same road out of its gates. `0.04` keeps the total near what the tier counts gave (about 8,000 over 74 markets at 128×128), so it redistributes rather than changes the dose |
 | `road_travellers_max` | `int` | `500` | `≥ 1` | Cap per settlement, so one large city cannot drown the map. Reached only above 12,500 people |
+| `road_raw_freight_per_person` | `float` | `0.01` | `≥ 0` | Road journeys a raw-goods flow (provisioning into a city, ore from a mine) puts on its route per person it feeds. Bulk went short distances or by water, so this is low: it wears the spokes into each city without taking the primary tier from the roads between cities. Timber floats and wears no road |
+| `road_goods_freight_per_person` | `float` | `0.2` | `≥ 0` | Road journeys a manufactured-goods flow between two cities puts on its route per person it feeds: the carrier and wagon trade the main roads carried. At 0.2 the land legs of city-to-city trade routes are all secondary or better and their primary share rises by 5-8 points; much higher spreads the fixed primary tier thinner and lowers it |
 | `road_gravity_exponent` | `float` | `2.5` | `≥ 0` | Distance exponent in the gravity model: a destination's appeal is `pop / distance ** this`. `2.5` rather than the `1.5` a modern gravity model would use, because a laden cart is not a lorry — at `1.5` a traveller was nearly as likely to make for a town 40 km off as one 10 km away, so 72% of every possible pair of settlements ended up with a road of its own and the network came out a mat rather than a hierarchy |
 | `road_pheromone_factor` | `float` | `0.1` | `≥ 0` | Cost reduction per unit traffic. Higher = stronger highway-reinforcement effect |
 

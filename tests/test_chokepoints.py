@@ -265,8 +265,21 @@ def test_thin_country_grows_few_villages_and_only_on_its_good_ground():
     must never do is stand on sand — and the arid world does grow one here, on a pass on
     arable ground, so the soil assertion finally has a subject.
     """
-    arid = _world(regional_climate="arid")
-    temperate = _world()
+
+    # Seed 2 rather than the suite's seed 1. Once freight began wearing the roads, seed 1's
+    # arid world lost its one crossing village and this test had no subject; seed 2's arid
+    # world grows one, on alluvium, and its temperate world one as well.
+    def world(climate):
+        return build_world(
+            seed=2,
+            width=_CHOKE_SIZE,
+            height=_CHOKE_SIZE,
+            model="organic",
+            **{**_CHOKE_DEFAULTS, "regional_climate": climate},
+        )
+
+    arid = world("arid")
+    temperate = world("temperate")
     arid_villages = _villages(arid)
     assert len(arid_villages) <= len(_villages(temperate)), (
         "a desert should carry no more bridge villages than well-watered country"

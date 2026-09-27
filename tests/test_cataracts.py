@@ -75,13 +75,14 @@ def test_the_stage_marks_only_the_steep_reach():
 
 def test_a_cataract_forces_a_portage():
     """Hauling past the falls costs a landing and a loading more than hauling past a slack
-    reach of the same river, which is what makes the portage a quay."""
+    reach of the same river, which is what makes the portage a quay. River landings, since
+    both sides of the falls are river."""
     cfg = WorldConfig()
     slack, falls = _river([1.0] * 6), _river([1.0] * 6)
     falls[(3, 0)].tags.add("cataract")
     cost_slack, _ = bulk_routes(slack, [(6, 0)], cfg)
     cost_falls, _ = bulk_routes(falls, [(6, 0)], cfg)
-    assert cost_falls[(0, 0)] >= cost_slack[(0, 0)] + 2 * cfg.haulage_transship_cost
+    assert cost_falls[(0, 0)] >= cost_slack[(0, 0)] + 2 * cfg.haulage_river_transship_cost
 
 
 def test_a_site_beside_the_falls_has_water_power():
@@ -91,3 +92,17 @@ def test_a_site_beside_the_falls_has_water_power():
     hexes[(2, 0)].tags.add("cataract")
     after = site_bonus((1, 0), hexes[(1, 0)], hexes, cfg)
     assert after == before + cfg.habitability_mill_bonus
+
+
+def test_a_river_landing_is_cheaper_than_a_harbour():
+    """A barge ties up at a bank; a sea-going ship wants a harbour."""
+    from worldgen.stages.haulage import make_bulk_cost
+
+    cfg = WorldConfig()
+    land = Hex(coord=(0, 0), terrain_class=TerrainClass.LAND)
+    river = _river([1.0])[(1, 0)]
+    sea = Hex(coord=(1, 0), terrain_class=TerrainClass.OPEN_WATER)
+    _, edge = make_bulk_cost({}, cfg)
+    assert edge(land, river) == cfg.haulage_river_transship_cost
+    assert edge(land, sea) == cfg.haulage_transship_cost
+    assert cfg.haulage_river_transship_cost < cfg.haulage_transship_cost

@@ -175,7 +175,13 @@ def test_the_land_decides_how_much_city_a_region_can_carry():
     Not asserted as "arid grows no cities". A desert with a great river through it grows
     exactly one, on the delta, which is Egypt — and refusing it would be the model failing
     to describe real geography rather than the model working. The claim that matters is
-    the *contrast*, and it is an order of magnitude.
+    the *contrast*.
+
+    Twice, not three times. Since each market splits its grain between the cities by pull
+    rather than every city taking from every market it reaches, more of a rich country's
+    people stay in its market towns: at seed 42, 96x96, temperate cities carry 50,075
+    against arid's 19,270 (the old rule gave 94,600 against 23,535). The desert still
+    grows half as many cities and well under half the city-dwellers.
     """
 
     def urban(model, climate):
@@ -205,7 +211,7 @@ def test_the_land_decides_how_much_city_a_region_can_carry():
         f"arid grew {arid_n} cities against temperate's {temperate_n} — the land is not "
         "deciding how many"
     )
-    assert arid_pop * 3 < temperate_pop, (
+    assert arid_pop * 2 < temperate_pop, (
         f"arid carries {arid_pop:,} city-dwellers against temperate's {temperate_pop:,} — "
         "the gap should be an order of magnitude, not a percentage"
     )
@@ -585,3 +591,72 @@ def test_a_town_past_the_population_threshold_is_a_city():
         **{**_CITY_DEFAULTS, "city_min_population": 1},
     )
     assert all(s.tier is SettlementTier.CITY for s in state.settlements)
+
+
+# --- where the surplus goes, and the trade between cities ----------------------
+
+
+def _market(coord, pop, tier=SettlementTier.TOWN):
+    from worldgen.core.hex import Settlement, SettlementRole
+
+    return Settlement(
+        coord=coord, tier=tier, role=SettlementRole.MARKET, population=pop, name=f"m{coord}"
+    )
+
+
+def _split_of(sharpness):
+    """One market, a small city near it and a big city twice as far."""
+    cfg = WorldConfig(city_pull_sharpness=sharpness, city_pull_rounds=1, city_draw_share=1.0)
+    market, near, far = _market((0, 0), 500), _market((1, 0), 1000), _market((9, 0), 8000)
+    reach = {(1, 0): {(0, 0): 4.0}, (9, 0): {(0, 0): 8.0}}
+    draw = {(0, 0): 10.0, (1, 0): 5.0, (9, 0): 5.0}
+    absorbed = CityPromotionStage._allocate([market, near, far], [(1, 0), (9, 0)], draw, reach, cfg)
+    return absorbed[(1, 0)].get((0, 0), 0.0), absorbed[(9, 0)].get((0, 0), 0.0), cfg
+
+
+def test_the_big_city_outbids_the_near_one_as_pull_sharpens():
+    near_soft, far_soft, _ = _split_of(0.5)
+    near_sharp, far_sharp, _ = _split_of(4.0)
+    assert far_sharp / (near_sharp + far_sharp) > far_soft / (near_soft + far_soft)
+    # Pull is size times what survives the haul: 8000 * 0.8 against 1000 * 0.9.
+    assert far_sharp > near_sharp
+
+
+def test_zero_sharpness_splits_the_shipment_evenly():
+    near, far, cfg = _split_of(0.0)
+    # Even shares of what ships, each discounted by its own haul.
+    assert near / 0.9 == pytest.approx(far / 0.8)
+
+
+def test_a_market_never_ships_more_than_its_share():
+    near, far, cfg = _split_of(1.0)
+    assert near + far <= 10.0 * cfg.city_draw_share + 1e-9
+
+
+def test_trade_between_cities_pays_the_quay_between_them_and_balances():
+    """Two cities across a strait, a town at the quay on one side of it."""
+    from worldgen.core.world_state import WorldState
+
+    cfg = WorldConfig(manufactured_trade_share=0.1, transship_share=0.2, transship_radius=1)
+    state = WorldState.empty(1, 12, 12, cfg.grid_layout)
+    state.hexes = _row("llsssll")
+    a = _market((0, 0), 10_000, SettlementTier.CITY)
+    quay = _market((1, 0), 100)
+    b = _market((6, 0), 10_000, SettlementTier.CITY)
+    state.settlements = [a, quay, b]
+    before = sum(s.population for s in state.settlements)
+
+    CityPromotionStage(cfg, np.random.default_rng(0))._trade(state, cfg)
+
+    assert quay.population > 100, "the quay town was paid nothing for the trade it handled"
+    assert abs(sum(s.population for s in state.settlements) - before) <= 2
+    kinds = {f[5] for f in state.metadata["freight"]}
+    assert kinds == {"goods"}
+
+
+def test_every_kind_of_freight_is_recorded_for_the_roads():
+    state = build_world(
+        until="ResourceStage", seed=42, width=96, height=96, model="organic", **_CITY_DEFAULTS
+    )
+    kinds = {f[5] for f in state.metadata.get("freight", [])}
+    assert {"food", "goods"} <= kinds

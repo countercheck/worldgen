@@ -103,6 +103,28 @@ class InterurbanRoadStage(GeneratorStage):
         n_s = len(settlements)
         s_index = {s.coord: i for i, s in enumerate(settlements)}
 
+        def journey(origin, dest, n) -> None:
+            """Route *origin* to *dest* and wear the road by *n* journeys along it."""
+            key = (min(origin, dest), max(origin, dest))
+            if key in canonical_routes:
+                path = canonical_routes[key]
+            else:
+                path = self._route(
+                    hexes, origin, dest, net_adj, node_cost, edge_cost, home_cache, net_version[0]
+                )
+                if path is None or len(path) < 2:
+                    return
+                canonical_routes[key] = path
+
+            for c in path:
+                hex_traffic[c] += n
+            for a, b in zip(path, path[1:], strict=False):
+                edge_traffic[road_edge_key(a, b)] += n
+                if b not in net_adj[a]:
+                    net_adj[a].add(b)
+                    net_adj[b].add(a)
+                    net_version[0] += 1
+
         for origin_s in travellers:
             oi = s_index[origin_s.coord]
             dists = [max(1, distance(origin_s.coord, c)) for c in coords_arr]
@@ -115,34 +137,26 @@ class InterurbanRoadStage(GeneratorStage):
                 continue
             probs = [w / total_w for w in weights]
             di = int(self.rng.choice(n_s, p=probs))
-            dest_coord = coords_arr[di]
+            journey(origin_s.coord, coords_arr[di], 1.0)
 
-            key = (min(origin_s.coord, dest_coord), max(origin_s.coord, dest_coord))
-            if key in canonical_routes:
-                path = canonical_routes[key]
-            else:
-                path = self._route(
-                    hexes,
-                    origin_s.coord,
-                    dest_coord,
-                    net_adj,
-                    node_cost,
-                    edge_cost,
-                    home_cache,
-                    net_version[0],
-                )
-                if path is None or len(path) < 2:
-                    continue
-                canonical_routes[key] = path
-
-            for c in path:
-                hex_traffic[c] += 1.0
-            for a, b in zip(path, path[1:], strict=False):
-                edge_traffic[road_edge_key(a, b)] += 1.0
-                if b not in net_adj[a]:
-                    net_adj[a].add(b)
-                    net_adj[b].add(a)
-                    net_version[0] += 1
+        # Freight wears roads as travellers do. Every flow the settlement stages recorded
+        # puts journeys on its route in proportion to the people it feeds, at two rates.
+        # Raw goods — provisioning from market to city, ore from the mines — are bulk that
+        # went short distances or by water, and wear the spokes into each city at
+        # `road_raw_freight_per_person`. Manufactures between cities are the carrier and
+        # wagon trade the main roads were built for, at `road_goods_freight_per_person`.
+        # With one rate, provisioning outweighed the goods trade and its spokes took the
+        # primary tier from the roads between cities. Timber is left off: it floats, and a
+        # lumber camp's road is its river. Busiest first, as the travellers are.
+        rate = {"goods": cfg.road_goods_freight_per_person}
+        rate["food"] = rate["ore"] = cfg.road_raw_freight_per_person
+        flows = state.metadata.get("freight", [])
+        for oq, or_, dq, dr, people, kind in sorted(flows, key=lambda f: (-f[4], f[:4])):
+            if kind in rate:
+                n = people * rate[kind]
+                origin, dest = (oq, or_), (dq, dr)
+                if n > 0.0 and origin in hexes and dest in hexes and origin != dest:
+                    journey(origin, dest, n)
 
         # Tier is a property of an edge, not of a journey.  It used to be taken per hex and
         # then collapsed onto whole routes by `_path_min_tier`, which handed a 157-hex route
