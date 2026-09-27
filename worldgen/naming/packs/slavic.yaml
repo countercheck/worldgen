@@ -1,0 +1,159 @@
+key: "slavic"
+name: "Slavic"
+description: |
+  Slavic: West and South Slavic place names, in Latin script.
+
+  An adjective agreeing with its noun leads — Bílá Hora, Dubový Brod, Kamenné Pole — so
+  each head carries a gender and each qualifier a stem ending in "~" that takes the right
+  ending. The same stems make one-word names with a suffix (Dubovec, Kamenice), and a
+  founder's name makes the -ov and -ice names (Petrov, Boleslavice) that fill the Slavic map.
+  A town on a river is nad (above) it, as Ústí nad Labem is.
+
+  The spelling is Czech with Croatian forms mixed in where they are the better-known name —
+  a Slavic that reads as Slavic rather than as any one country.
+
+heads:
+  ford: ["brod"]
+  bridge: ["most"]
+  confluence: ["soutok"]
+  mouth: ["ústí", "ušće"]
+  falls: ["slap", "vodopad"]
+  pass: ["sedlo", "vrata"]
+  harbour: ["přístav", "luka"]
+  shore: ["breg", "obala"]
+  market: ["trh", "trg"]
+  mine: ["baňa", "rudnik", "jama"]
+  clearing: ["laz", "paseka"]
+  spring: ["studenec", "izvor"]
+  hill: ["hora", "vrch", "brdo", "gora"]
+  steading: ["selo", "ves", "dvor"]
+  hamlet: ["selce", "osada"]
+  enclosure: ["ograda"]
+  cottages: ["chalupa", "koliba"]
+  field: ["pole", "polje", "niva"]
+  town: ["grad", "gradec", "město"]
+  wick: ["trgovište"]
+  stow: ["sobor"]
+  burgh: ["hrad", "grad"]
+  hall: ["dvor"]
+  wall: ["hradište", "gradište"]
+
+quals:
+  marsh: ["blatn~"]
+  fen: ["mokr~"]
+  deepwood: ["temn~"]
+  wood: ["lesn~"]
+  thorn: ["trnov~"]
+  meadow: ["lučn~"]
+  cold: ["studen~"]
+  sand: ["písečn~"]
+  stone: ["kamenn~"]
+  salt: ["slan~"]
+  rich: ["bohat~"]
+  high: ["vysok~"]
+  oak: ["dubov~"]
+  ash: ["jasenov~"]
+  elm: ["jilmov~"]
+  birch: ["březov~"]
+  pine: ["borov~"]
+  palm: ["palmov~"]
+  broom: ["vřesov~"]
+  reed: ["rákosov~"]
+  ox: ["volov~"]
+  deer: ["jelenov~"]
+  swine: ["svinov~"]
+  horse: ["konsk~"]
+  hare: ["zajecov~"]
+  elk: ["losov~"]
+  wolf: ["vukov~", "vlčov~"]
+  bear: ["medvedov~"]
+  goat: ["kozov~"]
+  crane: ["jeřábov~"]
+  eagle: ["orlov~"]
+  white: ["bíl~", "bel~"]
+  black: ["čern~", "crn~"]
+  red: ["červen~", "crven~"]
+  green: ["zelen~"]
+  north: ["severn~"]
+  south: ["jižn~"]
+  east: ["východn~"]
+  west: ["západn~"]
+  great: ["velk~", "velik~"]
+  little: ["mal~"]
+
+templates:
+  compound: ["{a} {h}", "{a} {h}", "{a} {h}", "{q}ec", "{q}ice"]
+  founder: ["{p}ov", "{p}ice", "{p}in", "{p}ov {h}"]
+  river_on: ["{h} nad {r}", "{h} na {r}"]
+  bare: ["{h}"]
+
+agreement:
+  genders:
+    brod: "m"
+    most: "m"
+    soutok: "m"
+    "ústí": "n"
+    "ušće": "n"
+    slap: "m"
+    vodopad: "m"
+    sedlo: "n"
+    vrata: "n"
+    "přístav": "m"
+    luka: "f"
+    breg: "m"
+    obala: "f"
+    trh: "m"
+    trg: "m"
+    "baňa": "f"
+    rudnik: "m"
+    jama: "f"
+    laz: "m"
+    paseka: "f"
+    studenec: "m"
+    izvor: "m"
+    hora: "f"
+    vrch: "m"
+    brdo: "n"
+    gora: "f"
+    selo: "n"
+    ves: "f"
+    dvor: "m"
+    selce: "n"
+    osada: "f"
+    ograda: "f"
+    chalupa: "f"
+    koliba: "f"
+    pole: "n"
+    polje: "n"
+    niva: "f"
+    grad: "m"
+    gradec: "m"
+    "město": "n"
+    "trgovište": "n"
+    sobor: "m"
+    hrad: "m"
+    "hradište": "n"
+    "gradište": "n"
+  endings:
+    m: "ý"
+    f: "á"
+    "n": "é"
+
+proper_names:
+  style: "lists"
+  persons:
+    first: ["Bole", "Rado", "Jaro", "Vrati", "Mile", "Dobro", "Stani", "Bori", "Vladi",
+             "Svato", "Ljubo", "Budi"]
+    second: ["slav", "mir", "gost", "voj", "bor"]
+  rivers:
+    roots: ["Vltava", "Morava", "Sázava", "Drava", "Sava", "Una", "Vrbas", "Bosna",
+             "Drina", "Kupa", "Odra", "Nisa", "Jizera", "Ohře", "Svratka", "Dyje",
+             "Otava", "Lužnice", "Orlice", "Bečva", "Ondava", "Hron", "Váh", "Nitra",
+             "Tisa", "Mura", "Krka", "Cetina"]
+    patterns: ["{root}", "{root}", "malá {root}", "velká {root}"]
+
+spelling:
+  particles: ["na", "nad", "pod"]
+  hyphen_caps: true
+
+founder_gloss: "{p}'s {h}"
