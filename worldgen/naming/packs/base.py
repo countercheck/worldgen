@@ -72,6 +72,11 @@ class Pack:
     proper: Callable[[str, int, int], str] | None = None
     # How a founder is glossed in the etymology, over {p} the founder and {h} the head.
     founder_gloss: str = "{p}'s {h}"
+    # Templates for a qualifier that is an agreeing adjective (its word carries "~"), in
+    # place of `compound`. Where the two differ — Fuente Blanca and Villablanca, but
+    # Fuente de los Robles — a noun phrase must not be run into the head. Empty: use
+    # `compound` for both.
+    adjective: tuple[str, ...] = ()
 
 
 _SEPARATORS = re.compile(r"([ -])")
@@ -134,7 +139,8 @@ class PackCulture:
             ending = pack.endings.get(pack.genders.get(head, ""), "")
             parts["q"] = word.replace("~", "")
             parts["a"] = word.replace("~", ending)
-            template = _pick(self._templates("compound", rank), rng)
+            kind = "adjective" if "~" in word and pack.adjective else "compound"
+            template = _pick(self._templates(kind, rank), rng)
         elif qualifier.relation == "on":
             parts["r"] = qualifier.value.lower()
             template = _pick(self._templates("river_on", rank), rng)

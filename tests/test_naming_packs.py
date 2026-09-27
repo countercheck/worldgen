@@ -55,9 +55,30 @@ def test_slavic_adjectives_agree_with_their_noun():
     assert seen
 
 
-def test_every_slavic_head_has_a_gender():
-    pack = PACKS["slavic"]
-    assert {w for words in pack.heads.values() for w in words} <= set(pack.genders)
+@pytest.mark.parametrize("key", [k for k in _ALL if PACKS[k].endings])
+def test_every_head_in_an_agreeing_pack_has_a_gender_it_has_an_ending_for(key):
+    pack = PACKS[key]
+    heads = {w for words in pack.heads.values() for w in words}
+    assert heads <= set(pack.genders), sorted(heads - set(pack.genders))
+    assert set(pack.genders.values()) <= set(pack.endings)
+
+
+def test_an_adjective_agrees_and_a_noun_phrase_is_not_run_into_the_head():
+    """Fuente Blanca or Fuenteblanca, but Fuente del Roble — never Fuentedel Roble."""
+    culture = PackCulture(PACKS["spanish"])
+    rng = np.random.default_rng(7)
+    for _ in range(30):
+        white = culture.place_name("spring", Qualifier("meaning", "white"), rng)
+        oak = culture.place_name("spring", Qualifier("meaning", "oak"), rng)
+        assert white.endswith(("Blanca", "blanca")), white
+        assert oak.split(" ")[0] in ("Fuente", "Fontana"), oak
+
+
+def test_latin_puts_a_founder_and_a_river_in_the_genitive():
+    culture = PackCulture(PACKS["latin"])
+    rng = np.random.default_rng(8)
+    assert culture.place_name("market", Qualifier("proper", "Iulius", "of"), rng) == "Forum Iulii"
+    assert culture.place_name("bridge", Qualifier("proper", "Vassa", "on"), rng) == "Pons Vassae"
 
 
 def test_french_particles_stay_lower_case():

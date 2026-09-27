@@ -19,16 +19,21 @@ MODELS = ("classic", "organic")
 # and a test holds it equal to `worldgen.naming.packs.PACKS`.
 CULTURE_PACKS = (
     "arabic",
+    "dutch",
     "english",
     "french",
+    "german",
     "hive",
     "hobbitish",
+    "italian",
     "khuzdul",
+    "latin",
     "norse",
     "quenya",
     "rohirric",
     "sindarin",
     "slavic",
+    "spanish",
     "welsh",
 )
 
@@ -1010,7 +1015,8 @@ class WorldConfig:
     naming_substrate: bool = True
     # Hand-written culture packs for the regions, in order: the first region speaks the
     # first pack, and so on; regions past the end of the list get invented languages.
-    # One of: arabic, english, french, norse, slavic, welsh, or Tolkien's sindarin,
+    # One of: arabic, dutch, english, french, german, italian, latin, norse, slavic,
+    # spanish, welsh, or Tolkien's sindarin,
     # quenya, khuzdul, rohirric, hobbitish, or hive (an insect people). At most
     # naming_cultures.
     naming_packs: tuple[str, ...] = ()
