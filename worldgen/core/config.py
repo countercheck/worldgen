@@ -681,6 +681,17 @@ class WorldConfig:
     # are sized on leftovers. 0.7 gives 5-7 cities on seeds 42/7/3, the largest about
     # 1.5-1.9x the second, which is near the rank-size rule.
     city_draw_share: float = 0.7
+    # Transshipment: every change in how a city's cargo travels — cart to boat, barge to
+    # ship — leaves this share of the people it feeds with the settlement handling that
+    # quay, the nearest within `transship_radius`. Conserved: the handlers eat out of the
+    # cargo, off the city's gain. Only the places between source and city are paid. 0.2
+    # turns a quay town with next to no hinterland into a trade town of 3-5k on seeds
+    # 42/7/3, one of which passes city_min_population; 0 turns it off.
+    transship_share: float = 0.2
+    transship_radius: int = 2
+    # A town that grows past this becomes a city whatever it draws: the entrepôt, which
+    # handles a hinterland's trade rather than eating its food. 0 turns it off.
+    city_min_population: int = 5000
 
     # Cultivation radii — also the catchment each tier is scored on by HabitabilityStage
     cultivation_city_radius: int = 8
@@ -1182,6 +1193,12 @@ class WorldConfig:
             )
         if self.yield_multiplier <= 0:
             raise ValueError(f"yield_multiplier must be > 0, got {self.yield_multiplier}")
+        if not 0.0 <= self.transship_share <= 0.5:
+            raise ValueError(f"transship_share must be in [0, 0.5], got {self.transship_share}")
+        if self.transship_radius < 0:
+            raise ValueError(f"transship_radius must be >= 0, got {self.transship_radius}")
+        if self.city_min_population < 0:
+            raise ValueError(f"city_min_population must be >= 0, got {self.city_min_population}")
         if not 0.0 < self.city_draw_share <= 1.0:
             raise ValueError(f"city_draw_share must be in (0, 1], got {self.city_draw_share}")
         if self.city_min_draw <= 0:

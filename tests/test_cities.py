@@ -464,3 +464,105 @@ def test_a_smaller_share_spreads_the_same_people_over_more_cities():
 def test_city_draw_share_must_be_a_fraction():
     with pytest.raises(ValueError, match="city_draw_share"):
         WorldConfig(city_draw_share=1.5)
+
+
+# --- transshipment ------------------------------------------------------------
+
+
+def _row(kinds):
+    """Hexes along r = 0: 'l' land, 's' open sea, 'r' a river big enough to float a barge."""
+    from worldgen.core.hex import Hex
+
+    hexes = {}
+    for q, kind in enumerate(kinds):
+        if kind == "s":
+            hexes[(q, 0)] = Hex(coord=(q, 0), terrain_class=TerrainClass.OPEN_WATER)
+        else:
+            hx = Hex(coord=(q, 0), terrain_class=TerrainClass.LAND)
+            if kind == "r":
+                hx.tags.add("river")
+                hx.catchment_km2 = 1e6
+            hexes[(q, 0)] = hx
+    return hexes
+
+
+def _eastward(n):
+    """Every hex's next step toward a seat at the east end of a row of *n*."""
+    return {(q, 0): (q + 1, 0) for q in range(n - 1)}
+
+
+def test_a_cargo_changes_hands_where_it_changes_mode():
+    """Cart to boat and boat to cart, each at its land-side quay."""
+    hexes = _row("llsssll")
+    quays = CityPromotionStage._break_points((0, 0), (6, 0), _eastward(7), hexes, WorldConfig())
+    assert quays == [(1, 0), (5, 0)]
+
+
+def test_a_river_mouth_is_a_quay_of_its_own():
+    """Barge to ship where a navigable river meets the sea, at the river hex."""
+    hexes = _row("lrss")
+    cfg = WorldConfig()
+    assert navigable(hexes[(1, 0)], cfg)
+    quays = CityPromotionStage._break_points((0, 0), (3, 0), _eastward(4), hexes, cfg)
+    assert quays == [(0, 0), (1, 0)]
+
+
+def test_a_quay_is_handled_by_the_nearest_settlement_in_reach():
+    seats = {(0, 0), (3, 0)}
+    assert CityPromotionStage._handler((1, 0), seats, 2) == (0, 0)
+    assert CityPromotionStage._handler((9, 9), seats, 2) is None
+
+
+def test_an_entrepot_is_paid_out_of_the_cargo_it_handles():
+    """The handler's people come off the city's gain, so the books still balance, and
+    neither the market loading its own cargo nor the city unloading it is paid twice."""
+    from worldgen.core.hex import Settlement, SettlementRole
+    from worldgen.core.world_state import WorldState
+
+    cfg = WorldConfig(transship_share=0.2, transship_radius=1)
+
+    def town(coord, pop):
+        return Settlement(
+            coord=coord,
+            tier=SettlementTier.TOWN,
+            role=SettlementRole.PORT,
+            population=pop,
+            name=f"market_{coord}",
+        )
+
+    source, entrepot, seat = town((0, 0), 1000), town((2, 0), 50), town((7, 0), 2000)
+    state = WorldState.empty(1, 12, 12, cfg.grid_layout)
+    state.hexes = _row("lllsssll")
+    stage = CityPromotionStage(cfg, np.random.default_rng(0))
+    stage._resize(
+        state,
+        [source, entrepot, seat],
+        {(7, 0): {(0, 0): 5.0}},
+        {(0, 0): 10.0},
+        [(7, 0)],
+        cfg,
+        {(7, 0): _eastward(8)},
+    )
+
+    # Half the source's draw moves, so 500 people; the quay at (2, 0) keeps a fifth.
+    assert source.population == 500
+    assert entrepot.population == 50 + 100
+    assert seat.population == 2000 + 400
+    assert state.metadata["transshipment"] == [[2, 0, 5.0]]
+
+
+def test_transship_share_is_bounded():
+    with pytest.raises(ValueError, match="transship_share"):
+        WorldConfig(transship_share=0.6)
+
+
+def test_a_town_past_the_population_threshold_is_a_city():
+    state = build_world(
+        seed=42,
+        width=96,
+        height=96,
+        model="organic",
+        until="CityPromotionStage",
+        **{**_CITY_DEFAULTS, "city_min_population": 1},
+    )
+    assert all(s.tier is SettlementTier.CITY for s in state.settlements)
