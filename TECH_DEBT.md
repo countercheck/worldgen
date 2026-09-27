@@ -15,18 +15,28 @@ that the same work invalidated and have been re-scoped rather than deleted; one 
 materially worse. Every remaining item below
 was checked against the file and line it names.
 
+Items 24-29 were added 2026-09-27 from the `map-rivers-roads` branch (resource settlements,
+cataracts, provisioning and trade). They are recorded from the measurements made while
+building those features, not from a fresh audit.
+
 ---
 
 ## Summary — live items
 
 | # | Item | Category | Priority | Effort | Since audit |
 |---|------|----------|----------|--------|-------------|
+| 29 | Era-table figures from memory are not marked as such | Docs | **25** | S | new 2026-09-27 |
+| 26 | Mine and lumber-camp workforces do not scale with era | Model | **20** | S | new 2026-09-27 |
 | 19 | One off-map river strips the floodplain off half the map's channels | Model | **21** | M | unchanged |
 | 18 | Market siting scores a plain hex disc, not the day-reach the catchment walks | Model | **20** | L | unchanged |
 | 13 | `hydrology.py` is 1,402 lines — prime split candidate | Code | **18** | M | **worse**: was 781 |
 | 20 | An off-map river imports discharge but no sediment | Model | **18** | M | unchanged |
 | 21 | Runoff is linearised at the map's mean rainfall | Model | **18** | M | unchanged |
+| 24 | Ports are not marked on the map | Render | **15** | S | new 2026-09-27 |
+| 28 | Overland haulage is still priced for medieval carts at the c. 1800 default | Model | **15** | M | new 2026-09-27 |
 | 16 | Moisture smear blends the ocean's carrier value into coastal rainfall | Model | **12** | M | unchanged |
+| 27 | Ore is one generic kind; coal would need lowland placement | Model | **12** | M | new 2026-09-27 |
+| 25 | Portage towns at cataracts stay small | Model | **10** | L | new 2026-09-27 |
 | 8a | `ImageElevationStage` imports a reader from `export/` | Architecture | **8** | S | unchanged |
 | 14 | Bare `dict`/`list` type annotations throughout stages | Code | **8** | S | 58 occurrences |
 | 15 | Rivers stay a list of paths while roads became a graph | Architecture | — | — | **do not "fix"** — see entry |
@@ -53,7 +63,7 @@ Recorded so they are not raised again. Each was verified absent from master.
 | 1 | Erosion paths untested | Closed 2026-09-06, and **the premise was an instrumentation artifact**. `erosion.py` reads 72% because `coverage.py` cannot instrument a `@numba.njit` function — the whole droplet loop scores as dead. Under `NUMBA_DISABLE_JIT=1` the same suite puts the file at 96%: that code was always exercised, just not counted. What was genuinely untested was the plain-Python scaffolding around it, now covered by `tests/test_erosion.py`, taking the file to 98% measured that way. **Do not chase the 72%** — see the note below |
 | 22 | **CI had not run since 2026-05-04** | Found and closed 2026-09-06. `f9cf552` edited `name: Status Check` to `name: name: CIExpected`, which is not valid YAML. GitHub cannot report a parse error against a step, so every run failed in **0 s** before reaching one, and neither `ruff` nor `pytest` ran in CI for four months. Nothing noticed: a workflow that never starts never fails visibly, and no branch protection required it. Item 3's `\|\| true` was therefore moot in a deeper way than the audit knew — the step it disarmed was never reached. `tests/test_ci_workflow.py` now parses the file the way GitHub does and asserts lint runs, pytest runs, no step swallows its failure, and the gate still needs both |
 | 23 | **`ruff` was unpinned, so CI and local disagreed** | Found and closed 2026-09-06, by finding 22's first green run. `pyproject.toml` asked for `ruff>=0.4`, so CI installed 0.16.6 at build time while the venv held 0.15.12. Ruff 0.16 formats Python inside Markdown fences, so CI checked 87 files to local's 81 and `ruff format --check` failed on `TECH_DEBT.md` alone — a build broken by a release nobody chose. Pinned exactly (`ruff==0.16.6`), and `*.md` added to `extend-exclude`: the reformat collapsed the aligned `file:line` annotation columns in this file and `docs/REFERENCE.md` into ragged comments, and those excerpts are elided and annotated rather than runnable |
-| 17 | `_assign_role` compares metre elevation against 0.70 | Closed 2026-09-05 by removing `MINING` and `FORTRESS` from `SettlementRole` outright. The threshold existed only to split those two roles, nothing has ever read `Settlement.role`, and defining a fortress was the blocker — so the roles went rather than the number being guessed at. Ground with steep neighbours now falls through to the fertility test |
+| 17 | `_assign_role` compares metre elevation against 0.70 | Closed 2026-09-05 by removing `MINING` and `FORTRESS` from `SettlementRole` outright. (`MINING` returned 2026-09-27 with a purpose — `ResourceStage` founds mining villages and the renderers draw them — alongside a new `LUMBER`; `FORTRESS` stays retired. The 0.70 threshold did not come back.) The threshold existed only to split those two roles, nothing has ever read `Settlement.role`, and defining a fortress was the blocker — so the roles went rather than the number being guessed at. Ground with steep neighbours now falls through to the fertility test |
 
 ---
 
@@ -463,6 +473,110 @@ one function call and no new setting. What it changes is how much of every map i
 channel, which is `channel_min_discharge`'s calibration and the wetland and navigability
 figures with it. Measure across all five climates before and after; the point of the change
 is that arid and tropical should move in *opposite* directions.
+
+---
+
+### 24 — Ports are not marked on the map
+
+**Score:** Impact 2 · Risk 1 · Effort 1 → **15**
+
+Mining and lumber villages are drawn as a pickaxe and an axe (`render/glyphs.py`,
+mirrored in `campaign/client/src/map/glyphs.ts`), but a port — founded by `ResourceStage` at
+an unattended quay, or grown into an entrepôt by transshipment — draws as an ordinary town
+square. The role is in the world file (`SettlementRole.PORT`); only the glyph is missing.
+Note that `PORT` is also the role of every market on navigable water (~80% of them), so an
+anchor on every `PORT` would be noise: the mark belongs on the ports `ResourceStage` founds
+(`_port_` in the name) or on settlements with transshipment trade, which is a decision to
+make first.
+
+**Fix:** decide which ports earn the mark, add an anchor `Glyph` beside `AXE` and `PICKAXE`,
+and extend the legend's `"resource"` rows. The mirror test in `tests/test_glyphs.py` covers
+the TypeScript copy automatically once the new glyph is listed there.
+
+---
+
+### 25 — Portage towns at cataracts stay small
+
+**Score:** Impact 3 · Risk 2 · Effort 4 → **10**
+
+`CataractStage` makes a barge-sized river hex falling 20 m/km or more unnavigable, and a
+portage round it is two river landings (`haulage_river_transship_cost`, 1.0). Trade through
+portages rose 2-6x when river landings got cheaper, but the portage towns themselves stay
+in the hundreds to low thousands. The cause is structural: provisioning flows are short
+(market to city within `haulage_range_land`), and city-to-city manufactures mostly take
+routes that avoid cataracts, since a portage still costs two landings and a land hop. The
+historical portage towns — Aswan, Louisville, the fall-line towns — lived on long-distance
+trade along the river itself, which the model does not route.
+
+**Fix:** a long-haul trade flow along river systems (upriver interior to the coast), or
+treating a portage as a single charge rather than two landings. Measure portage-town
+populations against the cataract count before and after.
+
+---
+
+### 26 — Mine and lumber-camp workforces do not scale with era
+
+**Score:** Impact 3 · Risk 2 · Effort 1 → **20**
+
+`mine_workforce` (400, lognormal) and `lumber_people_per_wood_hex` (3) are fixed. The era
+table in `worldgen.yaml` moves density from 9/km2 to 134/km2 with `yield_multiplier`,
+`marketable_surplus_fraction` and `people_per_food`, but a mine employs the same number of
+people in Roman Britain as in 1830s Belgium. The draw that feeds a workforce is capped by
+`resource_draw_share`, so a thin country will under-supply a large mine rather than fail,
+but the intended size is still era-blind.
+
+**Fix:** scale both by `people_per_food` (or by a share of the population within reach), and
+add the resulting mine and camp sizes to the era table's measured columns.
+
+---
+
+### 27 — Ore is one generic kind; coal would need lowland placement
+
+**Score:** Impact 3 · Risk 1 · Effort 3 → **12**
+
+`ResourceStage._mines` draws deposits on ground with at least `ore_min_relief_m` (200 m) of
+relief — right for the metal ores (tin, lead, copper, silver) that sit in old upland rock,
+wrong for coal, which lies in lowland sedimentary basins, and for iron ore, which was often
+in the Weald's clay rather than the hills. `ore_haul_range_mult` is one value (2.0) where
+coal and iron (low value per ton, needed water) wanted about 1 and smelted lead or tin
+about 3.
+
+**Fix:** a deposit kind with its own placement rule and haul range. Coal matters most for
+the c. 1800 default, where it was the fuel that let cities outgrow their wood supply.
+
+---
+
+### 28 — Overland haulage is still priced for medieval carts at the c. 1800 default
+
+**Score:** Impact 3 · Risk 2 · Effort 3 → **15**
+
+The defaults were moved to England c. 1800 (`yield_multiplier` 1.7,
+`marketable_surplus_fraction` 0.40), but `haulage_range_land` (40) is the reach of a
+medieval cart. By 1800 turnpike roads and canals had made overland carriage noticeably
+cheaper, which extended provisioning reach and fed larger inland cities. No sourced figure
+has been found for how much cheaper, so the value was left alone rather than guessed.
+
+**Fix:** find a figure (turnpike-era freight rates against medieval carriage), raise
+`haulage_range_land` for the default, add it as a column in the era table, and re-measure
+the city columns. Canals would be a network feature rather than a cost, and are a separate
+piece of work.
+
+---
+
+### 29 — Era-table figures from memory are not marked as such
+
+**Score:** Impact 2 · Risk 3 · Effort 1 → **25**
+
+The era table in `worldgen.yaml` (and `default_config.yaml`) cites historical densities and
+urban shares, checked 2026-09-27 by two research passes. Several figures rest on those
+passes' recall of standard sources rather than pages they could open: Roman Gaul (Frier),
+Scandinavia c. 1300, Flanders' urban share (Prevenier), Dutch and Belgian urban shares
+(de Vries), and Florence's population (Day, which returned a 403). The table's footnotes
+name sources but do not say which figures were verified against them, so a reader cannot
+tell a checked number from a remembered one.
+
+**Fix:** mark the unverified figures in the footnotes, and check each against its source
+when the source can be read.
 
 ---
 
