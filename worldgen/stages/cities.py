@@ -18,14 +18,12 @@ absorbs off the markets that sent it.  The size gap between a port and an inland
 produced by one constant rather than by a rule that says ports are bigger.
 """
 
-import heapq
-
 from ..core.hex import SettlementTier, TerrainClass
-from ..core.hex_grid import distance, hex_range, neighbors
+from ..core.hex_grid import distance, hex_range
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
 from .habitability import actual_food
-from .haulage import gather, make_bulk_cost, navigable, usable_fraction
+from .haulage import bulk_routes, gather, navigable, usable_fraction
 
 # How a cargo travels on a hex, ranked so the quay of a change is the lower-ranked side:
 # the land hex where a cart meets a boat, or the river hex where a barge meets a ship.
@@ -97,46 +95,8 @@ class CityPromotionStage(GeneratorStage):
 
     @staticmethod
     def _bulk_routes(hexes, seat, cfg) -> tuple[dict, dict]:
-        """Cost of hauling bulk to *seat* from anywhere within `haulage_range_land`, and the way.
-
-        A second Dijkstra, over `make_bulk_cost` rather than `make_travel_cost`. That
-        distinction is the whole stage: travel cost makes water impassable, because a
-        catchment is ground somebody works, while a cargo goes by ship. Using the wrong one
-        here does not fail loudly — it silently makes every city inland, because the reach
-        then measures nothing but how central a market is on land.
-
-        Returns cost keyed by coord, over hexes within budget, and each hex's next step toward
-        the seat — the route a cargo from there takes, which transshipment walks.
-        """
-        node_cost, edge_cost = make_bulk_cost(hexes, cfg)
-        budget = cfg.haulage_range_land
-
-        cost: dict = {seat: 0.0}
-        toward: dict = {}
-        heap = [(0.0, seat)]
-        while heap:
-            d, coord = heapq.heappop(heap)
-            if d > cost.get(coord, float("inf")):
-                continue
-            hx = hexes[coord]
-            for n in neighbors(coord):
-                n_hx = hexes.get(n)
-                if n_hx is None:
-                    continue
-                # The search expands outward from the seat, but the cargo travels the
-                # other way — so each relaxation prices the step *n -> here*, toward the
-                # seat. Getting the edge direction wrong does not fail loudly: slope is
-                # the only asymmetric term, so it silently inflates the draw of every
-                # market the country rises toward.
-                step = node_cost(n_hx) + edge_cost(n_hx, hx)
-                if step == float("inf"):
-                    continue
-                nd = d + step
-                if nd < budget and nd < cost.get(n, float("inf")):
-                    cost[n] = nd
-                    toward[n] = coord
-                    heapq.heappush(heap, (nd, n))
-        return cost, toward
+        """`bulk_routes` to one seat: the cost of hauling bulk there, and the way."""
+        return bulk_routes(hexes, [seat], cfg)
 
     # -- transshipment --------------------------------------------------------
 
@@ -283,6 +243,10 @@ class CityPromotionStage(GeneratorStage):
 
         share = cfg.transship_share if toward is not None else 0.0
         handled: dict = {}
+        # Quays nobody stands at, keyed (quay, seat): the cargo through each and the people
+        # it would support. The city keeps them for now; `ResourceStage` founds a port on
+        # the busiest and moves them there.
+        unhandled: dict = {}
 
         lost: dict = {}
         gained: dict = {}
@@ -299,9 +263,14 @@ class CityPromotionStage(GeneratorStage):
                     # Loading at its own market is part of what the market already is, and
                     # unloading at the city is part of the city: only the places between
                     # earn a living off the trade.
-                    if handler is None or handler in (seat, other):
+                    if handler in (seat, other):
                         continue
                     cut = min(people * share, people - paid)
+                    if handler is None:
+                        food, kept = unhandled.get((quay, seat), (0.0, 0.0))
+                        unhandled[(quay, seat)] = (food + taken, kept + cut)
+                        paid += cut
+                        continue
                     gained[handler] = gained.get(handler, 0.0) + cut
                     gained[seat] -= cut
                     paid += cut
@@ -319,6 +288,11 @@ class CityPromotionStage(GeneratorStage):
         if handled:
             state.metadata["transshipment"] = [
                 [q, r, round(food, 3)] for (q, r), food in sorted(handled.items())
+            ]
+        if unhandled:
+            state.metadata["unhandled_quays"] = [
+                [q, r, sq, sr, round(food, 3), round(people, 3)]
+                for ((q, r), (sq, sr)), (food, people) in sorted(unhandled.items())
             ]
 
 

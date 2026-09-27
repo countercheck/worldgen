@@ -113,11 +113,12 @@ physical stages and diverge after them:
 
   It runs none of `classic`'s village stages: the dispersed peasantry is a productive
   surface rather than a list of hamlets (§ [3.10b](#310b-market-centres--organic)), and it
-  now carries an explicit population — about 38 people per km² on a temperate map, against
-  England's ~35 in 1300. A temperate map carries ~80 settlements where `classic` carries
+  now carries an explicit population — about 60 people per km² on a temperate map at the
+  c. 1800 defaults, against England and Wales's 59 in the 1801 census. A temperate map carries ~80 settlements where `classic` carries
   ~1,100. See § [3.10a](#310a-river-crossings--organic),
   § [3.10b](#310b-market-centres--organic),
-  § [3.10c](#310c-land-use-clearing-and-rural-density--organic) and
+  § [3.10c](#310c-land-use-clearing-and-rural-density--organic),
+  § [3.10d](#310d-resource-settlements--organic) and
   § [3.11a](#311a-chokepoints--organic).
 
 The difference is not cosmetic. On one landlocked desert map at 128×128, `classic` places
@@ -128,7 +129,7 @@ settlements around the shore of the inland sea.
 
 The diagram below shows the `classic` pipeline. `SoilStage` runs before `LandCoverStage` in both models. `organic`
 replaces `CityTownStage` with `CrossingStage → MarketStage → LandUseStage →
-CityPromotionStage`, inserts `ChokepointStage` after `InterurbanRoadStage`, and drops
+CityPromotionStage → ResourceStage`, inserts `ChokepointStage` after `InterurbanRoadStage`, and drops
 `CultivationStage` — `LandUseStage` does that job and more.
 
 ```mermaid
@@ -1536,6 +1537,42 @@ rather than by calibration.
 
 ---
 
+### 3.10d Resource Settlements — `organic`
+
+[resources.py](../worldgen/stages/resources.py). Three kinds of place that no fertility puts
+where they belong, founded after city promotion and before roads so the network reaches
+them. Each is fed from beyond itself, like a city, so none conjures people: every workforce
+is drawn from the settlements that can haul food to it, weighted by `usable_fraction` over
+the bulk cost, none giving more than `resource_draw_share` of its weighted population. The
+map's total population is unchanged by this stage.
+
+- **Ports** (TOWN, role `port`). `CityPromotionStage` records the quays on its provisioning
+  routes that no settlement stands within `transship_radius` of, with the trade share the
+  city kept for them. Quays within `transship_radius` of each other are pooled onto the
+  busiest; where that share reaches `port_min_population` a port is founded and paid it.
+  A port past `city_min_population` is a city.
+- **Mines** (VILLAGE, role `mining`). Deposits are drawn at random over ground with at least
+  `ore_min_relief_m` of relief, weighted towards the higher, at `ore_deposits_per_1000_km2`
+  of that ground and `ore_min_separation` apart. A deposit is worked only if its metal can
+  reach an outlet (a city, or a port-role settlement) by bulk haulage within
+  `haulage_range_land` × `ore_haul_range_mult`; smelted ore is worth more per ton than grain,
+  so it goes further, but not without limit. On temperate 128x128 maps every deposit has an
+  outlet in reach — port-role markets stand every 10-15 km — so the rule binds only where
+  water is scarce. A workforce drawn lognormally around `mine_workforce` goes to the town
+  within `resource_attach_radius` if there is one, and otherwise founds a village.
+- **Lumber camps** (VILLAGE, role `lumber`). On a WOOD hex on or beside water that floats
+  timber — open water, or a river past `timber_float_min_discharge`, a lower bar than a
+  barge needs (about half of all river hexes against 15% navigable); worth the woodland within `lumber_radius`, discounted by the bulk haul to the
+  nearest city. Placed best-first, `lumber_min_separation` apart, while that worth reaches
+  `lumber_min_score`, employing `lumber_people_per_wood_hex` per wooded hex.
+
+A village that the food within reach cannot bring to `resource_min_population` is not
+founded. `InterurbanRoadStage` routes to mining and lumber villages as well as to cities
+and towns. On seeds 42/7/3 at 128x128 this gives 5-9 ports, 2-6 mines and a handful of
+camps.
+
+---
+
 ### 3.11 Interurban Roads
 
 [stages/interurban_roads.py](../worldgen/stages/interurban_roads.py)
@@ -2300,6 +2337,21 @@ the surplus it draws on is depleted, and the scan repeats until nothing clears t
 | `transship_share` | `float` | `0.2` | Transshipment: every change in how a city's cargo travels on its way — cart to boat, boat to cart, barge to ship at a river mouth — leaves this share of the people it feeds with the settlement handling that quay (the nearest within `transship_radius`), off the city's gain. Conserved; only the places between the source market and the city are paid, since loading and unloading are already part of those two. 0.2 turns a quay town with next to no hinterland into a trade town of 3-5k on seeds 42/7/3. Handled cargo per settlement is written to `metadata["transshipment"]` as `[q, r, food]`. Validated in [0, 0.5] |
 | `transship_radius` | `int` | `2` | How far from a quay, in hexes, its handling settlement may stand. Validated `>= 0` |
 | `city_min_population` | `int` | `5000` | A town that grows past this becomes a city whatever it draws — the entrepôt, which handles a hinterland's trade rather than eating its food. 0 turns it off. Validated `>= 0` |
+| `port_min_population` | `int` | `250` | A port is founded at an unattended quay (or waterfront of quays within `transship_radius`) whose trade share reaches this many people. 0 turns ports off. § [3.10d](#310d-resource-settlements--organic) |
+| `ore_min_relief_m` | `float` | `200.0` | Relief a hex needs to carry ore. About the top 8% of land on a temperate map |
+| `ore_deposits_per_1000_km2` | `float` | `5.0` | Expected deposits per 1000 km² of ground above `ore_min_relief_m`, drawn as a Poisson count. 0 turns mines off |
+| `ore_min_separation` | `int` | `8` | Hexes between deposits |
+| `ore_haul_range_mult` | `float` | `2.0` | How many times `haulage_range_land` smelted ore is carried to an outlet (a city or a port-role settlement); a deposit with none in reach goes unworked. About 1 suits iron and coal, 3 or more lead, tin and silver |
+| `mine_workforce` | `float` | `400.0` | Mean people a seam employs |
+| `mine_workforce_sigma` | `float` | `0.5` | Lognormal spread of a seam's workforce around the mean |
+| `lumber_radius` | `int` | `4` | Radius over which a camp counts the woodland it works |
+| `lumber_min_score` | `float` | `35.0` | Woodland within `lumber_radius`, discounted by the bulk haul to the nearest city, that a camp must reach. 0 turns camps off |
+| `lumber_min_separation` | `int` | `10` | Hexes between camps |
+| `timber_float_min_discharge` | `float` | `15000.0` | Discharge (km² × mm) a river needs to float logs: below `navigable_min_discharge`, since timber was driven down rivers far too small for a barge |
+| `lumber_people_per_wood_hex` | `float` | `3.0` | People a camp employs per wooded hex it works |
+| `resource_attach_radius` | `int` | `1` | A workforce joins a settlement this close instead of founding a village beside it |
+| `resource_draw_share` | `float` | `0.25` | The most of its haulage-weighted population any settlement sends to feed a new workforce. Validated in (0, 1] |
+| `resource_min_population` | `int` | `30` | A village the food within reach cannot bring to this size is not founded |
 | `market_viability_floor` | `float` | `24.0` | `> 0` | The one density knob, replacing `target_city_count` and `target_town_count` both: stop planting once the best remaining site scores below this. Planting scores are *surplus*, so this scales with `marketable_surplus_fraction`, which the soil model moved from 0.20 to 0.32. At 24.0 a temperate map with `continent_falloff_edges: [south]` gives 76–92 markets across seeds 42/7/3/11/19, against 20 on an arid one — an absolute threshold on gathered surplus rather than a target, so density follows the land. **Lowering it raises the rural population too**, and that is a real feedback rather than rounding: more markets mean more catchments, more catchments mean more ground cleared, and cleared ground feeds more people than the wood it replaced — 38 per km² at 24.0 against 48 at 16.0 on the same terrain |
 | `chokepoint_min_road_tier` | `str` | `secondary` | `primary` \| `secondary` \| `track` | Least road tier a crossing must carry before it is worth a settlement. A bridge on a farm track is a plank, not a town. **This is what actually sets the size of the village tier**: on a 128×128 temperate map `secondary` admits about twenty candidate features, `track` admits a hundred and twenty |
 | `chokepoint_min_separation` | `int` | `2` | `>= 0` | Suppression disc, and how far a village must stand off an existing settlement. The economics would mostly do this anyway — there is no residual surplus close to a market — but a bridge on a town's own doorstep is the town's bridge whatever the arithmetic says |

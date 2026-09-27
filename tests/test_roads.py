@@ -954,3 +954,45 @@ def test_connectivity_joins_an_isolated_settlement_to_the_nearest_of_the_network
     if path is not None:
         assert path[0] == a
         assert path[-1] in b, "astar_to_any ended somewhere that was not a goal"
+
+
+@pytest.mark.parametrize(
+    ("tier", "road"),
+    [
+        (SettlementTier.VILLAGE, "track"),
+        (SettlementTier.TOWN, "secondary"),
+        (SettlementTier.CITY, "primary"),
+    ],
+)
+def test_a_stranded_place_is_joined_by_the_road_it_deserves(tier, road):
+    """The guarantee used to lay PRIMARY whatever it joined, which gave a lumber camp of a
+    hundred and twenty a trunk road once resource villages joined the network."""
+    from worldgen.core.hex import Hex, Settlement, SettlementRole, TerrainClass
+    from worldgen.core.world_state import RoadTier
+    from worldgen.stages import interurban_roads as ir
+
+    cfg = WorldConfig()
+    hexes = {
+        (q, r): Hex(coord=(q, r), terrain_class=TerrainClass.LAND)
+        for q in range(10)
+        for r in range(3)
+    }
+    city = Settlement(
+        coord=(0, 1),
+        tier=SettlementTier.CITY,
+        role=SettlementRole.MARKET,
+        population=9000,
+        name="city",
+    )
+    stranded = Settlement(
+        coord=(7, 1), tier=tier, role=SettlementRole.MARKET, population=200, name="stranded"
+    )
+    existing = {((0, 1), (1, 1)): RoadTier.PRIMARY}
+    settled = {city.coord, stranded.coord}
+
+    edges, _, unreachable = ir.InterurbanRoadStage(cfg, None)._guarantee_connectivity(
+        hexes, [city, stranded], dict(existing), cfg, frozenset(), settled
+    )
+    assert not unreachable
+    laid = {k: t for k, t in edges.items() if k not in existing}
+    assert laid and {t.value for t in laid.values()} == {road}

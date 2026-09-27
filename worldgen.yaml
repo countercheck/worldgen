@@ -537,6 +537,24 @@ city_draw_share: 0.7 # Share of what can reach it that a promoted city actually 
 transship_share: 0.2 # Every change in how a city's cargo travels on its way (cart to boat, boat to cart, barge to ship at a river mouth) leaves this share of the people it feeds with the settlement handling that quay, off the city's gain. Conserved: the handlers eat out of the cargo. Only the places between the source market and the city are paid. 0.2 turns a quay town with next to no hinterland into a trade town of 3-5k on seeds 42/7/3. 0 turns it off. Default: 0.2
 transship_radius: 2 # How far from a quay, in hexes, the settlement that handles it may stand. Default: 2
 city_min_population: 5000 # A town that grows past this becomes a city whatever it draws: the entrepot, which handles a hinterland's trade rather than eating its food. 5,000 is the common historical urban threshold. 0 turns it off. Default: 5000
+# Resource settlements: ports at unattended quays, mines on the ore, lumber camps in the woods.
+# Each is fed from beyond itself, like a city: its workforce is drawn from the settlements
+# that can haul food to it, so the map's total population does not change.
+port_min_population: 250 # A port is founded at an unattended quay (or waterfront of quays within transship_radius) whose trade share reaches this many people. 0 turns ports off.. Default: 250
+ore_min_relief_m: 200.0 # Relief a hex needs to carry ore. About the top 8% of land on a temperate map. Default: 200.0
+ore_deposits_per_1000_km2: 5.0 # Expected deposits per 1000 km² of ground above ore_min_relief_m, drawn as a Poisson count. 0 turns mines off. Default: 5.0
+ore_min_separation: 8 # Hexes between deposits. Default: 8
+ore_haul_range_mult: 2.0 # How many times haulage_range_land smelted ore is carried to an outlet (a city or a port-role settlement); a deposit with none in reach goes unworked. About 1 suits iron and coal, 3 or more lead, tin and silver. Default: 2.0
+mine_workforce: 400.0 # Mean people a seam employs. Default: 400.0
+mine_workforce_sigma: 0.5 # Lognormal spread of a seam's workforce around the mean. Default: 0.5
+lumber_radius: 4 # Radius over which a camp counts the woodland it works. Default: 4
+lumber_min_score: 35.0 # Woodland within lumber_radius, discounted by the bulk haul to the nearest city, that a camp must reach. 0 turns camps off. Default: 35.0
+lumber_min_separation: 10 # Hexes between camps. Default: 10
+timber_float_min_discharge: 15000.0 # Discharge (km² × mm) a river needs to float logs: below navigable_min_discharge, since timber was driven down rivers far too small for a barge. Default: 15000.0
+lumber_people_per_wood_hex: 3.0 # People a camp employs per wooded hex it works. Default: 3.0
+resource_attach_radius: 1 # A workforce joins a settlement this close instead of founding a village beside it. Default: 1
+resource_draw_share: 0.25 # The most of its haulage-weighted population any settlement sends to feed a new workforce. Validated in (0, 1]. Default: 0.25
+resource_min_population: 30 # A village the food within reach cannot bring to this size is not founded. Default: 30
 market_viability_floor: 24.0 # The one density knob, replacing target_city_count and target_town_count both: stop planting once the best remaining site scores below this. Calibrated to ~70–85 markets at 128x128 (first set against ~700 English markets in ~130,000 km2, an eighth of which is ~87; Letters' Gazetteer puts market grants by 1300 nearer 1,750, though many never traded, so the true count is uncertain and this may run sparse): on a temperate map with continent_falloff_edges = [south], seeds 42/7/3/11/19 give 76–92 markets. An absolute threshold on gathered surplus rather than a target, so density follows the land: the same value yields 20 markets on an arid map and 76 on a temperate one. Lowering it raises the rural population too, and that is a real feedback rather than rounding — more markets mean more catchments, more catchments mean more ground cleared, and cleared ground feeds more people than the wood it replaced. Default: 24.0
 
 # Chokepoints: the settlement tier below the market, founded on bridgeheads and passes

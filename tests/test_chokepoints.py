@@ -70,7 +70,13 @@ def _world(**over):
 
 
 def _villages(state):
-    return [s for s in state.settlements if s.tier is SettlementTier.VILLAGE]
+    """The chokepoint villages: not the mining and lumber villages `ResourceStage` founds."""
+    return [
+        s
+        for s in state.settlements
+        if s.tier is SettlementTier.VILLAGE
+        and s.role not in (SettlementRole.MINING, SettlementRole.LUMBER)
+    ]
 
 
 @pytest.fixture(scope="module")
@@ -295,7 +301,9 @@ def test_villages_take_nothing_from_the_markets(choke_world):
         until="InterurbanRoadStage",
         **_CHOKE_DEFAULTS,
     )
-    was = {s.coord: s.population for s in before.settlements}
+    was = {
+        s.coord: s.population for s in before.settlements if s.tier is not SettlementTier.VILLAGE
+    }
     now = {
         s.coord: s.population
         for s in choke_world.settlements

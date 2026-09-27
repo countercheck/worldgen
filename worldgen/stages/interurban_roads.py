@@ -2,7 +2,7 @@ from collections import defaultdict, deque
 from heapq import heappop, heappush
 
 from ..core.errors import RoutingError
-from ..core.hex import SettlementTier, TerrainClass
+from ..core.hex import SettlementRole, SettlementTier, TerrainClass
 from ..core.hex_grid import astar_to_any, distance, neighbors
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import ROAD_TIER_RANK, Ferry, RoadTier, WorldState, road_edge_key
@@ -25,6 +25,13 @@ from .road_cost import (
     tier_near,
 )
 
+# The road the connectivity guarantee lays to a stranded place, by the best place on it.
+_ROAD_FOR_TIER = {
+    SettlementTier.CITY: RoadTier.PRIMARY,
+    SettlementTier.TOWN: RoadTier.SECONDARY,
+    SettlementTier.VILLAGE: RoadTier.TRACK,
+}
+
 
 class InterurbanRoadStage(GeneratorStage):
     """Builds PRIMARY and SECONDARY roads between cities and towns only.
@@ -36,9 +43,14 @@ class InterurbanRoadStage(GeneratorStage):
     def run(self, state: WorldState) -> WorldState:
         hexes = state.hexes
         cfg = self.config
-        # Only city and town settlements participate
+        # Cities and towns, and the villages `ResourceStage` founds: a mine or a lumber camp
+        # has to be reached by road or its ore and timber go nowhere. Other villages are
+        # placed after this stage and joined by stages of their own.
         settlements = [
-            s for s in state.settlements if s.tier in (SettlementTier.CITY, SettlementTier.TOWN)
+            s
+            for s in state.settlements
+            if s.tier in (SettlementTier.CITY, SettlementTier.TOWN)
+            or s.role in (SettlementRole.MINING, SettlementRole.LUMBER)
         ]
         if not settlements:
             return state
@@ -509,12 +521,28 @@ class InterurbanRoadStage(GeneratorStage):
 
         plain_edge = make_road_edge_cost(cfg, blocked, settled)
 
-        def adopt(path) -> None:
-            """Lay *path* into the network as primary, without demoting anything."""
+        def adopt(path, tier) -> None:
+            """Lay *path* into the network at *tier*, without demoting anything."""
             for a, b in zip(path, path[1:], strict=False):
                 road_adj[a].add(b)
                 road_adj[b].add(a)
-                road_edges.setdefault(road_edge_key(a, b), RoadTier.PRIMARY)
+                road_edges.setdefault(road_edge_key(a, b), tier)
+
+        def tier_for(coord) -> RoadTier:
+            """The road a stranded piece of the network deserves: by the best place on it.
+
+            This used to be PRIMARY always, from when only a city could be stranded; once
+            the resource villages joined the network it was handing a lumber camp of 120 a
+            trunk road. The piece is judged on everything it holds, because a village can
+            stand between the main network and a city cut off behind it.
+            """
+            piece = bfs_component(coord) | {coord}
+            best = max(
+                (_ROAD_FOR_TIER[s.tier] for s in places if s.coord in piece),
+                key=ROAD_TIER_RANK.__getitem__,
+                default=RoadTier.TRACK,
+            )
+            return best
 
         ferries: list[Ferry] = []
         # Settlements the terrain puts beyond both road and ferry. Reported, not raised.
@@ -540,7 +568,7 @@ class InterurbanRoadStage(GeneratorStage):
                     hexes, iso.coord, main & place_coords, plain_cost, plain_edge
                 )
                 if best_path:
-                    adopt(best_path)
+                    adopt(best_path, tier_for(iso.coord))
                     main |= bfs_component(iso.coord)
                     progressed = True
                     break
@@ -572,8 +600,9 @@ class InterurbanRoadStage(GeneratorStage):
                     main.add(iso.coord)
                     continue
                 ferries.append(ferry)
+                tier = tier_for(iso.coord)
                 for fp in ferry_paths:
-                    adopt(fp)
+                    adopt(fp, tier)
                 main |= bfs_component(iso.coord)
                 main.add(ferry.a)
                 main.add(ferry.b)

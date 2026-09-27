@@ -50,7 +50,11 @@ FIXTURE = (
     / "world-32x32.json"
 )
 
-SEED = 7
+# Chosen because it carries everything `test_the_world_fixture_still_exercises_what_the_
+# typescript_tests_need` asks for. Seed 7 stopped carrying a secondary road once
+# `fill_tier_gaps` began closing short dips in trunk roads; 13 and 16 were the seeds in
+# 1-31 that still carry all three tiers at 32x32.
+SEED = 13
 SIZE = 32
 MODEL = "organic"
 PLACES = 4

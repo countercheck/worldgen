@@ -693,6 +693,42 @@ class WorldConfig:
     # handles a hinterland's trade rather than eating its food. 0 turns it off.
     city_min_population: int = 5000
 
+    # Resource settlements (`ResourceStage`): places fed from beyond themselves, like a
+    # city, founded on something other than farmland. Every workforce is drawn from the
+    # settlements that can haul food to it, none giving more than `resource_draw_share` of
+    # its haulage-weighted population, so the map's total is unchanged.
+    # A port is founded at an unattended quay whose trade supports at least this many.
+    port_min_population: int = 250
+    # Ore lies in the hills: deposits are drawn over ground with this much relief, at this
+    # many per 1000 km2 of it, weighted towards the higher, and this far apart.
+    ore_min_relief_m: float = 200.0
+    ore_deposits_per_1000_km2: float = 5.0
+    ore_min_separation: int = 8
+    # Smelted ore is worth more per ton than grain, so it is carried further overland to an
+    # outlet (a city, or a settlement a boat can load at): this many times
+    # `haulage_range_land`. A deposit with no outlet in reach goes unworked. About 1 suits
+    # iron and coal, which needed water; 3 or more suits lead, tin and silver, which went by
+    # packhorse to the nearest river port.
+    ore_haul_range_mult: float = 2.0
+    # People a seam employs, drawn lognormally around the mean with this sigma.
+    mine_workforce: float = 400.0
+    mine_workforce_sigma: float = 0.5
+    # Lumber camps: woodland counted within `lumber_radius`, discounted by the bulk haul to
+    # the nearest city, must reach `lumber_min_score`; camps this far apart, employing this
+    # many per wooded hex around them.
+    # Discharge, in km2 x mm, a river needs to float logs: below `navigable_min_discharge`,
+    # because timber was driven down rivers far too small for a barge, but not down a brook.
+    timber_float_min_discharge: float = 15000.0
+    lumber_radius: int = 4
+    lumber_min_score: float = 35.0
+    lumber_min_separation: int = 10
+    lumber_people_per_wood_hex: float = 3.0
+    # A workforce joins a settlement this close instead of founding a village beside it.
+    resource_attach_radius: int = 1
+    resource_draw_share: float = 0.25
+    # A village that the food within reach cannot bring to this size is not founded.
+    resource_min_population: int = 30
+
     # Cultivation radii — also the catchment each tier is scored on by HabitabilityStage
     cultivation_city_radius: int = 8
     cultivation_town_radius: int = 4
@@ -1197,6 +1233,27 @@ class WorldConfig:
             raise ValueError(f"transship_share must be in [0, 0.5], got {self.transship_share}")
         if self.transship_radius < 0:
             raise ValueError(f"transship_radius must be >= 0, got {self.transship_radius}")
+        for name in (
+            "port_min_population",
+            "ore_deposits_per_1000_km2",
+            "ore_min_separation",
+            "ore_haul_range_mult",
+            "timber_float_min_discharge",
+            "mine_workforce",
+            "mine_workforce_sigma",
+            "lumber_radius",
+            "lumber_min_score",
+            "lumber_min_separation",
+            "lumber_people_per_wood_hex",
+            "resource_attach_radius",
+            "resource_min_population",
+        ):
+            if getattr(self, name) < 0:
+                raise ValueError(f"{name} must be >= 0, got {getattr(self, name)}")
+        if not 0.0 < self.resource_draw_share <= 1.0:
+            raise ValueError(
+                f"resource_draw_share must be in (0, 1], got {self.resource_draw_share}"
+            )
         if self.city_min_population < 0:
             raise ValueError(f"city_min_population must be >= 0, got {self.city_min_population}")
         if not 0.0 < self.city_draw_share <= 1.0:
