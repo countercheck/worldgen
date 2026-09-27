@@ -278,3 +278,20 @@ def test_reproducibility():
             assert getattr(s1.hexes[coord], field) == getattr(s2.hexes[coord], field), (
                 f"{field} differs at {coord} between identical seeds"
             )
+
+
+def test_yield_multiplier_lifts_worked_ground_only():
+    """Farming technology feeds more people from ploughland and pasture; the wood, the
+    fishery and the potential that siting reads are untouched."""
+    base, better = WorldConfig(), WorldConfig(yield_multiplier=2.0)
+    for use in (LandUse.ARABLE, LandUse.PASTURE):
+        hx = _hex(SoilQuality.ARABLE, use=use)
+        assert actual_food(hx, better) == pytest.approx(2.0 * actual_food(hx, base))
+    wood = _hex(SoilQuality.ARABLE, use=LandUse.WOOD)
+    assert actual_food(wood, better) == actual_food(wood, base)
+    assert potential_food(wood, better) == potential_food(wood, base)
+
+
+def test_yield_multiplier_must_be_positive():
+    with pytest.raises(ValueError, match="yield_multiplier"):
+        WorldConfig(yield_multiplier=0.0)

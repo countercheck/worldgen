@@ -421,3 +421,46 @@ def test_resize_cannot_charge_a_market_past_nothing():
 
     assert source.population == 1, "a market that sends everything keeps nobody but the floor"
     assert seat.population == 900 + before, "the city is credited exactly what left the market"
+
+
+def test_a_city_takes_its_share_from_the_nearest_markets_first():
+    cfg = WorldConfig(city_draw_share=0.5)
+    offered = {"near": 4.0, "mid": 4.0, "far": 4.0}
+    cost = {"near": 1.0, "mid": 5.0, "far": 9.0}
+    take = CityPromotionStage._nearest_share(offered, cost, 12.0, cfg)
+    assert take == {"near": 4.0, "mid": 2.0}
+
+
+def test_a_full_share_takes_everything_offered():
+    cfg = WorldConfig(city_draw_share=1.0)
+    offered = {"a": 3.0, "b": 1.5}
+    take = CityPromotionStage._nearest_share(offered, {"a": 2.0, "b": 1.0}, 4.5, cfg)
+    assert take == offered
+
+
+def test_a_smaller_share_spreads_the_same_people_over_more_cities():
+    full = build_world(
+        seed=42,
+        width=96,
+        height=96,
+        model="organic",
+        until="CityPromotionStage",
+        **_CITY_DEFAULTS,
+    )
+    half = build_world(
+        seed=42,
+        width=96,
+        height=96,
+        model="organic",
+        until="CityPromotionStage",
+        city_draw_share=0.5,
+        **_CITY_DEFAULTS,
+    )
+    assert len(_split(half)[0]) >= len(_split(full)[0])
+    total = sum(s.population for s in full.settlements)
+    assert abs(sum(s.population for s in half.settlements) - total) <= len(full.settlements)
+
+
+def test_city_draw_share_must_be_a_fraction():
+    with pytest.raises(ValueError, match="city_draw_share"):
+        WorldConfig(city_draw_share=1.5)

@@ -126,21 +126,22 @@ class CityPromotionStage(GeneratorStage):
         absorbed: dict = {}
 
         while True:
-            best, best_take = None, None
+            best, best_take, best_total = None, None, -1.0
             for seat in seats:
                 if seat in absorbed:
                     continue
-                take = {
+                offered = {
                     other: remaining.get(other, 0.0)
                     * usable_fraction(reach[seat][other], cfg.haulage_range_land)
                     for other in seats
                     if other != seat and other in reach[seat]
                 }
-                total = sum(take.values())
-                if best_take is None or total > sum(best_take.values()):
-                    best, best_take = seat, take
+                total = sum(offered.values())
+                if total > best_total:
+                    best, best_total = seat, total
+                    best_take = self._nearest_share(offered, reach[seat], total, cfg)
 
-            if best is None or sum(best_take.values()) < cfg.city_min_draw:
+            if best is None or best_total < cfg.city_min_draw:
                 break
 
             promoted.append(best)
@@ -149,6 +150,26 @@ class CityPromotionStage(GeneratorStage):
                 remaining[other] = max(0.0, remaining.get(other, 0.0) - taken)
 
         return promoted, absorbed
+
+    @staticmethod
+    def _nearest_share(offered, cost, total, cfg) -> dict:
+        """What a city actually takes of what is *offered*: `city_draw_share` of it, nearest first.
+
+        Promotion is judged on everything that can reach a place; the take is capped. A city
+        that took all of it drained the half of the map its water reach covers, and every
+        city after the first was sized on leftovers. Filling from the cheapest source first
+        means the markets at the gates feed the city outright and the far ones keep their
+        surplus for a city of their own.
+        """
+        budget = total * cfg.city_draw_share
+        take: dict = {}
+        for other in sorted(offered, key=lambda o: (cost[o], o)):
+            if budget <= 0.0:
+                break
+            amount = min(offered[other], budget)
+            take[other] = amount
+            budget -= amount
+        return take
 
     # -- sizing ---------------------------------------------------------------
 

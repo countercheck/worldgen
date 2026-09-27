@@ -72,9 +72,13 @@ def actual_food(hx, cfg) -> float:
     base = potential_food(hx, cfg)
     if hx.land_use is None or hx.land_cover is LandCover.OPEN_WATER:
         return base
+    # `yield_multiplier` is farming technology — rotation, manure, marl, clover — so it
+    # lifts worked ground and leaves the wood and the fishery alone. It is applied here and
+    # not to `potential_food`, which siting and land use read: better farming fed more
+    # people from the same market network rather than planting a denser one.
     return base * {
-        LandUse.ARABLE: cfg.yield_arable,
-        LandUse.PASTURE: cfg.yield_pasture,
+        LandUse.ARABLE: cfg.yield_arable * cfg.yield_multiplier,
+        LandUse.PASTURE: cfg.yield_pasture * cfg.yield_multiplier,
         LandUse.WOOD: cfg.yield_wood,
     }.get(hx.land_use, 0.0)
 

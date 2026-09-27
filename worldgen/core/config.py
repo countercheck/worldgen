@@ -671,6 +671,11 @@ class WorldConfig:
     # on a small island — but it means a small map grows no cities at this value, and that
     # this figure belongs to a 128x128 world.
     city_min_draw: float = 40.0
+    # Share of what can reach it that a promoted city actually takes, from the nearest
+    # markets outward. 1.0 takes everything: the first city drains half the map and the rest
+    # are sized on leftovers. 0.7 gives 5-7 cities on seeds 42/7/3, the largest about
+    # 1.5-1.9x the second, which is near the rank-size rule.
+    city_draw_share: float = 0.7
 
     # Cultivation radii — also the catchment each tier is scored on by HabitabilityStage
     cultivation_city_radius: int = 8
@@ -717,6 +722,9 @@ class WorldConfig:
     yield_arable: float = 1.0
     yield_pasture: float = 0.55
     yield_wood: float = 0.30
+    # Farming technology, as one multiplier on the arable and pasture yields. 1.0 is
+    # England c.1300; see the era table in worldgen.yaml.
+    yield_multiplier: float = 1.0
     # Where clearing stops, as a fraction of the best rent the settlement can reach.
     # Relative rather than absolute, and that is the substance of it: a market with a
     # floodplain has a high bar and leaves its hillsides to sheep, while a market on
@@ -1165,6 +1173,10 @@ class WorldConfig:
             raise ValueError(
                 f"haulage_transship_cost must be >= 0, got {self.haulage_transship_cost}"
             )
+        if self.yield_multiplier <= 0:
+            raise ValueError(f"yield_multiplier must be > 0, got {self.yield_multiplier}")
+        if not 0.0 < self.city_draw_share <= 1.0:
+            raise ValueError(f"city_draw_share must be in (0, 1], got {self.city_draw_share}")
         if self.city_min_draw <= 0:
             raise ValueError(f"city_min_draw must be > 0, got {self.city_min_draw}")
         if self.road_settlement_skirt_cost < 0:
