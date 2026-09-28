@@ -65,3 +65,26 @@ export function zoomAt(camera: Camera, at: Point, box: { w: number; h: number },
     },
   };
 }
+
+/** Whether a point lies inside the map's box, at least `margin` in from every edge. */
+export function onScreen(p: Point, box: { w: number; h: number }, margin = 0): boolean {
+  return p.x >= margin && p.y >= margin && p.x <= box.w - margin && p.y <= box.h - margin;
+}
+
+/**
+ * The camera that puts some ground in the middle of the box, at the zoom it already has.
+ *
+ * `fitted` is where that ground sits in the fitted view — at zoom 1 with no pan. The map
+ * places it at `(fitted - box/2)·zoom + pan + box/2` (see `zoomAt`), so the pan that
+ * lands it on `box/2` is `(box/2 - fitted)·zoom`. The zoom is left alone: a reader who has
+ * zoomed in to read the ground wants to be taken somewhere, not zoomed back out.
+ */
+export function centreOn(camera: Camera, fitted: Point, box: { w: number; h: number }): Camera {
+  return {
+    zoom: camera.zoom,
+    pan: {
+      x: (box.w / 2 - fitted.x) * camera.zoom,
+      y: (box.h / 2 - fitted.y) * camera.zoom,
+    },
+  };
+}

@@ -29,6 +29,8 @@ export function More({
   reachDisabled,
   onReach,
   onHome,
+  places,
+  onPlaces,
   onHelp,
   onClose,
 }: {
@@ -42,6 +44,9 @@ export function More({
   reachDisabled: boolean;
   onReach: (on: boolean) => void;
   onHome: () => void;
+  /** How many settlements the places list holds. */
+  places: number;
+  onPlaces: () => void;
   onHelp: () => void;
   onClose: () => void;
 }) {
@@ -118,6 +123,11 @@ export function More({
         <button className="more-home" onClick={onHome}>
           {copy.console.home}
           <span className="muted small">{copy.console.homeHint}</span>
+        </button>
+
+        <button className="more-home" onClick={onPlaces}>
+          {copy.places.open(places)}
+          <span className="muted small">{copy.places.openHint}</span>
         </button>
 
         <button className="more-home" onClick={onHelp}>

@@ -10,7 +10,14 @@ import { fileURLToPath } from 'node:url';
 
 import { expect, test } from '@playwright/test';
 
-import { hexInSidebar, mapPoints, openConsole, type Point } from './helpers.js';
+import {
+  flashCentre,
+  hexInSidebar,
+  mapPoints,
+  openConsole,
+  placeHexes,
+  type Point,
+} from './helpers.js';
 
 test.beforeEach(async ({ page }) => {
   await openConsole(page);
@@ -224,4 +231,49 @@ test('starts an uploaded world with no sides, and takes one the referee adds', a
   await expect(tab).toBeVisible();
   await expect(tab.locator('.swatch')).toHaveCSS('background-color', 'rgb(31, 78, 156)');
   await expect(roster).not.toContainText('No sides yet.');
+});
+
+test.describe('the places list', () => {
+  test('opens as a drawer beside the map and flashes the place picked', async ({ page }) => {
+    await page.locator('header').getByRole('button', { name: /^Places/ }).click();
+    const drawer = page.getByRole('complementary', { name: 'Places' });
+    await expect(drawer).toBeVisible();
+    await expect(drawer.locator('.place').first()).toBeVisible();
+
+    await drawer.locator('.place').first().click();
+    await expect.poll(() => flashCentre(page)).not.toBeNull();
+    // Beside the map, so it stays open to point at the next one.
+    await expect(drawer).toBeVisible();
+
+    await page.keyboard.press('Escape');
+    await expect(drawer).toBeHidden();
+  });
+
+  test('narrows to what is typed', async ({ page }) => {
+    await page.locator('header').getByRole('button', { name: /^Places/ }).click();
+    const drawer = page.getByRole('complementary', { name: 'Places' });
+    const first = (await drawer.locator('.place-name').first().textContent()) ?? '';
+    await drawer.getByRole('searchbox').fill(first);
+    await expect(drawer.locator('.place-name').first()).toHaveText(first);
+    await drawer.getByRole('searchbox').fill('zzzzqqq');
+    await expect(drawer.locator('.place')).toHaveCount(0);
+  });
+
+  test('takes the map to a place that is off the screen', async ({ page }) => {
+    const box = await page.locator('.map').boundingBox();
+    if (box === null) throw new Error('the map is not on screen');
+    // Zoom hard into the far west, so a place in the east is well off the screen.
+    await page.mouse.move(box.x + 5, box.y + box.height / 2);
+    for (let i = 0; i < 20; i++) await page.mouse.wheel(0, -200);
+
+    await page.locator('header').getByRole('button', { name: /^Places/ }).click();
+    const places = await placeHexes(page);
+    const east = places.reduce((a, b) => (b.q > a.q ? b : a));
+    await page.locator(`.places .place[data-hex="${east.hex}"]`).click();
+
+    await expect.poll(() => flashCentre(page)).not.toBeNull();
+    const at = await flashCentre(page);
+    expect(at!.x).toBeCloseTo(box.width / 2, -2);
+    expect(at!.y).toBeCloseTo(box.height / 2, -2);
+  });
 });

@@ -21,6 +21,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
+  axialToPixel,
   key,
   pixelToAxial,
   type Hex,
@@ -33,11 +34,13 @@ import { copy } from '../copy.js';
 import { coarsePointer } from '../layout.js';
 
 import {
+  drawFlash,
   drawOverlay,
   drawTerrain,
   drawWash,
   markAtHex,
   worldExtent,
+  FLASH_MS,
   type Mark,
   type Plan,
   type Rider,
@@ -45,9 +48,24 @@ import {
   type WashMode,
 } from './draw.js';
 
-import { distance, isTap, midpoint, zoomAt, type Camera, type Point } from './gesture.js';
+import {
+  centreOn,
+  distance,
+  isTap,
+  midpoint,
+  onScreen,
+  zoomAt,
+  type Camera,
+  type Point,
+} from './gesture.js';
 
 export type { Mark, Rider, WashMode } from './draw.js';
+
+/**
+ * A place to draw the eye to, from outside the map: the places list. `seq` changes with
+ * every request, so choosing the same place twice flashes it twice.
+ */
+export type Focus = { readonly hex: Hex; readonly seq: number };
 
 /** A press in progress: where it went down, and whether it has stopped being a tap. */
 type Press = { start: Point; button: number; moved: boolean };
@@ -69,6 +87,7 @@ export function HexMap({
   visible,
   surveyed,
   washMode,
+  focus,
 }: {
   world: World;
   marks: readonly Mark[];
@@ -102,16 +121,25 @@ export function HexMap({
   visible?: ReadonlySet<HexKey> | undefined;
   surveyed?: ReadonlySet<HexKey> | undefined;
   washMode?: WashMode | undefined;
+  /**
+   * Flash this place, and bring it into view if it is not. Off screen, the map pans to put
+   * it in the middle at the zoom it already has; on screen, it stays put, because moving
+   * a map the reader can already see the place on only loses them.
+   */
+  focus?: Focus | null | undefined;
 }) {
   const wrap = useRef<HTMLDivElement>(null);
   const terrainRef = useRef<HTMLCanvasElement>(null);
   const washRef = useRef<HTMLCanvasElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
+  const flashRef = useRef<HTMLCanvasElement>(null);
 
   const [box, setBox] = useState({ w: 800, h: 600 });
   const [camera, setCamera] = useState<Camera>({ zoom: 1, pan: { x: 0, y: 0 } });
   const { zoom, pan } = camera;
   const [hoveredUnitId, setHoveredUnitId] = useState<string | null>(null);
+  // The place being flashed and when it started, in `performance.now()` time.
+  const [flash, setFlash] = useState<{ hex: Hex; started: number } | null>(null);
   // Every pointer currently down, where it was last seen. One is a pan or a tap; two are a
   // pinch. Refs, not state: they change on every move and nothing renders from them.
   const pointers = useRef(new Map<number, Point>());
@@ -138,6 +166,53 @@ export function HexMap({
     }),
     [base, zoom, pan, box.w, box.h],
   );
+
+  // Keyed on `seq` alone: the view changes as the map pans, and a pan must not re-run the
+  // request that caused it.
+  useEffect(() => {
+    if (focus === null || focus === undefined) return;
+    const at = axialToPixel(focus.hex, view.size);
+    const screen = { x: at.x + view.offsetX, y: at.y + view.offsetY };
+    // A hex's width in from the edge, so a place half off the map counts as off it.
+    if (!onScreen(screen, box, view.size)) {
+      const fitted = axialToPixel(focus.hex, base.size);
+      setCamera((c) =>
+        centreOn(c, { x: fitted.x + base.offsetX, y: fitted.y + base.offsetY }, box),
+      );
+    }
+    setFlash({ hex: focus.hex, started: performance.now() });
+  }, [focus?.seq]);
+
+  // Its own canvas and its own frame loop, so the flash animates without repainting the
+  // terrain or the units under it. Restarted when the view moves, and picks up where it
+  // was, since the time is measured from when the flash began.
+  useEffect(() => {
+    const canvas = flashRef.current;
+    if (canvas === null) return;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = box.w * dpr;
+    canvas.height = box.h * dpr;
+    const ctx = canvas.getContext('2d');
+    if (ctx === null || flash === null) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const still = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
+    const color =
+      getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() ||
+      '#cba135';
+    let frame = 0;
+    const draw = (): void => {
+      const elapsed = performance.now() - flash.started;
+      ctx.clearRect(0, 0, box.w, box.h);
+      if (elapsed >= FLASH_MS) {
+        setFlash(null);
+        return;
+      }
+      drawFlash(ctx, view, flash.hex, elapsed, still, color);
+      frame = requestAnimationFrame(draw);
+    };
+    draw();
+    return () => cancelAnimationFrame(frame);
+  }, [flash, view, box]);
 
   useEffect(() => {
     const el = wrap.current;
@@ -351,6 +426,7 @@ export function HexMap({
       {/* Between the ground and the troops on it: the wash dims terrain, never a symbol. */}
       <canvas ref={washRef} style={{ width: box.w, height: box.h }} />
       <canvas ref={overlayRef} style={{ width: box.w, height: box.h }} />
+      <canvas ref={flashRef} className="map-flash" style={{ width: box.w, height: box.h }} />
       <div className={`map-hint${onPick === undefined ? '' : ' picking'}`}>
         {coarsePointer()
           ? onPick === undefined

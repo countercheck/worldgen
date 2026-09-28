@@ -556,6 +556,22 @@ export const copy = {
   // -------------------------------------------------------------------------
   // The order of battle
   // -------------------------------------------------------------------------
+  /** The places list: every settlement on the viewer's map, in a drawer. */
+  places: {
+    open: (count: number): string => `Places · ${count}`,
+    openHint: 'Every town and village on your map; pick one to find it',
+    heading: 'Places',
+    close: 'Close',
+    filter: 'Find a place',
+    none: 'No towns or villages on this map.',
+    noMatch: (q: string): string => `Nothing called “${q}”.`,
+    tiers: { city: 'Cities', town: 'Towns', village: 'Villages' } as Record<string, string>,
+    tier: (tier: string, count: number): string =>
+      `${copy.places.tiers[tier] ?? prettify(tier)} · ${count}`,
+    population: (n: number): string => n.toLocaleString('en-GB'),
+    show: (name: string): string => `Show ${name} on the map`,
+  },
+
   roster: {
     label: 'Order of battle',
     heading: 'Order of battle',
@@ -900,7 +916,7 @@ export const copy = {
           body: [
             'The sidebar splits into tabs along the bottom: Map, Post (Despatches for a referee), Command for a commander, and Order of battle.',
             'Whatever you tap on the map slides up in a sheet. Tap its handle to pull it up over the map, and again to push it back down.',
-            'The header’s controls sit behind the ⋯ button: switching seats, shading, reach, the way back to Campaigns, and this help.',
+            'The header’s controls sit behind the ⋯ button: switching seats, shading, reach, the list of places, the way back to Campaigns, and this help.',
           ],
         },
       ],
@@ -912,6 +928,7 @@ export const copy = {
             'Scroll or pinch to zoom, and drag to pan.',
             'Hover over a hex, or tap it, to read the ground in the sidebar: terrain, relief, how many hours each arm takes to enter it on and off road, and whether a river there can be crossed.',
             'Click or tap a formation to select it, and it stays in the sidebar while you read the ground around it.',
+            'Places, in the header, lists every town and village on your map. Type to narrow it, and pick one to make it flash; if it is off the screen, the map moves to it first.',
           ],
         },
         {

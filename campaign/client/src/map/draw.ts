@@ -791,3 +791,52 @@ export function markAtHex(marks: readonly Mark[], c: Hex): string | null {
   }
   return null;
 }
+
+/** How long a place pointed at from the places list flashes for, in milliseconds. */
+export const FLASH_MS = 2400;
+const FLASH_PULSES = 3;
+
+/**
+ * One frame of the flash on a place chosen from the places list, `elapsed` ms in.
+ *
+ * Rings that swell out from the hex and fade, three of them, so the eye is drawn to the
+ * spot even when the map has just moved under it. With `still` — the reader has asked for
+ * less motion — one steady ring is drawn for the same time instead.
+ */
+export function drawFlash(
+  ctx: CanvasRenderingContext2D,
+  view: View,
+  hex: Hex,
+  elapsed: number,
+  still: boolean,
+  color: string,
+): void {
+  if (elapsed < 0 || elapsed >= FLASH_MS) return;
+  const p = toScreen(hex, view);
+  const base = Math.max(8, view.size);
+  ctx.save();
+  ctx.strokeStyle = color;
+  if (still) {
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, base * 1.3, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+    return;
+  }
+  const phase = ((elapsed / FLASH_MS) * FLASH_PULSES) % 1;
+  // The last pulse fades out rather than stopping dead.
+  const fade = 1 - elapsed / FLASH_MS;
+  ctx.globalAlpha = (1 - phase) * (0.35 + 0.65 * fade);
+  ctx.lineWidth = 3 + 2 * (1 - phase);
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, base * (0.8 + 1.8 * phase), 0, Math.PI * 2);
+  ctx.stroke();
+  // A fixed inner ring, so the spot itself is marked between pulses.
+  ctx.globalAlpha = 0.9 * fade + 0.1;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(p.x, p.y, base * 0.75, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+}

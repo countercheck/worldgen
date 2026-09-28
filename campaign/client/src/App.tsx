@@ -67,7 +67,7 @@ import {
 } from './despatch.js';
 import { Join, type Joined } from './Join.jsx';
 import { coarsePointer, panesFor, useNarrow, type Pane } from './layout.js';
-import { HexMap } from './map/HexMap.js';
+import { HexMap, type Focus } from './map/HexMap.js';
 import { Command } from './panels/Command.jsx';
 import { Composer, type Draft } from './panels/Composer.jsx';
 import { ContactPanel } from './panels/ContactPanel.jsx';
@@ -76,6 +76,7 @@ import { HexPanel } from './panels/HexPanel.js';
 import { DayNight, DaylightControl, StandingOrdersPanel } from './panels/Hours.jsx';
 import { UnitEdit } from './panels/UnitEdit.jsx';
 import { More } from './panels/More.jsx';
+import { Places } from './panels/Places.jsx';
 import { Post } from './panels/Post.jsx';
 import { DecisionQueue, DespatchLog } from './panels/Referee.jsx';
 import { ReportPanel } from './panels/ReportPanel.jsx';
@@ -285,6 +286,10 @@ function Console({
   const [sheetOpen, setSheetOpen] = useState(false);
   const [more, setMore] = useState(false);
   const [help, setHelp] = useState(false);
+  // The places list, and the place it last asked the map to show. `seq` counts requests, so
+  // pointing at the same place twice flashes it twice.
+  const [places, setPlaces] = useState(false);
+  const [focus, setFocus] = useState<Focus | null>(null);
 
   // The order of battle is a drawer on a wide screen and a tab on a phone, and the two
   // have to agree: whatever opens or closes the drawer — the tab, its own Close, pointing
@@ -293,6 +298,23 @@ function Console({
     if (roster) setPane('orbat');
     else setPane((p) => (p === 'orbat' ? 'map' : p));
   }, [roster]);
+
+  // The places list and the order of battle are drawers in the same spot: one at a time.
+  useEffect(() => {
+    if (roster) setPlaces(false);
+  }, [roster]);
+  useEffect(() => {
+    if (places) setRoster(false);
+  }, [places]);
+
+  useEffect(() => {
+    if (!places) return;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape' && ordering === null) setPlaces(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [places, ordering]);
 
   // Every pointing mode is a question about the map, so it brings the map back.
   useEffect(() => {
@@ -672,6 +694,20 @@ function Console({
     if (narrow) choosePane('map');
   };
 
+  /**
+   * Flash a place on the map, bringing it into view first if it is off the screen.
+   *
+   * On a phone the list covers the map, so it closes and the map pane comes forward. On a
+   * wide screen it stays open beside the map, to point at one place after another.
+   */
+  const showPlace = (hex: Hex): void => {
+    setFocus((f) => ({ hex, seq: (f?.seq ?? 0) + 1 }));
+    if (narrow) {
+      setPlaces(false);
+      choosePane('map');
+    }
+  };
+
   const setWash = (next: WashMode): void => {
     saveWash(next);
     setWashMode(next);
@@ -731,6 +767,14 @@ function Console({
           {copy.console.orderOfBattle(
             isReferee ? view.units.length : view.reports.length + view.units.length,
           )}
+        </button>
+
+        <button
+          className={`wash-toggle${places ? ' active' : ''}`}
+          onClick={() => setPlaces((o) => !o)}
+          title={copy.places.openHint}
+        >
+          {copy.places.open(board.world.settlements.length)}
         </button>
 
         <label className="toggle">
@@ -831,6 +875,11 @@ function Console({
           reachDisabled={selectedUnit === null}
           onReach={setShowReach}
           onHome={() => navigate(HOME_HASH)}
+          places={board.world.settlements.length}
+          onPlaces={() => {
+            setMore(false);
+            setPlaces(true);
+          }}
           onHelp={() => {
             setMore(false);
             setHelp(true);
@@ -932,6 +981,13 @@ function Console({
       )}
 
       <div className="body">
+      {places && (
+        <Places
+          settlements={board.world.settlements}
+          onShow={(s) => showPlace(s.coord)}
+          onClose={() => setPlaces(false)}
+        />
+      )}
       <Roster
         open={roster}
         onClose={() => setRoster(false)}
@@ -1063,6 +1119,7 @@ function Console({
           riders={board.riders}
           plans={plans}
           battle={board.battle}
+          focus={focus}
           onPick={
             ordering === null
               ? undefined

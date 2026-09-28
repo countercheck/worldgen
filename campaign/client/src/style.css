@@ -1307,6 +1307,12 @@ button.tag {
   gap: 14px;
 }
 
+/* Scroll, never squash: a flex column over its height shrinks its children, and a
+   squashed group of choices lets the next control lie over it and take its taps. */
+.more-sheet > * {
+  flex: none;
+}
+
 .more-head {
   display: flex;
   align-items: center;
@@ -1878,4 +1884,109 @@ button.help-button:hover {
   min-height: 30px;
   padding: 2px;
   cursor: pointer;
+}
+
+/* ---- the places list -------------------------------------------------- */
+
+/* The gazetteer. A drawer where the order of battle opens, but only as wide as the
+   sidebar it covers, so the map beside it stays whole while a reader points at one place
+   after another. */
+.places {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  width: 330px;
+  background: var(--panel);
+  border-left: 1px solid var(--line);
+  box-shadow: -18px 0 40px rgb(0 0 0 / 45%);
+  animation: roster-in 140ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .places {
+    animation: none;
+  }
+}
+
+.places-filter {
+  padding: 10px 16px 2px;
+  flex: none;
+}
+
+.places-filter input {
+  width: 100%;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font: inherit;
+  padding: 6px 9px;
+}
+
+.places-filter input:focus {
+  outline: 1px solid var(--accent);
+  border-color: var(--accent);
+}
+
+.places-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.place {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 8px;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.place:hover,
+.place:focus-visible {
+  background: var(--line);
+}
+
+.place-meta {
+  flex: none;
+  white-space: nowrap;
+}
+
+/* The flash is drawn over everything and must not take a click meant for the map. */
+.map-flash {
+  pointer-events: none;
+}
+
+/* On a phone the list is the screen, and its own Close is the way back: it has no tab. */
+@media (max-width: 700px) {
+  .places {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    width: auto;
+    border-left: none;
+    box-shadow: none;
+    animation: none;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  .places-head .dismiss {
+    display: inline-block;
+  }
+
+  .place {
+    padding: 10px 8px;
+  }
 }

@@ -10,6 +10,7 @@ import { expect, test } from '@playwright/test';
 
 import {
   fingerDrag,
+  flashCentre,
   fingerTap,
   hexInSidebar,
   mapPoints,
@@ -268,5 +269,31 @@ test.describe('the order of battle on a touch screen', () => {
     const action = page.locator('.roster .cmd-action').first();
     await expect(action).toBeVisible();
     expect(Number(await action.evaluate((el) => getComputedStyle(el).opacity))).toBe(1);
+  });
+});
+
+test.describe('the places list', () => {
+  test('opens from More, fills the screen, and shows the map with the place picked', async ({
+    page,
+  }) => {
+    await moreButton(page).click();
+    await page.getByRole('dialog', { name: 'More' }).getByRole('button', { name: /^Places/ }).click();
+    const list = page.getByRole('complementary', { name: 'Places' });
+    await expect(list).toBeVisible();
+    const box = await list.boundingBox();
+    expect(box?.width).toBeCloseTo(390, -1);
+
+    await list.locator('.place').first().click();
+    await expect(list).toBeHidden();
+    await expect(page.locator('.map')).toBeVisible();
+    await expect.poll(() => flashCentre(page)).not.toBeNull();
+  });
+
+  test('closes with its own button, having no tab to go back by', async ({ page }) => {
+    await moreButton(page).click();
+    await page.getByRole('dialog', { name: 'More' }).getByRole('button', { name: /^Places/ }).click();
+    const list = page.getByRole('complementary', { name: 'Places' });
+    await list.getByRole('button', { name: 'Close' }).click();
+    await expect(list).toBeHidden();
   });
 });
