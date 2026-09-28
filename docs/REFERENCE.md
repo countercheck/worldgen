@@ -2098,6 +2098,13 @@ every region either way and then replaced, so choosing packs never changes what 
 regions are called; each pack culture in `metadata["cultures"]` records its `pack`,
 `pack_source` (builtin or user) and a `pack_hash` of its content.
 
+**Renaming.** `worldgen rename` runs this stage alone over a saved world.json
+(`stages.rename`), with the world's recorded config and new naming settings. It gives the
+stage the child seed a full run would have drawn for it from the naming seed (the world's
+own by default), so a world renamed with its own seed and config keeps every name. River
+names are cleared before naming, and the naming seed is recorded as
+`metadata["naming_seed"]`.
+
 Each settlement records its `culture` and an English `etymology` ("ford on the Vassa");
 `metadata["cultures"]` lists the languages. Labels on the SVG and PNG exports are placed by
 [export/labels.py](../worldgen/export/labels.py): sized by tier, rivers italic along their

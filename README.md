@@ -144,6 +144,22 @@ A few things worth knowing:
   built to span the full range already, so its coastline is unaffected.
 - The heightmap path is recorded in `world.json` as part of the config dump.
 
+## Renaming a world
+
+A world's settlements and major rivers are named last, by the cultures `naming_packs`
+chooses (see [docs/CULTURE_PACKS.md](docs/CULTURE_PACKS.md)). To try other cultures on a
+world you already have, without generating it again:
+
+```bash
+worldgen rename --input output/world.json --output norse.json --packs norse,welsh
+worldgen rename --input output/world.json --output hive.json \
+    --packs hive --cultures 1 --substrate-pack none --seed 7
+worldgen export --input hive.json --output hive.svg
+```
+
+The ground, settlements and roads are unchanged; every name is new. The same world with
+its own seed and config comes back with the names it already had.
+
 ## SVG export
 
 ```bash
