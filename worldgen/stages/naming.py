@@ -91,6 +91,10 @@ class NamingStage(GeneratorStage):
         if cfg.naming_cultures <= 0:
             return state
         rng = self.rng
+        # A world being named again keeps no river name from before: the new cultures may
+        # leave a river unnamed that the old ones named. A no-op inside a full run.
+        for river in state.rivers:
+            river.name = ""
 
         packs = self._packs(cfg)
         cultures = self._cultures(cfg.naming_cultures, cfg.naming_packs, packs, rng)

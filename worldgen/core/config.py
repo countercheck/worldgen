@@ -1581,6 +1581,15 @@ class WorldConfig:
         _coerce_tuples(data)
         return _construct(cls, data)
 
+    @classmethod
+    def from_dict(cls, data: dict) -> "WorldConfig":
+        """Build a config from a mapping, such as the one a world.json keeps under
+        `metadata.config`: tuples arrive as lists, and old keys are carried over as a file's
+        would be."""
+        data = dict(data)
+        _coerce_tuples(data)
+        return _construct(cls, data)
+
     def to_json(self, path: str) -> None:
         """Save config to JSON file."""
         with open(path, "w") as f:

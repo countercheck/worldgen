@@ -35,6 +35,29 @@ If you edit a pack and regenerate, the hash changes, so you can tell a world nam
 the old version from one named with the new. Editing comments or layout does not change
 the hash.
 
+## Renaming a saved world
+
+`worldgen rename` names a world.json again, keeping its ground, settlements and roads:
+
+```bash
+worldgen rename --input world.json --output renamed.json --packs english,norse
+worldgen rename --input world.json --output renamed.json --config naming.yaml
+```
+
+| Option | What it does |
+|---|---|
+| `--packs a,b` | `naming_packs`. Raises `naming_cultures` to fit if the list is longer. |
+| `--cultures N` | `naming_cultures`, the number of regions. |
+| `--substrate-pack k` | `naming_substrate_pack`; `none` for no older people, so each river is named by whoever holds its mouth. |
+| `--config file` | A config file whose `naming_*` settings are used; anything else in it is ignored, and a naming setting it leaves out takes its default. |
+| `--seed N` | The naming seed. Defaults to the world's own. |
+
+Everything else — the world's size, terrain, the settings the stage reads the ground with —
+comes from the config the world recorded. Renaming with the world's own seed and naming
+settings gives back exactly the names it has, so a new seed or new packs is the only thing
+that makes a difference. The new world records its naming settings in `metadata.config`
+and the seed it was named with in `metadata.naming_seed`.
+
 ## How a name is built
 
 For each settlement the generator chooses:
