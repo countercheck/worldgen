@@ -1,6 +1,10 @@
+import math
+
 import numpy as np
 from opensimplex import OpenSimplex
+from scipy.stats import lognorm
 
+from ..core.config import ELEVATION_PROFILES
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
 
@@ -195,28 +199,48 @@ def apply_tilt(arr: np.ndarray, cfg, w: int, h: int) -> np.ndarray:
     return arr + gx * qf + gy * rf
 
 
-def apply_hypsometry(arr: np.ndarray, cfg) -> np.ndarray:
-    """Push the land down towards the coast, leaving the sea, the shoreline and the peak alone.
+def profile_heights(n: int, mode_m: float, median_m: float, top_m: float) -> np.ndarray:
+    """*n* land heights, lowest first, spread evenly in probability through a log-normal
+    with this mode and median, cut off at *top_m*.
+
+    Evenly in probability, not drawn: the proportions are then exact on any map, and the
+    same ranks always get the same heights.
+    """
+    s = math.sqrt(math.log(median_m / mode_m))
+    dist = lognorm(s, scale=median_m)
+    return dist.ppf((np.arange(n) + 0.5) / n * dist.cdf(top_m))
+
+
+def apply_profile(arr: np.ndarray, cfg) -> np.ndarray:
+    """Give the land the share of each height that `elevation_profile` asks for.
 
     Noise comes out as a bell around half the range, so a raw field has as much ground at
-    700 m as at 70 m — and erosion, which carves valleys rather than lowering plateaux, only
-    moves the bottom decile. Real land is lopsided: most of it lies low and the high ground
-    is a small fraction. Each land height becomes `top * (e / top) ** k`, so with
-    `elevation_hypsometry_exponent` k above 1 the middle sinks while zero stays the
-    shoreline and the highest point stays the highest. 1.0 leaves the field as it is.
+    700 m as at 70 m. Real land is lopsided: most of it low, and a long tail of high ground.
+    The land hexes are ranked by height, and each is given the height at the same rank of
+    a log-normal. Ranks are kept, so every ridge, valley, pit and the coastline stay where
+    the noise put them; only how high each stands changes.
 
-    Applied by `ErosionStage` to the eroded field, not here to the raw one. Run before
-    erosion it put so much ground within a few metres of the sea that erosion cut a quarter
-    of the land below it, and the drowned hollows came out as lakes; after erosion it only
-    lowers ground that is already land, so the coastline is erosion's and no hex drowns.
+    Before erosion, so the droplets and the valley carving work on land of the right
+    shape. The power curve this replaced ran after erosion and bent heights by a fixed
+    rule instead, which flattened the ground near the sea to nothing: its slope was zero at
+    the shoreline. A log-normal is thin at zero, so the lowest land keeps its relief.
     """
-    k = cfg.elevation_hypsometry_exponent
-    land = arr > 0.0
-    if k == 1.0 or not land.any():
+    if cfg.elevation_profile == "none":
         return arr
-    top = arr[land].max()
+    if cfg.elevation_profile == "custom":
+        mode_m, median_m = cfg.elevation_profile_mode_m, cfg.elevation_profile_median_m
+    else:
+        mode_m, median_m = ELEVATION_PROFILES[cfg.elevation_profile]
+    land = arr > 0.0
+    n = int(land.sum())
+    if n == 0:
+        return arr
+    heights = np.empty(n)
+    heights[np.argsort(arr[land], kind="stable")] = profile_heights(
+        n, mode_m, median_m, cfg.max_elevation_m
+    )
     out = arr.copy()
-    out[land] = top * (arr[land] / top) ** k
+    out[land] = heights
     return out
 
 
@@ -239,6 +263,7 @@ class ElevationStage(GeneratorStage):
         arr, coast_gen = noise_field(cfg, self.rng, w, h)
         arr = apply_continent_falloff(arr, cfg, coast_gen, w, h)
         arr = apply_tilt(to_metres(arr, cfg), cfg, w, h)
+        arr = apply_profile(arr, cfg)
         write_elevations(state, arr)
 
         return state

@@ -250,6 +250,7 @@ Convenience accessors: `all_land()`, `all_open_water()`, `all_inland_water()`,
 | `"prominent_site"` | ROLLING hex that is a local-max `habitability_town` within 3-hex range, no settlement | City/Town (`classic`) |
 | `"pass"` | A col: a saddle whose flanks both rise at least `terrain_steep_gradient_m` | Chokepoints (`organic`) |
 | `"confluence_town"` | TOWN settled on a hex already tagged `"confluence"` | City/Town |
+| `"hollow"` | Land in a closed hollow too small or shallow for a lake, or a small island in a lake; waterlogs to wetland | Water bodies |
 
 Roads may cross a river but never travel along one: the hexsides a river is drawn
 along are excluded from road pathfinding outright (`make_road_edge_cost`), and
@@ -329,9 +330,18 @@ of anchorages) rather than a road in the channel; if the gap is wider than
    seabed_depth_m) − seabed_depth_m`. Sea level is the datum: land is positive, the sea
    floor negative, and zero means sea level by definition rather than by a threshold.
 7. **Regional tilt** (optional) adds `elevation_gradient_m` as `[east, south]` metres
-   across the map, centred on `[-0.5, +0.5]`. It goes on **last**, in metres. It used to
+   across the map, centred on `[-0.5, +0.5]`. It goes on in metres, after the conversion. It used to
    run before the shaping, where a normalisation promptly stretched the result back out,
    so asking for half a range of tilt got you rather less than that.
+
+8. **Elevation profile** (`apply_profile`, unless `elevation_profile: none`). The land
+   hexes are ranked by height and each is given the height at the same rank of a
+   log-normal with the profile's mode and median, cut off at `max_elevation_m`. Ranks are
+   kept, so ridges, valleys and the coastline stay where the noise put them; only the
+   share of land at each height changes. Droplet erosion then takes off a share of every
+   height, so `ErosionStage` resets sea level after the droplets to keep the land share
+   that went in, and applies the profile again at the end: the final heights match it
+   exactly.
 
 **Gotchas**
 
@@ -618,8 +628,8 @@ because uphill and downhill neighbours genuinely differ.
 
 [stages/water_bodies.py](../worldgen/stages/water_bodies.py)
 
-**Purpose:** Distinguish OCEAN (map-edge-connected) from inland LAKE, and
-fix COAST hexes that ended up adjacent only to a lake.
+**Purpose:** Distinguish OCEAN (map-edge-connected) from inland LAKE, fill the
+closed hollows on land, and fix COAST hexes that ended up adjacent only to a lake.
 
 **Reads:** `hex.terrain_class` (OCEAN from previous stage).
 **Writes:** `hex.terrain_class` (some OCEAN → LAKE; some COAST →
@@ -632,7 +642,14 @@ fix COAST hexes that ended up adjacent only to a lake.
 2. For each component: if any hex sits on the map border, leave it as
    OCEAN. Otherwise, reclassify every hex in the component to LAKE
    ([water_bodies.py:33–36](../worldgen/stages/water_bodies.py#L33)).
-3. **`_fix_coast_hexes`** ([water_bodies.py:60–101](../worldgen/stages/water_bodies.py#L60)):
+3. **`_fill_hollows`**: a Priority-Flood from the sea, the lakes and the map edge finds the
+   level water would have to rise to before it could run out of each hex. A connected
+   run of land under that level is a hollow. One at least `lake_min_hexes` across and
+   `lake_min_depth_m` deep, in a region shedding `lake_min_runoff_mm`, becomes LAKE — it
+   stands at its rim, so it overflows there and hydrology gives it an outlet. A smaller
+   one at least `hollow_wetland_min_depth_m` deep, and any island smaller than
+   `lake_min_hexes` inside a lake, is tagged `hollow` for `BiomeStage` to waterlog.
+4. **`_fix_coast_hexes`** ([water_bodies.py:60–101](../worldgen/stages/water_bodies.py#L60)):
    COAST was assigned earlier based on adjacency to OCEAN, but some of
    those neighbours are now LAKE. For each COAST hex that has no actual
    ocean neighbour:
@@ -685,8 +702,11 @@ Nine steps, top to bottom in
    drain consistently); the second is a coordinate-based tiebreaker that
    makes the result reproducible regardless of dict iteration order.
 
-3. **Flow direction** — for each land hex, point at the lowest neighbour
-   on the filled surface ([hydrology.py:188–235](../worldgen/stages/hydrology.py#L188)).
+3. **Flow direction** — for each land hex, point at a lower neighbour on the
+   filled surface, drawn at random with weight (drop / largest drop)^`river_wander_exponent`,
+   so rivers on level ground wander into each other rather than running as parallel
+   straight lines. Erosion's valley carving routes by the same rule, with one fixed draw
+   per cell across its passes ([hydrology.py:188–235](../worldgen/stages/hydrology.py#L188)).
    Two subtleties:
    - For ocean/lake neighbours, use **raw** elevation, not filled, so a
      priority-flood-raised lake never appears higher than the actual
@@ -795,7 +815,7 @@ river hex that carries a barge (`navigable_min_discharge`) and falls at least
 
 It has to run before `HabitabilityStage`, which reads `navigable` to score harbours. At
 20 m/km a temperate 128x128 map carries 14-65 cataract hexes in 6-28 stretches, about 15% of
-barge-sized river hexes once `elevation_hypsometry_exponent` has laid the lowland flat.
+barge-sized river hexes once `elevation_profile` has laid most of the land low.
 
 ---
 
@@ -2158,7 +2178,9 @@ country the map is comes from the two vertical-scale settings below.
 | Param | Type | Default | Range | Effect |
 |---|---|---|---|---|
 | `max_elevation_m` | `float` | `1500.0` | `> 0` | Highest ground above sea level. The single most consequential setting for what country this is: `800` gives downland, `1500` mixed uplands, `3000` an Alpine massif |
-| `elevation_hypsometry_exponent` | `float` | `2.0` | `> 0` | How lopsided the land is. Applied by `ErosionStage` to the eroded field: each land height becomes top × (e / top)^k, so sea level and the peak stay put and the middle sinks. 1.0 keeps the noise's bell around half the range — a quarter of the land at 25-30% of the peak, and navigable rivers falling ~10 m/km, a torrent. 2.0 puts half the land in the lowest tenth of the range and navigable rivers at 1-2 m/km. Applied after erosion rather than before: before, it put so much ground within metres of the sea that erosion drowned a quarter of the land into lakes. Generated terrain only |
+| `elevation_profile` | `str` | `"lowland"` | `lowland`, `rolling`, `upland`, `custom`, `none` | How much of the land lies at each height. Before erosion (`ElevationStage`) the land hexes are ranked by height and each is given the height at its rank in a log-normal — a bell skewed low with a long tail of high ground — so every map has the same proportions whatever its noise did. Presets (most common / median height): lowland 50 / 150 m, rolling 100 / 250 m, upland 200 / 450 m. `custom` uses the two settings below; `none` keeps the noise. `ErosionStage` resets sea level after the droplets so the land share going in is kept, and puts the land back on the profile at the end, so the final heights match it exactly. Generated terrain only. Replaces `elevation_hypsometry_exponent`. |
+| `elevation_profile_mode_m` | `float` | `50.0` | `> 0`, `< median` | The most common land height for `elevation_profile: custom`. |
+| `elevation_profile_median_m` | `float` | `150.0` | `< max_elevation_m` | The median land height for `elevation_profile: custom`, before the log-normal is cut off at `max_elevation_m` — a median near the ceiling comes out lower. |
 | `seabed_depth_m` | `float` | `200.0` | `> 0` | How deep the sea floor lies at the map edge. A continental shelf, not an abyss. How much of the map ends up underwater follows from this and `max_elevation_m` |
 | `coast_max_elevation_m` | `float` | `100.0` | `≥ 0` | Land no higher than this beside the sea is classed COAST |
 | `noise_octaves` | `int` | `6` | ≥ 1 | Number of fBm octaves. Higher = more detail at the cost of speed |
@@ -2286,6 +2308,7 @@ no navigable river at all, and tropical 12.6%.
 | Param | Type | Default | Range | Effect |
 |---|---|---|---|---|
 | `channel_min_discharge` | `float` | `6000.0` | `> 0` | Catchment km² × runoff mm needed to cut a channel. Also the dial that decides whether the drainage *network* branches: a basin shows only as many Strahler orders as its area divides into channel-sized pieces, so basin ÷ threshold sets the branching. At the old `20000` (41.7 km²) that ratio was about five on a 64 km map — no seed reached third order and first-order streams outnumbered second by nine to one, against Horton's three to five. `6000` is 12.5 km², by the humid-temperate regional curve `W = 2.5·A^0.4` a channel ~7 m across and ~0.6 m deep — a watercourse a cart must ford — and it leaves 88% of the land dry |
+| `river_wander_exponent` | `float` | `1.0` | `≥ 0` | How water picks its way downhill, in hydrology and in erosion's valley carving alike: each hex drains to a lower neighbour drawn at random with weight (drop / largest drop)^k. 0 is any downhill neighbour alike, 1 in proportion to the drop, 8+ all but always the steepest. Pure steepest descent drew rivers on level ground as ranks of straight parallel lines. |
 | `navigable_min_discharge` | `float` | `60000.0` | `> channel` | ...and to float a boat. Consumed by the haulage model: a navigable hex multiplies a city's supply reach |
 | `cataract_min_drop_m` | `float` | `20.0` | `>= 0` | Metres a barge-sized river falls through one hex before it is a cataract: no boat passes, cargo portages round it, and the fall drives mills (§ [3.5a](#35a-cataracts)). 20 m/km is a 2% gradient, strong rapids at a kilometre to the hex. 0 turns cataracts off |
 | `evapotranspiration_base_mm` | `float` | `50.0` | `≥ 0` | Rain the ground and its plants take before anything runs off, even at freezing |
@@ -2294,6 +2317,10 @@ no navigable river at all, and tropical 12.6%.
 | `wetland_min_runoff_mm` | `float` | `300.0` | `≥ 0` | Runoff above which flat riverside ground waterlogs. Tested on runoff, not rainfall: waterlogging is not about how much rain arrives but whether the ground can shed it |
 | `river_flow_continuous` | `bool` | `False` | — | Record `hex.river_flow` on every draining land hex rather than only on channel hexes. A diagnostic for inspecting the drainage field; it does not add rivers to the map |
 | `lake_chaining` | `bool` | `True` | — | Allow a lake to spill into a strictly lower lake, not just the sea. Chains of lakes stepping down to the coast are the only outlet on a landlocked map |
+| `lake_min_hexes` | `int` | `20` | `≥ 1` | A closed hollow on land (ground water can only leave by filling it to its rim) at least this many hexes across, `lake_min_depth_m` deep at the rim, in a region shedding `lake_min_runoff_mm` a year, becomes a lake standing at its rim (`WaterBodiesStage`). Islands smaller than this inside a lake are tagged `hollow`. |
+| `lake_min_depth_m` | `float` | `5.0` | `≥ 0` | See `lake_min_hexes`. |
+| `lake_min_runoff_mm` | `float` | `50.0` | `≥ 0` | Regional runoff (at `mean_precip_mm`) below which no hollow fills: a dry basin stays a basin. |
+| `hollow_wetland_min_depth_m` | `float` | `1.0` | `≥ 0` | A hollow too small or shallow for a lake but at least this deep is tagged `hollow`, and waterlogs to `WETLAND` under the closed-basin marsh rule (`endorheic_marsh_min_precip_mm`, level, below the treeline). |
 | `endorheic_marsh_radius` | `int` | `1` | `≥ 0` | Where a basin genuinely has no outlet, water leaves by evaporation; this many hexes of its shore become wetland. `0` disables |
 | `endorheic_marsh_min_precip_mm` | `float` | `300.0` | `≥ 0` | A closed basin drier than this is a salt pan, not a marsh, and gets no wetland shore |
 | `endorheic_evaporation_scale` | `float` | `1.0` | `≥ 0` (validated) | Multiplier on the potential evapotranspiration a basin loses its water to. Whether a basin is closed is a **water balance**, not a shape: it overflows when the rivers reaching it plus the rain on its surface exceed what evaporates off that surface. Above `1` closes more basins; `0` makes every basin with any inflow overflow. It replaced a test the routing was making by accident — a basin came out closed when path-finding happened to fail on it, so a dry basin with an easy saddle drained while a wet one ringed by hills did not, backwards on both counts. On one map 5,234 of 7,089 lake hexes came out endorheic |

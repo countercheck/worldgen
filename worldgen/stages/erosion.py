@@ -8,7 +8,7 @@ from ..core.hex_grid import distance as hex_distance
 from ..core.hex_grid import neighbors as hex_neighbors
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
-from .elevation import apply_hypsometry
+from .elevation import apply_profile
 
 try:
     import numba as _numba
@@ -256,6 +256,7 @@ def _grid_receivers(
     arr: np.ndarray,
     sea_level: float,
     neighbours: list[list[tuple[int, int]]],
+    wander: tuple[np.ndarray, float] | None = None,
 ) -> tuple[dict[tuple[int, int], tuple[int, int]], list[tuple[int, int]]]:
     """Where each land cell sends its water, and the cells ordered high to low.
 
@@ -267,6 +268,13 @@ def _grid_receivers(
     Split out of `_grid_flow_accumulation`, which computed both and kept neither, because
     incision needs the same receivers and the same order and recomputing them would mean
     a second sink fill per pass.
+
+    *wander*, if given, is `(draws, power)`: a fixed uniform draw per cell and
+    `river_wander_exponent`. Each cell then sends its water to a lower neighbour picked with
+    weight (drop / largest drop) ** power, using its own draw, rather than always to the
+    lowest — the rule hydrology routes rivers by, so the valleys cut here are the ones the
+    rivers will follow. The draws are fixed across carve passes so a cell keeps choosing
+    the same way while its valley deepens, rather than scattering cuts between passes.
 
     Returns `(receivers, order)`.  The order is descending by routing elevation; ties are
     left to Python's stable sort over `np.argwhere`, which is what makes a run
@@ -280,16 +288,24 @@ def _grid_receivers(
 
     receivers: dict[tuple[int, int], tuple[int, int]] = {}
     for i, j in order:
-        lowest = None
-        lowest_elev = routing[i, j]
-        for ni, nj in neighbours[i * h + j]:
-            if not land[ni, nj]:
-                continue
-            if routing[ni, nj] < lowest_elev:
-                lowest_elev = routing[ni, nj]
-                lowest = (ni, nj)
-        if lowest is not None:
-            receivers[(i, j)] = lowest
+        here = routing[i, j]
+        lower = [
+            (here - routing[ni, nj], (ni, nj))
+            for ni, nj in neighbours[i * h + j]
+            if land[ni, nj] and routing[ni, nj] < here
+        ]
+        if not lower:
+            continue
+        if wander is None or len(lower) == 1:
+            # The lowest; the first listed wins a tie, as it always has.
+            receivers[(i, j)] = max(lower, key=lambda d: d[0])[1]
+            continue
+        draws, power = wander
+        steepest = max(d for d, _ in lower)
+        weights = np.array([(d / steepest) ** power for d, _ in lower])
+        pick = draws[i, j] * weights.sum()
+        k = min(int(np.searchsorted(np.cumsum(weights), pick)), len(lower) - 1)
+        receivers[(i, j)] = lower[k][1]
     return receivers, order
 
 
@@ -625,6 +641,15 @@ def _normalise_alluvium(
 
 
 class ErosionStage(GeneratorStage):
+    @staticmethod
+    def _profiled(cfg) -> bool:
+        """Whether the land was shaped by `elevation_profile` and should leave on it.
+
+        Generated terrain only: an imported heightmap is a picture of somewhere, with its
+        own heights, and `none` asks for the noise as erosion leaves it.
+        """
+        return not cfg.heightmap_path and cfg.elevation_profile != "none"
+
     def run(self, state: WorldState) -> WorldState:
         cfg = self.config
         w, h = state.width, state.height
@@ -718,6 +743,19 @@ class ErosionStage(GeneratorStage):
         if cfg.erosion_smoothing_sigma > 0.0:
             arr = gaussian_filter(arr, sigma=cfg.erosion_smoothing_sigma)
 
+        # Put sea level back where the land share says, before anything is carved. The
+        # droplets take off a share of every height rather than a depth — about two thirds
+        # of it at the lowest, half at the highest — so land shaped by `elevation_profile`
+        # into a low plain comes out of them mostly under the sea. The waterline is set
+        # again so the same share of the map is land as went in: the coast stays roughly
+        # where the noise drew it, and a delta the droplets built out into the shallows
+        # stays land. Before the carving, because incision floors at sea level and would
+        # otherwise read the drowned plain as sea. The heights themselves are put back on
+        # the profile at the end, which keeps their order and so every valley cut here.
+        if land_coords and self._profiled(cfg):
+            share = len(land_coords) / (w * h)
+            arr = arr - (np.quantile(arr, 1.0 - share) - sea_shaped)
+
         # Back to metres below. There is deliberately no re-stretch to [0, 1] first: it
         # would undo the datum, putting the lowest point of the eroded map at the seabed
         # and the highest at the peak whatever erosion had actually done to either. Sea
@@ -758,10 +796,11 @@ class ErosionStage(GeneratorStage):
             # The two height knobs are quoted in metres and the field is normalised, so
             # they are divided by the same span the array was built with.
             meander = np.zeros((w, h))
+            wander = (self.rng.random((w, h)), cfg.river_wander_exponent)
             for _ in range(cfg.valley_carve_passes):
                 # Receivers once per pass, shared by both carving steps: they are the same
                 # routing, and a second sink fill for the same answer is pure cost.
-                receivers, order = _grid_receivers(arr, sea_shaped, neighbours)
+                receivers, order = _grid_receivers(arr, sea_shaped, neighbours, wander)
                 acc = _accumulate(arr, sea_shaped, receivers, order, inflow)
                 # Incise first, then widen.  Incision cuts the line; widening planes the
                 # floor outward from it.  The other way round would plane a floor flat and
@@ -811,10 +850,10 @@ class ErosionStage(GeneratorStage):
                     state.hexes[state.coord_at(col, row)].alluvium = float(alluvium[col, row])
 
         metres = arr * span - cfg.seabed_depth_m
-        # Reshape the eroded land so most of it lies low (`apply_hypsometry`). Generated
-        # terrain only: an imported heightmap is a picture of somewhere, with its own curve.
-        if not cfg.heightmap_path:
-            metres = apply_hypsometry(metres, cfg)
+        # And the land back on the profile it went in with, so the proportions asked for
+        # are the proportions the rest of the pipeline sees.
+        if self._profiled(cfg):
+            metres = apply_profile(metres, cfg)
         for col in range(w):
             for row in range(h):
                 state.hexes[state.coord_at(col, row)].elevation = float(metres[col, row])

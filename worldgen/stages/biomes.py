@@ -110,9 +110,12 @@ class BiomeStage(GeneratorStage):
         # basin in a desert is a playa, not a swamp — and the terrain and treeline
         # tests match the river-wetland rule above so the two look consistent.
         marsh_min_moisture = self.config.endorheic_marsh_min_precip_mm
+        #
+        # So is a hollow too small for a lake (`WaterBodiesStage`): ground the rain can only
+        # leave by filling it, so it stands wet.
         for h in state.hexes.values():
             if (
-                "endorheic_shore" in h.tags
+                ("endorheic_shore" in h.tags or "hollow" in h.tags)
                 and _is_level(h, self.config)
                 and h.moisture >= marsh_min_moisture
                 and h.temperature >= treeline_temp
