@@ -1,5 +1,5 @@
 {
- "version": "1.9",
+ "version": "1.10",
  "seed": 1,
  "width": 32,
  "height": 32,
@@ -212,7 +212,21 @@
    "road_secondary_pct": 0.3,
    "road_track_pct": 0.6,
    "road_tier_gap_max_edges": 12,
-   "settlement_min_reachable": 100
+   "settlement_min_reachable": 100,
+   "naming_cultures": 3,
+   "naming_substrate": true,
+   "naming_region_climb_m": 150.0,
+   "naming_region_river_cost": 8.0,
+   "naming_region_water_cost": 2.0,
+   "naming_great_river_km2": 1000.0,
+   "naming_river_min_catchment_km2": 200.0,
+   "naming_min_edit_distance": 2,
+   "naming_max_letters": 12,
+   "naming_hill_relief_m": 100.0,
+   "naming_high_elevation_m": 800.0,
+   "naming_direction_radius": 12,
+   "naming_founder_weight": 0.4,
+   "naming_river_weight": 3.0
   },
   "market_seats": [
    [
@@ -235,6 +249,24 @@
     25,
     10
    ]
+  ],
+  "cultures": [
+   {
+    "name": "Musas",
+    "role": "regional"
+   },
+   {
+    "name": "Chelzilch",
+    "role": "regional"
+   },
+   {
+    "name": "Yitus",
+    "role": "regional"
+   },
+   {
+    "name": "Mupnoum",
+    "role": "substrate"
+   }
   ]
  },
  "hexes": [
@@ -29578,7 +29610,8 @@
      17
     ]
    ],
-   "flow_volume": 0.198
+   "flow_volume": 0.198,
+   "name": ""
   },
   {
    "hexes": [
@@ -29603,7 +29636,8 @@
      10
     ]
    ],
-   "flow_volume": 1.0
+   "flow_volume": 1.0,
+   "name": ""
   },
   {
    "hexes": [
@@ -29620,7 +29654,8 @@
      12
     ]
    ],
-   "flow_volume": 0.1958
+   "flow_volume": 0.1958,
+   "name": ""
   },
   {
    "hexes": [
@@ -29637,7 +29672,8 @@
      4
     ]
    ],
-   "flow_volume": 0.2386
+   "flow_volume": 0.2386,
+   "name": ""
   },
   {
    "hexes": [
@@ -29658,7 +29694,8 @@
      10
     ]
    ],
-   "flow_volume": 0.3201
+   "flow_volume": 0.3201,
+   "name": ""
   },
   {
    "hexes": [
@@ -29675,7 +29712,8 @@
      7
     ]
    ],
-   "flow_volume": 0.1686
+   "flow_volume": 0.1686,
+   "name": ""
   },
   {
    "hexes": [
@@ -29724,7 +29762,8 @@
      12
     ]
    ],
-   "flow_volume": 0.6127
+   "flow_volume": 0.6127,
+   "name": ""
   },
   {
    "hexes": [
@@ -29749,7 +29788,8 @@
      8
     ]
    ],
-   "flow_volume": 0.3178
+   "flow_volume": 0.3178,
+   "name": ""
   },
   {
    "hexes": [
@@ -29762,7 +29802,8 @@
      21
     ]
    ],
-   "flow_volume": 0.2796
+   "flow_volume": 0.2796,
+   "name": ""
   }
  ],
  "settlements": [
@@ -29774,7 +29815,9 @@
    "tier": "town",
    "role": "port",
    "population": 1684,
-   "name": "grassland_market_0"
+   "name": "Chi h\u00fbl Pe",
+   "culture": "Chelzilch",
+   "etymology": "oxen harbour"
   },
   {
    "coord": [
@@ -29784,7 +29827,9 @@
    "tier": "town",
    "role": "port",
    "population": 1942,
-   "name": "temperate_forest_market_1"
+   "name": "T\u00e2-Chad",
+   "culture": "Musas",
+   "etymology": "oxen harbour"
   },
   {
    "coord": [
@@ -29794,7 +29839,9 @@
    "tier": "town",
    "role": "port",
    "population": 1880,
-   "name": "grassland_market_2"
+   "name": "T\u00e2-Duk",
+   "culture": "Musas",
+   "etymology": "wood harbour"
   },
   {
    "coord": [
@@ -29804,7 +29851,9 @@
    "tier": "town",
    "role": "port",
    "population": 2054,
-   "name": "temperate_forest_market_3"
+   "name": "Iknwideg",
+   "culture": "Yitus",
+   "etymology": "marsh harbour"
   },
   {
    "coord": [
@@ -29814,7 +29863,9 @@
    "tier": "town",
    "role": "port",
    "population": 2388,
-   "name": "grassland_market_4"
+   "name": "T\u00e2 chi Fdastad",
+   "culture": "Musas",
+   "etymology": "horse harbour"
   }
  ],
  "road_edges": [

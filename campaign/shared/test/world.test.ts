@@ -27,7 +27,7 @@ const load = (): World => parseWorld(world32);
 describe('parseWorld', () => {
   it('reads the generated world whole', () => {
     const w = load();
-    expect(w.schemaVersion).toBe('1.9');
+    expect(w.schemaVersion).toBe('1.10');
     expect(w.layout).toBe('axial');
     expect(w.width).toBe(32);
     expect(w.height).toBe(32);

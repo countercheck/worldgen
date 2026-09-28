@@ -63,9 +63,14 @@ ROAD_TIER_RANK = {RoadTier.TRACK: 0, RoadTier.SECONDARY: 1, RoadTier.PRIMARY: 2}
 # 1.9 adds two settlement roles, "mining" and "lumber", founded by `ResourceStage`. Nothing
 # else changed shape, so a 1.8 file loads as it always did; the bump is for readers, which
 # may not know the new role values.
-SCHEMA_VERSION = "1.9"
+#
+# 1.10 names things. Each river carries a "name", empty if it was too small to have one,
+# and each settlement a "culture" and an "etymology" beside the name it always had. All
+# three read back as empty strings from an older file, whose settlements keep their
+# placeholder names.
+SCHEMA_VERSION = "1.10"
 SUPPORTED_SCHEMA_VERSIONS = frozenset(
-    {"1.0", "1.1", "1.2", "1.3", "1.4", "1.5", "1.6", "1.7", "1.8", "1.9"}
+    {"1.0", "1.1", "1.2", "1.3", "1.4", "1.5", "1.6", "1.7", "1.8", "1.9", "1.10"}
 )
 
 
@@ -92,6 +97,8 @@ _TERRAIN_ALIASES = {
 class River:
     hexes: list[HexCoord]
     flow_volume: float
+    # Empty for a river too small to have been named, and for one from an older world.
+    name: str = ""
 
 
 @dataclass
@@ -295,7 +302,7 @@ class WorldState:
                 for h in self.hexes.values()
             ],
             "rivers": [
-                {"hexes": [list(c) for c in r.hexes], "flow_volume": r.flow_volume}
+                {"hexes": [list(c) for c in r.hexes], "flow_volume": r.flow_volume, "name": r.name}
                 for r in self.rivers
             ],
             "settlements": [
@@ -305,6 +312,8 @@ class WorldState:
                     "role": s.role.value,
                     "population": s.population,
                     "name": s.name,
+                    "culture": s.culture,
+                    "etymology": s.etymology,
                 }
                 for s in self.settlements
             ],
@@ -346,7 +355,10 @@ class WorldState:
 
         version = data.get("version")
         if version is not None and version not in SUPPORTED_SCHEMA_VERSIONS:
-            supported = ", ".join(sorted(SUPPORTED_SCHEMA_VERSIONS))
+            # Numerically, or "1.10" sorts between "1.1" and "1.2".
+            supported = ", ".join(
+                sorted(SUPPORTED_SCHEMA_VERSIONS, key=lambda v: tuple(map(int, v.split("."))))
+            )
             raise ValueError(f"Unsupported WorldState version '{version}'. Supported: {supported}.")
 
         layout = data.get("layout", AXIAL)
@@ -369,6 +381,8 @@ class WorldState:
                 role=SettlementRole(sd["role"]),
                 population=sd["population"],
                 name=sd["name"],
+                culture=sd.get("culture", ""),
+                etymology=sd.get("etymology", ""),
             )
             for sd in data.get("settlements", [])
         ]
@@ -419,7 +433,11 @@ class WorldState:
             ws.hexes[coord] = h
 
         ws.rivers = [
-            River(hexes=[tuple(c) for c in rd["hexes"]], flow_volume=rd["flow_volume"])
+            River(
+                hexes=[tuple(c) for c in rd["hexes"]],
+                flow_volume=rd["flow_volume"],
+                name=rd.get("name", ""),
+            )
             for rd in data.get("rivers", [])
         ]
 

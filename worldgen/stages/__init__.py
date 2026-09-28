@@ -50,6 +50,7 @@ def default_stages(model: str = "classic") -> tuple[type["GeneratorStage"], ...]
     from .hydrology import HydrologyStage
     from .interurban_roads import InterurbanRoadStage
     from .land_cover import LandCoverStage
+    from .naming import NamingStage
     from .soil import SoilStage
     from .terrain_class import TerrainClassificationStage
     from .village_placement import VillagePlacementStage
@@ -124,6 +125,9 @@ def default_stages(model: str = "classic") -> tuple[type["GeneratorStage"], ...]
             # traffic anyway, and only the built network can say which crossings carry
             # any. They sit on the road by construction, so nothing has to be recut.
             ChokepointStage,
+            # Names last: every settlement is founded and sized by now, and a stage appended
+            # at the end draws the last child seed, so nothing above it changes.
+            NamingStage,
         )
 
     return physical + (
@@ -135,6 +139,7 @@ def default_stages(model: str = "classic") -> tuple[type["GeneratorStage"], ...]
         VillagePlacementStage,
         VillageTrackStage,
         VillageCultivationStage,
+        NamingStage,
     )
 
 
