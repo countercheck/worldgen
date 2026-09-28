@@ -1,0 +1,162 @@
+key: "latin"
+name: "Latin"
+description: |
+  Latin: the names Rome gave the places it built and garrisoned.
+
+  The head leads, and what follows it is an agreeing adjective or a noun in the genitive:
+  Castra Alba, Pons Aelii, Forum Iulii, Aquae Calidae, Confluentes. Adjectives are the
+  regular kind, so each head carries a gender and number and the ending follows it.
+
+  The genitive of a founder's or a river's name is made by rule rather than listed — a
+  "#" after the name in a template becomes the genitive ending in `fixes` — so a river
+  from another people's tongue is Latinised too: the Vassa gives Pons Vassae, as the
+  Romans made Pons Aelius of Hadrian's family name and Pons Saravi of the Saar.
+
+heads:
+  ford: ["vadum"]
+  bridge: ["pons"]
+  confluence: ["confluentes"]
+  mouth: ["ostia"]
+  falls: ["cataracta"]
+  pass: ["fauces"]
+  harbour: ["portus"]
+  shore: ["litus", "ripa"]
+  market: ["forum"]
+  mine: ["metalla", "fodinae"]
+  clearing: ["novale"]
+  spring: ["fons", "aquae"]
+  hill: ["mons", "collis"]
+  steading: ["villa", "fundus"]
+  hamlet: ["vicus"]
+  enclosure: ["saeptum", "hortus"]
+  cottages: ["casae", "tabernae"]
+  field: ["campus", "ager"]
+  town: ["oppidum", "colonia"]
+  wick: ["emporium", "forum"]
+  stow: ["conventus"]
+  burgh: ["castra", "castellum"]
+  hall: ["praetorium", "aula"]
+  wall: ["vallum", "murus"]
+
+quals:
+  marsh: ["paludis"]
+  fen: ["uliginis"]
+  deepwood: ["silvae"]
+  wood: ["nemoris", "luci"]
+  thorn: ["spinarum"]
+  meadow: ["pratorum"]
+  cold: ["frigid~", "calid~"]
+  sand: ["arenarum"]
+  stone: ["lapidum", "saxi"]
+  salt: ["salinarum"]
+  rich: ["beat~"]
+  high: ["alt~"]
+  oak: ["quercus"]
+  ash: ["fraxini"]
+  elm: ["ulmi"]
+  birch: ["betullae"]
+  pine: ["pinorum"]
+  palm: ["palmarum"]
+  broom: ["genistae"]
+  reed: ["harundinum"]
+  ox: ["boum"]
+  deer: ["cervorum"]
+  swine: ["porcorum"]
+  horse: ["equorum"]
+  hare: ["leporis"]
+  elk: ["alcis"]
+  wolf: ["luporum"]
+  bear: ["ursi"]
+  goat: ["caprarum"]
+  crane: ["gruum"]
+  eagle: ["aquilae"]
+  white: ["alb~"]
+  black: ["fusc~"]
+  red: ["ruf~"]
+  green: ["prasin~"]
+  north: ["borealis"]
+  south: ["australis"]
+  east: ["orientalis"]
+  west: ["occidentalis"]
+  great: ["magn~"]
+  little: ["parv~"]
+
+templates:
+  compound: ["{h} {q}"]
+  adjective: ["{h} {a}"]
+  founder: ["{h} {p}#"]
+  river_on: ["{h} {r}#"]
+  bare: ["{h}"]
+
+agreement:
+  genders:
+    vadum: "n"
+    pons: "m"
+    confluentes: "mp"
+    ostia: "np"
+    cataracta: "f"
+    fauces: "fp"
+    portus: "m"
+    litus: "n"
+    ripa: "f"
+    forum: "n"
+    metalla: "np"
+    fodinae: "fp"
+    novale: "n"
+    fons: "m"
+    aquae: "fp"
+    mons: "m"
+    collis: "m"
+    villa: "f"
+    fundus: "m"
+    vicus: "m"
+    saeptum: "n"
+    hortus: "m"
+    casae: "fp"
+    tabernae: "fp"
+    campus: "m"
+    ager: "m"
+    oppidum: "n"
+    colonia: "f"
+    emporium: "n"
+    conventus: "m"
+    castra: "np"
+    castellum: "n"
+    praetorium: "n"
+    aula: "f"
+    vallum: "n"
+    murus: "m"
+  endings:
+    m: "us"
+    f: "a"
+    "n": "um"
+    mp: "i"
+    fp: "ae"
+    np: "a"
+
+proper_names:
+  style: "lists"
+  persons:
+    first: ["Iulius", "Claudius", "Flavius", "Aelius", "Traianus", "Hadrianus",
+             "Augustus", "Antonius", "Valerius", "Cornelius", "Septimius", "Aurelius",
+             "Severus", "Domitius", "Ulpius", "Agrippa", "Drusus", "Germanicus"]
+    second: [""]
+  rivers:
+    roots: ["Rhenus", "Danuvius", "Mosella", "Tamesis", "Sequana", "Liger", "Garumna",
+             "Rhodanus", "Padus", "Tiberis", "Arnus", "Athesis", "Savus", "Dravus",
+             "Moenus", "Nicer", "Albis", "Visurgis", "Mosa", "Scaldis", "Samara", "Axona",
+             "Matrona", "Duranius", "Tagus", "Durius", "Anas", "Baetis", "Iberus",
+             "Sabrina"]
+    patterns: ["{root}", "{root}", "{root} minor", "{root} maior"]
+
+spelling:
+  particles: []
+  hyphen_caps: true
+  fixes:
+    - ["ius#", "ii"]
+    - ["us#", "i"]
+    - ["um#", "i"]
+    - ["a#", "ae"]
+    - ["#", ""]
+
+founder_gloss: "{h} of {p}"

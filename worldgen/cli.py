@@ -159,6 +159,7 @@ def generate(
         click.echo(f"  Heightmap: {cfg.heightmap_path} ({cfg.heightmap_mode})")
 
     from .export.heightmap_import import HeightmapError
+    from .naming.packs import CulturePackError
 
     pipeline = GeneratorPipeline(seed, cfg)
     for stage in stages_for(cfg, cfg.model):
@@ -166,9 +167,9 @@ def generate(
     started = time.perf_counter()
     try:
         state = pipeline.run(on_stage=_report_stage)
-    except HeightmapError as exc:
-        # Only the user-input failures; a plain ValueError from a downstream stage is a
-        # bug and keeps its traceback.
+    except (HeightmapError, CulturePackError) as exc:
+        # Only the user-input failures — a bad image, a bad or missing culture pack; a
+        # plain ValueError from a downstream stage is a bug and keeps its traceback.
         raise click.ClickException(str(exc)) from exc
 
     click.echo("Writing output...")

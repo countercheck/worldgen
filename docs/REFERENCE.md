@@ -2086,14 +2086,17 @@ settlement stage, and because a stage appended at the end draws the last child s
    (`naming_river_weight`). A name longer than `naming_max_letters`, or within
    `naming_min_edit_distance` edits of any name already given, is redrawn.
 
-**Culture packs.** A region can speak a hand-written pack instead of an invented language
-(`naming_packs`, `naming_substrate_pack`): data modules in
-[naming/packs/](../worldgen/naming/packs/) giving, for every head and qualifier above, the
-words a real naming tradition used — English -ford/-ton, Norse -by/-thwaite, Welsh
-aber-/pont-, French -ville/plessis, Slavic brod/hradište with gender agreement, Arabic
-jisr/kafr — and templates for how they combine. Languages are invented for every region
-either way and then replaced, so choosing packs never changes what the other regions are
-called.
+**Culture packs.** A region can speak a pack instead of an invented language
+(`naming_packs`, `naming_substrate_pack`). A pack is a YAML file — the built-in ones in
+[naming/packs/](../worldgen/naming/packs/), your own in the folders `naming_pack_dirs`
+lists — giving, for every head and qualifier above, the words a naming tradition used, and
+templates for how they combine. [export/culture_packs.py](../worldgen/export/culture_packs.py)
+reads the files, `naming.packs.schema.parse_pack` checks each one (every error names the
+file and field), and one processor, `naming.packs.processor.PackCulture`, runs them all.
+[CULTURE_PACKS.md](CULTURE_PACKS.md) is the authoring guide. Languages are invented for
+every region either way and then replaced, so choosing packs never changes what the other
+regions are called; each pack culture in `metadata["cultures"]` records its `pack`,
+`pack_source` (builtin or user) and a `pack_hash` of its content.
 
 Each settlement records its `culture` and an English `etymology` ("ford on the Vassa");
 `metadata["cultures"]` lists the languages. Labels on the SVG and PNG exports are placed by
@@ -2603,6 +2606,7 @@ placed where its only escape requires one.
 | `naming_substrate` | `bool` | `true` | An older people named the rivers and the present ones kept the names. `false`: each river is named by whoever holds its mouth |
 | `naming_packs` | `list[str]` | `[]` | Hand-written culture packs for the regions, in order; regions past the end get invented languages. Any of `arabic`, `dutch`, `english`, `french`, `german`, `italian`, `latin`, `norse`, `slavic`, `spanish`, `welsh`, or Tolkien's `sindarin`, `quenya`, `khuzdul`, `rohirric`, `hobbitish`, or `hive` (an insect people). Validated: known, no repeats, at most `naming_cultures` |
 | `naming_substrate_pack` | `str` | `""` | A pack for the people who named the rivers in place of an invented language — `welsh` under `english` is England. Empty for an invented one |
+| `naming_pack_dirs` | `list[str]` | `[]` | Folders of your own culture pack YAML files ([CULTURE_PACKS.md](CULTURE_PACKS.md)), read after the built-in packs in order; a pack whose key is already taken replaces the earlier one. Relative to the working directory. An unknown pack key is refused when the naming stage runs, with the available packs listed |
 | `naming_region_climb_m` | `float` | `150.0` | Metres of climb costing as much as one hex of level going when culture regions spread |
 | `naming_region_river_cost` | `float` | `8.0` | Added for crossing a great river, in hexes of level going |
 | `naming_region_water_cost` | `float` | `2.0` | Added per hex of open or inland water crossed |

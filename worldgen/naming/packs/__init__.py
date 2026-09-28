@@ -1,54 +1,19 @@
-"""Culture packs: naming cultures written by hand from real place-name elements.
+"""Culture packs: naming cultures written as data rather than invented from a seed.
 
-See `base` for how a pack is written. Each module here is one people's naming habits;
-`PACKS` is the registry the stage looks them up in by key, and `core.config.CULTURE_PACKS`
-lists the same keys so a config can be checked without importing this.
+A generated language is endless and alien. A pack is the other thing a map sometimes
+wants: names a reader half-recognises, because they are built from the elements real
+places are built from — English -ford and -ton, Norse -by and -thwaite, Welsh aber- and
+pont-, French -ville and plessis — or from a fiction's own, like Sindarin or a hive's.
+
+Each pack is a YAML file in this folder (or in a user's folder named by
+`naming_pack_dirs`): for every meaning in `site.GENERICS` and `site.SPECIFICS`, the words
+that culture used for it, and templates for how those words go together. `schema`
+checks a file and builds a `Pack`; `processor.PackCulture` runs any pack. Reading the
+files is `export.culture_packs`'s job. The format is documented for authors in
+`docs/CULTURE_PACKS.md`.
 """
 
-from . import (
-    arabic,
-    dutch,
-    english,
-    french,
-    german,
-    hive,
-    hobbitish,
-    italian,
-    khuzdul,
-    latin,
-    norse,
-    quenya,
-    rohirric,
-    sindarin,
-    slavic,
-    spanish,
-    welsh,
-)
-from .base import Pack, PackCulture
+from .processor import PackCulture
+from .schema import CulturePackError, Pack, ProperNames, pack_hash, parse_pack
 
-PACKS: dict[str, Pack] = {
-    p.key: p
-    for p in (
-        english.PACK,
-        norse.PACK,
-        welsh.PACK,
-        french.PACK,
-        slavic.PACK,
-        arabic.PACK,
-        spanish.PACK,
-        german.PACK,
-        dutch.PACK,
-        italian.PACK,
-        latin.PACK,
-        # Tolkien's Middle-earth.
-        sindarin.PACK,
-        quenya.PACK,
-        khuzdul.PACK,
-        rohirric.PACK,
-        hobbitish.PACK,
-        # Not human at all.
-        hive.PACK,
-    )
-}
-
-__all__ = ["PACKS", "Pack", "PackCulture"]
+__all__ = ["CulturePackError", "Pack", "PackCulture", "ProperNames", "pack_hash", "parse_pack"]

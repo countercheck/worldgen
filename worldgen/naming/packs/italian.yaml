@@ -1,0 +1,157 @@
+key: "italian"
+name: "Italian"
+description: |
+  Italian: the place names of medieval Italy.
+
+  The head leads. An adjective agrees and follows, or runs into it — Monte Rosso,
+  Castelnuovo, Villafranca, Acquaviva — and a noun follows with di and the article: Ponte
+  del Lupo, Borgo delle Querce. A founder is usually a saint, whose church the place grew
+  round (Borgo San Lorenzo); a town on a river sits sul it.
+
+  The old words are kept where they survive in the names: pieve for the mother church a
+  district gathered at, ronco for ground cleared by grubbing, chiusa for an enclosure.
+
+heads:
+  ford: ["guado"]
+  bridge: ["ponte"]
+  confluence: ["confluenza"]
+  mouth: ["foce", "bocca"]
+  falls: ["cascata", "salto"]
+  pass: ["passo", "colle", "valico"]
+  harbour: ["porto"]
+  shore: ["marina", "riva", "lido"]
+  market: ["mercato"]
+  mine: ["miniera", "cava"]
+  clearing: ["ronco", "radura"]
+  spring: ["fonte", "fontana"]
+  hill: ["monte", "colle", "poggio"]
+  steading: ["casale", "villa", "masseria"]
+  hamlet: ["borgata"]
+  enclosure: ["chiusa", "corte"]
+  cottages: ["capanna", "casetta"]
+  field: ["campo", "prato"]
+  town: ["borgo", "terra"]
+  wick: ["mercatale", "fiera"]
+  stow: ["pieve"]
+  burgh: ["castello", "rocca"]
+  hall: ["palazzo", "sala"]
+  wall: ["castel"]
+
+quals:
+  marsh: ["della palude", "del padule"]
+  fen: ["del pantano"]
+  deepwood: ["della selva"]
+  wood: ["del bosco"]
+  thorn: ["delle spine", "del pruno"]
+  meadow: ["dei prati", "del prato"]
+  cold: ["fredd~"]
+  sand: ["delle sabbie"]
+  stone: ["della pietra", "dei sassi"]
+  salt: ["del sale", "delle saline"]
+  rich: ["ricc~"]
+  high: ["alt~"]
+  oak: ["della quercia", "delle querce"]
+  ash: ["del frassino"]
+  elm: ["degli olmi"]
+  birch: ["delle betulle"]
+  pine: ["dei pini", "del pino"]
+  palm: ["delle palme"]
+  broom: ["delle ginestre"]
+  reed: ["delle canne"]
+  ox: ["dei buoi"]
+  deer: ["del cervo"]
+  swine: ["dei porci"]
+  horse: ["dei cavalli"]
+  hare: ["della lepre"]
+  elk: ["degli alci"]
+  wolf: ["del lupo", "dei lupi"]
+  bear: ["degli orsi"]
+  goat: ["delle capre"]
+  crane: ["delle gru"]
+  eagle: ["delle aquile"]
+  white: ["bianc~"]
+  black: ["ner~"]
+  red: ["ross~"]
+  green: ["verde"]
+  north: ["di tramontana"]
+  south: ["di mezzogiorno"]
+  east: ["di levante"]
+  west: ["di ponente"]
+  great: ["grande", "maggiore"]
+  little: ["piccol~"]
+
+templates:
+  compound: ["{h} {q}"]
+  adjective: ["{h} {a}", "{h}{a}", "{h}{a}"]
+  founder: ["{h} san {p}", "{h} di {p}"]
+  river_on: ["{h} sul {r}", "{h} di {r}"]
+  bare: ["{h}"]
+
+agreement:
+  genders:
+    guado: "m"
+    ponte: "m"
+    confluenza: "f"
+    foce: "f"
+    bocca: "f"
+    cascata: "f"
+    salto: "m"
+    passo: "m"
+    colle: "m"
+    valico: "m"
+    porto: "m"
+    marina: "f"
+    riva: "f"
+    lido: "m"
+    mercato: "m"
+    miniera: "f"
+    cava: "f"
+    ronco: "m"
+    radura: "f"
+    fonte: "f"
+    fontana: "f"
+    monte: "m"
+    poggio: "m"
+    casale: "m"
+    villa: "f"
+    masseria: "f"
+    borgata: "f"
+    chiusa: "f"
+    corte: "f"
+    capanna: "f"
+    casetta: "f"
+    campo: "m"
+    prato: "m"
+    borgo: "m"
+    terra: "f"
+    mercatale: "m"
+    fiera: "f"
+    pieve: "f"
+    castello: "m"
+    rocca: "f"
+    palazzo: "m"
+    sala: "f"
+    castel: "m"
+  endings:
+    m: "o"
+    f: "a"
+
+proper_names:
+  style: "lists"
+  persons:
+    first: ["Lorenzo", "Giovanni", "Martino", "Michele", "Pietro", "Donato", "Vitale",
+             "Marco", "Stefano", "Ambrogio", "Biagio", "Siro", "Egidio", "Gregorio",
+             "Benedetto"]
+    second: [""]
+  rivers:
+    roots: ["Adda", "Oglio", "Mincio", "Brenta", "Piave", "Adige", "Arno", "Tevere",
+             "Serchio", "Ombrone", "Reno", "Panaro", "Secchia", "Taro", "Trebbia",
+             "Ticino", "Sesia", "Tanaro", "Bormida", "Scrivia", "Metauro", "Chienti",
+             "Tronto", "Pescara", "Sangro", "Volturno", "Liri", "Sele", "Crati", "Simeto"]
+    patterns: ["{root}", "{root}", "rio {root}", "{root} vecchio"]
+
+spelling:
+  particles: ["degli", "dei", "del", "della", "delle", "di", "in", "sul", "sulla"]
+  hyphen_caps: true
+
+founder_gloss: "{p}'s {h}"
