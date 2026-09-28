@@ -123,3 +123,44 @@ export async function takeSeat(page: Page, nth = 1): Promise<void> {
   await seats.nth(nth).click();
   await expect(tab(page, 'Command')).toBeVisible();
 }
+
+/**
+ * Where the places list's flash is drawn, as the middle of its painted pixels relative to
+ * the map's box, or null while nothing is painted. Read off the canvas itself: the flash
+ * is only there if it is drawn.
+ */
+export async function flashCentre(page: Page): Promise<Point | null> {
+  return page.locator('.map-flash').evaluate((el) => {
+    const canvas = el as HTMLCanvasElement;
+    const ctx = canvas.getContext('2d');
+    if (ctx === null) return null;
+    const { width, height } = canvas;
+    const data = ctx.getImageData(0, 0, width, height).data;
+    let sx = 0;
+    let sy = 0;
+    let n = 0;
+    for (let y = 0; y < height; y += 2) {
+      for (let x = 0; x < width; x += 2) {
+        if (data[(y * width + x) * 4 + 3]! > 0) {
+          sx += x;
+          sy += y;
+          n += 1;
+        }
+      }
+    }
+    if (n === 0) return null;
+    const scale = canvas.clientWidth / width;
+    return { x: (sx / n) * scale, y: (sy / n) * scale };
+  });
+}
+
+/** The places list's entries, each with the hex it names. */
+export async function placeHexes(page: Page): Promise<{ hex: string; q: number; r: number }[]> {
+  const hexes = await page.locator('.places .place').evaluateAll((els) =>
+    els.map((e) => e.getAttribute('data-hex') ?? ''),
+  );
+  return hexes.map((hex) => {
+    const [q, r] = hex.split(',').map(Number);
+    return { hex, q: q!, r: r! };
+  });
+}
