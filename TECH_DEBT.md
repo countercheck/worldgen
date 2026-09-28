@@ -15,7 +15,7 @@ that the same work invalidated and have been re-scoped rather than deleted; one 
 materially worse. Every remaining item below
 was checked against the file and line it names.
 
-Items 24-29 were added 2026-09-27 from the `map-rivers-roads` branch (resource settlements,
+Item 30 was added 2026-09-28 from the `elevation-profile` branch. Items 24-29 were added 2026-09-27 from the `map-rivers-roads` branch (resource settlements,
 cataracts, provisioning and trade). They are recorded from the measurements made while
 building those features, not from a fresh audit.
 
@@ -26,6 +26,7 @@ building those features, not from a fresh audit.
 | # | Item | Category | Priority | Effort | Since audit |
 |---|------|----------|----------|--------|-------------|
 | 29 | Era-table figures from memory are not marked as such | Docs | **25** | S | new 2026-09-27 |
+| 30 | Population is still calibrated for the old, flattened terrain | Calibration | **24** | S | new 2026-09-28 |
 | 26 | Mine and lumber-camp workforces do not scale with era | Model | **20** | S | new 2026-09-27 |
 | 19 | One off-map river strips the floodplain off half the map's channels | Model | **21** | M | unchanged |
 | 18 | Market siting scores a plain hex disc, not the day-reach the catchment walks | Model | **20** | L | unchanged |
@@ -577,6 +578,34 @@ tell a checked number from a remembered one.
 
 **Fix:** mark the unverified figures in the footnotes, and check each against its source
 when the source can be read.
+
+---
+
+### 30 — Population is still calibrated for the old, flattened terrain
+
+**Score:** Impact 3 · Risk 3 · Effort 2 → **24**
+
+`people_per_food` (145) and the era table were measured on terrain shaped by
+`elevation_hypsometry_exponent`. That curve flattened the ground near the sea to nothing:
+on the 64×64 tropical market world half the land sat below 15 m, most of it alluvial
+floodplain. `elevation_profile` (branch `elevation-profile`) replaced it with a log-normal
+set before erosion, and the lowland median is now about 150 m. Flat alluvial ground
+shrinks and grazing slope doubles, so markets come out smaller:
+
+| 64×64, seed 42 | median market, master | median market, profile |
+|---|---|---|
+| temperate | 1,408 | 1,197 |
+| tropical | 773 | 430 |
+
+Tropical depends most on floodplain soil, so it falls furthest.
+`test_fertility_decides_how_many_markets_not_how_big` fails on the gap (3.0× across
+climates against a 2.5× bound, and tropical below the 500-person floor) and is marked
+`xfail` pointing here.
+
+**Fix:** re-measure `people_per_food` against the 1801 England density on the new
+terrain, then the era table's columns, as `fb52236` did for the curve it replaced. Check
+whether the tropical gap closes with the level or needs its own look (alluvium on a
+steeper lowland). Then remove the `xfail`.
 
 ---
 

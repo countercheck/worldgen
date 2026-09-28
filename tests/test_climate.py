@@ -305,10 +305,16 @@ def test_erosion_dose_does_not_wash_the_rain_shadow_away():
     the default — and the shadow closes to nothing on a small map. This pins the default
     on the right side of that, so raising it for flatter country cannot silently cost the
     map its dry country.
+
+    With `elevation_profile` off: the profile puts the land back on its heights after
+    erosion, so under it the dose no longer lowers the high ground at all, and the
+    coupling this pins only exists in the noise's own relief.
     """
 
     def shadow(dose):
-        cfg = WorldConfig(width=48, height=48, erosion_droplets_per_hex=dose)
+        cfg = WorldConfig(
+            width=48, height=48, erosion_droplets_per_hex=dose, elevation_profile="none"
+        )
         p = GeneratorPipeline(42, cfg)
         for stage in (ElevationStage, ErosionStage, TerrainClassificationStage, ClimateStage):
             p.add_stage(stage)

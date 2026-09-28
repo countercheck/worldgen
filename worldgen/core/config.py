@@ -14,6 +14,18 @@ HEIGHTMAP_MODES = ("elevation", "coastline")
 # what a world is, and core must not import from stages to validate itself.
 MODELS = ("classic", "organic")
 
+# The shapes `elevation_profile` names: the most common land height and the median one, in
+# metres. Each is a log-normal — a bell skewed low, with a long tail up to the peaks.
+ELEVATION_PROFILES: dict[str, tuple[float, float]] = {
+    # England: coastal plain and vale, most land under 150 m, a few hills above 500.
+    "lowland": (50.0, 150.0),
+    # More hill country than plain.
+    "rolling": (100.0, 250.0),
+    # About the Earth's land as a whole; little plain.
+    "upland": (200.0, 450.0),
+}
+ELEVATION_PROFILE_CHOICES = (*ELEVATION_PROFILES, "custom", "none")
+
 # The hand-written naming cultures `WorldConfig.naming_packs` may name. Listed here for the
 # same reason as MODELS — the config validates itself without importing a layer above it —
 # and a test holds it equal to `worldgen.naming.packs.PACKS`.
@@ -128,10 +140,18 @@ class WorldConfig:
     # ends up under water follows from this and seabed_depth_m rather than being set
     # directly, which is the honest way round.
     max_elevation_m: float = 1500.0
-    # How lopsided the land is: each land height becomes top * (e / top) ** k. 1.0 keeps
-    # the noise's bell around half the range; above 1 most ground lies low and the heights
-    # are a small fraction, as real land does. Generated terrain only.
-    elevation_hypsometry_exponent: float = 2.0
+    # How much of the land lies at each height. The noise is a bell around half the range,
+    # with as much ground at 700 m as at 70 m; real land is lopsided, mostly low with a
+    # long tail of high ground. Before erosion, the land is ranked by height and each hex
+    # given the height at its rank in a log-normal, so every map has these proportions
+    # whatever its noise did: lowland, rolling or upland (see ELEVATION_PROFILES), custom
+    # (the two settings below), or none to keep the noise as it is. Generated terrain only.
+    elevation_profile: str = "lowland"
+    # The shape `custom` uses: the most common land height and the median, in metres.
+    # Both are of the log-normal before it is cut off at max_elevation_m; a median near
+    # the ceiling comes out lower, as the cut trims the tail.
+    elevation_profile_mode_m: float = 50.0
+    elevation_profile_median_m: float = 150.0
     # How deep the sea floor lies at the map edge, in metres below sea level. A
     # continental shelf, not an abyss — the falloff blends the border down to this,
     # and a shallow shelf makes a gentler coast than a plunge would.
@@ -317,6 +337,13 @@ class WorldConfig:
     # drawing big rivers either: 42 km2 is 11 m across, and the largest river a 64 km map
     # raises drains 204 km2 and runs 21 m wide.
     channel_min_discharge: float = 6000.0
+    # How water picks its way downhill. Each hex drains to one of its lower neighbours at
+    # random, weighted by the drop to it raised to this power: 0 is any downhill neighbour
+    # alike, 1 in proportion to the drop, and 8 or more is all but always the steepest.
+    # Pure steepest descent drew the rivers across flat ground as ranks of straight
+    # parallel lines, because on a flat every hex agrees on which way is down; a little
+    # chance lets neighbouring streams wander into each other and join.
+    river_wander_exponent: float = 1.0
     # Rain the ground and its plants take before anything runs off. Evapotranspiration
     # rises with temperature — that is most of what it is — so it is expressed as a base
     # plus a rate per degree rather than a flat figure. A flat one gave a boreal region
@@ -379,6 +406,18 @@ class WorldConfig:
     # Lake drainage
     lake_chaining: bool = True  # Let a lake spill into a strictly lower lake, not only the sea
     endorheic_marsh_radius: int = 1  # Shore band (hexes) turned to wetland around a closed basin
+    # A closed hollow on land — ground that water can only leave by filling it to its lowest
+    # rim — holds a lake when it is at least `lake_min_hexes` across and `lake_min_depth_m`
+    # deep at the rim, and the region sheds at least `lake_min_runoff_mm` a year to fill it.
+    # The lake stands at the rim, so it overflows there and a river leaves it. Without this
+    # the hollow was filled flat for routing only, and every river crossing it ran in a
+    # straight line to the one exit.
+    lake_min_hexes: int = 20
+    lake_min_depth_m: float = 5.0
+    lake_min_runoff_mm: float = 50.0
+    # A hollow too small or shallow for a lake, but at least this deep, is tagged `hollow`
+    # and waterlogs to wetland where the closed-basin marsh rule allows (rain and treeline).
+    hollow_wetland_min_depth_m: float = 1.0
     # Below this much annual rainfall a closed basin evaporates to a salt pan rather
     # than holding a marshy shore.
     endorheic_marsh_min_precip_mm: float = 300.0
@@ -1234,6 +1273,11 @@ class WorldConfig:
             raise ValueError(
                 f"heightmap_land_threshold must be in [0, 1], got {self.heightmap_land_threshold}"
             )
+        if self.lake_min_hexes < 1:
+            raise ValueError(f"lake_min_hexes must be >= 1, got {self.lake_min_hexes}")
+        for name in ("lake_min_depth_m", "lake_min_runoff_mm", "hollow_wetland_min_depth_m"):
+            if getattr(self, name) < 0:
+                raise ValueError(f"{name} must be >= 0, got {getattr(self, name)}")
         if self.endorheic_marsh_radius < 0:
             raise ValueError(
                 f"endorheic_marsh_radius must be >= 0, got {self.endorheic_marsh_radius}"
@@ -1343,10 +1387,26 @@ class WorldConfig:
             raise ValueError(
                 f"haulage_transship_cost must be >= 0, got {self.haulage_transship_cost}"
             )
-        if self.elevation_hypsometry_exponent <= 0:
+        if self.river_wander_exponent < 0:
             raise ValueError(
-                "elevation_hypsometry_exponent must be > 0, got "
-                f"{self.elevation_hypsometry_exponent}"
+                f"river_wander_exponent must be >= 0, got {self.river_wander_exponent}"
+            )
+        if self.elevation_profile not in ELEVATION_PROFILE_CHOICES:
+            raise ValueError(
+                f"unknown elevation_profile {self.elevation_profile!r}; choose from "
+                f"{', '.join(ELEVATION_PROFILE_CHOICES)}"
+            )
+        if self.elevation_profile == "custom" and not (
+            0
+            < self.elevation_profile_mode_m
+            < self.elevation_profile_median_m
+            < self.max_elevation_m
+        ):
+            raise ValueError(
+                "a custom elevation_profile needs 0 < elevation_profile_mode_m < "
+                "elevation_profile_median_m < max_elevation_m, got "
+                f"{self.elevation_profile_mode_m}, {self.elevation_profile_median_m}, "
+                f"{self.max_elevation_m}"
             )
         if self.yield_multiplier <= 0:
             raise ValueError(f"yield_multiplier must be > 0, got {self.yield_multiplier}")
@@ -1643,6 +1703,11 @@ _EDGES = ("north", "south", "east", "west")
 # Settings that used to exist. A key here is dropped with a warning naming what replaced
 # it, so a config written against an older version still loads instead of crashing.
 _RETIRED_FIELDS: dict[str, str] = {
+    "elevation_hypsometry_exponent": (
+        "it bent heights after erosion, which flattened the coastal plain to nothing; use "
+        "elevation_profile (lowland, rolling, upland, custom or none), which sets the share "
+        "of land at each height before erosion"
+    ),
     "base_temperature": (
         "temperature is in degrees Celsius now, not on a 0-1 axis; use mean_temperature_c "
         "(temperate is 10.0)"

@@ -24,7 +24,9 @@ model: classic          # Settlement and road model: classic | organic. The --mo
 # Elevation is metres above sea level, so sea level is zero by definition and is not a
 # setting. How the map looks is set by how high the land stands and how deep the sea lies.
 max_elevation_m: 1500.0  # Highest ground above sea level. The map's vertical scale, and the single most consequential setting for what country this is: 800 gives downland, 1500 mixed uplands, 3000 an Alpine massif. Default: 1500
-elevation_hypsometry_exponent: 2.0 # How lopsided the land is: each land height becomes top x (e / top) ^ k, applied after erosion. 1.0 keeps the noise's bell around half the range, leaving a quarter of the land at 25-30% of the peak and navigable rivers falling ~10 m/km, a torrent. 2.0 puts half the land in the lowest tenth of the range and navigable rivers at 1-2 m/km. Generated terrain only. Default: 2.0
+elevation_profile: lowland    # How much of the land lies at each height, set before erosion and kept through it: lowland (most common 50 m, median 150 m), rolling (100 / 250), upland (200 / 450), custom (elevation_profile_mode_m / elevation_profile_median_m), or none to keep the noise. Generated terrain only. Default: lowland
+elevation_profile_mode_m: 50.0    # Most common land height for elevation_profile: custom. Default: 50
+elevation_profile_median_m: 150.0 # Median land height for elevation_profile: custom, before the cut at max_elevation_m (a median near the ceiling comes out lower). Default: 150
 seabed_depth_m: 200.0    # How deep the sea floor lies at the map edge. A continental shelf, not an abyss. How much of the map ends up underwater follows from this and max_elevation_m. Default: 200
 coast_max_elevation_m: 100.0 # Land no higher than this beside the sea is coast. Default: 100
 
@@ -182,6 +184,7 @@ alluvium_quantile: 0.98       # Depth treated as full, for the droplet term only
 # depth. This replaced a threshold that was really a rank — the top 5% of land by
 # accumulation — which gave desert and rainforest alike 5.6% of their land under channel.
 channel_min_discharge: 6000.0    # Catchment km2 x runoff mm needed to cut a channel — also the dial that decides whether the network branches at all: a basin shows only as many stream orders as its area divides into channel-sized pieces. 6000 is 12.5 km2, a channel ~7 m across and knee deep. Default: 6000
+river_wander_exponent: 1.0      # How water picks its way downhill: a lower neighbour drawn at random, weighted by (drop / largest drop) ^ k. 0 = any downhill neighbour alike, 1 = in proportion to the drop, 8+ = nearly always the steepest. Steepest descent alone drew straight parallel rivers on level ground. Default: 1.0
 navigable_min_discharge: 60000.0 # ...and to float a boat. Default: 150000
 cataract_min_drop_m: 20.0 # Metres a barge-sized river falls through one hex before it is a cataract: no boat passes, cargo portages round it, and the fall drives mills. 20 m/km is a 2% gradient, strong rapids at a kilometre to the hex. 0 turns cataracts off. Default: 20.0
 river_flow_continuous: false # Record a flow figure on every draining land hex, not only on hexes that carry a channel. Off by default: it is a diagnostic for inspecting the drainage field in the viewer, and turning it on does not add rivers to the map. Default: false
@@ -223,6 +226,10 @@ river_inflow_min_length: 0.1  # Shortest course worth a river, as a fraction of 
 # Lake drainage. Every lake is filled to its spillway and given an outflow, so water
 # that enters a basin has somewhere to go instead of accumulating forever.
 lake_chaining: true             # Allow a lake to spill into a strictly lower lake, not just the sea. Chains of lakes stepping down to the coast are the only outlet on a landlocked map. Default: true
+lake_min_hexes: 20               # A closed hollow on land this many hexes across or more, lake_min_depth_m deep at its rim, fills to the rim and becomes a lake with a river leaving it. Default: 20
+lake_min_depth_m: 5.0            # See lake_min_hexes. Default: 5
+lake_min_runoff_mm: 50.0         # Regional runoff below which no hollow fills: a dry basin stays a basin. Default: 50
+hollow_wetland_min_depth_m: 1.0  # A hollow too small or shallow for a lake, but at least this deep, waterlogs to wetland where the closed-basin marsh rule allows. Default: 1
 endorheic_marsh_radius: 1       # Where a basin genuinely has no outlet it is endorheic: water leaves by evaporation. This many hexes of its shore become wetland. 0 disables. Default: 1
 endorheic_marsh_min_precip_mm: 300.0 # A closed basin drier than this is a salt pan, not a marsh, and gets no wetland shore. Default: 300
 
@@ -357,7 +364,7 @@ yield_wood: 0.30     # Still under trees; nobody has cleared it. Default: 0.30
 #                               feed people at any yield.
 #
 # Measured on seeds 42 and 7 (temperate 128x128, organic model, city_draw_share 0.7,
-# city_pull_sharpness 1.25, elevation_hypsometry_exponent 2.0).
+# city_pull_sharpness 1.25, elevation_profile lowland).
 # "Target" is the historical figure; "map" is what these settings produced. Largest city
 # is the largest on the map.
 #

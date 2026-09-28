@@ -266,12 +266,13 @@ def test_thin_country_grows_few_villages_and_only_on_its_good_ground():
     arable ground, so the soil assertion finally has a subject.
     """
 
-    # Seed 2 rather than the suite's seed 1. Once freight began wearing the roads, seed 1's
-    # arid world lost its one crossing village and this test had no subject; seed 2's arid
-    # world grows one, on alluvium, and its temperate world one as well.
+    # Seed 4 rather than the suite's seed 1. Once freight began wearing the roads, seed 1's
+    # arid world lost its one crossing village and this test had no subject, so it moved to
+    # seed 2; `elevation_profile` emptied seed 2's in turn. Seed 4's arid world grows one
+    # village, on arable ground, and its temperate world two.
     def world(climate):
         return build_world(
-            seed=2,
+            seed=4,
             width=_CHOKE_SIZE,
             height=_CHOKE_SIZE,
             model="organic",

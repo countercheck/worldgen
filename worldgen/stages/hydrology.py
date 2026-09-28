@@ -2,6 +2,8 @@ import heapq
 from collections import defaultdict, deque
 from collections.abc import Callable
 
+import numpy as np
+
 from ..core.hex import Hex, HexCoord, TerrainClass
 from ..core.hex_grid import distance, neighbors
 from ..core.pipeline import GeneratorStage
@@ -63,7 +65,7 @@ class HydrologyStage(GeneratorStage):
                 q + r
             ) / (w + h)
 
-        # B — Flow direction (steepest descent on filled surface)
+        # B — Flow direction (downhill on the filled surface, weighted towards the steepest)
         flow_dir = self._flow_direction(filled, land, ocean, lakes, elev, on_border)
 
         # B2 — Rivers that arrive from beyond the border.  The map is a region, not a
@@ -314,10 +316,12 @@ class HydrologyStage(GeneratorStage):
         elev: dict[HexCoord, float],
         on_border: OnBorder,
     ) -> dict[HexCoord, HexCoord | None]:
-        """For each land hex, flow to the lowest filled neighbor.
+        """For each land hex, the neighbor it drains to: a lower one, drawn at random with
+        weight (drop / largest drop) ** `river_wander_exponent`.
 
-        The caller adds an epsilon tilt before calling, so all filled elevations
-        are unique — no tie-breaking needed, and the result is cycle-free.
+        The caller adds an epsilon tilt before calling, so all filled elevations are
+        unique and every land hex off the border has somewhere lower to go; any strictly
+        lower choice keeps the result cycle-free.
 
         Priority-Flood does not seed lake hexes, so their filled elevation may be
         raised by the algorithm.  To guarantee that land hexes adjacent to lakes
@@ -325,31 +329,45 @@ class HydrologyStage(GeneratorStage):
         lake neighbors when computing steepest descent.
         """
         water = ocean | lakes
+        power = self.config.river_wander_exponent
         flow_dir: dict[HexCoord, HexCoord | None] = {}
-        for coord in land:
-            best_coord: HexCoord | None = None
-            best_elev = filled[coord]
+        # Sorted, so the draws land on the same hexes in the same order every run.
+        for coord in sorted(land):
+            here = filled[coord]
+            options: list[HexCoord] = []
+            drops: list[float] = []
             for nbr in neighbors(coord):
                 if nbr not in filled:
+                    continue
+                # A border land hex that drains along the border would produce rivers
+                # that creep along the map edge; it drains off the map instead.
+                if on_border(coord) and nbr not in water and on_border(nbr):
                     continue
                 # Use raw elevation for water hexes so PF-raised lake/ocean values
                 # never appear higher than the actual landscape.
                 nbr_e = elev[nbr] if nbr in water else filled[nbr]
-                if nbr_e < best_elev:
-                    best_elev = nbr_e
-                    best_coord = nbr
-
-            # A border land hex whose steepest descent leads to another border land hex
-            # would produce rivers that creep along the map edge.  Terminate here instead
-            # so the border acts as a drain, not a channel.
-            if (
-                best_coord is not None
-                and best_coord not in ocean
-                and best_coord not in lakes
-                and on_border(coord)
-                and on_border(best_coord)
-            ):
-                best_coord = None
+                if nbr_e < here:
+                    options.append(nbr)
+                    drops.append(here - nbr_e)
+            best_coord: HexCoord | None = None
+            # Beside the sea or a lake, water goes into it: a coastal hex that wandered
+            # along the shore instead would draw a river running parallel to the water.
+            wet = [(d, n) for d, n in zip(drops, options, strict=True) if n in water]
+            if wet:
+                best_coord = max(wet)[1]
+            elif len(options) == 1:
+                best_coord = options[0]
+            elif options:
+                # Strictly downhill whichever is drawn, so the network stays free of
+                # cycles; the weighting keeps a steep valley on its floor and lets a flat
+                # one wander. Scaled by the largest drop first: on a filled flat the drops
+                # are the epsilon tilt's millionths, and their powers would underflow.
+                rel = np.array(drops) / max(drops)
+                weights = rel**power
+                pick = self.rng.random() * weights.sum()
+                best_coord = options[
+                    min(int(np.searchsorted(np.cumsum(weights), pick)), len(options) - 1)
+                ]
 
             flow_dir[coord] = best_coord
         return flow_dir
