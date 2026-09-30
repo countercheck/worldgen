@@ -176,6 +176,8 @@ channel_min_discharge: 6000.0    # Catchment km2 x runoff mm needed to cut a cha
 river_wander_exponent: 1.0      # How water picks its way downhill: a lower neighbour drawn at random, weighted by (drop / largest drop) ^ k. 0 = any downhill neighbour alike, 1 = in proportion to the drop, 8+ = nearly always the steepest. Steepest descent alone drew straight parallel rivers on level ground. Default: 1.0
 navigable_min_discharge: 60000.0 # ...and to float a boat. Default: 150000
 cataract_min_drop_m: 20.0 # Metres a barge-sized river falls through one hex before it is a cataract: no boat passes, cargo portages round it, and the fall drives mills. 20 m/km is a 2% gradient, strong rapids at a kilometre to the hex. 0 turns cataracts off. Default: 20.0
+rapids_min_drop_m: 10.0  # White water on a smaller river: a river draining at least rapids_min_catchment_km2 that falls this far through one hex is drawn as rapids. Drawing only. 0 turns rapids off. Default: 10
+rapids_min_catchment_km2: 200.0 # The smallest river rapids_min_drop_m marks. Default: 200
 river_flow_continuous: false # Record a flow figure on every draining land hex, not only on hexes that carry a channel. Off by default: it is a diagnostic for inspecting the drainage field in the viewer, and turning it on does not add rivers to the map. Default: false
 # Rain the ground and its plants take before anything runs off. Rises with temperature,
 # which is why cold country sheds nearly all its rain and the taiga is full of rivers.

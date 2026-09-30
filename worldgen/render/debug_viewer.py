@@ -133,15 +133,6 @@ def _rgb_to_hex(r: float, g: float, b: float) -> str:
     return f"#{int(r * 255):02x}{int(g * 255):02x}{int(b * 255):02x}"
 
 
-def _star_points(cx: float, cy: float, outer: float, inner: float, n: int = 5) -> str:
-    pts = []
-    for i in range(n * 2):
-        r = outer if i % 2 == 0 else inner
-        angle = math.radians(i * 180 / n - 90)
-        pts.append((cx + r * math.cos(angle), cy + r * math.sin(angle)))
-    return _points_str(pts)
-
-
 def is_fog(h) -> bool:
     """Whether a hex is unobserved ground on a partial map rather than real terrain."""
     return FOG_TAG in h.tags
@@ -402,9 +393,16 @@ def render_svg(state: WorldState, attribute: str, hex_size: float = 20) -> str:
             px, py = axial_to_pixel(s.coord, hex_size)
             cx, cy = px + ox, py + oy
             if s.tier == SettlementTier.CITY:
-                pts = _star_points(cx, cy, outer=7.0, inner=3.0)
+                # A church among roofs on a gold disc, as the exports draw it.
+                r = glyphs.CITY_RADIUS
+                shapes = "".join(
+                    f'<polygon points="{" ".join(f"{x:.2f},{y:.2f}" for x, y in shape)}"'
+                    f' fill="{glyphs.CITY_INK}"/>'
+                    for shape in glyphs.placed_emblem(glyphs.CITY, cx, cy, r)
+                )
                 out.append(
-                    f'    <polygon points="{pts}" fill="gold" stroke="black" stroke-width="0.8"/>'
+                    f'    <circle cx="{cx:.2f}" cy="{cy:.2f}" r="{r:.2f}"'
+                    f' fill="{glyphs.CITY_DISC}" stroke="black" stroke-width="0.8"/>{shapes}'
                 )
             elif s.tier == SettlementTier.TOWN:
                 r = 4.0

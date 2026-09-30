@@ -191,6 +191,15 @@ class HydrologyStage(GeneratorStage):
         # This runs after all hydrological computation (river_set, acc, flow_dir) is final
         # so that per-hex river_flow and lake drainage connectivity are unaffected.
         state.rivers = _split_at_confluences(state.rivers, land, acc, max_acc)
+        # And at water: a river ends where it meets a lake, as it does the sea, and what
+        # leaves the lake is a river of its own. Lake drainage can route one path in at one
+        # shore and out at another, and drawn whole it ran a line across the open water.
+        water_hexes = {
+            c
+            for c, hx in hexes.items()
+            if hx.terrain_class in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
+        }
+        state.rivers = _split_at_water(state.rivers, water_hexes, acc, max_acc)
 
         # H — Tag every non-water hex in any River path with "river".
         # Done after all rivers (including drainage) are finalized, so drainage tail
@@ -200,6 +209,27 @@ class HydrologyStage(GeneratorStage):
             for coord in river.hexes:
                 if coord in hexes and hexes[coord].terrain_class not in water_classes:
                     hexes[coord].tags.add("river")
+
+        # H — Where each drawn river rises and where it stops, for the map's symbols. A
+        # river drawn across a single hex has no course to mark. A source is a spring: the
+        # first hex of a path that is a headwater and not water arriving from off the map.
+        # An end is where a course stops without joining another — into the sea or a lake,
+        # off the map, or into the ground. A tributary's last hex belongs to its trunk, and
+        # the trunk flows on from it, so a tributary has no end of its own.
+        flows_on = {c for river in state.rivers for c in river.hexes[:-1]}
+        for river in state.rivers:
+            course = [
+                c for c in river.hexes if c in hexes and hexes[c].terrain_class not in water_classes
+            ]
+            if len(course) < 2:
+                continue
+            first, last = river.hexes[0], river.hexes[-1]
+            tags = hexes[first].tags if first in hexes else set()
+            if first == course[0] and "headwater" in tags and "river_source_offmap" not in tags:
+                tags.add("river_source")
+            ends_in_water = last in hexes and hexes[last].terrain_class in water_classes
+            if ends_in_water or last not in flows_on:
+                hexes[course[-1]].tags.add("river_end")
 
         # I — Mark basins that still have no way out.  Not every lake can be drained:
         # a bowl ringed by higher ground with no lower lake to spill into is a closed
@@ -1278,6 +1308,46 @@ class HydrologyStage(GeneratorStage):
                 new_rivers.append(River(hexes=path, flow_volume=acc[last_land] / max_acc))
 
         return new_rivers, outlet_of
+
+
+def _split_at_water(
+    rivers: list[River], water: set[HexCoord], acc: dict[HexCoord, float], max_acc: float
+) -> list[River]:
+    """Cut every river where it meets water, and start it again where it leaves.
+
+    A piece that reaches water keeps the first water hex as its last, the way a river into
+    the sea already ends; a piece leaving water starts from the last water hex it crossed,
+    so the line begins at the shore. Nothing is drawn across the water between. A piece
+    with fewer than two hexes is dropped. Each piece's flow_volume is its own last land
+    hex's, as `_build_rivers` sets it.
+    """
+    out: list[River] = []
+
+    def keep(piece: list[HexCoord]) -> None:
+        land = [c for c in piece if c not in water]
+        if len(piece) < 2 or not land:
+            return
+        out.append(River(hexes=piece, flow_volume=acc.get(land[-1], 0.0) / max_acc))
+
+    for river in rivers:
+        if not any(c in water for c in river.hexes[1:-1]):
+            out.append(river)
+            continue
+        piece: list[HexCoord] = []
+        shore: HexCoord | None = None
+        for c in river.hexes:
+            if c in water:
+                if any(p not in water for p in piece):
+                    piece.append(c)
+                    keep(piece)
+                piece = []
+                shore = c
+            else:
+                if not piece and shore is not None:
+                    piece = [shore]
+                piece.append(c)
+        keep(piece)
+    return out
 
 
 def _split_at_confluences(
