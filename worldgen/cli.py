@@ -98,7 +98,7 @@ def _load_world_config(config_path: str | None) -> WorldConfig:
     default=None,
     help=(
         "Settlement and road model to run. Overrides the config's `model` field; "
-        "defaults to what the config says (classic if it says nothing)."
+        "defaults to what the config says (organic if it says nothing)."
     ),
 )
 @click.option(
