@@ -598,6 +598,12 @@ shrinks and grazing slope doubles, so markets come out smaller:
 | tropical | 773 | 430 |
 
 Tropical depends most on floodplain soil, so it falls furthest.
+
+Clearing moved further in the same direction on 2026-09-29: `clearing_margin` went from 0.45
+to 0.35 and `pasture_margin` (0.15) turned the wood between the ploughland and the parish
+woods into grass, so in-reach woodland fell from about 47% to 13% on a temperate 128×128 and
+both arable and pasture rose. More food means bigger markets and a denser countryside, and
+the re-measure below must include it.
 `test_fertility_decides_how_many_markets_not_how_big` fails on the gap (3.0× across
 climates against a 2.5× bound, and tropical below the 500-person floor) and is marked
 `xfail` pointing here.

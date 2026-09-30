@@ -127,7 +127,8 @@ flowchart LR
     L --> M[VillagePlacement]
     M --> N[VillageTrack]
     N --> O[VillageCultivation]
-    O --> Q[Naming]
+    O --> P[SettledGround]
+    P --> Q[Naming]
 
     A -.-> S(["WorldState<br/>hexes · rivers · roads<br/>settlements · ferries"])
     Q -.-> S
@@ -147,7 +148,7 @@ computes. The short version:
 | rain pattern | `precipitation.py` | shared, runs inside both Climate and Hydrology |
 | `river_flow`, rivers, lakes | Hydrology | the authoritative drainage network |
 | `moisture`, `temperature` | Climate | *after* hydrology — it reads river tags |
-| `biome`, `land_cover` | Biome, LandCover | |
+| `biome`, `land_cover` | Biome, LandCover; then LandUse and SettledGround | cover is the wild country; clearing opens it for ploughland, pasture and the ground under settlements |
 | settlements, roads | CityTown onward | |
 | settlement and river names, `culture`, `etymology` | Naming | last in both models; placeholders until then |
 

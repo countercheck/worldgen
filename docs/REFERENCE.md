@@ -1534,9 +1534,16 @@ UNUSABLE soil                           → WASTE
 outside every catchment, ploughable     → WOOD     (the wildwood: reached by nobody)
 outside every catchment, otherwise      → WASTE
 GRAZING soil in a catchment             → PASTURE  (grazing needs no clearing)
-ploughable, rent clears the margin      → ARABLE
-ploughable, rent does not               → WOOD
+ploughable, rent clears clearing_margin → ARABLE
+ploughable, rent clears pasture_margin  → PASTURE  (too poor to plough, near enough to graze)
+ploughable, rent clears neither         → WOOD     (the parish's woods: its worst ground)
 ```
+
+Ploughland and pasture are open ground: clearing turns forest, woodland and scrub
+`land_cover` to `open`, so a map coloured by cover shows the fields. Food is unaffected;
+`potential_food` reads the cover only for water and wetland. `SettledGroundStage` clears
+the hex under every town and village, and the ring round a city, once every settlement is
+founded and before the names are given.
 
 `hex.cultivated` survives as a derived boolean (`land_use is ARABLE`) because the classic
 village stages and the JSON schema both read it.
@@ -2413,7 +2420,9 @@ are always `0`.
 | `yield_pasture` | `float` | `0.55` | ≥ 0 | What grazed ground yields |
 | `yield_wood` | `float` | `0.30` | ≥ 0 | What ground still under trees yields. The gap between this and `yield_arable` is what gives clearing economic weight — a settlement grows by assarting its hinterland, not merely by sitting in it |
 | `yield_multiplier` | `float` | `1.7` | > 0 | Farming technology, as one multiplier on `yield_arable` and `yield_pasture`. 1.7 is England c. 1800, 1.0 England c. 1300; wood and fishery are left alone, and `potential_food` (which siting and land use read) is unchanged, so the market network stays put while more people live on it. `worldgen.yaml` carries a table of settings measured against historical densities from Roman Britain to 1830s Belgium |
-| `clearing_margin` | `float` | `0.45` | ≥ 0 | Where clearing stops, as a fraction of the **best rent the settlement can reach**. Relative rather than absolute, and that is the substance: a market with a floodplain has a high bar and leaves its hillsides to sheep, while a market on uniformly thin ground has a low bar and ploughs the scrub — the worse the land, the more pressure to use bad land. The extensive margin set against the best alternative available, which is what rent theory actually says |
+| `clearing_margin` | `float` | `0.35` | ≥ 0 | Where clearing stops, as a fraction of the **best rent the settlement can reach**. Relative rather than absolute, and that is the substance: a market with a floodplain has a high bar and leaves its hillsides to sheep, while a market on uniformly thin ground has a low bar and ploughs the scrub — the worse the land, the more pressure to use bad land. The extensive margin set against the best alternative available, which is what rent theory actually says |
+| `pasture_margin` | `float` | `0.15` | `[0, 1]` | Ploughable ground within a catchment whose rent falls short of `clearing_margin` but reaches this fraction of the best is cleared to **pasture**; below it, the parish keeps it as **wood**. At or above `clearing_margin` it does nothing. With 0.35 / 0.15 a temperate map is about 30% arable, 28% pasture, 20% waste and 23% wood, most of that wood beyond every market's reach — England c. 1800 was about 30 / 45 / 20 / 5. |
+| `settled_clear_radius_city` | `int` | `1` | `≥ 0` | Hexes round a city cleared of forest and scrub for gardens, orchards and paddocks (`SettledGroundStage`). Every town and village clears its own hex; a lumber camp keeps its trees. |
 
 Fertile and marginal hexes are additionally scaled by a rainfall curve peaking across
 `[biome_dry_precip_mm, biome_wet_precip_mm]` and falling to `0` at both ends — too dry is
@@ -2488,6 +2497,8 @@ the surplus it draws on is depleted, and the scan repeats until nothing clears t
 | `transship_radius` | `int` | `2` | How far from a quay, in hexes, its handling settlement may stand. Validated `>= 0` |
 | `city_min_population` | `int` | `5000` | A town that grows past this becomes a city whatever it draws — the entrepôt, which handles a hinterland's trade rather than eating its food. 0 turns it off. Validated `>= 0` |
 | `port_min_population` | `int` | `250` | A port is founded at an unattended quay (or waterfront of quays within `transship_radius`) whose trade share reaches this many people. 0 turns ports off. § [3.10d](#310d-resource-settlements--organic) |
+| `port_city_min_separation` | `int` | `12` | A port whose trade alone reaches `city_min_population` is a city only if no other city stands within this many hexes, and … |
+| `port_city_min_farmland` | `int` | `20` | … at least this many ploughed hexes lie within `market_day_radius` of it. Otherwise it is a town: a portage in a bog beside the city it serves is a landing, not a second city. |
 | `ore_min_relief_m` | `float` | `200.0` | Relief a hex needs to carry ore. About the top 8% of land on a temperate map |
 | `ore_deposits_per_1000_km2` | `float` | `5.0` | Expected deposits per 1000 km² of ground above `ore_min_relief_m`, drawn as a Poisson count. 0 turns mines off |
 | `ore_min_separation` | `int` | `8` | Hexes between deposits |

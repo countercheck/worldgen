@@ -271,13 +271,15 @@ def test_thin_country_grows_few_villages_and_only_on_its_good_ground():
     arable ground, so the soil assertion finally has a subject.
     """
 
-    # Seed 4 rather than the suite's seed 1. Once freight began wearing the roads, seed 1's
+    # Seed 8 rather than the suite's seed 1. Once freight began wearing the roads, seed 1's
     # arid world lost its one crossing village and this test had no subject, so it moved to
-    # seed 2; `elevation_profile` emptied seed 2's in turn. Seed 4's arid world grows one
-    # village, on arable ground, and its temperate world two.
+    # seed 2, then to 4 when `elevation_profile` emptied that, and to 8 when pasture margins
+    # moved the clearing. Seed 8's arid world grows one village, on arable ground, and its
+    # temperate world two. Each map grows a handful at most, so any change to the land
+    # moves the count; comparing two single maps is the fragile part of this test.
     def world(climate):
         return build_world(
-            seed=4,
+            seed=8,
             width=_CHOKE_SIZE,
             height=_CHOKE_SIZE,
             model="organic",
