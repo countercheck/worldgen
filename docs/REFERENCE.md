@@ -59,7 +59,7 @@ shape every map.
   temperature degrees Celsius, rainfall millimetres a year, catchment area square
   kilometres, gradient metres per kilometre. None of them are normalised, so a threshold
   written against one means the same thing on every map. See § [4](#4-configuration-reference).
-- **Default grid:** 128 × 128 (≈16,000 km², the size of a small kingdom).
+- **Default grid:** 200 × 200 on the `offset` layout (≈40,000 km², a large kingdom or a small country).
 - **Coordinates:** axial `(q, r)`, flat-top hexagons.
   Neighbours, distance, ranges, and pixel conversion live in
   [worldgen/core/hex_grid.py](../worldgen/core/hex_grid.py).
@@ -95,10 +95,10 @@ the test fixtures read it from there. Each stage is a pure transformer: `state �
 **There are two settlement models**, selected with `generate --model`. They share the nine
 physical stages and diverge after them:
 
-- **`classic`** (default) ranks hexes on habitability and places a *configured number* of
+- **`classic`** ranks hexes on habitability and places a *configured number* of
   cities and towns at a fixed minimum separation, then sprinkles villages. Population is
   drawn at random from a per-tier band and nothing about the site enters the number.
-- **`organic`** derives the hierarchy from pre-industrial haulage economics, and each of
+- **`organic`** (default) derives the hierarchy from pre-industrial haulage economics, and each of
   its three tiers is a different question about reach. Markets go where the most surplus
   can reach them inside a **day's return**; cities are markets that other *markets* can
   reach over `haulage_range_land` with water counting fifteen times; villages stand where
@@ -2153,10 +2153,10 @@ from the dataclass again without the suite failing.
 
 | Param | Type | Default | Range | Effect |
 |---|---|---|---|---|
-| `width` | `int` | `128` | ≥ 1 | Map width in hexes (`1 hex = 1 km` by convention) |
-| `height` | `int` | `128` | ≥ 1 | Map height in hexes |
-| `grid_layout` | `str` | `"axial"` | `axial` \| `offset` | Grid shape — see below |
-| `model` | `str` | `"classic"` | `classic` \| `organic` | Which settlement and road model the pipeline runs. In the config rather than only on the CLI so `world.json` records which model made the map — seed plus config is the reproduction record. The `--model` flag overrides it |
+| `width` | `int` | `200` | ≥ 1 | Map width in hexes (`1 hex = 1 km` by convention) |
+| `height` | `int` | `200` | ≥ 1 | Map height in hexes |
+| `grid_layout` | `str` | `"offset"` | `axial` \| `offset` | Grid shape — see below |
+| `model` | `str` | `"organic"` | `classic` \| `organic` | Which settlement and road model the pipeline runs. In the config rather than only on the CLI so `world.json` records which model made the map — seed plus config is the reproduction record. The `--model` flag overrides it |
 
 `grid_layout` decides which hexes a world is built from:
 

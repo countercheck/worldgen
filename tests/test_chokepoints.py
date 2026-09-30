@@ -51,7 +51,10 @@ from worldgen.stages.chokepoints import (
 # residual surplus is untouched by any of this: 511 before, 520 after.
 _CHOKE_SEED = 1
 _CHOKE_SIZE = 112
+# Axial, the grid these worlds were chosen on; offset became the default afterwards, and
+# the seeds below are picked for what they grow on this grid.
 _CHOKE_DEFAULTS = {
+    "grid_layout": "axial",
     "regional_climate": "temperate",
     "continent_falloff_edges": ("south",),
     "chokepoint_min_road_tier": "track",
@@ -203,7 +206,9 @@ def test_a_spur_that_joins_no_settlements_is_not_a_chokepoint():
     sixty (128x128 mediterranean, seed 42) and on none at 48, 64 or 96, so a test that
     generates worlds and looks would have gone on passing.
     """
-    cfg = WorldConfig(width=12, height=12, chokepoint_min_road_tier="secondary")
+    cfg = WorldConfig(
+        width=12, height=12, grid_layout="axial", chokepoint_min_road_tier="secondary"
+    )
     state = WorldState.empty(1, cfg.width, cfg.height, cfg.grid_layout)
 
     # A through road joining two settlements, and a spur joining nothing. Both carry a
@@ -396,7 +401,9 @@ def test_a_bridge_no_road_crosses_founds_nothing():
     anything if the drawn network actually goes over it. Before this was checked, six of
     seven villages on the 96x96 fixture stood at bridges with no road edge at all.
     """
-    cfg = WorldConfig(width=12, height=12, chokepoint_min_road_tier="secondary")
+    cfg = WorldConfig(
+        width=12, height=12, grid_layout="axial", chokepoint_min_road_tier="secondary"
+    )
     state = WorldState.empty(1, cfg.width, cfg.height, cfg.grid_layout)
 
     road = [(1, 1), (2, 1), (3, 1), (4, 1), (5, 1)]

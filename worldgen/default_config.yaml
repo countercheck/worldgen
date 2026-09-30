@@ -6,20 +6,20 @@
 # ---------------------------------------------------------------------------
 # Map dimensions
 # ---------------------------------------------------------------------------
-width: 128    # Map width in hexes. Default: 128
-height: 128   # Map height in hexes. Default: 128
+width: 200    # Map width in hexes. Default: 200
+height: 200   # Map height in hexes. Default: 200
 
 # How width x height are laid onto the hex grid.
 #   axial   Hex coordinates run q in [0, width), r in [0, height). The flat-top pixel
 #           transform shears that rhombus, so the drawn map is a leaning parallelogram
-#           with a straight edge on all four sides. Default.
+#           with a straight edge on all four sides.
 #   offset  Odd-q offset column/row. The drawn map is a rectangle; odd columns sit half
 #           a hex lower than even ones, so the north and south edges are ragged while
-#           east and west stay straight.
+#           east and west stay straight. Default.
 # Columns are spaced 1.5 hex-sizes apart and rows sqrt(3), so an offset map is square
 # when height is about 0.87 * width — 128 x 111, say.
-grid_layout: axial
-model: classic          # Settlement and road model: classic | organic. The --model flag overrides.
+grid_layout: offset
+model: organic          # Settlement and road model: classic | organic. The --model flag overrides. Default: organic
 
 # Elevation is metres above sea level, so sea level is zero by definition and is not a
 # setting. How the map looks is set by how high the land stands and how deep the sea lies.
@@ -29,17 +29,6 @@ elevation_profile_mode_m: 50.0    # Most common land height for elevation_profil
 elevation_profile_median_m: 150.0 # Median land height for elevation_profile: custom, before the cut at max_elevation_m (a median near the ceiling comes out lower). Default: 150
 seabed_depth_m: 200.0    # How deep the sea floor lies at the map edge. A continental shelf, not an abyss. How much of the map ends up underwater follows from this and max_elevation_m. Default: 200
 coast_max_elevation_m: 100.0 # Land no higher than this beside the sea is coast. Default: 100
-
-# How width x height are laid onto the hex grid.
-#   axial   Hex coordinates run q in [0, width), r in [0, height). The flat-top pixel
-#           transform shears that rhombus, so the drawn map is a leaning parallelogram
-#           with a straight edge on all four sides. Default.
-#   offset  Odd-q offset column/row. The drawn map is a rectangle; odd columns sit half
-#           a hex lower than even ones, so the north and south edges are ragged while
-#           east and west stay straight.
-# Columns are spaced 1.5 hex-sizes apart and rows sqrt(3), so an offset map is square
-# when height is about 0.87 * width — 128 x 111, say.
-grid_layout: axial
 
 # ---------------------------------------------------------------------------
 # Elevation noise (Fractal Brownian Motion)

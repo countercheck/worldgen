@@ -75,8 +75,8 @@ CLIMATE_CONTEXTS: dict[str, ClimateContext] = {
 class WorldConfig:
     """All tunable parameters for world generation."""
 
-    width: int = 128
-    height: int = 128
+    width: int = 200
+    height: int = 200
     # How width x height are laid out on the hex grid:
     #   "axial"   q in [0, width), r in [0, height).  The flat-top pixel transform
     #             shears that rhombus, so the drawn map is a leaning parallelogram.
@@ -84,7 +84,7 @@ class WorldConfig:
     #             sit half a hex lower than even ones, so the north and south edges are
     #             ragged.  A square needs height about 0.87 * width, since hex columns
     #             are spaced 1.5 hex-sizes apart and rows sqrt(3).
-    grid_layout: str = "axial"
+    grid_layout: str = "offset"
     # Which settlement and road model the pipeline runs.  "classic" ranks hexes on
     # habitability and places configured counts; "organic" derives the hierarchy from
     # haulage economics and the count falls out.  A config field rather than only a CLI
@@ -92,7 +92,7 @@ class WorldConfig:
     # it — the reproduction record is seed plus config, and the model changes everything
     # after the terrain — and the organic-only knobs must not be silently ignored because
     # the flag defaulted to classic on the replay.  The CLI flag overrides this.
-    model: str = "classic"
+    model: str = "organic"
     # Sea level is the datum: elevation is metres above it, so it is zero by
     # definition and is no longer a setting. What the map looks like is set by how
     # high the land stands and how deep the sea lies, below.
