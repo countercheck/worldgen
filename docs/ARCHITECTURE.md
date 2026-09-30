@@ -39,6 +39,7 @@ flowchart TB
         LEG[legend]
         RIV[rivers]
         HI[heightmap_import<br/>HeightmapError]
+        CP[culture_packs<br/>reads pack YAML]
     end
 
     subgraph RENDER["render/ — matplotlib debug viewer"]
@@ -52,6 +53,7 @@ flowchart TB
     subgraph NAMING["naming/ — place-name vocabulary, used by NamingStage"]
         SITE[site.read_site<br/>ground -> meanings]
         LANG[conlang.Language<br/>meanings -> words]
+        PK[packs.schema + processor<br/>culture packs from YAML]
         CREG[regions.culture_regions]
         NREG[registry.NameRegistry]
     end
@@ -74,6 +76,9 @@ flowchart TB
     SEQ -->|NamingStage| LANG
     SEQ -->|NamingStage| CREG
     SEQ -->|NamingStage| NREG
+    SEQ -->|NamingStage| CP
+    CP -->|parse_pack| PK
+    SEQ -->|NamingStage| PK
     WS --- HEX
     WS --- GRID
     SEQ -.reads.-> CFG

@@ -25,6 +25,7 @@ from ..core.hex import Hex, HexCoord, Settlement, SettlementTier, TerrainClass
 from ..core.hex_grid import distance, neighbors
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
+from ..export.culture_packs import LoadedPack, load_packs
 from ..naming import (
     GLOSS,
     Culture,
@@ -35,7 +36,7 @@ from ..naming import (
     culture_regions,
     read_site,
 )
-from ..naming.packs import PACKS, PackCulture
+from ..naming.packs import CulturePackError, PackCulture
 
 _WATER = (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
 _TIER_ORDER = {SettlementTier.CITY: 0, SettlementTier.TOWN: 1, SettlementTier.VILLAGE: 2}
@@ -90,14 +91,19 @@ class NamingStage(GeneratorStage):
         if cfg.naming_cultures <= 0:
             return state
         rng = self.rng
+        # A world being named again keeps no river name from before: the new cultures may
+        # leave a river unnamed that the old ones named. A no-op inside a full run.
+        for river in state.rivers:
+            river.name = ""
 
-        cultures = self._cultures(cfg.naming_cultures, cfg.naming_packs, rng)
+        packs = self._packs(cfg)
+        cultures = self._cultures(cfg.naming_cultures, cfg.naming_packs, packs, rng)
         substrate = None
         if cfg.naming_substrate:
             # Invented even when a pack replaces it, so the draws after it do not move.
             substrate = self._languages(1, rng, {c.name for c in cultures})[0]
             if cfg.naming_substrate_pack:
-                substrate = PackCulture(PACKS[cfg.naming_substrate_pack])
+                substrate = PackCulture(packs[cfg.naming_substrate_pack].pack)
         regions = culture_regions(
             state.hexes,
             len(cultures),
@@ -120,24 +126,57 @@ class NamingStage(GeneratorStage):
             )
 
         def record(culture, role: str) -> dict:
-            pack = culture.pack.key if isinstance(culture, PackCulture) else None
-            return {"name": culture.name, "role": role, "pack": pack}
+            # A pack culture records which pack, where it came from and a fingerprint of
+            # its content, so a world regenerated after the pack file was edited can be
+            # told apart from one named by the pack it was made with.
+            if not isinstance(culture, PackCulture):
+                return {"name": culture.name, "role": role, "pack": None}
+            loaded = packs[culture.pack.key]
+            return {
+                "name": culture.name,
+                "role": role,
+                "pack": loaded.pack.key,
+                "pack_source": loaded.source,
+                "pack_hash": loaded.hash,
+            }
 
         state.metadata["cultures"] = [record(c, "regional") for c in cultures] + (
             [record(substrate, "substrate")] if substrate else []
         )
         return state
 
+    @staticmethod
+    def _packs(cfg) -> dict[str, LoadedPack]:
+        """The packs this run can use, with every pack the config names checked to exist."""
+        wanted = [
+            *cfg.naming_packs,
+            *([cfg.naming_substrate_pack] if cfg.naming_substrate_pack else []),
+        ]
+        if not wanted:
+            return {}
+        packs = load_packs(cfg.naming_pack_dirs)
+        for key in wanted:
+            if key not in packs:
+                available = ", ".join(f"{k} ({p.source})" for k, p in sorted(packs.items()))
+                raise CulturePackError(f"unknown culture pack {key!r}; available: {available}")
+        return packs
+
     @classmethod
-    def _cultures(cls, n: int, packs: tuple[str, ...], rng: np.random.Generator) -> list:
+    def _cultures(
+        cls,
+        n: int,
+        keys: tuple[str, ...],
+        packs: dict[str, LoadedPack],
+        rng: np.random.Generator,
+    ) -> list:
         """One culture per region: the named packs first, invented languages for the rest.
 
         Languages are invented for every region either way and then replaced, so choosing
         packs does not shift the draws that invent the rest — a pack swapped in for region
         one leaves region three speaking what it did.
         """
-        invented = cls._languages(n, rng, {PACKS[k].name for k in packs})
-        return [PackCulture(PACKS[k]) for k in packs] + invented[len(packs) :]
+        invented = cls._languages(n, rng, {packs[k].pack.name for k in keys})
+        return [PackCulture(packs[k].pack) for k in keys] + invented[len(keys) :]
 
     @staticmethod
     def _languages(n: int, rng: np.random.Generator, taken: set[str] | None = None):

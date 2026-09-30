@@ -1,18 +1,20 @@
-"""Hand-written culture packs: complete, well-formed, and honoured by the stage."""
+"""The built-in culture packs: complete, well-formed, and honoured by the stage.
+
+The packs are YAML read through `export.culture_packs`; `test_culture_pack_schema` checks
+the validator on bad files, and this one checks what the good ones actually produce.
+"""
 
 import numpy as np
 import pytest
 
 from tests.worlds import build_world
-from worldgen.core.config import CULTURE_PACKS, WorldConfig
+from worldgen.core.config import WorldConfig
+from worldgen.export.culture_packs import load_packs
 from worldgen.naming import GENERICS, SPECIFICS, Qualifier
-from worldgen.naming.packs import PACKS, PackCulture
+from worldgen.naming.packs import PackCulture
 
+PACKS = {key: loaded.pack for key, loaded in load_packs().items()}
 _ALL = sorted(PACKS)
-
-
-def test_the_config_knows_every_pack_and_no_others():
-    assert tuple(sorted(CULTURE_PACKS)) == tuple(_ALL)
 
 
 @pytest.mark.parametrize("key", _ALL)
@@ -99,11 +101,16 @@ def test_proper_names_are_stable_and_step_on_when_asked(key):
     assert len(names) > 100
 
 
-def test_the_config_refuses_a_pack_it_does_not_know():
-    with pytest.raises(ValueError, match="unknown culture pack"):
-        WorldConfig(naming_packs=("klingon",))
-    with pytest.raises(ValueError, match="unknown culture pack"):
-        WorldConfig(naming_substrate_pack="klingon")
+@pytest.mark.parametrize(
+    "overrides", [{"naming_packs": ("klingon",)}, {"naming_substrate_pack": "klingon"}]
+)
+def test_the_stage_refuses_a_pack_it_cannot_find_and_says_what_there_is(overrides):
+    """Which packs exist is only known once their folders are read, so the check is the
+    stage's; the message lists what is available so a typo is easy to fix."""
+    from tests.worlds import build_pipeline
+
+    with pytest.raises(ValueError, match=r"unknown culture pack 'klingon'.*english \(builtin\)"):
+        build_pipeline(width=16, height=16, **overrides).run()
 
 
 def test_the_config_refuses_more_packs_than_regions_and_repeats():
@@ -176,11 +183,10 @@ def test_the_hive_names_a_queens_seat_with_ceremony_and_an_outpost_tersely():
 
 def test_the_hive_tongue_buzzes_for_queens_and_clicks_for_workers():
     """The two registers share no telltale letters: a buzz has no stops, a click no hum."""
-    from worldgen.naming.packs.hive import tongue
-
+    hive = PackCulture(PACKS["hive"])
     for i in range(50):
-        buzz = tongue(f"person:{i}", 2, rank=0)
-        click = tongue(f"person:{i}", 2, rank=2)
+        buzz = hive.proper_name(f"person:{i}", 2, rank=0).lower()
+        click = hive.proper_name(f"person:{i}", 2, rank=2).lower()
         assert not set("k'qxc") & set(buzz), buzz
         assert not set("vrsmngo") & set(click), click
 
