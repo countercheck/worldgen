@@ -11,6 +11,7 @@ from worldgen.core.hex import (
 )
 from worldgen.core.world_state import Ferry, River, RoadTier, WorldState
 from worldgen.export.svg_export import SVGConfig, render, save
+from worldgen.render import glyphs
 
 
 def _small_world() -> WorldState:
@@ -137,7 +138,7 @@ def test_save_creates_file(tmp_path):
 def test_all_settlement_tiers_rendered():
     ws = _small_world()
     svg = render(ws)
-    assert "gold" in svg  # city star
+    assert glyphs.CITY_DISC in svg  # city: a church on a gold disc
     assert "<rect" in svg  # town square
     assert "<circle" in svg  # village circle
 
@@ -399,10 +400,10 @@ def test_legend_scale_grows_the_panel():
 
 
 def test_legend_symbols_match_map_symbols():
-    """Legend glyphs come from the same helper as the map, so a city is a gold star."""
+    """Legend glyphs come from the same helper as the map, so a city is its church on gold."""
     ws = _small_world()
     body = render(ws).split('<g id="layer-legend">')[1]
-    assert 'fill="gold"' in body  # city star
+    assert f'fill="{glyphs.CITY_DISC}"' in body  # city: a church on a gold disc
     assert "#4a2f14" in body  # PRIMARY road color, same as the roads layer
     assert "#2f6fbf" in body  # river blue, same as the rivers layer
 

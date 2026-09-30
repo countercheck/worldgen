@@ -1,4 +1,4 @@
-"""The pickaxe and the axe: one shape, drawn by every renderer, and listed in the legend."""
+"""The settlement icons: one shape each, drawn by every renderer, and listed in the legend."""
 
 import re
 from pathlib import Path
@@ -30,6 +30,28 @@ def test_the_campaign_client_draws_the_same_shapes():
     for name, glyph in (("AXE", glyphs.AXE), ("PICKAXE", glyphs.PICKAXE)):
         python = [v for p in (*glyph.handle, *glyph.head) for v in p] + [glyph.handle_width]
         assert _ts_glyph(name) == python, f"{name} differs between glyphs.py and glyphs.ts"
+
+
+def test_the_campaign_client_draws_the_same_city():
+    block = re.search(r"export const CITY: Emblem = \{(.*?)\};", _TS.read_text(), re.S)
+    assert block, f"CITY is missing from {_TS.name}"
+    python = [v for shape in glyphs.CITY.shapes for p in shape for v in p]
+    assert _numbers(block.group(1)) == python, "CITY differs between glyphs.py and glyphs.ts"
+    colours = {
+        name: re.search(rf"export const {name} = '(#[0-9a-f]{{6}})'", _TS.read_text()).group(1)
+        for name in ("CITY_DISC", "CITY_INK")
+    }
+    assert colours == {"CITY_DISC": glyphs.CITY_DISC, "CITY_INK": glyphs.CITY_INK}
+
+
+def test_a_city_is_a_church_among_roofs_on_a_gold_disc():
+    city = _settlement_marker(SettlementTier.CITY, 10, 10)
+    assert glyphs.CITY_DISC in city and city.count("<polygon") == len(glyphs.CITY.shapes)
+    img = Image.new("RGB", (60, 60), (200, 200, 200))
+    _draw_settlement(ImageDraw.Draw(img), SettlementTier.CITY, 30, 30, scale=3)
+    pixels = list(img.getdata())
+    assert sum(1 for p in pixels if p == glyphs.CITY_DISC_RGB) > 50, "no gold disc"
+    assert sum(1 for p in pixels if p == glyphs.CITY_INK_RGB) > 50, "no silhouette"
 
 
 def test_a_mine_and_a_camp_are_drawn_as_their_tools():

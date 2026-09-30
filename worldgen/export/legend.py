@@ -92,6 +92,7 @@ class LegendRow:
 
     kind: str  # "fill" | "ramp" | "river" | "road" | "anchorage"
     #       | "ford" | "bridge" | "settlement" | "resource"
+    #       | "river_source" | "river_end" | "rapids"
     label: str
     sample: object = None
 
@@ -153,14 +154,9 @@ def anchorage_points(ws: WorldState) -> list:
     return sorted(points)
 
 
-def crossings(ws: WorldState, axial_to_pixel, hex_size: float) -> list:
-    """Every tagged ford and bridge, as `(coord, kind, angle)` in stable order.
-
-    *angle* is the bearing in degrees of the river passing under the crossing, taken from
-    the neighbouring hexes on its own drawn path.  Both symbols are laid across the water
-    rather than along it, so an exporter draws them rotated a further 90°; a bridge
-    aligned with the current would read as a second river.
-    """
+def _bearings(ws: WorldState, axial_to_pixel, hex_size: float) -> dict:
+    """The screen bearing, in degrees, of the river through each hex on a drawn path:
+    from the hex before it to the hex after, so it runs downstream."""
     bearing: dict = {}
     for river in ws.rivers:
         hexes = river.hexes
@@ -172,7 +168,39 @@ def crossings(ws: WorldState, axial_to_pixel, hex_size: float) -> list:
             (ax, ay) = axial_to_pixel(before, hex_size)
             (bx, by) = axial_to_pixel(after, hex_size)
             bearing[c] = math.degrees(math.atan2(by - ay, bx - ax))
+    return bearing
 
+
+def river_marks(ws: WorldState, axial_to_pixel, hex_size: float) -> list:
+    """Where rivers rise, where they end and where they run white, as `(coord, kind,
+    bearing)` in stable order. *kind* is "source", "end" or "rapids" (a cataract or
+    rapids); *bearing* is the river's, downstream, in degrees.
+
+    Read off the tags `HydrologyStage` and `CataractStage` set, so every renderer marks
+    the same places.
+    """
+    bearing = _bearings(ws, axial_to_pixel, hex_size)
+    out = []
+    for coord, hex_item in ws.hexes.items():
+        tags = hex_item.tags
+        if "river_source" in tags:
+            out.append((coord, "source", bearing.get(coord, 0.0)))
+        if "river_end" in tags:
+            out.append((coord, "end", bearing.get(coord, 0.0)))
+        if "cataract" in tags or "rapids" in tags:
+            out.append((coord, "rapids", bearing.get(coord, 0.0)))
+    return sorted(out)
+
+
+def crossings(ws: WorldState, axial_to_pixel, hex_size: float) -> list:
+    """Every tagged ford and bridge, as `(coord, kind, angle)` in stable order.
+
+    *angle* is the bearing in degrees of the river passing under the crossing, taken from
+    the neighbouring hexes on its own drawn path.  Both symbols are laid across the water
+    rather than along it, so an exporter draws them rotated a further 90°; a bridge
+    aligned with the current would read as a second river.
+    """
+    bearing = _bearings(ws, axial_to_pixel, hex_size)
     out = []
     for coord, hex_item in ws.hexes.items():
         if "bridge" in hex_item.tags:
@@ -208,6 +236,13 @@ def rows(ws: WorldState, color_mode: str, layers: set[str]) -> list[LegendRow]:
 
     if "rivers" in layers and ws.rivers:
         out.append(LegendRow("river", "River"))
+        tagged = {t for hex_item in ws.hexes.values() for t in hex_item.tags}
+        if "river_source" in tagged:
+            out.append(LegendRow("river_source", "River source"))
+        if "river_end" in tagged:
+            out.append(LegendRow("river_end", "River end"))
+        if tagged & {"cataract", "rapids"}:
+            out.append(LegendRow("rapids", "Rapids"))
 
     if "roads" in layers and ws.road_edges:
         present = {edge.tier for edge in ws.road_edges.values()}

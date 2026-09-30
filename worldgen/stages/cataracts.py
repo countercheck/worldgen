@@ -18,6 +18,10 @@ American east coast.
 they were built anywhere else. `site_bonus` pays a site beside one
 `habitability_mill_bonus`.
 
+**Rapids** are the same fall on a smaller river: white water, too fast to wade and too
+rough to paddle, but on a river no barge was ever going to use. They are tagged `rapids`
+for the map to draw, and change nothing else. A cataract is not also a rapid.
+
 Tagged here, straight after hydrology, because `navigable` is read as early as
 `HabitabilityStage` scoring harbours — a cataract has to exist before anyone asks whether a
 boat can load there.
@@ -33,20 +37,32 @@ from .road_cost import is_river
 class CataractStage(GeneratorStage):
     def run(self, state: WorldState) -> WorldState:
         cfg = self.config
-        if cfg.cataract_min_drop_m <= 0:
-            return state
         hexes = state.hexes
         # Measured before any tag is set, so one reach's cataract cannot change how the
         # next one reads: the drop is a fact about the ground, not about the tagging order.
-        falls = [
-            coord
-            for coord, hx in hexes.items()
-            if is_river(hx)
-            and carries_a_barge(hx, cfg)
-            and channel_drop_m(hx, hexes, cfg) >= cfg.cataract_min_drop_m
-        ]
+        falls = set()
+        rapids = set()
+        for coord, hx in hexes.items():
+            if not is_river(hx):
+                continue
+            drop = channel_drop_m(hx, hexes, cfg)
+            if (
+                cfg.cataract_min_drop_m > 0
+                and carries_a_barge(hx, cfg)
+                and drop >= cfg.cataract_min_drop_m
+            ):
+                falls.add(coord)
+                continue
+            if (
+                cfg.rapids_min_drop_m > 0
+                and hx.catchment_km2 >= cfg.rapids_min_catchment_km2
+                and drop >= cfg.rapids_min_drop_m
+            ):
+                rapids.add(coord)
         for coord in falls:
             hexes[coord].tags.add("cataract")
+        for coord in rapids:
+            hexes[coord].tags.add("rapids")
         return state
 
 
