@@ -418,7 +418,9 @@ yield_multiplier: 1.7 # Farming technology, as one multiplier on yield_arable an
 # rather than absolute, and that is the substance of it: a market with a floodplain has a
 # high bar and leaves its hillsides to sheep, while a market on uniformly thin ground has a
 # low bar and ploughs the scrub. The worse the land, the more pressure to use bad land.
-clearing_margin: 0.45 # Fraction of the best rent in reach at which clearing stops. Default: 0.45
+clearing_margin: 0.35 # Fraction of the best rent in reach at which clearing stops. Default: 0.35
+pasture_margin: 0.15   # Ploughable ground in reach whose rent falls short of clearing_margin but reaches this fraction of the best is cleared to pasture; below it, it stays wood. Default: 0.15
+settled_clear_radius_city: 1 # Hexes round a city cleared for gardens and paddocks; every town and village clears its own hex. Default: 1
 
 # Fertile and marginal hexes are additionally scaled by a rainfall curve peaking across
 # the [biome_dry_precip_mm, biome_wet_precip_mm] band and falling to 0 at both ends — too
@@ -514,6 +516,8 @@ city_min_population: 5000 # A town that grows past this becomes a city whatever 
 # Each is fed from beyond itself, like a city: its workforce is drawn from the settlements
 # that can haul food to it, so the map's total population does not change.
 port_min_population: 250 # A port is founded at an unattended quay (or waterfront of quays within transship_radius) whose trade share reaches this many people. 0 turns ports off.. Default: 250
+port_city_min_separation: 12 # A port made a city by trade alone must have no other city within this many hexes... Default: 12
+port_city_min_farmland: 20   # ...and at least this many ploughed hexes within market_day_radius; otherwise it is a town. Default: 20
 ore_min_relief_m: 200.0 # Relief a hex needs to carry ore. About the top 8% of land on a temperate map. Default: 200.0
 ore_deposits_per_1000_km2: 5.0 # Expected deposits per 1000 km² of ground above ore_min_relief_m, drawn as a Poisson count. 0 turns mines off. Default: 5.0
 ore_min_separation: 8 # Hexes between deposits. Default: 8

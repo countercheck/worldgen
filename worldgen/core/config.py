@@ -774,6 +774,13 @@ class WorldConfig:
     # its haulage-weighted population, so the map's total is unchanged.
     # A port is founded at an unattended quay whose trade supports at least this many.
     port_min_population: int = 250
+    # A port whose trade alone would make it a city (city_min_population) is one only if
+    # no other city stands within port_city_min_separation hexes and at least
+    # port_city_min_farmland ploughed hexes lie within market_day_radius; otherwise it is a
+    # town. A portage at a cataract in a bog, a morning's walk from the city it serves, is
+    # a busy landing, not a second city.
+    port_city_min_separation: int = 12
+    port_city_min_farmland: int = 20
     # Ore lies in the hills: deposits are drawn over ground with this much relief, at this
     # many per 1000 km2 of it, weighted towards the higher, and this far apart.
     ore_min_relief_m: float = 200.0
@@ -860,7 +867,14 @@ class WorldConfig:
     # uniformly thin ground has a low bar and ploughs the scrub. The worse the land, the
     # more pressure to use bad land — the extensive margin set against the best
     # alternative available, which is what rent theory actually says.
-    clearing_margin: float = 0.45
+    clearing_margin: float = 0.35
+    # The same test for grazing: ploughable ground within a catchment whose rent falls short
+    # of clearing_margin but reaches this fraction of the best is cleared to pasture; below
+    # it, the parish keeps it as woodland. At or above clearing_margin it does nothing.
+    pasture_margin: float = 0.15
+    # How far round a city its own ground is cleared — gardens, orchards, paddocks — in
+    # hexes. Every town and village clears the hex it stands on. See SettledGroundStage.
+    settled_clear_radius_city: int = 1
 
     # Habitability — weight on the catchment mean, plus flat site bonuses
     habitability_agri_weight: float = 0.40
@@ -1372,6 +1386,15 @@ class WorldConfig:
             raise ValueError(
                 f"haulage_transship_cost must be >= 0, got {self.haulage_transship_cost}"
             )
+        for name in (
+            "port_city_min_separation",
+            "port_city_min_farmland",
+            "settled_clear_radius_city",
+        ):
+            if getattr(self, name) < 0:
+                raise ValueError(f"{name} must be >= 0, got {getattr(self, name)}")
+        if not 0.0 <= self.pasture_margin <= 1.0:
+            raise ValueError(f"pasture_margin must be in [0, 1], got {self.pasture_margin}")
         for name in ("rapids_min_drop_m", "rapids_min_catchment_km2"):
             if getattr(self, name) < 0:
                 raise ValueError(f"{name} must be >= 0, got {getattr(self, name)}")

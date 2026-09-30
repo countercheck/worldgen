@@ -78,6 +78,23 @@ def decide_land_use(hexes, cfg) -> None:
     for coord, hx in hexes.items():
         hx.land_use = _use_for(hx, rents[coord], best.get(hx.territory, 0.0), cfg)
         hx.cultivated = hx.land_use is LandUse.ARABLE
+        clear(hx)
+
+
+# What clearing takes off the ground. Wetland and bare ground are not cleared: neither is
+# ploughed or grazed here, since their soil makes them waste.
+CLEARED_COVER = frozenset({LandCover.DENSE_FOREST, LandCover.WOODLAND, LandCover.SCRUB})
+
+
+def clear(hx) -> None:
+    """Make the cover match the use: ploughland and pasture are open ground.
+
+    The cover was set by `LandCoverStage` for the wild country, before anyone worked it, and
+    left as it was it drew every field on a map as forest. Food is not affected:
+    `potential_food` reads the cover only for water and wetland, which are never cleared.
+    """
+    if hx.land_use in (LandUse.ARABLE, LandUse.PASTURE) and hx.land_cover in CLEARED_COVER:
+        hx.land_cover = LandCover.OPEN
 
 
 def _use_for(hx, hex_rent: float, best_rent: float, cfg) -> LandUse:
@@ -96,6 +113,11 @@ def _use_for(hx, hex_rent: float, best_rent: float, cfg) -> LandUse:
         return LandUse.PASTURE
     if hex_rent >= cfg.clearing_margin * best_rent:
         return LandUse.ARABLE
+    # Too poor to plough but near enough to work: cleared for stock. What a parish left
+    # standing was its worst and furthest ground, kept for timber and pannage; ground only a
+    # little worse than the ploughland was grass.
+    if hex_rent >= cfg.pasture_margin * best_rent:
+        return LandUse.PASTURE
     return LandUse.WOOD
 
 
@@ -169,4 +191,4 @@ class LandUseStage(GeneratorStage):
         return out
 
 
-__all__ = ["LandUseStage", "decide_land_use", "rent", "rural_population"]
+__all__ = ["CLEARED_COVER", "LandUseStage", "clear", "decide_land_use", "rent", "rural_population"]

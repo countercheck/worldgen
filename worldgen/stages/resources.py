@@ -113,12 +113,30 @@ class ResourceStage(GeneratorStage):
                     city.population -= n
             # A port that the trade alone makes a city is the entrepôt, and it is one on the
             # same terms as a town grown past `city_min_population`.
-            big = 0 < cfg.city_min_population <= moved
+            big = 0 < cfg.city_min_population <= moved and self._may_be_city(state, quay)
             tier = SettlementTier.CITY if big else SettlementTier.TOWN
             self._found(state, quay, tier, SettlementRole.PORT, moved, "port", founded)
             if big:
                 state.metadata["cities"] = sorted([*state.metadata.get("cities", []), quay])
             founded += 1
+
+    def _may_be_city(self, state, quay) -> bool:
+        """Whether a port founded on trade alone may be a city: farmland round it, and no
+        city close by. Otherwise it is a town, however much passes through it."""
+        cfg = self.config
+        hexes = state.hexes
+        for s in state.settlements:
+            if (
+                s.tier is SettlementTier.CITY
+                and distance(s.coord, quay) < cfg.port_city_min_separation
+            ):
+                return False
+        ploughed = sum(
+            1
+            for c in hex_range(quay, int(cfg.market_day_radius))
+            if c in hexes and hexes[c].land_use is LandUse.ARABLE
+        )
+        return ploughed >= cfg.port_city_min_farmland
 
     # -- mines ----------------------------------------------------------------
 
