@@ -250,6 +250,9 @@ Convenience accessors: `all_land()`, `all_open_water()`, `all_inland_water()`,
 | `"prominent_site"` | ROLLING hex that is a local-max `habitability_town` within 3-hex range, no settlement | City/Town (`classic`) |
 | `"pass"` | A col: a saddle whose flanks both rise at least `terrain_steep_gradient_m` | Chokepoints (`organic`) |
 | `"confluence_town"` | TOWN settled on a hex already tagged `"confluence"` | City/Town |
+| `"river_source"` | First hex of a drawn river (two or more land hexes) that rises on the map — a headwater, not water arriving from off it | Hydrology |
+| `"river_end"` | Last land hex of a drawn river that stops without joining another: into the sea or a lake, off the map, or into the ground | Hydrology |
+| `"rapids"` | White water on a river too small for a cataract: see `rapids_min_drop_m` | Cataracts |
 | `"hollow"` | Land in a closed hollow too small or shallow for a lake, or a small island in a lake; waterlogs to wetland | Water bodies |
 
 Roads may cross a river but never travel along one: the hexsides a river is drawn
@@ -785,6 +788,18 @@ Nine steps, top to bottom in
    the first already-claimed hex. The result: every `River` object in
    `state.rivers` is a single source-to-confluence (or source-to-sea)
    segment with no duplicate trunk drawing.
+
+10. **Splitting at water** (`_split_at_water`): a river ends where it meets a lake, as
+    it does the sea — the piece keeps the first water hex as its last — and what leaves
+    the lake is a river of its own, starting from the water hex it leaves by. Nothing is
+    drawn across open water.
+
+11. **Marks** for the map's symbols: `river_source` on the first hex of each drawn river
+    (two or more land hexes) that rises on the map, and `river_end` on the last land hex of
+    each that stops without joining another — into the sea or a lake, off the map, or into
+    the ground. `CataractStage` adds `rapids` (see `rapids_min_drop_m`). Every exporter and
+    the campaign map draw a source as a ring, an end as an arrowhead pointing downstream,
+    and a cataract or rapids as white bars across the river.
 
 **Output**
 
@@ -2328,6 +2343,8 @@ no navigable river at all, and tropical 12.6%.
 | `river_wander_exponent` | `float` | `1.0` | `≥ 0` | How water picks its way downhill, in hydrology and in erosion's valley carving alike: each hex drains to a lower neighbour drawn at random with weight (drop / largest drop)^k. 0 is any downhill neighbour alike, 1 in proportion to the drop, 8+ all but always the steepest. Pure steepest descent drew rivers on level ground as ranks of straight parallel lines. |
 | `navigable_min_discharge` | `float` | `60000.0` | `> channel` | ...and to float a boat. Consumed by the haulage model: a navigable hex multiplies a city's supply reach |
 | `cataract_min_drop_m` | `float` | `20.0` | `>= 0` | Metres a barge-sized river falls through one hex before it is a cataract: no boat passes, cargo portages round it, and the fall drives mills (§ [3.5a](#35a-cataracts)). 20 m/km is a 2% gradient, strong rapids at a kilometre to the hex. 0 turns cataracts off |
+| `rapids_min_drop_m` | `float` | `10.0` | `>= 0` | White water on a smaller river: a river hex draining at least `rapids_min_catchment_km2` that falls this far through one hex (and is not already a cataract) is tagged `rapids` and drawn as white water on every map. Drawing only; boats and crossings are unaffected. 0 turns rapids off. |
+| `rapids_min_catchment_km2` | `float` | `200.0` | `>= 0` | The smallest river `rapids_min_drop_m` marks. |
 | `evapotranspiration_base_mm` | `float` | `50.0` | `≥ 0` | Rain the ground and its plants take before anything runs off, even at freezing |
 | `evapotranspiration_per_c_mm` | `float` | `30.0` | `≥ 0` | ...plus this much per degree of mean temperature. Why cold country sheds nearly all its rain and the taiga is full of rivers |
 | `min_runoff_mm` | `float` | `25.0` | `≥ 0` | Floor, so even a desert drains its largest valleys |

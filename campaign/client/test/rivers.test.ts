@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest';
 
 import { key, type Hex, type HexKey, type River, type World } from '@campaign/shared';
 
-import { riverRuns } from '../src/map/draw.js';
+import { riverMarks, riverRuns } from '../src/map/draw.js';
 
 const NAVIGABLE = 1000;
 
@@ -78,5 +78,33 @@ describe('splitting a river by class', () => {
     const runs = riverRuns({ hexes: [...along(2).hexes, { q: 9, r: 9 }], flowVolume: 0, name: '' }, world);
     expect(runs.map((r) => r.cls)).toEqual(['minor']);
     expect(runs[0].hexes).toHaveLength(3);
+  });
+});
+
+describe('marking where a river rises, ends and runs white', () => {
+  /** Three hexes eastward along r = 0, tagged as given. */
+  function tagged(tags: readonly (readonly string[])[]): World {
+    const hexes = new Map<HexKey, unknown>();
+    tags.forEach((t, q) => hexes.set(key({ q, r: 0 }), { coord: { q, r: 0 }, tags: new Set(t) }));
+    return { hexes, rivers: [along(tags.length)] } as unknown as World;
+  }
+
+  it('marks each tag once, at its hex', () => {
+    const marks = riverMarks(tagged([['river_source'], ['rapids'], ['river_end']]));
+    expect(marks.map((m) => [m.coord.q, m.kind])).toEqual([
+      [0, 'source'],
+      [1, 'rapids'],
+      [2, 'end'],
+    ]);
+  });
+
+  it('draws a cataract as white water too', () => {
+    expect(riverMarks(tagged([[], ['cataract'], []])).map((m) => m.kind)).toEqual(['rapids']);
+  });
+
+  it('turns a mark along its river, downstream', () => {
+    // Eastward along r = 0 on the flat-top layout is down and to the right on screen.
+    const [mark] = riverMarks(tagged([[], ['rapids'], []]));
+    expect(Math.cos(mark!.bearing)).toBeGreaterThan(0);
   });
 });

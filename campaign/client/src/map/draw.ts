@@ -28,7 +28,16 @@ import {
   type WorldHex,
 } from '@campaign/shared';
 
-import { drawGlyph, ROLE_GLYPH } from './glyphs.js';
+import {
+  CITY,
+  CITY_DISC,
+  CITY_INK,
+  drawEmblem,
+  drawGlyph,
+  drawRiverMark,
+  ROLE_GLYPH,
+  type RiverMarkKind,
+} from './glyphs.js';
 import { drawSymbol, symbolSize, type SymbolSpec } from './symbols.js';
 
 export type { SymbolSpec } from './symbols.js';
@@ -135,7 +144,57 @@ export function drawTerrain(
 
   drawRivers(ctx, world, view, theme);
   drawRoads(ctx, world, view, theme);
+  // Over the roads, so a spring or white water on a road's reach still shows.
+  for (const mark of riverMarks(world)) {
+    const p = toScreen(mark.coord, view);
+    drawRiverMark(
+      ctx,
+      mark.kind,
+      p.x,
+      p.y,
+      mark.bearing,
+      Math.max(2.5, view.size * 0.3),
+      theme.river.major.color,
+    );
+  }
   drawSettlements(ctx, world, view);
+}
+
+/** A river mark: where one rises, where it ends, or where it runs white. */
+export interface RiverMark {
+  readonly coord: Hex;
+  readonly kind: RiverMarkKind;
+  /** The river's bearing through the hex, downstream, in radians on the flat-top layout. */
+  readonly bearing: number;
+}
+
+/**
+ * Every river mark, read off the tags the generator sets (`river_source`, `river_end`,
+ * `cataract`, `rapids`), each turned along its river. Mirrors `legend.river_marks` in the
+ * Python, so the campaign marks the same places the exported map does.
+ */
+export function riverMarks(world: World): RiverMark[] {
+  const bearing = new Map<string, number>();
+  for (const river of world.rivers) {
+    river.hexes.forEach((c, i) => {
+      const before = river.hexes[i - 1] ?? c;
+      const after = river.hexes[i + 1] ?? c;
+      if (before.q === after.q && before.r === after.r) return;
+      const a = axialToPixel(before, 1);
+      const b = axialToPixel(after, 1);
+      bearing.set(key(c), Math.atan2(b.y - a.y, b.x - a.x));
+    });
+  }
+  const out: RiverMark[] = [];
+  for (const hex of world.hexes.values()) {
+    const b = bearing.get(key(hex.coord)) ?? 0;
+    if (hex.tags.has('river_source')) out.push({ coord: hex.coord, kind: 'source', bearing: b });
+    if (hex.tags.has('river_end')) out.push({ coord: hex.coord, kind: 'end', bearing: b });
+    if (hex.tags.has('cataract') || hex.tags.has('rapids')) {
+      out.push({ coord: hex.coord, kind: 'rapids', bearing: b });
+    }
+  }
+  return out;
 }
 
 /** A stretch of one river drawn in one style. */
@@ -245,6 +304,11 @@ function drawSettlements(ctx: CanvasRenderingContext2D, world: World, view: View
   const r = Math.max(2, view.size * 0.28);
   for (const s of world.settlements) {
     const p = toScreen(s.coord, view);
+    // A city is a church among roofs on a gold disc, larger again than a trade's tool.
+    if (s.tier === 'city') {
+      drawEmblem(ctx, CITY, p.x, p.y, Math.max(4, r * 1.15), CITY_DISC, CITY_INK);
+      continue;
+    }
     // A mine or a lumber camp is drawn as its tool, a little larger so the tool reads.
     const glyph = ROLE_GLYPH[s.role];
     if (glyph !== undefined) {

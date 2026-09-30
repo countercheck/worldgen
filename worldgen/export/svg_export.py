@@ -129,15 +129,6 @@ def _get_hex_fill(
     return _rgb_to_hex(*rgb[:3])
 
 
-def _star_points(cx: float, cy: float, outer: float, inner: float, n: int = 5) -> str:
-    pts = []
-    for i in range(n * 2):
-        r = outer if i % 2 == 0 else inner
-        angle = math.radians(i * 180 / n - 90)
-        pts.append((cx + r * math.cos(angle), cy + r * math.sin(angle)))
-    return _points_str(pts)
-
-
 def _anchorage_marker(cx: float, cy: float, scale: float = 1.0) -> str:
     """Anchor symbol marking where a road embarks onto, or lands from, water.
 
@@ -191,6 +182,36 @@ def _crossing_marker(kind: str, cx: float, cy: float, angle: float, scale: float
     return "".join(body)
 
 
+def _river_mark(
+    kind: str, cx: float, cy: float, bearing: float, scale: float = 1.0, river_color="#2f6fbf"
+) -> str:
+    """Where a river rises ("source"), where it ends ("end"), or its white water ("rapids"),
+    laid along the river's *bearing* (`glyphs`)."""
+    size = glyphs.RIVER_MARK_SIZE * scale
+    if kind == "source":
+        return (
+            f'<g><circle cx="{cx:.2f}" cy="{cy:.2f}" r="{glyphs.RIVER_SOURCE_RING * size:.2f}"'
+            f' fill="white" stroke="{river_color}" stroke-width="{0.35 * size:.2f}"/>'
+            f'<circle cx="{cx:.2f}" cy="{cy:.2f}" r="{glyphs.RIVER_SOURCE_DOT * size:.2f}"'
+            f' fill="{river_color}"/></g>'
+        )
+    if kind == "end":
+        pts = _points_str(glyphs.along(glyphs.RIVER_END_ARROW, cx, cy, size, bearing))
+        return (
+            f'<polygon points="{pts}" fill="{river_color}" stroke="white"'
+            f' stroke-width="{0.2 * size:.2f}" stroke-linejoin="round"/>'
+        )
+    bars = [glyphs.along(bar, cx, cy, size, bearing) for bar in glyphs.RAPIDS_BARS]
+    body = []
+    for colour, width in ((glyphs.RAPIDS_CASING, 0.55 * size), (glyphs.RAPIDS_INK, 0.28 * size)):
+        for (x1, y1), (x2, y2) in bars:
+            body.append(
+                f'<line x1="{x1:.2f}" y1="{y1:.2f}" x2="{x2:.2f}" y2="{y2:.2f}"'
+                f' stroke="{colour}" stroke-width="{width:.2f}" stroke-linecap="round"/>'
+            )
+    return "<g>" + "".join(body) + "</g>"
+
+
 def _role_marker(glyph, cx: float, cy: float, scale: float = 1.0) -> str:
     """A pickaxe or an axe in a white disc: a village that exists for a trade."""
     r = glyphs.DISC_RADIUS * scale
@@ -202,6 +223,20 @@ def _role_marker(glyph, cx: float, cy: float, scale: float = 1.0) -> str:
         f'<line x1="{a[0]:.2f}" y1="{a[1]:.2f}" x2="{b[0]:.2f}" y2="{b[1]:.2f}"'
         f' stroke="#3b2a1a" stroke-width="{width:.2f}" stroke-linecap="round"/>'
         f'<polygon points="{pts}" fill="#2b2b2b"/></g>'
+    )
+
+
+def _city_marker(cx: float, cy: float, scale: float = 1.0) -> str:
+    """A church among roofs on a gold disc (`glyphs.CITY`)."""
+    r = glyphs.CITY_RADIUS * scale
+    shapes = "".join(
+        f'<polygon points="{" ".join(f"{x:.2f},{y:.2f}" for x, y in shape)}"'
+        f' fill="{glyphs.CITY_INK}"/>'
+        for shape in glyphs.placed_emblem(glyphs.CITY, cx, cy, r)
+    )
+    return (
+        f'<g><circle cx="{cx:.2f}" cy="{cy:.2f}" r="{r:.2f}"'
+        f' fill="{glyphs.CITY_DISC}" stroke="black" stroke-width="0.8"/>{shapes}</g>'
     )
 
 
@@ -218,8 +253,7 @@ def _settlement_marker(
     if tier == SettlementTier.VILLAGE and role in glyphs.ROLE_GLYPH:
         return _role_marker(glyphs.ROLE_GLYPH[role], cx, cy, scale)
     if tier == SettlementTier.CITY:
-        pts = _star_points(cx, cy, outer=6.0 * scale, inner=2.5 * scale)
-        return f'<polygon points="{pts}" fill="gold" stroke="black" stroke-width="0.8"/>'
+        return _city_marker(cx, cy, scale)
     if tier == SettlementTier.TOWN:
         r = 3.5 * scale
         return (
@@ -270,6 +304,10 @@ def _legend_glyph(
 
     if row.kind == "anchorage":
         return _anchorage_marker(cx, cy, scale=g / legend.SYMBOL_BOX)
+
+    if row.kind in ("river_source", "river_end", "rapids"):
+        kind = row.kind.removeprefix("river_")
+        return _river_mark(kind, cx, cy, 0.0, scale=g / legend.SYMBOL_BOX, river_color=river_color)
 
     if row.kind in ("ford", "bridge"):
         # Angle 90 so the legend shows the span horizontally, as it reads on the map.
@@ -608,6 +646,18 @@ def render(ws: WorldState, config: SVGConfig | None = None) -> str:
                 out.append(
                     f"    {_crossing_marker(kind, px + ox, py + oy, angle, scale=size / 12.0)}"
                 )
+            out.append("  </g>")
+
+    # Over the rivers and the crossings, so a spring or white water on a forded reach
+    # still shows.
+    if "rivers" in layers:
+        marks = legend.river_marks(ws, axial_to_pixel, size)
+        if marks:
+            out.append('  <g id="layer-river-marks">')
+            for coord, kind, bearing in marks:
+                px, py = axial_to_pixel(coord, size)
+                mark = _river_mark(kind, px + ox, py + oy, bearing, size / 12.0, config.river_color)
+                out.append(f"    {mark}")
             out.append("  </g>")
 
     if "anchorages" in layers:

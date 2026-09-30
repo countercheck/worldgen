@@ -503,6 +503,11 @@ class WorldConfig:
     # temperate map reach it once `elevation_hypsometry_exponent` has laid the lowland flat.
     # 0 turns cataracts off.
     cataract_min_drop_m: float = 20.0
+    # White water on a smaller river: a river draining at least rapids_min_catchment_km2
+    # that falls rapids_min_drop_m or more through one hex is tagged `rapids` and drawn as
+    # white water. Only drawn; boats and crossings are unaffected. 0 turns rapids off.
+    rapids_min_drop_m: float = 10.0
+    rapids_min_catchment_km2: float = 200.0
     # What leaves the farm: not only what the household sells, but the rent, the tithe and
     # the dues, all of which end up feeding somebody in a town. Sizing markets off the
     # *surplus* rather than the production is why the tier ratios come out right without
@@ -1390,6 +1395,9 @@ class WorldConfig:
                 raise ValueError(f"{name} must be >= 0, got {getattr(self, name)}")
         if not 0.0 <= self.pasture_margin <= 1.0:
             raise ValueError(f"pasture_margin must be in [0, 1], got {self.pasture_margin}")
+        for name in ("rapids_min_drop_m", "rapids_min_catchment_km2"):
+            if getattr(self, name) < 0:
+                raise ValueError(f"{name} must be >= 0, got {getattr(self, name)}")
         if self.river_wander_exponent < 0:
             raise ValueError(
                 f"river_wander_exponent must be >= 0, got {self.river_wander_exponent}"

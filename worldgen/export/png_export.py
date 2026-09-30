@@ -118,17 +118,6 @@ def _get_hex_fill(
     return _rgb_int(*rgb[:3])
 
 
-def _star_pts(
-    cx: float, cy: float, outer: float, inner: float, n: int = 5
-) -> list[tuple[int, int]]:
-    pts = []
-    for i in range(n * 2):
-        r = outer if i % 2 == 0 else inner
-        angle = math.radians(i * 180 / n - 90)
-        pts.append((int(cx + r * math.cos(angle)), int(cy + r * math.sin(angle))))
-    return pts
-
-
 def _draw_anchorage(draw: ImageDraw.ImageDraw, cx, cy, scale: float = 1.0):
     """Anchor symbol marking where a road embarks onto, or lands from, water.
 
@@ -212,17 +201,47 @@ def _draw_settlement(
         _draw_role(draw, glyphs.ROLE_GLYPH[role], cx, cy, scale)
         return
     if tier == SettlementTier.CITY:
-        draw.polygon(
-            _star_pts(cx, cy, outer=6.0 * scale, inner=2.5 * scale),
-            fill=(255, 215, 0),
-            outline=(0, 0, 0),
-        )
+        r = glyphs.CITY_RADIUS * scale
+        draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=glyphs.CITY_DISC_RGB, outline=(0, 0, 0))
+        for shape in glyphs.placed_emblem(glyphs.CITY, cx, cy, r):
+            draw.polygon(list(shape), fill=glyphs.CITY_INK_RGB)
     elif tier == SettlementTier.TOWN:
         r = 4 * scale
         draw.rectangle([cx - r, cy - r, cx + r, cy + r], fill=(255, 255, 255), outline=(0, 0, 0))
     else:
         r = 3 * scale
         draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=(255, 255, 255), outline=(0, 0, 0))
+
+
+def _hex_rgb(colour: str) -> tuple[int, int, int]:
+    return tuple(int(colour[i : i + 2], 16) for i in (1, 3, 5))  # type: ignore[return-value]
+
+
+def _draw_river_mark(
+    draw: ImageDraw.ImageDraw, kind: str, cx, cy, bearing: float, scale: float = 1.0
+) -> None:
+    """Where a river rises ("source"), where it ends ("end"), or its white water ("rapids"),
+    laid along the river's *bearing* (`glyphs`)."""
+    size = glyphs.RIVER_MARK_SIZE * scale
+    if kind == "source":
+        r = glyphs.RIVER_SOURCE_RING * size
+        draw.ellipse(
+            [cx - r, cy - r, cx + r, cy + r],
+            fill=(255, 255, 255),
+            outline=_RIVER_COLOR,
+            width=max(1, round(0.35 * size)),
+        )
+        d = glyphs.RIVER_SOURCE_DOT * size
+        draw.ellipse([cx - d, cy - d, cx + d, cy + d], fill=_RIVER_COLOR)
+        return
+    if kind == "end":
+        pts = list(glyphs.along(glyphs.RIVER_END_ARROW, cx, cy, size, bearing))
+        draw.polygon(pts, fill=_RIVER_COLOR, outline=(255, 255, 255))
+        return
+    bars = [glyphs.along(bar, cx, cy, size, bearing) for bar in glyphs.RAPIDS_BARS]
+    for colour, width in ((glyphs.RAPIDS_CASING, 0.55 * size), (glyphs.RAPIDS_INK, 0.28 * size)):
+        for a, b in bars:
+            draw.line([a, b], fill=_hex_rgb(colour), width=max(1, round(width)))
 
 
 def _dashed_line(draw: ImageDraw.ImageDraw, x1, y, x2, color, width, dash=4, gap=2):
@@ -255,6 +274,9 @@ def _draw_legend_glyph(draw: ImageDraw.ImageDraw, row, cx, cy, g: float, color_m
         _draw_settlement(draw, row.sample, cx, cy, scale=g / legend.SYMBOL_BOX)
     elif row.kind == "anchorage":
         _draw_anchorage(draw, cx, cy, scale=g / legend.SYMBOL_BOX)
+    elif row.kind in ("river_source", "river_end", "rapids"):
+        kind = row.kind.removeprefix("river_")
+        _draw_river_mark(draw, kind, cx, cy, 0.0, scale=g / legend.SYMBOL_BOX)
     elif row.kind in ("ford", "bridge"):
         # Angle -90 so the legend shows the span horizontally, as it reads on the map.
         _draw_crossing(draw, row.kind, cx, cy, -90.0, scale=g / legend.SYMBOL_BOX)
@@ -611,6 +633,13 @@ def render(ws: WorldState, config: PNGConfig | None = None) -> Image.Image:
         for coord, kind, angle in legend.crossings(ws, axial_to_pixel, size):
             px, py = axial_to_pixel(coord, size)
             _draw_crossing(draw, kind, px + ox, py + oy, angle, scale=size / 12.0)
+
+    # Over the rivers and the crossings, so a spring or white water on a forded reach
+    # still shows.
+    if "rivers" in layers:
+        for coord, kind, bearing in legend.river_marks(ws, axial_to_pixel, size):
+            px, py = axial_to_pixel(coord, size)
+            _draw_river_mark(draw, kind, px + ox, py + oy, bearing, scale=size / 12.0)
 
     if "anchorages" in layers:
         # One marker per shore point, however many routes embark there. Covers both
