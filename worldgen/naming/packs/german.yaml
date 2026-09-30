@@ -1,0 +1,105 @@
+key: "german"
+name: "German"
+description: |
+  German: the place names of the German lands.
+
+  Qualifier first, head last, one word — Ochsenfurt, Schwarzenberg, Reichenbach — with an
+  adjective in the weak -en form a compound gives it (Weißenburg, Hohenstein). The heads
+  are the old ones that fill a German map: -furt a ford, -gemünd a confluence, -rode and
+  -reuth a clearing, -born a spring, -heim and -hausen a farmstead, -stätt a place. A town
+  on a river is am it (Frankfurt am Main), and a founder's people give the -ingen names
+  (Sigmaringen).
+
+heads:
+  ford: ["furt"]
+  bridge: ["brück", "brücken", "bruck"]
+  confluence: ["gemünd"]
+  mouth: ["münde"]
+  falls: ["fall"]
+  pass: ["joch", "sattel", "pass"]
+  harbour: ["hafen"]
+  shore: ["strand", "ufer"]
+  market: ["markt"]
+  mine: ["zeche", "grube"]
+  clearing: ["rode", "reuth", "rath"]
+  spring: ["born", "brunn", "quell"]
+  hill: ["berg", "bühl"]
+  steading: ["heim", "hof", "hausen"]
+  hamlet: ["dorf", "weiler"]
+  enclosure: ["hag", "hagen", "garten"]
+  cottages: ["kotten", "hausen"]
+  field: ["feld", "au"]
+  town: ["stadt", "stedt"]
+  wick: ["wik", "markt"]
+  stow: ["stätt", "stätten"]
+  burgh: ["burg"]
+  hall: ["hall", "saal"]
+  wall: ["wall", "mauern"]
+
+quals:
+  marsh: ["moor", "bruch"]
+  fen: ["fenn", "ried"]
+  deepwood: ["tann", "hard"]
+  wood: ["wald", "holz", "loh"]
+  thorn: ["dorn"]
+  meadow: ["wiesen", "anger"]
+  cold: ["kalten"]
+  sand: ["sand"]
+  stone: ["stein"]
+  salt: ["salz"]
+  rich: ["reichen"]
+  high: ["hohen"]
+  oak: ["eich", "eichen"]
+  ash: ["eschen", "esch"]
+  elm: ["ulmen"]
+  birch: ["birken", "birk"]
+  pine: ["föhren", "kiefern"]
+  palm: ["palmen"]
+  broom: ["ginster"]
+  reed: ["rohr", "ried"]
+  ox: ["ochsen"]
+  deer: ["hirsch"]
+  swine: ["sau"]
+  horse: ["ross", "stuten"]
+  hare: ["hasen"]
+  elk: ["elch"]
+  wolf: ["wolfs"]
+  bear: ["bären"]
+  goat: ["geis"]
+  crane: ["kranich"]
+  eagle: ["adler"]
+  white: ["weißen"]
+  black: ["schwarzen"]
+  red: ["roten"]
+  green: ["grünen"]
+  north: ["nord"]
+  south: ["süd"]
+  east: ["ost"]
+  west: ["west"]
+  great: ["groß", "großen"]
+  little: ["klein"]
+
+templates:
+  compound: ["{q}{h}"]
+  founder: ["{p}ingen", "{p}s{h}", "{p}{h}"]
+  river_on: ["{h} am {r}", "{h} an der {r}", "{r}{h}"]
+  bare: ["{h}"]
+
+proper_names:
+  style: "lists"
+  persons:
+    first: ["Sieg", "Wolf", "Ger", "Adal", "Hein", "Kon", "Diet", "Ber", "Hilde", "Ros",
+             "Ott", "Wal"]
+    second: ["mar", "hard", "bert", "rich", "rad", "helm", "mund", "wald", "olf"]
+  rivers:
+    roots: ["Main", "Neckar", "Lahn", "Mosel", "Saale", "Elster", "Mulde", "Fulda",
+             "Werra", "Weser", "Aller", "Leine", "Ems", "Lippe", "Ruhr", "Sieg", "Nahe",
+             "Iller", "Lech", "Isar", "Inn", "Regen", "Naab", "Altmühl", "Tauber",
+             "Kocher", "Jagst", "Murg", "Kinzig", "Havel", "Spree"]
+    patterns: ["{root}", "{root}", "schwarze {root}", "weiße {root}", "kleine {root}"]
+
+spelling:
+  particles: ["am", "an", "der", "im", "ob"]
+  hyphen_caps: true
+
+founder_gloss: "{p}'s {h}"

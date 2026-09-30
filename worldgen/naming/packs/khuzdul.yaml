@@ -1,0 +1,163 @@
+key: "khuzdul"
+name: "Khuzdul"
+description: |
+  Khuzdul: the secret tongue of Tolkien's Dwarves.
+
+  Tolkien left only a few dozen words of it, nearly all from place names: dûm (halls,
+  delvings), gathol (fortress), gunud (a delving), zahar (mansion), tumun (hollow), bizar
+  (dale), zâram (lake), nâla (river course), ul (streams), baraz (red), kibil (silver),
+  azan (dark), kheled (glass), zigil (spike), bund (head), gabil (great). Those carry the
+  pack. Everything else is invented in their sound — hard consonants, a and u, the
+  circumflex — and marked below, so nobody mistakes it for Tolkien's.
+
+  Names join with a hyphen and keep the second part in lower case, as Khazad-dûm and
+  Kheled-zâram do. Founders take names from the Dvergatal, the list of dwarves in the Old
+  Norse Völuspá that Tolkien drew his own dwarves from.
+
+heads:
+  ford: ["gundab"]
+  bridge: ["baruk"]
+  confluence: ["ulbad"]
+  mouth: ["ulnar"]
+  falls: ["ulkhaz"]
+  pass: ["nargun"]
+  harbour: ["khelek"]
+  shore: ["zâram"]
+  market: ["tharbul"]
+  mine: ["gunud"]
+  clearing: ["felak"]
+  spring: ["ulun"]
+  hill: ["zigil", "bund"]
+  steading: ["zahar"]
+  hamlet: ["tumun"]
+  enclosure: ["gundar"]
+  cottages: ["khiz"]
+  field: ["bizar"]
+  town: ["dûm"]
+  wick: ["tharbul"]
+  stow: ["aglab"]
+  burgh: ["gathol"]
+  hall: ["dûm", "zahar"]
+  wall: ["gathol"]
+
+quals:
+  marsh: ["ulzar"]
+  fen: ["nulun"]
+  deepwood: ["azan"]
+  wood: ["rukh"]
+  thorn: ["zigil"]
+  meadow: ["bizar"]
+  cold: ["kheled"]
+  sand: ["rakhab"]
+  stone: ["tharkh"]
+  salt: ["mizim"]
+  rich: ["mazar"]
+  high: ["bund"]
+  oak: ["gorth"]
+  ash: ["azar"]
+  elm: ["ulmuk"]
+  birch: ["kibrak"]
+  pine: ["narduk"]
+  palm: ["zundur"]
+  broom: ["khurz"]
+  reed: ["ulsid"]
+  ox: ["barak"]
+  deer: ["zhelek"]
+  swine: ["gorog"]
+  horse: ["ruzhan"]
+  hare: ["kithik"]
+  elk: ["zhelek"]
+  wolf: ["narg"]
+  bear: ["bundab"]
+  goat: ["gamil"]
+  crane: ["shurak"]
+  eagle: ["khuzal"]
+  white: ["kibil"]
+  black: ["azan"]
+  red: ["baraz"]
+  green: ["ruzak"]
+  north: ["tharak"]
+  south: ["zudân"]
+  east: ["bazûk"]
+  west: ["ushar"]
+  great: ["gabil"]
+  little: ["nuluk"]
+
+templates:
+  compound: ["{q}-{h}", "{q}-{h}", "{q}{h}"]
+  founder: ["{p}-{h}"]
+  river_on: ["{r}-{h}"]
+  bare: ["{h}"]
+
+proper_names:
+  style: "lists"
+  persons:
+    first: ["Nar", "Frar", "Hepti", "Vili", "Hanar", "Svior", "Bruni", "Bild", "Buri",
+             "Fundin", "Nali", "Loni", "Dolgthrasir", "Hlevang", "Duf", "Andvari",
+             "Skirfir", "Virfir", "Skafid", "Alf", "Yngvi", "Fjalar", "Frosti", "Fid",
+             "Ginnar", "Mjodvitnir"]
+    second: [""]
+  rivers:
+    roots: ["kibil", "baraz", "azan", "kheled", "gabil", "sigin", "zirak", "narag",
+             "ruzak", "tharak", "bund", "mizim"]
+    patterns: ["{root}-nâla", "{root}ul"]
+
+spelling:
+  particles: []
+  hyphen_caps: false
+
+founder_gloss: "{p}'s {h}"
+
+# Where a word is not the language's own, or means something other than the key.
+notes:
+  ford: "invented"
+  bridge: "invented"
+  confluence: "ul (streams) + invented"
+  mouth: "ul (streams) + invented"
+  falls: "ul (streams) + invented"
+  pass: "invented"
+  harbour: "invented"
+  market: "invented"
+  clearing: "to hew"
+  spring: "ul (streams)"
+  enclosure: "invented"
+  cottages: "invented"
+  wick: "invented"
+  stow: "speech"
+  marsh: "invented"
+  fen: "invented"
+  deepwood: "dark"
+  wood: "invented"
+  cold: "glass"
+  sand: "invented"
+  stone: "invented"
+  salt: "invented"
+  rich: "invented"
+  high: "head"
+  oak: "invented"
+  ash: "invented"
+  elm: "invented"
+  birch: "invented"
+  pine: "invented"
+  palm: "invented"
+  broom: "invented"
+  reed: "invented"
+  ox: "invented"
+  deer: "invented"
+  swine: "invented"
+  horse: "invented"
+  hare: "invented"
+  elk: "invented"
+  wolf: "invented"
+  bear: "invented"
+  goat: "invented"
+  crane: "invented"
+  eagle: "invented"
+  white: "silver"
+  black: "dark"
+  green: "invented"
+  north: "invented"
+  south: "invented"
+  east: "invented"
+  west: "invented"
+  little: "invented"

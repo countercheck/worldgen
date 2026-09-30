@@ -1,14 +1,8 @@
-"""Culture packs: naming cultures written by hand from real place-name elements.
+"""The one processor every culture pack runs through.
 
-A generated language is endless and alien. A pack is the other thing a map sometimes
-wants: names a reader half-recognises, because they are built from the elements real
-places are built from — English -ford and -ton, Norse -by and -thwaite, Welsh aber- and
-pont-, French -ville and plessis, Slavic brod and hradište, Arabic jisr and kafr.
-
-Each pack is data: for every meaning in `site.GENERICS` and `site.SPECIFICS`, the words
-that culture used for it, and a handful of templates for how those words go together.
-`PackCulture` turns that data into the `Culture` protocol the stage speaks, so a pack and
-a generated language are interchangeable region by region.
+A pack is data (see `schema`); this turns it into the `Culture` protocol the stage speaks,
+so a pack and a generated language are interchangeable region by region, and any pack a
+user writes in YAML is run exactly as the built-in ones are.
 
 Templates are `str.format` strings over lower-case parts, title-cased at the end:
 
@@ -25,59 +19,11 @@ makes a one-word name — dubov~ gives Dubovec as well as Dubová Hora.
 
 import re
 import zlib
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
 
 import numpy as np
 
 from ..culture import Qualifier
-
-
-@dataclass(frozen=True)
-class Pack:
-    key: str
-    # What the people are called, and so what their region is called on the map.
-    name: str
-    heads: Mapping[str, tuple[str, ...]]
-    quals: Mapping[str, tuple[str, ...]]
-    # How a head and a qualifier combine; one is drawn per name.
-    compound: tuple[str, ...]
-    # How a head and a founder's name combine.
-    founder: tuple[str, ...]
-    # How a head and the river it stands on combine.
-    river_on: tuple[str, ...]
-    # Personal names are built as first + second, as most early naming systems built them.
-    person_first: tuple[str, ...]
-    river_roots: tuple[str, ...]
-    person_second: tuple[str, ...] = ("",)
-    # How a river root becomes a river's name; {root} is the root.
-    river_patterns: tuple[str, ...] = ("{root}",)
-    bare: tuple[str, ...] = ("{h}",)
-    # Words left in lower case inside a name: of, on, the.
-    particles: frozenset[str] = frozenset()
-    # Grammatical gender of each head word, and the adjective ending each gender takes.
-    genders: Mapping[str, str] = field(default_factory=dict)
-    endings: Mapping[str, str] = field(default_factory=dict)
-    # Whether a part after a hyphen is capitalised: Gué-du-Chêne, but Khazad-dûm.
-    hyphen_caps: bool = True
-    # Spelling fixes applied to a finished name, as (regex, replacement) pairs — Quenya
-    # writes a final ë but drops the diaeresis once the word is inside a compound.
-    fixes: tuple[tuple[str, str], ...] = ()
-    # Templates that differ by rank, keyed "compound", "founder", "river_on" or "bare",
-    # each a tuple of three template tuples for rank 0 (city), 1 (town) and 2 (village).
-    # A kind not listed uses the rank-blind field of the same name.
-    ranked: Mapping[str, tuple[tuple[str, ...], ...]] = field(default_factory=dict)
-    # A pack that makes its own proper names — (key, syllables, rank) -> name — in place
-    # of drawing them from `person_first` and `river_roots`.
-    proper: Callable[[str, int, int], str] | None = None
-    # How a founder is glossed in the etymology, over {p} the founder and {h} the head.
-    founder_gloss: str = "{p}'s {h}"
-    # Templates for a qualifier that is an agreeing adjective (its word carries "~"), in
-    # place of `compound`. Where the two differ — Fuente Blanca and Villablanca, but
-    # Fuente de los Robles — a noun phrase must not be run into the head. Empty: use
-    # `compound` for both.
-    adjective: tuple[str, ...] = ()
-
+from .schema import Pack
 
 _SEPARATORS = re.compile(r"([ -])")
 _ELIDED = re.compile(r"^([ld])'(.)(.*)$")
@@ -150,33 +96,53 @@ class PackCulture:
         return self._title(template.format(**parts))
 
     def _persons(self) -> list[str]:
+        proper = self.pack.proper
         return [
             f + s
-            for f in self.pack.person_first
-            for s in self.pack.person_second
+            for f in proper.person_first
+            for s in proper.person_second
             if f.lower() != s.lower()
         ]
 
     def _rivers(self) -> list[str]:
+        proper = self.pack.proper
         return [
             pattern.format(root=root)
-            for pattern in self.pack.river_patterns
-            for root in self.pack.river_roots
+            for pattern in proper.river_patterns
+            for root in proper.river_roots
         ]
+
+    def _syllables(self, key: str, syllables: int, rank: int) -> str:
+        """A word from the registers the rank allows, stable for its key.
+
+        A random draw picks the register only where the rank allows more than one, so a
+        pack with one register per rank spends no draw on it.
+        """
+        proper = self.pack.proper
+        rng = np.random.default_rng([zlib.crc32(key.encode()), max(1, syllables), rank])
+        choices = proper.by_rank[min(max(rank, 0), len(proper.by_rank) - 1)]
+        register = choices[0] if len(choices) == 1 else choices[int(rng.random() * len(choices))]
+        onsets, vowels, codas = proper.registers[register]
+        return "".join(
+            onsets[int(rng.integers(len(onsets)))]
+            + vowels[int(rng.integers(len(vowels)))]
+            + codas[int(rng.integers(len(codas)))]
+            for _ in range(max(1, syllables))
+        )
 
     def proper_name(self, key: str, syllables: int, rank: int = 1) -> str:
         """A founder's or a river's name, stable for a key.
 
-        *syllables* means nothing to a pack — its names are whole words — so it is used to
-        step to the next name instead, which is what a caller raising it is asking for:
-        something different. Past the end of the list, two names are joined, so a caller
-        that keeps asking always eventually gets one it has not seen.
+        For a pack of lists, *syllables* means nothing — its names are whole words — so
+        it is used to step to the next name instead, which is what a caller raising it is
+        asking for: something different. Past the end of the list, two names are joined,
+        so a caller that keeps asking always eventually gets one it has not seen.
         """
         kind = key.split(":", 1)[0]
         if kind == "people":
             return self.name
-        if self.pack.proper is not None:
-            return self._title(self.pack.proper(key, syllables, rank))
+        if self.pack.proper.style == "syllables":
+            return self._title(self._syllables(key, syllables, rank))
         names = self._rivers() if kind == "river" else self._persons()
         h = zlib.crc32(key.encode())
         n = len(names)
@@ -186,4 +152,4 @@ class PackCulture:
         return self._title(first + names[(h // n + syllables // n) % n].lower())
 
 
-__all__ = ["Pack", "PackCulture"]
+__all__ = ["PackCulture"]

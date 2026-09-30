@@ -159,6 +159,7 @@ def generate(
         click.echo(f"  Heightmap: {cfg.heightmap_path} ({cfg.heightmap_mode})")
 
     from .export.heightmap_import import HeightmapError
+    from .naming.packs import CulturePackError
 
     pipeline = GeneratorPipeline(seed, cfg)
     for stage in stages_for(cfg, cfg.model):
@@ -166,9 +167,9 @@ def generate(
     started = time.perf_counter()
     try:
         state = pipeline.run(on_stage=_report_stage)
-    except HeightmapError as exc:
-        # Only the user-input failures; a plain ValueError from a downstream stage is a
-        # bug and keeps its traceback.
+    except (HeightmapError, CulturePackError) as exc:
+        # Only the user-input failures — a bad image, a bad or missing culture pack; a
+        # plain ValueError from a downstream stage is a bug and keeps its traceback.
         raise click.ClickException(str(exc)) from exc
 
     click.echo("Writing output...")
@@ -192,6 +193,107 @@ def generate(
         _report_stage(index, len(layers), layer, time.perf_counter() - drawing)
 
     click.echo(f"✓ Done in {time.perf_counter() - started:.1f}s → {output_dir}")
+
+
+@cli.command()
+@click.option("--input", "input_path", type=str, required=True, help="Input world.json file")
+@click.option("--output", type=str, required=True, help="Output world.json file")
+@click.option(
+    "--config",
+    "config_path",
+    type=str,
+    default=None,
+    help="Config YAML/JSON file. Only its naming_* settings are used.",
+)
+@click.option(
+    "--packs",
+    type=str,
+    default=None,
+    help="Comma-separated culture packs, one per region in order (overrides naming_packs).",
+)
+@click.option(
+    "--cultures", type=int, default=None, help="Number of culture regions (overrides config)."
+)
+@click.option(
+    "--substrate-pack",
+    type=str,
+    default=None,
+    help="Pack that names the rivers; 'none' for no older people (overrides config).",
+)
+@click.option(
+    "--seed",
+    type=int,
+    default=None,
+    help="Naming seed. Defaults to the world's own seed.",
+)
+def rename(
+    input_path: str,
+    output: str,
+    config_path: str | None,
+    packs: str | None,
+    cultures: int | None,
+    substrate_pack: str | None,
+    seed: int | None,
+):
+    """Name a saved world again, with other cultures.
+
+    The ground, settlements and roads are kept; every settlement and river is renamed.
+    """
+    import dataclasses
+
+    from .export.json_export import load as load_json
+    from .export.json_export import save as save_json
+    from .naming.packs import CulturePackError
+    from .stages import rename as rename_world
+
+    click.echo(f"Loading {input_path}...")
+    try:
+        state = load_json(input_path)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+    recorded = state.metadata.get("config")
+    if not isinstance(recorded, dict):
+        raise click.ClickException(
+            f"{input_path} does not record the config it was made with, so it cannot be renamed"
+        )
+
+    # The world's own config, so the stage reads the ground with the settings that made it;
+    # then the naming settings, and only those, from the file and the flags.
+    settings = dict(recorded)
+    if config_path:
+        chosen = _load_world_config(config_path)
+        naming = {f.name for f in dataclasses.fields(chosen) if f.name.startswith("naming_")}
+        settings.update({k: getattr(chosen, k) for k in naming})
+    if packs is not None:
+        settings["naming_packs"] = tuple(p.strip() for p in packs.split(",") if p.strip())
+        if cultures is None:
+            settings["naming_cultures"] = max(
+                settings.get("naming_cultures", 0), len(settings["naming_packs"])
+            )
+    if cultures is not None:
+        settings["naming_cultures"] = cultures
+    if substrate_pack is not None:
+        none = substrate_pack.lower() == "none"
+        settings["naming_substrate"] = not none
+        settings["naming_substrate_pack"] = "" if none else substrate_pack
+    try:
+        cfg = WorldConfig.from_dict(settings)
+    except ValueError as exc:
+        raise click.ClickException(str(exc)) from exc
+    if cfg.naming_cultures <= 0:
+        raise click.ClickException("naming_cultures is 0: there would be no one to name the world")
+
+    seed = state.seed if seed is None else seed
+    try:
+        state = rename_world(state, cfg, seed)
+    except CulturePackError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    for c in state.metadata["cultures"]:
+        click.echo(f"  {c['role']:<9} {c['name']}" + (f" ({c['pack']})" if c["pack"] else ""))
+    Path(output).parent.mkdir(parents=True, exist_ok=True)
+    save_json(state, output)
+    click.echo(f"✓ Saved to {output}")
 
 
 _ATTRIBUTES = [

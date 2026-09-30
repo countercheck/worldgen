@@ -17,7 +17,7 @@ from ..core.config import MODELS
 if TYPE_CHECKING:
     from ..core.pipeline import GeneratorStage
 
-__all__ = ["MODELS", "default_stages", "stages_for"]
+__all__ = ["MODELS", "default_stages", "rename", "stages_for"]
 
 
 def default_stages(model: str = "classic") -> tuple[type["GeneratorStage"], ...]:
@@ -167,3 +167,29 @@ def stages_for(config, model: str = "classic") -> tuple[type["GeneratorStage"], 
     from .image_elevation import ImageElevationStage
 
     return tuple(ImageElevationStage if s is ElevationStage else s for s in stages)
+
+
+def rename(state, config, seed: int):
+    """Name a finished world again, with *config*'s naming settings.
+
+    The naming stage is given the seed it would have drawn in a full run from *seed*: the
+    pipeline draws one child seed per stage, in order, and naming is last. So renaming a
+    world with its own seed and its own config gives back the names it already has, and
+    anything else — another seed, other packs — is a different naming of the same ground.
+    """
+    import numpy as np
+
+    from .naming import NamingStage
+
+    stages = stages_for(config, config.model)
+    if stages[-1] is not NamingStage:
+        raise RuntimeError("the naming stage is no longer last; rename cannot find its seed")
+    rng = np.random.default_rng(seed)
+    for _ in stages:
+        child = rng.integers(0, 2**32)
+    state = NamingStage(config, np.random.default_rng(child)).run(state)
+    state.metadata["config"] = config.__dict__
+    # Not the world's seed when a caller asked for another naming; the two together, with
+    # the config, reproduce the world as it now stands.
+    state.metadata["naming_seed"] = seed
+    return state

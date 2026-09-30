@@ -26,29 +26,6 @@ ELEVATION_PROFILES: dict[str, tuple[float, float]] = {
 }
 ELEVATION_PROFILE_CHOICES = (*ELEVATION_PROFILES, "custom", "none")
 
-# The hand-written naming cultures `WorldConfig.naming_packs` may name. Listed here for the
-# same reason as MODELS — the config validates itself without importing a layer above it —
-# and a test holds it equal to `worldgen.naming.packs.PACKS`.
-CULTURE_PACKS = (
-    "arabic",
-    "dutch",
-    "english",
-    "french",
-    "german",
-    "hive",
-    "hobbitish",
-    "italian",
-    "khuzdul",
-    "latin",
-    "norse",
-    "quenya",
-    "rohirric",
-    "sindarin",
-    "slavic",
-    "spanish",
-    "welsh",
-)
-
 
 @dataclass(frozen=True)
 class ClimateContext:
@@ -1052,16 +1029,19 @@ class WorldConfig:
     # river names outlived Celtic speech across England. False: each river is named by
     # whoever holds its mouth.
     naming_substrate: bool = True
-    # Hand-written culture packs for the regions, in order: the first region speaks the
-    # first pack, and so on; regions past the end of the list get invented languages.
-    # One of: arabic, dutch, english, french, german, italian, latin, norse, slavic,
-    # spanish, welsh, or Tolkien's sindarin,
-    # quenya, khuzdul, rohirric, hobbitish, or hive (an insect people). At most
-    # naming_cultures.
+    # Culture packs for the regions, by key, in order: the first region speaks the first
+    # pack, and so on; regions past the end of the list get invented languages. At most
+    # naming_cultures. The built-in packs are the YAML files in worldgen/naming/packs/;
+    # see docs/CULTURE_PACKS.md to write another.
     naming_packs: tuple[str, ...] = ()
     # A pack for the older people who named the rivers, in place of an invented language:
     # "welsh" under "english" is England. Empty for an invented one.
     naming_substrate_pack: str = ""
+    # Folders of your own culture pack YAML files, read after the built-in ones, in order.
+    # A pack whose key is already taken replaces the earlier one, so copying a built-in
+    # pack's file into a folder here and editing it overrides it. Relative paths are from
+    # the working directory.
+    naming_pack_dirs: tuple[str, ...] = ()
     # Culture regions spread from their homelands at a cost, so frontiers fall where
     # crossing is hard. Metres of climb that cost as much as a hex of level going.
     naming_region_climb_m: float = 150.0
@@ -1476,12 +1456,10 @@ class WorldConfig:
             )
         if self.naming_cultures < 0:
             raise ValueError(f"naming_cultures must be >= 0, got {self.naming_cultures}")
+        # Which packs exist is only known once their folders are read, so a pack name is
+        # checked when the naming stage loads them, not here.
         self.naming_packs = tuple(self.naming_packs)
-        for pack in (*self.naming_packs, self.naming_substrate_pack or "english"):
-            if pack not in CULTURE_PACKS:
-                raise ValueError(
-                    f"unknown culture pack {pack!r}; choose from {', '.join(CULTURE_PACKS)}"
-                )
+        self.naming_pack_dirs = tuple(self.naming_pack_dirs)
         if len(set(self.naming_packs)) != len(self.naming_packs):
             raise ValueError(f"naming_packs names a pack twice: {list(self.naming_packs)}")
         if len(self.naming_packs) > self.naming_cultures:
@@ -1660,6 +1638,15 @@ class WorldConfig:
         """Load config from JSON file."""
         with open(path) as f:
             data = json.load(f)
+        _coerce_tuples(data)
+        return _construct(cls, data)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "WorldConfig":
+        """Build a config from a mapping, such as the one a world.json keeps under
+        `metadata.config`: tuples arrive as lists, and old keys are carried over as a file's
+        would be."""
+        data = dict(data)
         _coerce_tuples(data)
         return _construct(cls, data)
 
