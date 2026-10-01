@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Worldgen</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <aside id="controls">
+    <header>
+      <h1>Worldgen</h1>
+      <p class="muted">1 hex = 1 km · same seed, same world</p>
+    </header>
+
+    <section class="panel">
+      <div class="row">
+        <label for="seed">Seed</label>
+        <div class="inline">
+          <input id="seed" type="number" step="1" value="42">
+          <button id="dice" type="button" title="Random seed">⚄</button>
+        </div>
+      </div>
+      <div id="basics"></div>
+      <div class="row">
+        <label for="preset">Preset</label>
+        <select id="preset"><option value="">—</option></select>
+      </div>
+      <div class="actions">
+        <button id="generate" class="primary" type="button">Generate</button>
+        <label class="button" title="Load a worldgen.yaml or config.json">
+          Import…<input id="import" type="file" accept=".yaml,.yml,.json" hidden>
+        </label>
+        <button id="reset" type="button">Defaults</button>
+      </div>
+      <p id="form-error" class="error" hidden></p>
+    </section>
+
+    <section class="panel" id="progress" hidden>
+      <div class="progress-head">
+        <strong id="progress-label">Queued</strong>
+        <span id="progress-time" class="muted"></span>
+      </div>
+      <div class="bar"><div id="bar-fill"></div></div>
+      <ol id="stages"></ol>
+    </section>
+
+    <section class="panel">
+      <div class="progress-head">
+        <strong>All settings</strong>
+        <span id="changed-count" class="muted"></span>
+      </div>
+      <input id="filter" type="search" placeholder="Filter settings…">
+      <div id="sections"></div>
+    </section>
+  </aside>
+
+  <main>
+    <div id="toolbar">
+      <select id="view" disabled></select>
+      <div class="inline">
+        <button id="zoom-out" type="button" title="Zoom out">−</button>
+        <button id="zoom-fit" type="button" title="Fit to window">Fit</button>
+        <button id="zoom-in" type="button" title="Zoom in">+</button>
+      </div>
+      <div class="inline downloads">
+        <a id="dl-svg" class="button" aria-disabled="true">SVG</a>
+        <a id="dl-png" class="button" aria-disabled="true">PNG</a>
+        <a id="dl-world" class="button" aria-disabled="true">world.json</a>
+        <a id="dl-config" class="button" aria-disabled="true">config.json</a>
+      </div>
+    </div>
+    <div id="viewport">
+      <div id="empty" class="muted">Pick a seed and press Generate.</div>
+      <div id="stage">
+        <img id="map" alt="" draggable="false">
+        <svg id="marker" hidden><polygon></polygon></svg>
+      </div>
+      <div id="loading" hidden>Drawing…</div>
+    </div>
+  </main>
+
+  <aside id="inspector">
+    <h2>Hex</h2>
+    <p class="muted" id="inspector-empty">Click the map to inspect a hex.</p>
+    <div id="inspector-body"></div>
+  </aside>
+
+  <script src="app.js"></script>
+</body>
+</html>

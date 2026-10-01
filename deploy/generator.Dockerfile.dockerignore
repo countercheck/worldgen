@@ -1,0 +1,8 @@
+# Read by BuildKit in place of the root `.dockerignore` when building
+# `deploy/generator.Dockerfile`. Everything is excluded, then the two things the image
+# installs are let back in.
+*
+!pyproject.toml
+!worldgen/
+**/__pycache__/
+**/*.pyc

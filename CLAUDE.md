@@ -31,6 +31,8 @@ generation pipeline in run order.
 - `analysis/` — measurements over a finished world (drainage-network shape, and whatever
   follows); imports `core/` only, does no file I/O, and is **never imported by a stage** —
   a stage that could read its own report card would start tuning itself against a metric
+- `web/` — `worldgen serve`, the local web interface; the top layer beside `cli.py`, and
+  **imported by no other package**
 
 These are checked, not just described: `tests/test_layering.py` parses every module and
 fails on a layer importing one above it. Add a rule there when you add one here.

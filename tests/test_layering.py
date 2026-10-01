@@ -17,27 +17,35 @@ import pytest
 _ROOT = Path(__file__).resolve().parent.parent / "worldgen"
 
 # package -> the sibling packages it may not import, and why.
+_WEB = {"web": "the web interface drives the generator; nothing it drives may reach back"}
+
 _FORBIDDEN = {
     "stages": {
         "analysis": "a stage must not read its own report card",
         "render": "a stage must not draw",
+        **_WEB,
     },
     "core": {
         "analysis": "core is data types and the pipeline, and measures nothing",
         "render": "core must not draw",
         "export": "core does no file I/O",
+        **_WEB,
     },
     "naming": {
         "stages": "naming is a vocabulary stages use, not a stage",
         "analysis": "naming must not read a report card either",
         "render": "naming must not draw",
         "export": "naming does no file I/O",
+        **_WEB,
     },
     "analysis": {
         "render": "analysis returns numbers, not pictures",
         "export": "analysis does no file I/O",
         "stages": "analysis reads a finished world, it does not make one",
+        **_WEB,
     },
+    "export": _WEB,
+    "render": _WEB,
 }
 
 

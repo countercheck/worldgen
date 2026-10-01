@@ -18,6 +18,30 @@ from ..core.hex_grid import axial_to_pixel, road_polylines
 from ..core.world_state import RoadTier, WorldState
 from . import glyphs
 
+# The plates every model can fill, in the order they are drawn.
+DEBUG_LAYERS = (
+    "elevation",
+    "terrain_class",
+    "river_flow",
+    "drainage",
+    "alluvium",
+    "temperature",
+    "moisture",
+    "biome",
+    "habitability_city",
+    "habitability_town",
+    "habitability_village",
+    "settlements",
+    "roads",
+    "land_cover",
+    "cultivation",
+    "territory",
+)
+
+# The plates only the haulage (organic) model can fill. Under classic every hex would come
+# out the fallback grey, which reads as a bug rather than as an empty layer.
+HAULAGE_LAYERS = ("soil", "land_use", "rural_population")
+
 # Degrees Celsius spanned by the temperature ramp. Fixed rather than per-map so two
 # worlds can be compared by eye.
 TEMPERATURE_RAMP_C = (-20.0, 35.0)

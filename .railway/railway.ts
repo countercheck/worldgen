@@ -1,6 +1,7 @@
-import { defineRailway, github, project, service, volume } from "railway/iac";
+import { defineRailway, github, preserve, project, service, volume } from "railway/iac";
 
-// The campaign server, one container, and the volume its database lives on.
+// The campaign server, one container, and the volume its database lives on; and the world
+// generator's web interface beside it.
 //
 // Railway does not read this file on deploy. A change here reaches the service only when
 // `railway config apply` is run, and `railway config plan` shows what that would change.
@@ -48,7 +49,38 @@ export default defineRailway(() => {
     },
   });
 
+  // `worldgen serve`: the generator behind a password. See `deploy/generator.Dockerfile`.
+  const generator = service("generator", {
+    source: github("countercheck/worldgen", { branch: "master", checkSuites: false }),
+    build: {
+      buildEnvironment: "V3",
+      builder: "DOCKERFILE",
+      dockerfilePath: "deploy/generator.Dockerfile",
+      // Rebuilt for a change to the generator, not for every campaign commit.
+      watchPatterns: ["worldgen/**", "pyproject.toml", "deploy/generator.Dockerfile*"],
+    },
+    healthcheck: "/health",
+    healthcheckTimeout: 30,
+    // One replica: a generated world and the stream reporting its progress live in one
+    // process's memory, and a request routed to a second replica would find neither.
+    replicas: { "us-east4-eqdc4a": 1 },
+    deploy: {
+      restartPolicyType: "ON_FAILURE",
+      restartPolicyMaxRetries: 10,
+      // Asleep when nobody is using it. A run in progress keeps it awake — its progress
+      // stream sends every 15 seconds — and what sleep costs is the worlds held in memory,
+      // which a user downloads rather than keeps there.
+      sleepApplication: true,
+    },
+    networking: { serviceDomains: { "worldgen-generator.up.railway.app": {} } },
+    env: {
+      // Set in Railway, never here. `preserve()` keeps whatever value the service holds,
+      // and without one `worldgen serve` refuses to start rather than serve it open.
+      WORLDGEN_PASSWORD: preserve(),
+    },
+  });
+
   return project("worldgen-campaign", {
-    resources: [campaign, campaignData],
+    resources: [campaign, campaignData, generator],
   });
 });

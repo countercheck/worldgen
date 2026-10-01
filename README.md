@@ -90,6 +90,34 @@ Available attributes: `elevation`, `terrain_class`, `river_flow`, `temperature`,
 shorthand for `habitability_city` — the widest catchment, and the one that decides where
 the map's anchor settlements go.
 
+## Web interface
+
+```bash
+worldgen serve                 # http://127.0.0.1:8000/, opens a browser tab
+worldgen serve --port 9000 --no-open
+```
+
+A local page over the same pipeline: set the seed and any `WorldConfig` setting (the form
+is built from `default_config.yaml`, help text and all), watch each stage report as it
+runs, then pan and zoom the finished map in any export style or debug plate. Click a hex
+to see everything it carries — elevation, climate, soil, its settlement and whose
+territory it lies in. `world.json`, the config, and the map as SVG or PNG download from
+the toolbar. An existing `worldgen.yaml` or `config.json` can be imported, and presets in
+`./presets` are offered.
+
+It listens on `127.0.0.1` unless told otherwise. To put it behind a password, set
+`WORLDGEN_PASSWORD`; the browser asks once, and any username is accepted. A password is
+required to listen anywhere else:
+
+```bash
+WORLDGEN_PASSWORD='something long' worldgen serve --host 0.0.0.0 --no-open
+```
+
+The password travels with every request, so beyond this machine serve it over HTTPS (a
+host such as Railway terminates TLS in front of it). `heightmap_path` and
+`naming_pack_dirs` cannot be set from the page, since both name files on the machine
+running the server.
+
 ## Importing a map
 
 You can hand the generator a picture instead of letting it invent the terrain. The image
@@ -418,6 +446,12 @@ worldgen/
 │   └── png_export.py   # rasterised map via Pillow
 ├── render/         # matplotlib debug viewer (never imported by stages)
 │   └── debug_viewer.py
+├── web/            # `worldgen serve`: local web interface (imported by nothing else)
+│   ├── server.py       # stdlib HTTP server, progress as Server-Sent Events
+│   ├── jobs.py         # generation runs on a worker thread
+│   ├── schema.py       # the config form, read from default_config.yaml
+│   ├── views.py        # map views and click → hex lookup
+│   └── static/         # the page: HTML, CSS, JS, no build step
 └── cli.py
 ```
 
