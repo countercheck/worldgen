@@ -467,6 +467,10 @@ export const copy = {
     patrolHostile: 'Enemy',
     patrolFriendly: 'Friendly',
     patrolSomething: 'column',
+    /** Where an enemy rider was seen, and what happens if they go on. */
+    riderSighted: (side: string | undefined, q: number | undefined, r: number | undefined): string =>
+      `A ${side ?? ''} rider at ${q ?? ''}, ${r ?? ''}. If they ride into the column itself, ` +
+      'the dice decide whether they get through.',
     despatchArrived: (from: string, written: string): string =>
       `From ${from}, written ${written}. Read it in their seat, then tell their formation where to go.`,
     stoppedShort: (aq: number, ar: number, dq: number | undefined, dr: number | undefined): string =>
@@ -505,6 +509,7 @@ export const copy = {
     column_blocked: 'has run into a column in its way',
     column_contested: 'is contesting a hex, and neither is the faster',
     patrol_contact: 'has run into something',
+    rider_sighted: 'has an enemy rider in sight',
     referee_note: '— its commander has written to you, out of the game',
     unknown: 'needs a decision',
   },

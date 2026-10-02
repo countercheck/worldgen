@@ -148,6 +148,7 @@ function Context({ decision }: { decision: PendingDecision }) {
     hostile?: boolean;
     dice?: number;
     text?: string;
+    riderFaction?: string;
   };
 
   // A player talking to the referee. Their words, in full, as they wrote them.
@@ -180,6 +181,14 @@ function Context({ decision }: { decision: PendingDecision }) {
         )}
         {c.dice === undefined ? '' : copy.referee.patrolRoll(c.dice)}
       </p>
+    );
+  }
+
+  // Before the generic `at` caption below, which would read a rider in sight as a column
+  // that stopped short of somewhere.
+  if (decision.trigger === 'rider_sighted') {
+    return (
+      <p className="muted small">{copy.referee.riderSighted(c.riderFaction, c.at?.q, c.at?.r)}</p>
     );
   }
 
