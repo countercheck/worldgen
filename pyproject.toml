@@ -39,7 +39,7 @@ worldgen = "worldgen.cli:cli"
 include = ["worldgen*"]
 
 [tool.setuptools.package-data]
-worldgen = ["*.yaml", "naming/packs/*.yaml"]
+worldgen = ["*.yaml", "naming/packs/*.yaml", "web/static/*"]
 
 [tool.ruff]
 target-version = "py311"

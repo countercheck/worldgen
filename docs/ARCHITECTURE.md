@@ -14,6 +14,14 @@ flowchart TB
         IH[import-heightmap]
         IC[init-config]
         P[presets]
+        SV[serve]
+    end
+
+    subgraph WEB["web/ — local web interface, imported by nothing"]
+        WSRV[server<br/>HTTP + Server-Sent Events]
+        WJOB[jobs<br/>worker thread per run]
+        WSCH[schema<br/>form from default_config.yaml]
+        WVIEW[views<br/>map views · click to hex]
     end
 
     subgraph CORE["core/ — types + orchestration, no I/O"]
@@ -59,6 +67,17 @@ flowchart TB
     end
 
     DV --> DN
+
+    SV --> WSRV
+    WSRV --> WJOB
+    WSRV --> WSCH
+    WSRV --> WVIEW
+    WJOB --> REG
+    WJOB --> PIPE
+    WSCH --> CFG
+    WVIEW --> SVG
+    WVIEW --> PNG
+    WVIEW --> DV
     WS --> DN
 
     G --> CFG

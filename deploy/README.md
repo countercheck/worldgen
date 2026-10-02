@@ -66,6 +66,35 @@ The upload ceiling and the rate budgets are the `env` block in `.railway/railway
 with why each is what it is. Edit, `railway config plan`, `railway config apply`; do not
 set them in the Railway console, where the next apply would silently revert them.
 
+## The generator
+
+A second service in the same project: `worldgen serve`, the generator's web interface, at
+`worldgen-generator.up.railway.app`, built from `deploy/generator.Dockerfile`. It shares
+nothing with the campaign — no volume, no variables — and holds the worlds it generates in
+memory only, so a restart or a sleep loses whatever nobody downloaded.
+
+**It is behind a password, `WORLDGEN_PASSWORD`, which lives in Railway and nowhere else.**
+The file says `preserve()` for it, so an apply neither sets nor clears it. Without it the
+container refuses to start — `serve` will not bind a public address unprotected — so a
+missing secret is a failed deploy, never an open one.
+
+First deploy, in order:
+
+```bash
+railway config plan                                   # expect: + service generator
+railway config apply                                  # its first deploy fails: no password yet
+railway variables --service generator --set 'WORLDGEN_PASSWORD=<something long>'
+railway redeploy --service generator
+```
+
+To change the password, set the variable again; Railway redeploys on a variable change.
+Anyone with the password can start a generation, and there is no cap on map size or limit
+on attempts, so make it long and share it as narrowly as the campaign's join links.
+
+The image's own ignore file, `deploy/generator.Dockerfile.dockerignore`, stands in for the
+root `.dockerignore`, which is the campaign's and keeps `worldgen/` out. `watchPatterns`
+limits rebuilds to changes in the generator.
+
 ## Moving off Railway
 
 Nothing in the image is Railway's. What a new host has to provide is the list below, and

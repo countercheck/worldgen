@@ -8,27 +8,6 @@ from .core.hex_grid import GRID_LAYOUTS
 from .core.pipeline import GeneratorPipeline
 from .stages import MODELS, stages_for
 
-# The debug plates every model can fill, in the order they are drawn. `generate` adds the
-# haulage-only plates to this when the organic model ran.
-_DEBUG_LAYERS = (
-    "elevation",
-    "terrain_class",
-    "river_flow",
-    "drainage",
-    "alluvium",
-    "temperature",
-    "moisture",
-    "biome",
-    "habitability_city",
-    "habitability_town",
-    "habitability_village",
-    "settlements",
-    "roads",
-    "land_cover",
-    "cultivation",
-    "territory",
-)
-
 
 def _report_stage(index: int, total: int, name: str, elapsed: float | None) -> None:
     """Print one line per stage, filling in the time when the stage returns.
@@ -176,15 +155,14 @@ def generate(
     cfg.to_json(str(output_path / "config.json"))
 
     from .export.json_export import save as save_json
+    from .render.debug_viewer import DEBUG_LAYERS, HAULAGE_LAYERS
     from .render.debug_viewer import render as render_debug
 
     save_json(state, str(output_path / "world.json"))
 
-    layers = list(_DEBUG_LAYERS)
+    layers = list(DEBUG_LAYERS)
     if cfg.model == "organic":
-        # The plates only the haulage model can fill. Under classic every hex would come
-        # out the fallback grey, which reads as a bug rather than as an empty layer.
-        layers += ["soil", "land_use", "rural_population"]
+        layers += HAULAGE_LAYERS
 
     for index, layer in enumerate(layers, start=1):
         _report_stage(index, len(layers), layer, None)
@@ -670,6 +648,52 @@ def presets():
         return
     for preset in found:
         click.echo(f"  {preset.stem}")
+
+
+# The loopback names: a server bound to one of these is reachable only from this machine.
+_LOOPBACK = ("127.0.0.1", "localhost", "::1")
+
+
+@cli.command()
+@click.option("--host", type=str, default="127.0.0.1", help="Address to listen on")
+@click.option("--port", type=int, default=8000, help="Port to listen on")
+@click.option("--open/--no-open", "open_browser", default=True, help="Open a browser tab")
+def serve(host: str, port: int, open_browser: bool) -> None:
+    """Run the web interface: edit the config, generate, and inspect the map.
+
+    Set WORLDGEN_PASSWORD to put the page behind a password; the browser asks for it once.
+    It is required to listen on anything but this machine.
+    """
+    import os
+
+    from .web.server import make_server
+
+    # An environment variable, not an option: a password on the command line is visible
+    # to every user of the machine in the process list, and lands in shell history.
+    password = os.environ.get("WORLDGEN_PASSWORD") or None
+    if password is None and host not in _LOOPBACK:
+        raise click.ClickException(
+            f"--host {host} would let anyone who can reach it run the generator. "
+            "Set WORLDGEN_PASSWORD to listen beyond this machine."
+        )
+
+    # Presets are read from ./presets, as `worldgen presets` reads them.
+    server = make_server(host, port, Path.cwd() / "presets", password=password)
+    url = f"http://{host}:{server.server_address[1]}/"
+    click.echo(f"Serving the world generator at {url} (Ctrl-C to stop)")
+    if password is not None:
+        click.echo("  Password required (from WORLDGEN_PASSWORD); any username will do.")
+    if open_browser:
+        import webbrowser
+
+        webbrowser.open(url)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        click.echo("Stopped.")
+    finally:
+        server.store.shutdown()
+        server.server_close()
 
 
 if __name__ == "__main__":
