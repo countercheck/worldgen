@@ -366,3 +366,18 @@ def test_serving_beyond_this_machine_needs_a_password():
 
 def test_the_health_check_needs_no_password(locked):
     assert _request(f"{locked}/health")[0] == 200
+
+
+def test_a_view_name_is_the_servers_own_string():
+    requested = "".join(["at", "las"])  # equal to, but not, the module's string
+    assert views.resolve("organic", requested) is views.EXPORT_STYLES[0]
+    with pytest.raises(KeyError):
+        views.resolve("organic", "atlas\r\nSet-Cookie: x=1")
+
+
+def test_a_header_cannot_be_smuggled_in_through_the_view(server, finished):
+    job_id, _ = finished
+    base = f"{server}/api/jobs/{job_id}"
+    for action in ["map.svg", "map.png", "hex"]:
+        status, _, headers = _get(f"{base}/{action}?view=atlas%0d%0aSet-Cookie:%20x=1&download=1")
+        assert status == 400 and "Set-Cookie" not in headers

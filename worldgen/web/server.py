@@ -28,6 +28,10 @@ from .jobs import Job, JobStore
 
 STATIC = Path(__file__).resolve().parent / "static"
 
+# The page's files, by the name a request asks for them by. Fixed when the module loads:
+# the page is three files and does not change while the server runs.
+_STATIC_FILES = {p.name: p for p in STATIC.iterdir() if p.is_file()}
+
 # How long an event stream waits for news before sending a keep-alive, in seconds. Under
 # the idle timeout of anything likely to sit between the page and the server.
 _HEARTBEAT_S = 15.0
@@ -194,22 +198,24 @@ def make_handler(
                 return self._error(HTTPStatus.CONFLICT, "the world is not finished")
             state = job.state
             stem = f"world-{job.seed}"
-            try:
-                if action == "map.svg":
-                    view = query.get("view", "atlas")
-                    if view not in job.svgs:
-                        job.svgs[view] = views.render_svg(state, view)
-                    headers = self._download(f"{stem}-{view}.svg") if "download" in query else {}
-                    body = job.svgs[view].encode("utf-8")
-                    return self._send(HTTPStatus.OK, body, "image/svg+xml", **headers)
-                if action == "map.png":
-                    style = query.get("view", "atlas")
-                    body = views.render_png(state, style)
-                    return self._send(
-                        HTTPStatus.OK, body, "image/png", **self._download(f"{stem}-{style}.png")
-                    )
-            except KeyError:
-                return self._error(HTTPStatus.BAD_REQUEST, f"unknown view {query.get('view')!r}")
+            if action in ("map.svg", "map.png", "hex"):
+                try:
+                    view = views.resolve(job.config.model, query.get("view", "atlas"))
+                except KeyError:
+                    return self._error(HTTPStatus.BAD_REQUEST, "unknown view")
+            if action == "map.svg":
+                if view not in job.svgs:
+                    job.svgs[view] = views.render_svg(state, view)
+                headers = self._download(f"{stem}-{view}.svg") if "download" in query else {}
+                body = job.svgs[view].encode("utf-8")
+                return self._send(HTTPStatus.OK, body, "image/svg+xml", **headers)
+            if action == "map.png":
+                if view not in views.EXPORT_STYLES:
+                    return self._error(HTTPStatus.BAD_REQUEST, "only a map style draws as PNG")
+                body = views.render_png(state, view)
+                return self._send(
+                    HTTPStatus.OK, body, "image/png", **self._download(f"{stem}-{view}.png")
+                )
             if action == "world.json":
                 body = json.dumps(state.to_dict()).encode("utf-8")
                 return self._send(
@@ -228,13 +234,13 @@ def make_handler(
                     x, y = float(query["x"]), float(query["y"])
                 except (KeyError, ValueError):
                     return self._error(HTTPStatus.BAD_REQUEST, "hex needs numeric x and y")
-                found = views.hex_at(state, query.get("view", "atlas"), x, y)
+                found = views.hex_at(state, view, x, y)
                 if found is None:
                     return self._json({"hex": None})
                 return self._json(
                     {
                         "hex": views.describe(state, found),
-                        "outline": views.hex_outline(state, query.get("view", "atlas"), found),
+                        "outline": views.hex_outline(state, view, found),
                     }
                 )
             return self._error(HTTPStatus.NOT_FOUND, f"no action {action!r}")
@@ -260,10 +266,10 @@ def make_handler(
                 return
 
         def _static(self, path: str) -> None:
-            name = "index.html" if path in ("", "/") else path.lstrip("/")
-            target = (STATIC / name).resolve()
-            # Nothing outside static/, whatever the path spells.
-            if STATIC not in target.parents or not target.is_file():
+            # Looked up by name in a fixed list, never joined onto a directory: no request
+            # spelling, `..` or otherwise, can name a file that is not in it.
+            target = _STATIC_FILES.get("index.html" if path in ("", "/") else path.lstrip("/"))
+            if target is None:
                 return self._error(HTTPStatus.NOT_FOUND, "not found")
             content_type = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
             return self._send(HTTPStatus.OK, target.read_bytes(), content_type)

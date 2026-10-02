@@ -35,6 +35,18 @@ def views_for(model: str) -> list[str]:
     return [*EXPORT_STYLES, *layers]
 
 
+def resolve(model: str, requested: str) -> str:
+    """The view named *requested*, as this module spells it, or KeyError.
+
+    What comes back is the module's own string, never the caller's, so a view name that
+    reaches a response header or a filename is one the server wrote, not one a request did.
+    """
+    for view in views_for(model):
+        if view == requested:
+            return view
+    raise KeyError(requested)
+
+
 def _frame(view: str) -> _Frame:
     if view in EXPORT_STYLES:
         default = svg_export.SVGConfig()
