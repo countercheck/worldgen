@@ -492,7 +492,7 @@ function Details({
           </dd>
           <dt>{copy.roster.columnFatigue}</dt>
           <dd>
-            {line.fatigue}
+            {Math.round(line.fatigue)}
             {unit !== null && ` · ${copy.roster.morale(unit.morale, maxMorale(unit, cfg.maxMorale))}`}
           </dd>
         </>

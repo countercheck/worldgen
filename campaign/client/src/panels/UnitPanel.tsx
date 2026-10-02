@@ -118,6 +118,16 @@ export function UnitPanel({
               value={presentUnderArms(unit).toLocaleString()}
               hint={copy.unit.presentUnderArmsHint}
             />
+            {(unit.campMissing ?? 0) + (unit.campIll ?? 0) > 0 && (
+              <Row
+                label={copy.unit.campLosses}
+                value={copy.unit.campLossesValue(
+                  (unit.campMissing ?? 0).toLocaleString(),
+                  (unit.campIll ?? 0).toLocaleString(),
+                )}
+                hint={copy.unit.campLossesHint}
+              />
+            )}
             <Row label={copy.unit.guns} value={String(unit.guns)} />
             <Bar label={copy.unit.fatigue} value={unit.fatigue} max={100} invert />
             <Bar

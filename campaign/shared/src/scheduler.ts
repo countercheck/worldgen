@@ -59,7 +59,7 @@ import {
   roadHoursWithin,
   unitSpeedKmh,
 } from './movement.js';
-import { marchFatigueBetween, nightFatigue } from './fatigue.js';
+import { campBreak, campDay, marchFatigueBetween, nightFatigue } from './fatigue.js';
 import { detectionDice, spottedBy, type Sighting } from './recon.js';
 import { ones, type Rng } from './rng.js';
 import { configAt, reduce, type CampaignState } from './state.js';
@@ -524,6 +524,51 @@ function simulate(state: CampaignState, world: World, base: CampaignConfig, rng:
       const atHours = Math.max(change.completesAtHours, now);
       clockTo(atHours);
       emit({ kind: 'formation_changed', unitId: unit.id, to: change.to, atHours });
+    }
+  };
+
+  /**
+   * Count days in camp and what each gives back, and strike the camp's losses off the rolls
+   * when it is broken.
+   *
+   * After the columns have moved, so that a camp made or struck this hour is seen this
+   * hour. A camp is a formation in rest with no change under way: one still building it
+   * has not started resting, and one striking it has stopped. Patrols never camp in this
+   * sense — they have no fatigue to shed and no morale to restore.
+   *
+   * A day is due on the hour, every twenty-four from the camp being made. Every hour of an
+   * advance passes through here exactly once, so none is missed; a day that completes on
+   * the hour the camp is struck was a full day, and is counted before the camp is struck.
+   */
+  const campTick = (atHours: number): void => {
+    const units = [...s.units.values()].sort((a, b) => (a.id < b.id ? -1 : 1));
+    for (const unit of units) {
+      if (isPatrol(unit)) continue;
+      const inCamp = unit.formation === 'rest' && unit.formationChange == null;
+      const since = unit.campSinceHours;
+
+      if (since === undefined) {
+        if (inCamp) {
+          clockTo(atHours);
+          emit({ kind: 'camp_made', unitId: unit.id, atHours });
+        }
+        continue;
+      }
+
+      const elapsed = atHours - since;
+      if (elapsed > 0 && elapsed % HOURS_PER_DAY === 0) {
+        const day = campDay(cfg, unit);
+        if (day.fatigue > 0 || day.morale > 0) {
+          clockTo(atHours);
+          emit({ kind: 'camp_recovered', unitId: unit.id, atHours, ...day });
+        }
+      }
+
+      if (!inCamp) {
+        const after = s.units.get(unit.id) ?? unit;
+        clockTo(atHours);
+        emit({ kind: 'camp_broken', unitId: unit.id, atHours, ...campBreak(after) });
+      }
     }
   };
 
@@ -1081,6 +1126,7 @@ function simulate(state: CampaignState, world: World, base: CampaignConfig, rng:
       // seven is on the road at six, and the referee reading the log wants the hour the
       // troops stepped off rather than the hour they stopped.
       marchTick(hourStart);
+      campTick(hourStart);
       if (payloads.length > before) discoveryTick(hourEnd);
 
       now = hourEnd;

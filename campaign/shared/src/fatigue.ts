@@ -20,11 +20,18 @@
  * two kilometres long is not off the road when its head halts — the rear is still marching
  * in the dark for as long as it takes to close up. A march that ends at dusk costs a night
  * march for the tail even though the head camped in daylight.
+ *
+ * ## And what a camp gives back
+ *
+ * Each full day in camp sheds a flat amount of fatigue and restores some morale. The
+ * fatigue stood for troops who had fallen out; a day's rest brings them in — some are
+ * missing, some are sick, the rest are back in the line. The missing and the sick leave the
+ * rolls when the camp is broken, so that fatigue can fall at a flat rate while it stands.
  */
 
 import { catchupHours } from './column.js';
 import type { CampaignConfig } from './config.js';
-import type { Unit } from './unit.js';
+import { maxMorale, type Unit } from './unit.js';
 
 /**
  * Cumulative march fatigue at a number of hours on the road.
@@ -116,3 +123,47 @@ export const nightFatigue = (
   from: number,
   to: number,
 ): number => cfg.nightFatiguePerHour * darkHoursBetween(cfg, from, to);
+
+/**
+ * What one full day in camp gives a formation back.
+ *
+ * The fatigue shed is a share of the formation that had fallen out. Of the troops it stood
+ * for, some are missing and some are ill; they are kept out of the line from the day they
+ * are found, but stay on the rolls until the camp is broken. That is what lets fatigue fall
+ * by exactly the configured rate: while the rolls do not move, a point of fatigue is the
+ * same number of troops every day.
+ */
+export function campDay(
+  cfg: CampaignConfig,
+  unit: Unit,
+): { fatigue: number; morale: number; recoveredTroops: number; missing: number; ill: number } {
+  const fatigue = Math.min(Math.max(0, unit.fatigue), cfg.campFatigueRecoveryPerDay);
+  // Up to the ceiling and never past it, nor back down to it: a referee who has set a
+  // morale above it has said something a camp has no business undoing.
+  const ceiling = maxMorale(unit, cfg.maxMorale);
+  const morale = Math.max(0, Math.min(cfg.campMoraleRecoveryPerDay, ceiling - unit.morale));
+
+  const recoveredTroops = Math.round((unit.paperStrength * fatigue) / 100);
+  const missing = Math.round(recoveredTroops * cfg.campMissingShare);
+  const ill = Math.min(recoveredTroops - missing, Math.round(recoveredTroops * cfg.campIllShare));
+  return { fatigue, morale, recoveredTroops, missing, ill };
+}
+
+/**
+ * Take a camp's missing and ill off the rolls, as it is broken.
+ *
+ * They were already out of the line, so present under arms does not move. The fatigue the
+ * formation still carries is the same troops as before, now a share of smaller rolls — so
+ * a formation that leaves camp before it is fully rested reads a little more fatigued than
+ * it did, and one that rested to nothing reads nothing.
+ */
+export function campBreak(unit: Unit): { missing: number; ill: number; fatigue: number } {
+  const missing = Math.max(0, unit.campMissing ?? 0);
+  const ill = Math.max(0, unit.campIll ?? 0);
+  const rolls = unit.paperStrength - missing - ill;
+  const stillFatigued = (unit.paperStrength * Math.max(0, unit.fatigue)) / 100;
+  // Not rounded: a rounded share of a changed denominator is a few troops more or fewer in
+  // the line than the ones who are actually there.
+  const fatigue = rolls > 0 ? Math.min(100, (stillFatigued / rolls) * 100) : 0;
+  return { missing, ill, fatigue };
+}

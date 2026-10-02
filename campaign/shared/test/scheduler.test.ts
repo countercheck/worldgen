@@ -20,7 +20,7 @@ import { roadHoursWithin } from '../src/movement.js';
 import { advance, despatchNow } from '../src/scheduler.js';
 import { EMPTY_STATE, reduce, type CampaignState } from '../src/state.js';
 import { contestants, contestedHex, type Task } from '../src/task.js';
-import type { Trait, Unit, UnitKind } from '../src/unit.js';
+import { presentUnderArms, type Trait, type Unit, type UnitKind } from '../src/unit.js';
 import type { World, WorldHex } from '../src/world.js';
 import { marched as onRoadFor } from './fixtures/road.js';
 
@@ -1878,5 +1878,131 @@ describe('a battlefield', () => {
 
     const { payloads } = advance(state, world, cfg, clean, { hours: 12 });
     expect(kinds(payloads)).toContain('march_blocked');
+  });
+});
+
+describe('resting in camp', () => {
+  const resting = (opts: Partial<Unit> = {}): Unit =>
+    unit('red-1', 'red', { q: 5, r: 5 }, { formation: 'rest', fatigue: 80, morale: 0, ...opts });
+
+  it('counts its days from the hour the camp is made', () => {
+    const state = stateFrom({ units: [resting()] });
+    const { payloads } = advance(state, world, cfg, clean, { hours: 49 });
+
+    const made = payloads.filter((p) => p.kind === 'camp_made');
+    expect(made).toEqual([{ kind: 'camp_made', unitId: 'red-1', atHours: 6 }]);
+    const days = payloads.filter((p) => p.kind === 'camp_recovered');
+    expect(days.map((p) => p.kind === 'camp_recovered' && p.atHours)).toEqual([30, 54]);
+
+    const after = fold(state, payloads).units.get('red-1')!;
+    expect(after.fatigue).toBe(80 - 2 * cfg.campFatigueRecoveryPerDay);
+    expect(after.morale).toBe(2 * cfg.campMoraleRecoveryPerDay);
+  });
+
+  it('gives nothing back for less than a full day', () => {
+    const state = stateFrom({ units: [resting()] });
+    const { payloads } = advance(state, world, cfg, clean, { hours: 24 });
+    expect(kinds(payloads)).not.toContain('camp_recovered');
+  });
+
+  it('does not count the hours spent making camp', () => {
+    const making = resting({
+      formation: 'march',
+      formationChange: { to: 'rest', completesAtHours: 8 },
+    });
+    const state = stateFrom({ units: [making] });
+    const { payloads } = advance(state, world, cfg, clean, { hours: 27 });
+    const made = payloads.find((p) => p.kind === 'camp_made');
+    expect(made).toMatchObject({ atHours: 8 });
+    const day = payloads.find((p) => p.kind === 'camp_recovered');
+    expect(day).toMatchObject({ atHours: 32 });
+  });
+
+  it('keeps the day\'s missing and ill out of the line, and strikes them off at the break', () => {
+    const state = stateFrom({ units: [resting()] });
+    const { payloads: day } = advance(state, world, cfg, clean, { hours: 25 });
+    expect(day.find((p) => p.kind === 'camp_recovered')).toMatchObject({
+      fatigue: 20,
+      recoveredTroops: 800,
+      missing: 80,
+      ill: 160,
+    });
+
+    const rested = fold(state, day);
+    const unit0 = rested.units.get('red-1')!;
+    expect(unit0.fatigue).toBe(60);
+    expect(unit0.paperStrength).toBe(4000);
+    // Seventy percent of the eight hundred are back in the line.
+    expect(presentUnderArms(unit0)).toBe(presentUnderArms(resting()) + 560);
+
+    const striking = fold(rested, [
+      {
+        kind: 'formation_change_began',
+        unitId: 'red-1',
+        from: 'rest',
+        to: 'march',
+        atHours: rested.clockHours,
+        completesAtHours: rested.clockHours + 1,
+        reason: 'ordered',
+      },
+    ]);
+    const { payloads } = advance(striking, world, cfg, clean, { hours: 1 });
+    expect(payloads.find((p) => p.kind === 'camp_broken')).toMatchObject({ missing: 80, ill: 160 });
+
+    const after = fold(striking, payloads).units.get('red-1')!;
+    expect(after.paperStrength).toBe(4000 - 240);
+    expect(presentUnderArms(after)).toBe(presentUnderArms(unit0));
+    expect(after.campSinceHours).toBeUndefined();
+    expect(after.campMissing).toBeUndefined();
+    expect(after.campIll).toBeUndefined();
+  });
+
+  it('counts a day that completes on the hour the camp is struck', () => {
+    const state = stateFrom({ units: [resting()] });
+    const rested = fold(state, advance(state, world, cfg, clean, { hours: 24 }).payloads);
+    const striking = fold(rested, [
+      {
+        kind: 'formation_change_began',
+        unitId: 'red-1',
+        from: 'rest',
+        to: 'march',
+        atHours: 30,
+        completesAtHours: 31,
+        reason: 'ordered',
+      },
+    ]);
+    const { payloads } = advance(striking, world, cfg, clean, { hours: 1 });
+    expect(kinds(payloads).filter((k) => k.startsWith('camp_'))).toEqual([
+      'camp_recovered',
+      'camp_broken',
+    ]);
+  });
+
+  it('counts the next camp\'s days afresh', () => {
+    const state = stateFrom({ units: [resting()] });
+    const rested = fold(state, advance(state, world, cfg, clean, { hours: 12 }).payloads);
+    const struck = fold(rested, [
+      { kind: 'formation_changed', unitId: 'red-1', to: 'march', atHours: 18 },
+    ]);
+    const marched = fold(struck, advance(struck, world, cfg, clean, { hours: 1 }).payloads);
+    const again = fold(marched, [
+      { kind: 'formation_changed', unitId: 'red-1', to: 'rest', atHours: 19 },
+    ]);
+    const { payloads } = advance(again, world, cfg, clean, { hours: 24 });
+    // Made at 19, so its first day is due at 43 — not at 30, a day from the first camp.
+    expect(payloads.find((p) => p.kind === 'camp_made')).toMatchObject({ atHours: 19 });
+    expect(kinds(payloads)).not.toContain('camp_recovered');
+  });
+
+  it('leaves a patrol out of it', () => {
+    const patrol = unit('red-p', 'red', { q: 6, r: 5 }, {
+      formation: 'rest',
+      parentUnitId: 'red-1',
+      paperStrength: 20,
+      morale: 0,
+    });
+    const state = stateFrom({ units: [patrol] });
+    const { payloads } = advance(state, world, cfg, clean, { hours: 49 });
+    expect(kinds(payloads).filter((k) => k.startsWith('camp_'))).toEqual([]);
   });
 });

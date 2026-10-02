@@ -238,6 +238,18 @@ export interface Unit {
    */
   readonly restFromHours?: number;
 
+  /**
+   * The hour this formation made camp, which its days of rest are counted from. Absent when
+   * it is not in camp, and on units logged before camps were counted.
+   */
+  readonly campSinceHours?: number;
+  /**
+   * Troops this camp has found missing, and found ill. Out of the line already; off the rolls
+   * when the camp is broken. Held apart so a hospital can one day return the ill.
+   */
+  readonly campMissing?: number;
+  readonly campIll?: number;
+
   /** Corps grouping. Presentation and combat only — everything tracks individually. */
   readonly corps: string | null;
   /**
@@ -271,15 +283,23 @@ export const head = (u: Unit): Hex => {
 };
 
 /**
- * Troops actually able to fight: paper strength reduced by fatigue percent.
+ * Troops actually able to fight: paper strength reduced by fatigue percent, and by the
+ * missing and ill a camp has found but not yet struck off the rolls.
  *
- * Derived, never stored. The rules define it as a function of two other fields, and a
- * stored copy is a third fact that can disagree with them.
+ * Derived, never stored. The rules define it as a function of other fields, and a stored
+ * copy is another fact that can disagree with them.
  *
  * A patrol carries no fatigue, so its twenty are its twenty.
  */
 export const presentUnderArms = (u: Unit): number =>
-  isPatrol(u) ? u.paperStrength : Math.round(u.paperStrength * (1 - u.fatigue / 100));
+  isPatrol(u)
+    ? u.paperStrength
+    : Math.max(
+        0,
+        Math.round(u.paperStrength * (1 - u.fatigue / 100)) -
+          (u.campMissing ?? 0) -
+          (u.campIll ?? 0),
+      );
 
 /**
  * The morale ceiling for this unit's experience.

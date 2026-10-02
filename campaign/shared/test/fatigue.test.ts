@@ -12,6 +12,8 @@ import { describe, expect, it } from 'vitest';
 import { catchupHours } from '../src/column.js';
 import { DEFAULT_CONFIG } from '../src/config.js';
 import {
+  campBreak,
+  campDay,
   columnMotionWindow,
   darkHoursBetween,
   isDark,
@@ -19,7 +21,7 @@ import {
   marchFatigueBetween,
   nightFatigue,
 } from '../src/fatigue.js';
-import type { Experience, Unit, UnitKind } from '../src/unit.js';
+import { presentUnderArms, type Experience, type Unit, type UnitKind } from '../src/unit.js';
 
 const cfg = DEFAULT_CONFIG;
 
@@ -161,5 +163,107 @@ describe('the tail, and why it matters', () => {
     const at = cfg.sunsetHour;
     const of = (u: Unit) => nightFatigue(cfg, at, columnMotionWindow(u, at - 1, at, 3).to);
     expect(of(long)).toBeGreaterThan(of(small));
+  });
+});
+
+describe('a day in camp', () => {
+  const tired = (fatigue: number, morale: number): Unit => ({ ...unit(), fatigue, morale });
+
+  it('sheds the configured fatigue, and brings in the troops it stood for', () => {
+    const day = campDay(cfg, tired(80, 30));
+    expect(day.fatigue).toBe(cfg.campFatigueRecoveryPerDay);
+    expect(day.recoveredTroops).toBe(Math.round((4000 * cfg.campFatigueRecoveryPerDay) / 100));
+  });
+
+  it('counts the missing and the ill among them, in the configured shares', () => {
+    const day = campDay(cfg, tired(80, 30));
+    expect(day.missing).toBe(Math.round(day.recoveredTroops * cfg.campMissingShare));
+    expect(day.ill).toBe(Math.round(day.recoveredTroops * cfg.campIllShare));
+    expect(day.missing + day.ill).toBeLessThanOrEqual(day.recoveredTroops);
+  });
+
+  it('never sheds more fatigue than there is', () => {
+    const day = campDay(cfg, tired(5, 30));
+    expect(day.fatigue).toBe(5);
+    expect(campDay(cfg, tired(0, 30))).toMatchObject({ fatigue: 0, recoveredTroops: 0, missing: 0, ill: 0 });
+  });
+
+  it('restores morale up to the experience ceiling and no further', () => {
+    expect(campDay(cfg, tired(0, 0)).morale).toBe(cfg.campMoraleRecoveryPerDay);
+    // A regular's ceiling is thirty.
+    expect(campDay(cfg, tired(0, 25)).morale).toBe(5);
+    expect(campDay(cfg, tired(0, 30)).morale).toBe(0);
+    // Above it, by a referee's hand, is left where it is rather than pulled down.
+    expect(campDay(cfg, tired(0, 45)).morale).toBe(0);
+  });
+
+  const rest = (u: Unit): Unit => {
+    const day = campDay(cfg, u);
+    return {
+      ...u,
+      fatigue: u.fatigue - day.fatigue,
+      morale: u.morale + day.morale,
+      campMissing: (u.campMissing ?? 0) + day.missing,
+      campIll: (u.campIll ?? 0) + day.ill,
+    };
+  };
+
+  it('recovers even a broken formation', () => {
+    // Morale 0, fatigue 80, two days: morale 20, fatigue 40.
+    const u = rest(rest(tired(80, 0)));
+    expect(u.morale).toBe(20);
+    expect(u.fatigue).toBe(40);
+  });
+
+  it('puts exactly the troops who came back into the line, day after day', () => {
+    let u = tired(80, 30);
+    for (let d = 0; d < 4; d++) {
+      const day = campDay(cfg, u);
+      const next = rest(u);
+      expect(presentUnderArms(next) - presentUnderArms(u)).toBe(
+        day.recoveredTroops - day.missing - day.ill,
+      );
+      expect(next.fatigue).toBe(u.fatigue - cfg.campFatigueRecoveryPerDay);
+      // The rolls do not move while the camp stands.
+      expect(next.paperStrength).toBe(u.paperStrength);
+      u = next;
+    }
+  });
+
+  it('matches the worked example', () => {
+    // Four thousand at fatigue 80: eight hundred fit. Each day brings 800 in, 240 of them lost.
+    const one = rest(tired(80, 30));
+    expect(one.fatigue).toBe(60);
+    expect(presentUnderArms(one)).toBe(1360);
+    const two = rest(one);
+    expect(two.fatigue).toBe(40);
+    expect(presentUnderArms(two)).toBe(1920);
+  });
+});
+
+describe('breaking camp', () => {
+  // Two days' rest from fatigue 80 on four thousand: 480 found missing or ill.
+  const camped: Unit = { ...unit(), fatigue: 40, campMissing: 160, campIll: 320 };
+  const broken = (u: Unit): Unit => {
+    const b = campBreak(u);
+    return { ...u, paperStrength: u.paperStrength - b.missing - b.ill, fatigue: b.fatigue, campMissing: 0, campIll: 0 };
+  };
+
+  it('strikes the missing and the ill off the rolls', () => {
+    expect(campBreak(camped)).toMatchObject({ missing: 160, ill: 320 });
+    expect(broken(camped).paperStrength).toBe(3520);
+  });
+
+  it('leaves present under arms where it was', () => {
+    expect(presentUnderArms(broken(camped))).toBe(presentUnderArms(camped));
+  });
+
+  it('reads the still-fatigued as a share of the smaller rolls', () => {
+    expect(campBreak(camped).fatigue).toBeCloseTo((1600 / 3520) * 100, 9);
+    expect(campBreak({ ...camped, fatigue: 0 }).fatigue).toBe(0);
+  });
+
+  it('costs nothing when the camp found nobody', () => {
+    expect(campBreak({ ...unit(), fatigue: 30 })).toEqual({ missing: 0, ill: 0, fatigue: 30 });
   });
 });
