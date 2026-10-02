@@ -228,8 +228,8 @@ export interface CampaignConfig {
    * The ground each formation stands on, as a fold of its column of march.
    *
    * A column is long and thin because it is on a road; everything else gathers it up. See
-   * `FOOTPRINT` in `column.ts` for what the numbers mean and why camp is a thicker line
-   * rather than a disc.
+   * `FOOTPRINT` in `column.ts` for what the numbers mean and why camp does not fold — its
+   * tail closes up over time instead.
    */
   readonly footprint: Readonly<Record<Formation, FootprintShape>>;
 

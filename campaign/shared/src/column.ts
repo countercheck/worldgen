@@ -85,37 +85,54 @@ export interface FootprintShape {
    * a road and has nothing to do with deploying.
    */
   readonly menPerHex: number | null;
+  /**
+   * Whether the formation gathers in over time rather than the moment it forms.
+   *
+   * A division that halts to camp or to form for battle still has its tail kilometres down
+   * the road, and the tail has to walk up. While it does, the formation stands on the column
+   * as it is, and the scheduler cuts the column shorter an hour at a time until it is down to
+   * `spineHexes`. Without this, the fold is instant.
+   *
+   * Optional because campaigns created before it carry their own footprint table without it,
+   * and those fold the way they always did.
+   */
+  readonly closesUp?: boolean;
 }
 
 /**
  * What each formation folds into. See `cfg.footprint` for the live table.
  *
- * Camp is the one that matters so far. A division halts and builds one, and the two hours
- * it costs are the troops coming off the road and pitching: a quarter the length, twice the
- * width. Twelve kilometres of cavalry column becomes a camp three hexes long and two
- * across, which is a thicker line than the tail it replaced, and that is what a bivouac
- * looks like from a hilltop.
+ * Camp and battle close up rather than fold. A division halts with its tail still kilometres
+ * back down the road, and the tail walks up to the head over the next `catchupHours`. That
+ * walk is time on the map, exposed to whoever is watching the road, so the scheduler does
+ * it an hour at a time by cutting `unit.column` shorter — a fold would gather the tail in the
+ * instant the order was given. A camp closes into a single hex.
  *
  * Occupation folds harder and stays narrow, because it is a garrison gone into a town
  * rather than a formation standing in a field.
  *
- * Battle is measured the other way, from strength: a kilometre of frontage per ten
+ * Battle closes up to a frontage measured the other way, from strength: a kilometre per ten
  * thousand troops. That makes an ordinary division a single hex, which is why deployment
  * needs no facing — there is no shape on this grid to orient. What happens inside that
  * hex is below the resolution of a 1 km map and belongs to whatever resolves a battle.
  *
- * March and rout are the column as marched.
+ * March and rout are the column as marched. Leaving camp or battle needs nothing here: the
+ * head steps off from where the formation stands, and `advanceColumn` lets the column grow
+ * back out behind it a hex at a time until it is its full length again.
  */
 export const FOOTPRINT: Readonly<Record<Formation, FootprintShape>> = {
   march: { foldsInto: 1, widthHexes: 1, menPerHex: null },
-  battle: { foldsInto: 1, widthHexes: 1, menPerHex: 10000 },
-  rest: { foldsInto: 4, widthHexes: 2, menPerHex: null },
+  battle: { foldsInto: 1, widthHexes: 1, menPerHex: 10000, closesUp: true },
+  rest: { foldsInto: 1, widthHexes: 1, menPerHex: null, closesUp: true },
   occupation: { foldsInto: 8, widthHexes: 1, menPerHex: null },
   rout: { foldsInto: 1, widthHexes: 1, menPerHex: null },
 };
 
 /**
- * How many hexes of the marched path the formation still stretches along.
+ * How many hexes of the marched path the formation stretches along, once it is gathered in.
+ *
+ * For a formation that closes up this is where it ends, not where it is: until the tail is
+ * in, it stands on more. A camp gathers into one hex.
  *
  * Always at least one: a unit is always somewhere.
  */
@@ -133,6 +150,7 @@ export const spineHexes = (
   if (shape.menPerHex != null && shape.menPerHex > 0) {
     return Math.max(1, Math.ceil(presentUnderArms(unit) / shape.menPerHex));
   }
+  if (shape.closesUp === true) return 1;
   return Math.max(1, Math.ceil(columnHexes(unit, grade) / Math.max(1, shape.foldsInto)));
 };
 
@@ -178,7 +196,11 @@ export function occupied(
   shapes: Readonly<Record<Formation, FootprintShape>> = FOOTPRINT,
 ): Hex[] {
   const shape = shapes[unit.formation] ?? FOOTPRINT.march;
-  const spine = unit.column.slice(0, spineHexes(unit, grade, shapes));
+  // Closing up is the column getting shorter, so until it has, the formation is still on all
+  // of it — up to its length as marched, past which the path is only where it has been.
+  const gathered = spineHexes(unit, grade, shapes);
+  const reach = shape.closesUp === true ? Math.max(gathered, columnHexes(unit, grade)) : gathered;
+  const spine = unit.column.slice(0, reach);
   if (shape.widthHexes <= 1) return spine;
 
   // Insertion-ordered so the head stays at index 0, and keyed so a flank hex that lands
