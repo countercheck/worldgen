@@ -38,7 +38,7 @@
  * of which are exactly the things that are supposed to hurt.
  */
 
-import { catchupHours, occupied } from './column.js';
+import { catchupHours, columnHexes, columnLengthKm, occupied } from './column.js';
 import { superiors } from './commander.js';
 import type { CampaignConfig, Grade } from './config.js';
 import {
@@ -524,6 +524,41 @@ function simulate(state: CampaignState, world: World, base: CampaignConfig, rng:
       const atHours = Math.max(change.completesAtHours, now);
       clockTo(atHours);
       emit({ kind: 'formation_changed', unitId: unit.id, to: change.to, atHours });
+    }
+  };
+
+  /**
+   * Walk every camp's tail an hour further up the road.
+   *
+   * A camp is pitched where the head stopped, and the rest of the column is still strung
+   * out behind it. Each hour the tail closes by an hour of marching at the pace of the road
+   * it is on, until the whole formation stands in the head's hex. Only while the formation
+   * is in camp or making one: a column that has broken camp to march is going the other way.
+   */
+  const closeUpTick = (atHours: number): void => {
+    const units = [...s.units.values()].sort((a, b) => (a.id < b.id ? -1 : 1));
+    for (const unit of units) {
+      if ((unit.formationChange?.to ?? unit.formation) !== 'rest') continue;
+      const n = unit.column.length;
+      if (n <= 1) continue;
+
+      // The ground the column covers as marched, which may be less than its full length
+      // for a unit placed with no road behind it.
+      const lengthKm = unit.closingKm ?? Math.min(columnLengthKm(unit), columnHexes(unit), n);
+      const tail = unit.column[n - 1]!;
+      const ahead = unit.column[n - 2]!;
+      const speed = unitSpeedKmh(cfg, unit, gradeOf(world, cfg, tail, ahead));
+      if (!(speed > 0)) continue;
+
+      const left = Math.max(0, lengthKm - speed * HOURS_PER_STEP);
+      clockTo(atHours);
+      emit({
+        kind: 'column_closed_up',
+        unitId: unit.id,
+        atHours,
+        lengthKm: left,
+        hexes: Math.max(1, Math.ceil(left)),
+      });
     }
   };
 
@@ -1077,6 +1112,7 @@ function simulate(state: CampaignState, world: World, base: CampaignConfig, rng:
       // it has not finished breaking — an hour early, and only visible as an off-by-one in
       // the log.
       formationTick(hourStart);
+      closeUpTick(hourStart);
       // Marching is stamped at the hour it begins: a column given the hour from six to
       // seven is on the road at six, and the referee reading the log wants the hour the
       // troops stepped off rather than the hour they stopped.

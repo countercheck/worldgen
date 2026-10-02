@@ -16,7 +16,8 @@ import type { EventPayload } from '../src/events.js';
 import { key, type Hex, type HexKey } from '../src/hex.js';
 import { makeRng, type Rng } from '../src/rng.js';
 import { marchFatigueAt } from '../src/fatigue.js';
-import { roadHoursWithin } from '../src/movement.js';
+import { columnLengthKm } from '../src/column.js';
+import { roadHoursWithin, unitSpeedKmh } from '../src/movement.js';
 import { advance, despatchNow } from '../src/scheduler.js';
 import { EMPTY_STATE, reduce, type CampaignState } from '../src/state.js';
 import { contestants, contestedHex, type Task } from '../src/task.js';
@@ -266,6 +267,126 @@ describe('marching', () => {
       'rest',
       'march',
     ]);
+  });
+});
+
+describe('a camp closing up', () => {
+  // Six metres a soldier makes twelve kilometres of column: long enough that the tail is a
+  // day's worth of hexes behind the head, and takes hours to come in.
+  const road = Array.from({ length: 13 }, (_, i) => ({ q: 20 - i, r: 5 }));
+  const camped = unit('red-1', 'red', road[0]!, {
+    spacingM: 3,
+    formation: 'rest',
+    column: road,
+  });
+  const ney = commander('ney', 'red', 'red-1');
+  const offRoad = unitSpeedKmh(cfg, camped, 'off_road');
+
+  const lengthAfter = (s: CampaignState, hours: number): number[] => {
+    const lengths: number[] = [];
+    let at = s;
+    for (let h = 0; h < hours; h++) {
+      at = fold(at, advance(at, world, cfg, clean, { hours: 1 }).payloads);
+      lengths.push(at.units.get('red-1')!.column.length);
+    }
+    return lengths;
+  };
+
+  it('brings the tail up to the head an hour at a time, until it is in one hex', () => {
+    const state = stateFrom({ units: [camped], commanders: [ney] });
+    const hoursToClose = Math.ceil((columnLengthKm(camped) - 1) / offRoad);
+    const lengths = lengthAfter(state, hoursToClose + 2);
+
+    // Shorter every hour it is still strung out, and never longer.
+    for (let i = 1; i < lengths.length; i++) expect(lengths[i]).toBeLessThanOrEqual(lengths[i - 1]!);
+    expect(lengths[0]).toBeGreaterThan(1);
+    expect(lengths[0]).toBeLessThan(road.length);
+    // In one hex at the pace of the road it is walking, and not an hour before.
+    expect(lengths[hoursToClose - 2]).toBeGreaterThan(1);
+    expect(lengths[hoursToClose - 1]).toBe(1);
+  });
+
+  it('closes up on the head, which does not move', () => {
+    const state = stateFrom({ units: [camped], commanders: [ney] });
+    const after = fold(state, advance(state, world, cfg, clean, { hours: 12 }).payloads);
+    expect(after.units.get('red-1')!.column).toEqual([road[0]]);
+  });
+
+  it('closes the same in one advance as in many', () => {
+    // The part of a kilometre walked in one hour is carried to the next on the unit, not
+    // lost between advances.
+    const state = stateFrom({ units: [camped], commanders: [ney] });
+    const once = fold(state, advance(state, world, cfg, clean, { hours: 4 }).payloads);
+    let stepped = state;
+    for (let h = 0; h < 4; h++) {
+      stepped = fold(stepped, advance(stepped, world, cfg, clean, { hours: 1 }).payloads);
+    }
+    expect(stepped.units.get('red-1')).toEqual(once.units.get('red-1'));
+  });
+
+  it('starts closing as soon as camp is being made, not once it is built', () => {
+    const making = {
+      ...camped,
+      formation: 'march' as const,
+      formationChange: { to: 'rest' as const, completesAtHours: 8 },
+    };
+    const state = stateFrom({ units: [making], commanders: [ney] });
+    expect(lengthAfter(state, 1)[0]).toBeLessThan(road.length);
+  });
+
+  it('leaves a column on the march strung out', () => {
+    const marching = { ...camped, formation: 'march' as const };
+    const state = stateFrom({ units: [marching], commanders: [ney] });
+    const { payloads } = advance(state, world, cfg, clean, { hours: 6 });
+    expect(kinds(payloads)).not.toContain('column_closed_up');
+  });
+
+  it('stops when the camp is broken, and a new march leaves a new tail', () => {
+    const half = fold(
+      stateFrom({ units: [camped], commanders: [ney] }),
+      advance(stateFrom({ units: [camped], commanders: [ney] }), world, cfg, clean, { hours: 2 })
+        .payloads,
+    );
+    const halfway = half.units.get('red-1')!;
+    expect(halfway.closingKm).toBeDefined();
+
+    const ordered = {
+      ...half,
+      tasks: new Map([
+        ['red-1', marchTo(halfway, { q: 30, r: 5 }, half.clockHours, { q: 21, r: 5 })],
+      ]),
+    };
+    const { payloads } = advance(ordered, world, cfg, clean, { hours: 6 });
+    const firstStep = payloads.findIndex((p) => p.kind === 'unit_marched');
+    expect(firstStep).toBeGreaterThan(-1);
+    // Nothing closes once the column is breaking camp to march off the other way.
+    const breaking = payloads.findIndex((p) => p.kind === 'formation_change_began');
+    expect(payloads.slice(breaking).map((p) => p.kind)).not.toContain('column_closed_up');
+
+    const after = fold(ordered, payloads).units.get('red-1')!;
+    expect(after.closingKm).toBeUndefined();
+    expect(after.column[0]).not.toEqual(road[0]);
+  });
+
+  it('closes up behind a column that camps at the end of its day', () => {
+    // Half an hour left in the day: one hex, then camp where it stands, and then the tail
+    // comes in behind it.
+    // Four kilometres of column, so the tail is in before the cap lifts and it marches on.
+    const tired = unit('red-1', 'red', road[0]!, {
+      spacingM: 1,
+      column: road.slice(0, 5),
+      ...onRoadFor(19.5, 20),
+    });
+    const state = stateFrom({
+      units: [tired],
+      commanders: [ney],
+      tasks: [marchTo(tired, { q: 30, r: 5 }, 20, { q: 21, r: 5 })],
+      clockHours: 20,
+    });
+    const after = fold(state, advance(state, world, cfg, clean, { hours: 4 }).payloads);
+    const red = after.units.get('red-1')!;
+    expect(red.formation).toBe('rest');
+    expect(red.column).toEqual([{ q: 21, r: 5 }]);
   });
 });
 

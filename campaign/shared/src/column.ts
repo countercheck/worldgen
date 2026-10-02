@@ -90,11 +90,12 @@ export interface FootprintShape {
 /**
  * What each formation folds into. See `cfg.footprint` for the live table.
  *
- * Camp is the one that matters so far. A division halts and builds one, and the two hours
- * it costs are the troops coming off the road and pitching: a quarter the length, twice the
- * width. Twelve kilometres of cavalry column becomes a camp three hexes long and two
- * across, which is a thicker line than the tail it replaced, and that is what a bivouac
- * looks like from a hilltop.
+ * Camp does not fold at all: it is the column as it stands. A division halts with its tail
+ * still kilometres back down the road, and the tail walks up to the head over the next
+ * `catchupHours` until the whole formation is in a single hex. That walk is time on the
+ * map, exposed to whoever is watching the road, so the scheduler does it an hour at a time
+ * by cutting `unit.column` shorter — a fold here would gather the tail in the instant the
+ * camp was pitched.
  *
  * Occupation folds harder and stays narrow, because it is a garrison gone into a town
  * rather than a formation standing in a field.
@@ -109,7 +110,7 @@ export interface FootprintShape {
 export const FOOTPRINT: Readonly<Record<Formation, FootprintShape>> = {
   march: { foldsInto: 1, widthHexes: 1, menPerHex: null },
   battle: { foldsInto: 1, widthHexes: 1, menPerHex: 10000 },
-  rest: { foldsInto: 4, widthHexes: 2, menPerHex: null },
+  rest: { foldsInto: 1, widthHexes: 1, menPerHex: null },
   occupation: { foldsInto: 8, widthHexes: 1, menPerHex: null },
   rout: { foldsInto: 1, widthHexes: 1, menPerHex: null },
 };
