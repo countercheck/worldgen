@@ -43,12 +43,23 @@ def test_a_river_reaching_the_sea_or_a_lake_is_marked_where_it_ends(world):
 
 
 def test_a_tributary_has_no_end_of_its_own(world):
-    """Its last hex is its trunk's, and the trunk flows on from there."""
+    """Its last hex is its trunk's, and the trunk flows on from there.
+
+    Unless the trunk ends there too: a tributary joining at the last land hex before the
+    sea meets a trunk that rightly marks its mouth on that hex, so it proves nothing here.
+    """
     flows_on = {c for r in world.rivers for c in r.hexes[:-1]}
+    mouths = set()
+    for r in world.rivers:
+        land = _land(world, r.hexes)
+        if land and world.hexes[r.hexes[-1]].terrain_class in _WATER:
+            mouths.add(land[-1])
     joined = [
         r.hexes[-1]
         for r in world.rivers
-        if world.hexes[r.hexes[-1]].terrain_class not in _WATER and r.hexes[-1] in flows_on
+        if world.hexes[r.hexes[-1]].terrain_class not in _WATER
+        and r.hexes[-1] in flows_on
+        and r.hexes[-1] not in mouths
     ]
     assert joined
     assert not any("river_end" in world.hexes[c].tags for c in joined)
