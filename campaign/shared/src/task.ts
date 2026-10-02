@@ -112,6 +112,8 @@ export type DecisionTrigger =
   | 'column_contested'
   /** A patrol ran into something. Twenty troopers meeting anything is the referee's. */
   | 'patrol_contact'
+  /** A rider rode into ground an enemy formation is watching. The referee's to see coming. */
+  | 'rider_sighted'
   /** A player wrote to the referee directly, out of the game. `context.text` is the note. */
   | 'referee_note';
 
@@ -126,6 +128,7 @@ export const DECISION_TRIGGERS: readonly DecisionTrigger[] = [
   'column_blocked',
   'column_contested',
   'patrol_contact',
+  'rider_sighted',
   'referee_note',
 ];
 

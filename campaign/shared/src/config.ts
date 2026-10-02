@@ -390,6 +390,10 @@ export const DEFAULT_CONFIG: CampaignConfig = {
     // rules hand that roll to the referee. Marching the clock past it would be marching
     // past the one thing a patrol exists to produce.
     'patrol_contact',
+    // A rider in ground the enemy is watching is about to be ridden down or let through,
+    // and a referee who wants to adjudicate that rather than leave it to the dice has to
+    // be handed the clock while the rider is still out there.
+    'rider_sighted',
   ],
   maxAdvanceHours: 24 * 14,
 

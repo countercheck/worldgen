@@ -921,6 +921,64 @@ describe('interception', () => {
     );
     expect(stopped?.kind === 'despatch_stopped' && stopped.outcome).toBe('lost');
   });
+
+  describe('a rider in sight of the enemy', () => {
+    const sightings = (payloads: readonly EventPayload[]) =>
+      payloads.flatMap((p) =>
+        p.kind === 'decision_raised' && p.decision.trigger === 'rider_sighted' ? [p.decision] : [],
+      );
+
+    it('tells the referee once, as the side that saw them, where they came into view', () => {
+      const { payloads } = advance(ride(inTheWay()), world, cfg, clean, { hours: 6 });
+      const seen = sightings(payloads);
+
+      // A scout sees two hexes, so the rider is in view for five hexes of road — and that
+      // is one thing to watch, not five.
+      expect(seen).toHaveLength(1);
+      expect(seen[0]).toMatchObject({
+        commanderId: 'wellington',
+        unitId: 'blue-1',
+        context: { riderFaction: 'red', at: { q: 13, r: 5 } },
+      });
+      expect(seen[0]!.context['despatchId']).toBeDefined();
+    });
+
+    it('hands the clock back while the rider is still out there', () => {
+      const result = advance(ride(inTheWay()), world, cfg, clean, {
+        hours: 6,
+        untilDecision: true,
+      });
+      expect(result.halted?.trigger).toBe('rider_sighted');
+      expect(kinds(result.payloads)).not.toContain('despatch_delivered');
+    });
+
+    it('says nothing about a rider passing their own side', () => {
+      const friendly = stateFrom({
+        units: [red, far, unit('red-3', 'red', { q: 15, r: 5 }, {}, 'cavalry', ['scout'])],
+        commanders: [
+          commander('ney', 'red', 'red-1'),
+          commander('kellermann', 'red', 'red-2', 'ney'),
+          commander('grouchy', 'red', 'red-3', 'ney'),
+        ],
+      });
+      const { payloads } = advance(ride(friendly), world, cfg, clean, { hours: 6 });
+      expect(kinds(payloads)).toContain('despatch_delivered');
+      expect(sightings(payloads)).toHaveLength(0);
+    });
+
+    it('can be left in the queue without stopping the clock', () => {
+      const quiet: CampaignConfig = {
+        ...cfg,
+        haltTriggers: cfg.haltTriggers.filter((t) => t !== 'rider_sighted'),
+      };
+      const result = advance(ride(inTheWay()), world, quiet, clean, {
+        hours: 6,
+        untilDecision: true,
+      });
+      expect(sightings(result.payloads)).toHaveLength(1);
+      expect(kinds(result.payloads)).toContain('despatch_delivered');
+    });
+  });
 });
 
 describe('determinism', () => {

@@ -39,7 +39,7 @@
  */
 
 import { catchupHours, columnHexes, columnLengthKm, occupied, spineHexes } from './column.js';
-import { superiors } from './commander.js';
+import { commanderOf, superiors } from './commander.js';
 import type { CampaignConfig, Grade } from './config.js';
 import {
   courierStepHours,
@@ -49,7 +49,7 @@ import {
   type DespatchBody,
 } from './despatch.js';
 import { REFEREE, type EventPayload, type LoggedEvent } from './events.js';
-import { key, type Hex } from './hex.js';
+import { key, type Hex, type HexKey } from './hex.js';
 import { fileSightings } from './knowledge.js';
 import {
   hasRested,
@@ -60,7 +60,7 @@ import {
   unitSpeedKmh,
 } from './movement.js';
 import { campBreak, campDay, marchFatigueBetween, nightFatigue } from './fatigue.js';
-import { detectionDice, spottedBy, type Sighting } from './recon.js';
+import { detectionDice, reconZone, spottedBy, type Sighting } from './recon.js';
 import { ones, type Rng } from './rng.js';
 import { configAt, reduce, type CampaignState } from './state.js';
 import { standingHoursLeft } from './standing.js';
@@ -384,8 +384,47 @@ function simulate(state: CampaignState, world: World, base: CampaignConfig, rng:
     return Number.isFinite(hoursToEnter(world, cfg, unit, from, next)) ? next : null;
   };
 
+  /**
+   * Tell the referee a rider has ridden into ground an enemy formation is watching.
+   *
+   * On entering, not on every hex inside: a rider skirting a picket line for ten
+   * kilometres is one thing for the referee to watch, not ten. Raised as the commander of
+   * the formation that saw them, so the referee reads it from that side's information —
+   * but only the referee sees it, because no commander's view carries a decision.
+   *
+   * The sender's own side is not watched for: a friendly picket seeing its own army's
+   * rider is not news.
+   */
+  const sighted = (
+    d: Despatch,
+    from: Hex,
+    to: Hex,
+    atHours: number,
+    zones: Map<string, Set<HexKey>>,
+  ): void => {
+    const enemies = [...s.units.values()]
+      .filter((u) => u.faction !== d.faction)
+      .sort((a, b) => (a.id < b.id ? -1 : 1));
+    for (const unit of enemies) {
+      let zone = zones.get(unit.id);
+      if (zone === undefined) {
+        zone = reconZone(world, cfg, unit);
+        zones.set(unit.id, zone);
+      }
+      if (!zone.has(key(to)) || zone.has(key(from))) continue;
+      raise('rider_sighted', commanderOf(s, unit.id)?.id ?? null, unit.id, atHours, {
+        despatchId: d.id,
+        at: to,
+        riderFaction: d.faction,
+      });
+    }
+  };
+
   /** Move every rider, rolling for interception on each hex they enter. */
   const rideTick = (tickEnd: number): void => {
+    // Columns stand still while riders move — marching comes after in the hour — so what
+    // each formation watches is worked out once per tick rather than once per hex ridden.
+    const zones = new Map<string, Set<HexKey>>();
     for (const [id, rider] of [...riding]) {
       const d = s.despatches.get(id);
       if (d === undefined || d.fate.kind !== 'in_transit') continue;
@@ -438,6 +477,7 @@ function simulate(state: CampaignState, world: World, base: CampaignConfig, rng:
 
         budget -= remaining;
         rider.progress = base + 1;
+        sighted(d, from, next, tickEnd, zones);
         if (interception(d, next, tickEnd)) break;
       }
     }
