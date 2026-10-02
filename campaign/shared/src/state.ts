@@ -496,6 +496,36 @@ export function reduce(state: CampaignState, event: LoggedEvent): CampaignState 
       });
     }
 
+    case 'camp_made': {
+      const unit = s.units.get(p.unitId);
+      if (unit === undefined) return s;
+      return withUnit(s, { ...unit, campSinceHours: p.atHours });
+    }
+
+    case 'camp_recovered': {
+      const unit = s.units.get(p.unitId);
+      if (unit === undefined) return s;
+      return withUnit(s, {
+        ...unit,
+        fatigue: Math.max(0, unit.fatigue - p.fatigue),
+        morale: unit.morale + p.morale,
+        campMissing: (unit.campMissing ?? 0) + p.missing,
+        campIll: (unit.campIll ?? 0) + p.ill,
+      });
+    }
+
+    case 'camp_broken': {
+      const unit = s.units.get(p.unitId);
+      if (unit === undefined) return s;
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { campSinceHours, campMissing, campIll, ...rest } = unit;
+      return withUnit(s, {
+        ...rest,
+        paperStrength: Math.max(0, unit.paperStrength - p.missing - p.ill),
+        fatigue: p.fatigue,
+      });
+    }
+
     case 'march_progressed': {
       // An hour of walking that did not finish a hex. The ground is closer than it was,
       // and the day is that much more spent.

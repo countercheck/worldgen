@@ -329,6 +329,47 @@ export type EventPayload =
       readonly fromMarching: number;
       readonly fromNight: number;
     }
+  /**
+   * A formation has finished making camp, and its days of rest are counted from here.
+   *
+   * Logged rather than read off `formation_changed`, so that what a camp is can change
+   * without changing what every camp already in the log meant.
+   */
+  | { readonly kind: 'camp_made'; readonly unitId: string; readonly atHours: number }
+  /**
+   * A full day in camp, and what it gave back.
+   *
+   * The fatigue shed stood for troops who had fallen out. The missing and the ill among them
+   * are out of the line from today and off the rolls when the camp is broken; the rest are
+   * back in the line.
+   */
+  | {
+      readonly kind: 'camp_recovered';
+      readonly unitId: string;
+      readonly atHours: number;
+      /** Points of fatigue shed. */
+      readonly fatigue: number;
+      /** Points of morale regained. */
+      readonly morale: number;
+      /** The fallen-out the fatigue shed stood for. */
+      readonly recoveredTroops: number;
+      readonly missing: number;
+      readonly ill: number;
+    }
+  /**
+   * A formation has left camp. The missing and ill it found leave the rolls, and `fatigue`
+   * is what it is left with: the still-fatigued over its smaller rolls. Its next camp counts
+   * its days afresh.
+   */
+  | {
+      readonly kind: 'camp_broken';
+      readonly unitId: string;
+      readonly atHours: number;
+      readonly missing: number;
+      /** Off the rolls for now. Kept apart from the missing so a hospital can return them. */
+      readonly ill: number;
+      readonly fatigue: number;
+    }
   | { readonly kind: 'task_completed'; readonly unitId: string; readonly atHours: number }
   /** Midnight. Marked for the log and for provisions; the march cap does not read it. */
   | { readonly kind: 'day_rolled'; readonly toHours: number }

@@ -218,6 +218,26 @@ export interface CampaignConfig {
    */
   readonly nightFatiguePerHour: number;
   /**
+   * Fatigue a formation sheds for each full day it spends in camp.
+   *
+   * A flat rate, a judgement: five days takes a column from spent to fresh. Counted from
+   * the hour the camp is made, not from midnight, and only whole days count — a column that
+   * breaks camp after twenty hours has had a long halt, not a day's rest.
+   */
+  readonly campFatigueRecoveryPerDay: number;
+  /** Morale regained for each full day in camp, up to the experience ceiling. */
+  readonly campMoraleRecoveryPerDay: number;
+  /**
+   * What becomes of the troops a day in camp brings back.
+   *
+   * Every point of fatigue is a percentage of the formation that has fallen out. A rest
+   * brings them in, but not all of them back: a share have simply gone, and a share are
+   * sick. What is left over returns to the ranks.
+   */
+  readonly campMissingShare: number;
+  /** The share of recovered troops who are ill, and leave the rolls for the hospital. */
+  readonly campIllShare: number;
+  /**
    * Hours to change formation, `from` then `to`.
    *
    * The rules' own matrix. Making camp is the one that fires by itself — a formation that
@@ -382,6 +402,10 @@ export const DEFAULT_CONFIG: CampaignConfig = {
   marchFatiguePerHourBeyond: DEFAULT_MARCH_FATIGUE_BEYOND,
   fatigueClass: DEFAULT_FATIGUE_CLASS,
   nightFatiguePerHour: 1,
+  campFatigueRecoveryPerDay: 20,
+  campMoraleRecoveryPerDay: 10,
+  campMissingShare: 0.1,
+  campIllShare: 0.2,
   formationChangeHours: DEFAULT_FORMATION_CHANGE_HOURS,
   footprint: FOOTPRINT,
 };
