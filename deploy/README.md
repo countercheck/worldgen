@@ -88,8 +88,10 @@ railway redeploy --service generator
 ```
 
 To change the password, set the variable again; Railway redeploys on a variable change.
-Anyone with the password can start a generation, and there is no cap on map size or limit
-on attempts, so make it long and share it as narrowly as the campaign's join links.
+Anyone with the password can start a generation. Maps are capped at 200x200 hexes (the
+default map, which takes several minutes on Railway's CPU; `worldgen serve --max-size`
+changes it), but there is no limit on attempts, so make the password long and share it as
+narrowly as the campaign's join links.
 
 The image's own ignore file, `deploy/generator.Dockerfile.dockerignore`, stands in for the
 root `.dockerignore`, which is the campaign's and keeps `worldgen/` out. `watchPatterns`

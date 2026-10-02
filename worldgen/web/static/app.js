@@ -16,6 +16,7 @@ let values = {};
 const setters = {}; // name -> [fn(value)], every control showing that field
 const rows = {}; // name -> [row elements], to mark the field changed
 
+let maxSize = null; // the server's cap on width and height, in hexes
 let job = null;
 let events = null;
 let timer = null;
@@ -273,8 +274,35 @@ let presets = [];
 
 // ---- generating --------------------------------------------------------------------
 
+function applyLimits(limits) {
+  maxSize = limits?.max_size ?? null;
+  if (maxSize == null) return;
+  for (const name of ["width", "height"]) {
+    for (const row of rows[name] || []) {
+      const input = row.querySelector("input");
+      input.min = 1;
+      input.max = maxSize;
+      input.title = `At most ${maxSize} hexes on this server`;
+    }
+  }
+}
+
+function sizeProblem() {
+  if (maxSize == null) return null;
+  for (const name of ["width", "height"]) {
+    const v = values[name];
+    if (!(v >= 1 && v <= maxSize)) return `${name} must be between 1 and ${maxSize} hexes on this server, got ${v}.`;
+  }
+  return null;
+}
+
 async function generate() {
   showFormError("");
+  const problem = sizeProblem();
+  if (problem) {
+    showFormError(problem);
+    return;
+  }
   let started;
   try {
     started = await api("/api/generate", {
@@ -559,8 +587,9 @@ $("generate").addEventListener("click", generate);
 
 (async () => {
   try {
-    const [{ sections }, presetList] = await Promise.all([api("/api/schema"), api("/api/presets")]);
+    const [{ sections, limits }, presetList] = await Promise.all([api("/api/schema"), api("/api/presets")]);
     buildForm(sections);
+    applyLimits(limits);
     presets = presetList.presets;
     for (const p of presets) $("preset").append(el("option", { value: p.name, textContent: p.name }));
     $("preset").disabled = presets.length === 0;
