@@ -16,7 +16,7 @@ import type { EventPayload } from '../src/events.js';
 import { key, type Hex, type HexKey } from '../src/hex.js';
 import { makeRng, type Rng } from '../src/rng.js';
 import { marchFatigueAt } from '../src/fatigue.js';
-import { columnLengthKm } from '../src/column.js';
+import { columnHexes, columnLengthKm, occupied } from '../src/column.js';
 import { roadHoursWithin, unitSpeedKmh } from '../src/movement.js';
 import { advance, despatchNow } from '../src/scheduler.js';
 import { EMPTY_STATE, reduce, type CampaignState } from '../src/state.js';
@@ -387,6 +387,82 @@ describe('a camp closing up', () => {
     const red = after.units.get('red-1')!;
     expect(red.formation).toBe('rest');
     expect(red.column).toEqual([{ q: 21, r: 5 }]);
+  });
+});
+
+describe('a battle line closing up', () => {
+  // A corps of twenty-five thousand: twelve and a half kilometres of column, and a frontage
+  // of three.
+  const road = Array.from({ length: 13 }, (_, i) => ({ q: 20 - i, r: 5 }));
+  const corps = unit('red-1', 'red', road[0]!, {
+    paperStrength: 25000,
+    formation: 'battle',
+    column: road,
+  });
+  const ney = commander('ney', 'red', 'red-1');
+
+  it('brings the tail up into its frontage, and no shorter', () => {
+    const state = stateFrom({ units: [corps], commanders: [ney] });
+    const after = fold(state, advance(state, world, cfg, clean, { hours: 12 }).payloads);
+    expect(after.units.get('red-1')!.column).toEqual(road.slice(0, 3));
+  });
+
+  it('starts closing as soon as it is forming, not once it is formed', () => {
+    const forming = {
+      ...corps,
+      formation: 'march' as const,
+      formationChange: { to: 'battle' as const, completesAtHours: 7 },
+    };
+    const state = stateFrom({ units: [forming], commanders: [ney] });
+    const after = fold(state, advance(state, world, cfg, clean, { hours: 1 }).payloads);
+    expect(after.units.get('red-1')!.column.length).toBeLessThan(road.length);
+  });
+});
+
+describe('stepping off from camp or battle', () => {
+  // Twelve kilometres of column, gathered into the one hex it stood in.
+  const at = { q: 20, r: 5 };
+  const ney = commander('ney', 'red', 'red-1');
+  const gathered = (formation: 'rest' | 'battle'): Unit =>
+    unit('red-1', 'red', at, { spacingM: 3, formation, column: [at] });
+
+  /**
+   * How much ground the formation stands on after each hex its head enters, and then once
+   * the hours are up.
+   */
+  const lengthsAsItMarches = (u: Unit, destination: Hex, hours: number): number[] => {
+    let state = stateFrom({
+      units: [u],
+      commanders: [ney],
+      tasks: [marchTo(u, destination, 6, { q: 21, r: 5 })],
+    });
+    const lengths: number[] = [];
+    for (const p of advance(state, world, cfg, clean, { hours }).payloads) {
+      state = fold(state, [p]);
+      if (p.kind === 'unit_marched') {
+        lengths.push(occupied(state.units.get('red-1')!, 'road', cfg.footprint).length);
+      }
+    }
+    lengths.push(occupied(state.units.get('red-1')!, 'road', cfg.footprint).length);
+    return lengths;
+  };
+
+  for (const formation of ['rest', 'battle'] as const) {
+    it(`strings the column back out behind the head, a hex at a time (${formation})`, () => {
+      const u = gathered(formation);
+      const full = columnHexes(u);
+      const lengths = lengthsAsItMarches(u, { q: 38, r: 5 }, 12);
+
+      expect(lengths.length).toBeGreaterThan(full);
+      lengths.slice(0, -1).forEach((n, i) => expect(n).toBe(Math.min(i + 2, full)));
+    });
+  }
+
+  it('stops stringing out where the head halts again', () => {
+    // Four hexes and then arrived: five hexes of column, and it stays five.
+    const u = gathered('rest');
+    const lengths = lengthsAsItMarches(u, { q: 24, r: 5 }, 12);
+    expect(lengths).toEqual([2, 3, 4, 5, 5]);
   });
 });
 

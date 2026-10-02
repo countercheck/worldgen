@@ -484,15 +484,29 @@ describe('formations drawn deployed', () => {
     expect(after.marks.find((m) => m.id === anyUnit.id)!.deployed).toBe(true);
   });
 
-  it('collapses the deployed footprint to its frontage', () => {
+  it('draws a line still closing up on the whole of its column', () => {
+    // The tail walks in over hours, and until it has the formation is still on the road.
     const anyUnit = [...state.units.values()][0]!;
     const before = boardFrom(view(REFEREE_ROLE), DEFAULT_THEME);
     const after = boardFrom(deployed(REFEREE_ROLE, anyUnit.id), DEFAULT_THEME);
 
-    const marching = before.marks.find((m) => m.id === anyUnit.id)!.column.length;
-    const standing = after.marks.find((m) => m.id === anyUnit.id)!.column.length;
-    expect(standing).toBeLessThanOrEqual(marching);
-    expect(standing).toBe(Math.max(1, Math.ceil(presentUnderArms(anyUnit) / 10000)));
+    const marching = before.marks.find((m) => m.id === anyUnit.id)!.column;
+    const standing = after.marks.find((m) => m.id === anyUnit.id)!.column;
+    expect(standing).toEqual(marching);
+  });
+
+  it('draws a line that has closed up at its frontage', () => {
+    const anyUnit = [...state.units.values()][0]!;
+    const frontage = Math.max(1, Math.ceil(presentUnderArms(anyUnit) / 10000));
+    const v = deployed(REFEREE_ROLE, anyUnit.id);
+    const closed = {
+      ...v,
+      units: v.units.map((u) =>
+        u.id === anyUnit.id ? { ...u, column: u.column.slice(0, frontage) } : u,
+      ),
+    };
+    const board = boardFrom(closed, DEFAULT_THEME);
+    expect(board.marks.find((m) => m.id === anyUnit.id)!.column.length).toBe(frontage);
   });
 
   it('never draws a reported or sighted formation as deployed', () => {

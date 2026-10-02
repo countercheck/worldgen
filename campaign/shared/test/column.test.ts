@@ -285,15 +285,25 @@ describe('occupied, by formation', () => {
     expect(occupied(camp, 'road', WIDE).length).toBe(2);
   });
 
+  /** A formation whose tail has walked all the way in, as the scheduler leaves it. */
+  const closed = (u: Unit): Unit => ({ ...u, column: u.column.slice(0, spineHexes(u)) });
+
   it('deploys at a kilometre of frontage per ten thousand troops', () => {
     // An ordinary division is one hex, whatever arm it is and however long its road was.
     const foot = { ...marched(REGULAR_INFANTRY), formation: 'battle' as const };
     const horse = { ...marched(GUARDS_CAVALRY), formation: 'battle' as const };
 
-    expect(occupied(foot)).toEqual([foot.column[0]]);
-    expect(occupied(horse)).toEqual([horse.column[0]]);
+    expect(spineHexes(foot)).toBe(1);
+    expect(spineHexes(horse)).toBe(1);
+    expect(occupied(closed(horse))).toEqual([horse.column[0]]);
     // Eighteen kilometres of column, one kilometre of line.
     expect(columnHexes(horse)).toBeGreaterThan(18);
+  });
+
+  it('stands on its whole column until the tail has closed up into the line', () => {
+    const march = marched(GUARDS_CAVALRY);
+    const line = { ...march, formation: 'battle' as const };
+    expect(occupied(line)).toEqual(occupied(march));
   });
 
   it('gives a larger formation a wider front, by strength alone', () => {
@@ -302,7 +312,8 @@ describe('occupied, by formation', () => {
       formation: 'battle' as const,
       paperStrength: 25000,
     };
-    expect(occupied(corps).length).toBe(3);
+    expect(spineHexes(corps)).toBe(3);
+    expect(occupied(closed(corps)).length).toBe(3);
   });
 
   it('narrows the front as the troops who would stand in it fall out', () => {
@@ -313,8 +324,20 @@ describe('occupied, by formation', () => {
     };
     // Half the division is no longer fit to stand in the line, so it covers half the ground.
     const worn = { ...fresh, fatigue: 50 };
-    expect(occupied(worn).length).toBe(2);
-    expect(occupied(worn).length).toBeLessThan(occupied(fresh).length);
+    expect(spineHexes(worn)).toBe(2);
+    expect(spineHexes(worn)).toBeLessThan(spineHexes(fresh));
+  });
+
+  it('folds at once in a table written before closing up existed', () => {
+    // A campaign carries the footprint table it was created with. One without `closesUp`
+    // keeps the instant fold it was played with.
+    const corps = {
+      ...marched(REGULAR_INFANTRY),
+      formation: 'battle' as const,
+      paperStrength: 25000,
+    };
+    const old = { ...FOOTPRINT, battle: { foldsInto: 1, widthHexes: 1, menPerHex: 10000 } };
+    expect(occupied(corps, 'road', old).length).toBe(3);
   });
 
   it('never deploys a formation onto no ground at all', () => {

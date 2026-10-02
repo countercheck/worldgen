@@ -38,7 +38,7 @@
  * of which are exactly the things that are supposed to hurt.
  */
 
-import { catchupHours, columnHexes, columnLengthKm, occupied } from './column.js';
+import { catchupHours, columnHexes, columnLengthKm, occupied, spineHexes } from './column.js';
 import { superiors } from './commander.js';
 import type { CampaignConfig, Grade } from './config.js';
 import {
@@ -528,19 +528,22 @@ function simulate(state: CampaignState, world: World, base: CampaignConfig, rng:
   };
 
   /**
-   * Walk every camp's tail an hour further up the road.
+   * Walk the tail of every camp and battle line an hour further up the road.
    *
-   * A camp is pitched where the head stopped, and the rest of the column is still strung
+   * The formation forms where the head stopped, and the rest of the column is still strung
    * out behind it. Each hour the tail closes by an hour of marching at the pace of the road
-   * it is on, until the whole formation stands in the head's hex. Only while the formation
-   * is in camp or making one: a column that has broken camp to march is going the other way.
+   * it is on, until the formation is down to the ground it gathers into — one hex for a
+   * camp, its frontage for a battle line. Only while it is in that formation or forming it:
+   * a column that has broken camp to march is going the other way.
    */
   const closeUpTick = (atHours: number): void => {
     const units = [...s.units.values()].sort((a, b) => (a.id < b.id ? -1 : 1));
     for (const unit of units) {
-      if ((unit.formationChange?.to ?? unit.formation) !== 'rest') continue;
+      const forming = unit.formationChange?.to ?? unit.formation;
+      if (cfg.footprint[forming]?.closesUp !== true) continue;
+      const gathered = spineHexes({ ...unit, formation: forming }, 'road', cfg.footprint);
       const n = unit.column.length;
-      if (n <= 1) continue;
+      if (n <= gathered) continue;
 
       // The ground the column covers as marched, which may be less than its full length
       // for a unit placed with no road behind it.
@@ -557,7 +560,7 @@ function simulate(state: CampaignState, world: World, base: CampaignConfig, rng:
         unitId: unit.id,
         atHours,
         lengthKm: left,
-        hexes: Math.max(1, Math.ceil(left)),
+        hexes: Math.max(gathered, Math.ceil(left)),
       });
     }
   };
