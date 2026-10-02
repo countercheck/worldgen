@@ -381,3 +381,58 @@ def test_a_header_cannot_be_smuggled_in_through_the_view(server, finished):
     for action in ["map.svg", "map.png", "hex"]:
         status, _, headers = _get(f"{base}/{action}?view=atlas%0d%0aSet-Cookie:%20x=1&download=1")
         assert status == 400 and "Set-Cookie" not in headers
+
+
+# --- the size cap -----------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("width", "height", "ok"),
+    [(200, 200, True), (1, 1, True), (201, 10, False), (10, 201, False), (0, 10, False)],
+)
+def test_a_map_past_the_cap_is_refused(width, height, ok):
+    from worldgen.web.server import check_size
+
+    config = WorldConfig(width=width, height=height)
+    if ok:
+        check_size(config, 200)
+    else:
+        with pytest.raises(ValueError, match="width|height"):
+            check_size(config, 200)
+
+
+def test_the_cap_defaults_to_the_default_map():
+    from worldgen.web.server import DEFAULT_MAX_SIZE
+
+    assert DEFAULT_MAX_SIZE == WorldConfig().width == WorldConfig().height == 200
+
+
+def test_serve_defaults_to_the_servers_cap():
+    from worldgen.cli import serve
+    from worldgen.web.server import DEFAULT_MAX_SIZE
+
+    option = next(p for p in serve.params if p.name == "max_size")
+    assert option.default == DEFAULT_MAX_SIZE
+
+
+def test_the_server_refuses_an_oversize_map_and_says_why(server):
+    status, reply = _post(f"{server}/api/generate", {"seed": 1, "config": {"width": 201}})
+    assert status == 400 and "width" in reply["error"] and "200" in reply["error"]
+
+
+def test_the_schema_tells_the_page_the_cap(tmp_path):
+    srv = make_server("127.0.0.1", 0, tmp_path, max_size=50)
+    thread = threading.Thread(target=srv.serve_forever, daemon=True)
+    thread.start()
+    try:
+        base = f"http://127.0.0.1:{srv.server_address[1]}"
+        _, body, _ = _get(f"{base}/api/schema")
+        assert json.loads(body)["limits"] == {"max_size": 50}
+        status, reply = _post(
+            f"{base}/api/generate", {"seed": 1, "config": {"width": 10, "height": 51}}
+        )
+        assert status == 400 and "height" in reply["error"]
+    finally:
+        srv.shutdown()
+        srv.store.shutdown()
+        srv.server_close()

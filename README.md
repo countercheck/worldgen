@@ -105,7 +105,8 @@ territory it lies in. `world.json`, the config, and the map as SVG or PNG downlo
 the toolbar. An existing `worldgen.yaml` or `config.json` can be imported, and presets in
 `./presets` are offered.
 
-It listens on `127.0.0.1` unless told otherwise. To put it behind a password, set
+Maps are capped at 200x200 hexes, the default size; `--max-size` changes the cap. It
+listens on `127.0.0.1` unless told otherwise. To put it behind a password, set
 `WORLDGEN_PASSWORD`; the browser asks once, and any username is accepted. A password is
 required to listen anywhere else:
 
