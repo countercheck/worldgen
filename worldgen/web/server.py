@@ -39,6 +39,11 @@ _HEARTBEAT_S = 15.0
 # What the browser's login prompt says. The username is not checked; only the password is.
 _REALM = 'Basic realm="worldgen", charset="UTF-8"'
 
+# The largest width or height, in hexes, a browser may ask for. 200x200 is the default map
+# and takes minutes on a shared CPU; past it a single request could hold the one worker for
+# as long as anyone liked. Generation runs on one core, so more hardware would not help.
+DEFAULT_MAX_SIZE = 200
+
 _JOB_ROUTE = re.compile(r"^/api/jobs/([\w-]+)(?:/([\w.]+))?$")
 
 
@@ -94,8 +99,19 @@ def password_matches(header: str | None, password: str) -> bool:
     return hmac.compare_digest(given.encode("utf-8"), password.encode("utf-8"))
 
 
+def check_size(config: WorldConfig, max_size: int) -> None:
+    """Refuse a map wider or taller than *max_size* hexes, naming the side that is."""
+    for side in ("width", "height"):
+        value = getattr(config, side)
+        if not 1 <= value <= max_size:
+            raise ValueError(f"{side} must be between 1 and {max_size} hexes, got {value}")
+
+
 def make_handler(
-    store: JobStore, presets_dir: Path, password: str | None = None
+    store: JobStore,
+    presets_dir: Path,
+    password: str | None = None,
+    max_size: int = DEFAULT_MAX_SIZE,
 ) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
         server_version = "worldgen"
@@ -150,7 +166,9 @@ def make_handler(
                 return
             query = {k: v[-1] for k, v in parse_qs(url.query).items()}
             if url.path == "/api/schema":
-                return self._json({"sections": schema.config_schema()})
+                return self._json(
+                    {"sections": schema.config_schema(), "limits": {"max_size": max_size}}
+                )
             if url.path == "/api/presets":
                 return self._json({"presets": _read_presets(presets_dir)})
             if match := _JOB_ROUTE.match(url.path):
@@ -184,6 +202,7 @@ def make_handler(
                 if isinstance(seed, bool) or not isinstance(seed, int):
                     raise ValueError(f"seed must be a whole number, got {seed!r}")
                 config = WorldConfig.from_dict(schema.coerce(body.get("config", {})))
+                check_size(config, max_size)
             except (ValueError, TypeError, AttributeError) as exc:
                 return self._error(HTTPStatus.BAD_REQUEST, str(exc))
             job = store.submit(seed, config)
@@ -278,10 +297,15 @@ def make_handler(
 
 
 def make_server(
-    host: str, port: int, presets_dir: Path, keep: int = 4, password: str | None = None
+    host: str,
+    port: int,
+    presets_dir: Path,
+    keep: int = 4,
+    password: str | None = None,
+    max_size: int = DEFAULT_MAX_SIZE,
 ) -> ThreadingHTTPServer:
     store = JobStore(keep=keep)
-    server = ThreadingHTTPServer((host, port), make_handler(store, presets_dir, password))
+    server = ThreadingHTTPServer((host, port), make_handler(store, presets_dir, password, max_size))
     server.daemon_threads = True
     server.store = store  # type: ignore[attr-defined]
     return server
