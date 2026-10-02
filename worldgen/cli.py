@@ -658,7 +658,14 @@ _LOOPBACK = ("127.0.0.1", "localhost", "::1")
 @click.option("--host", type=str, default="127.0.0.1", help="Address to listen on")
 @click.option("--port", type=int, default=8000, help="Port to listen on")
 @click.option("--open/--no-open", "open_browser", default=True, help="Open a browser tab")
-def serve(host: str, port: int, open_browser: bool) -> None:
+@click.option(
+    "--max-size",
+    type=click.IntRange(min=1),
+    default=200,
+    show_default=True,
+    help="Largest map width or height, in hexes, the page may ask for",
+)
+def serve(host: str, port: int, open_browser: bool, max_size: int) -> None:
     """Run the web interface: edit the config, generate, and inspect the map.
 
     Set WORLDGEN_PASSWORD to put the page behind a password; the browser asks for it once.
@@ -678,7 +685,7 @@ def serve(host: str, port: int, open_browser: bool) -> None:
         )
 
     # Presets are read from ./presets, as `worldgen presets` reads them.
-    server = make_server(host, port, Path.cwd() / "presets", password=password)
+    server = make_server(host, port, Path.cwd() / "presets", password=password, max_size=max_size)
     url = f"http://{host}:{server.server_address[1]}/"
     click.echo(f"Serving the world generator at {url} (Ctrl-C to stop)")
     if password is not None:

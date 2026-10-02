@@ -217,6 +217,14 @@ export interface Unit {
    * been", which is what recon and interception both need.
    */
   readonly column: readonly Hex[];
+  /**
+   * Kilometres of column still strung out on the road behind a camp, while the tail closes up.
+   *
+   * Absent until a camp starts closing up, and dropped again when the head next marches,
+   * because a new march leaves a new tail behind it. Kept as kilometres, not hexes: an hour's
+   * walking seldom ends on a hex boundary, and rounding each hour would lose the remainder.
+   */
+  readonly closingKm?: number;
 
   /**
    * Hours on the road since the column last rested. Drives fatigue.

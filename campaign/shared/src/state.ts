@@ -422,10 +422,10 @@ export function reduce(state: CampaignState, event: LoggedEvent): CampaignState 
       const unit = s.units.get(p.unitId);
       if (unit === undefined) return s;
 
-      const moved = withUnit(s, {
-        ...onRoad(unit, p.atHours, p.stepHours),
-        column: advanceColumn(unit, p.to, p.grade),
-      });
+      // A head that marches leaves a fresh tail behind it, so whatever was left of the last
+      // camp's closing up no longer describes this column.
+      const { closingKm: _closed, ...walking } = onRoad(unit, p.atHours, p.stepHours);
+      const moved = withUnit(s, { ...walking, column: advanceColumn(unit, p.to, p.grade) });
 
       const task = moved.tasks.get(p.unitId);
       if (task === undefined) return moved;
@@ -473,6 +473,16 @@ export function reduce(state: CampaignState, event: LoggedEvent): CampaignState 
       const unit = s.units.get(p.unitId);
       if (unit === undefined) return s;
       return withUnit(s, { ...unit, formation: p.to, formationChange: null });
+    }
+
+    case 'column_closed_up': {
+      const unit = s.units.get(p.unitId);
+      if (unit === undefined) return s;
+      return withUnit(s, {
+        ...unit,
+        column: unit.column.slice(0, Math.max(1, p.hexes)),
+        closingKm: p.lengthKm,
+      });
     }
 
     case 'fatigue_accrued': {

@@ -300,6 +300,20 @@ export type EventPayload =
       readonly atHours: number;
     }
   /**
+   * An hour of the tail walking up to a camp. The column now covers `hexes`, head first.
+   *
+   * Hexes are carried as well as kilometres so the reducer only cuts the column where the
+   * event says; it never works out for itself how far the tail got.
+   */
+  | {
+      readonly kind: 'column_closed_up';
+      readonly unitId: string;
+      readonly atHours: number;
+      /** Column still on the road behind the head, after this hour. */
+      readonly lengthKm: number;
+      readonly hexes: number;
+    }
+  /**
    * What a stretch of marching cost the troops.
    *
    * Its own event rather than a field on `unit_marched`, because the tail goes on paying
