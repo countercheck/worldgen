@@ -34,6 +34,7 @@ import { copy } from '../copy.js';
 import { coarsePointer } from '../layout.js';
 
 import {
+  ALL_LAYERS,
   drawFlash,
   drawOverlay,
   drawTerrain,
@@ -41,6 +42,7 @@ import {
   markAtHex,
   worldExtent,
   FLASH_MS,
+  type MapLayers,
   type Mark,
   type Plan,
   type Rider,
@@ -88,6 +90,7 @@ export function HexMap({
   surveyed,
   washMode,
   focus,
+  layers = ALL_LAYERS,
 }: {
   world: World;
   marks: readonly Mark[];
@@ -127,6 +130,8 @@ export function HexMap({
    * a map the reader can already see the place on only loses them.
    */
   focus?: Focus | null | undefined;
+  /** What the map draws besides the game. Everything, unless the reader has said otherwise. */
+  layers?: MapLayers | undefined;
 }) {
   const wrap = useRef<HTMLDivElement>(null);
   const terrainRef = useRef<HTMLCanvasElement>(null);
@@ -234,8 +239,8 @@ export function HexMap({
     const ctx = canvas.getContext('2d');
     if (ctx === null) return;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    drawTerrain(ctx, world, view, theme);
-  }, [world, view, theme, box]);
+    drawTerrain(ctx, world, view, theme, layers);
+  }, [world, view, theme, box, layers]);
 
   // Its own pass, and deliberately not in the overlay's dependency list: the wash moves
   // when the clock does, so a hover must not repaint it.

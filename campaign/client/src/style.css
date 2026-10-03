@@ -1754,7 +1754,8 @@ button.more-home {
    A dialog in the middle of a wide screen, and the same bottom sheet as More on a phone.
    It borrows More's sheet and head so the two read as one family of overlay. */
 
-button.help-button {
+button.help-button,
+button.layers-button {
   background: none;
   color: var(--muted);
   border: 1px solid var(--line);
@@ -1764,7 +1765,9 @@ button.help-button {
   cursor: pointer;
 }
 
-button.help-button:hover {
+button.help-button:hover,
+button.layers-button:hover,
+button.layers-button[aria-expanded='true'] {
   color: var(--text);
   border-color: var(--accent);
 }
@@ -1989,4 +1992,65 @@ button.help-button:hover {
   .place {
     padding: 10px 8px;
   }
+}
+
+/* ---- map layers ------------------------------------------------------------
+   On a wide screen a panel dropped from the header over the top of the map, with a clear
+   backdrop to click away on; on a phone the same controls fold into the More sheet. The
+   choices borrow More's look, tightened, since a mouse needs less room than a finger. */
+
+.layers-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+}
+
+.layers-pop {
+  position: fixed;
+  top: 56px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(320px, calc(100vw - 32px));
+  max-height: calc(100dvh - 72px);
+  overflow-y: auto;
+  padding: 4px 14px 14px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  box-shadow: 0 12px 30px rgb(0 0 0 / 50%);
+}
+
+.layer-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.layers-pop .choice {
+  min-height: 38px;
+  padding: 4px 12px;
+  font-size: 14px;
+}
+
+.layers-pop .choice input {
+  width: 16px;
+  height: 16px;
+}
+
+.more-layers {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 0 12px;
+}
+
+.more-layers > summary {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.more-layers[open] {
+  padding-bottom: 12px;
 }

@@ -20,7 +20,7 @@
 import { campaignHash, absolute } from './route.js';
 
 import type { Session } from './api.js';
-import type { WashMode } from './map/draw.js';
+import { ALL_LAYERS, GROUNDS, OVERLAYS, type Ground, type MapLayers, type WashMode } from './map/draw.js';
 
 /** Every campaign this browser holds a token for, keyed by campaign id. */
 const STORE_KEY = 'campaign.campaigns';
@@ -29,6 +29,7 @@ const LEGACY_SESSION_KEY = 'campaign.session';
 const LEGACY_TOKENS_KEY = 'campaign.tokens';
 const LEGACY_SEATS_KEY = 'campaign.seats';
 const WASH_KEY = 'campaign.wash';
+const LAYERS_KEY = 'campaign.layers';
 
 /** Tokens a referee holds for the other sides, so they can look through those eyes. */
 export type HeldTokens = Record<string, string>;
@@ -214,5 +215,26 @@ export const saveWash = (mode: WashMode): void => write(WASH_KEY, mode);
 /** The next mode in the cycle, so the key and any button agree on the order. */
 export const nextWash = (mode: WashMode): WashMode =>
   WASH_MODES[(WASH_MODES.indexOf(mode) + 1) % WASH_MODES.length]!;
+
+/**
+ * The map layers this browser last chose, or everything on.
+ *
+ * Read field by field rather than trusted whole: a value stored by an older build, or one
+ * missing a layer added since, keeps what it says and takes the default for the rest.
+ */
+export function loadLayers(): MapLayers {
+  return normaliseLayers(read<unknown>(LAYERS_KEY));
+}
+
+export function normaliseLayers(raw: unknown): MapLayers {
+  if (typeof raw !== 'object' || raw === null) return ALL_LAYERS;
+  const r = raw as Record<string, unknown>;
+  const ground = GROUNDS.includes(r.ground as Ground) ? (r.ground as Ground) : ALL_LAYERS.ground;
+  const out: Record<string, unknown> = { ground };
+  for (const o of OVERLAYS) out[o] = typeof r[o] === 'boolean' ? r[o] : ALL_LAYERS[o];
+  return out as unknown as MapLayers;
+}
+
+export const saveLayers = (layers: MapLayers): void => write(LAYERS_KEY, layers);
 
 export type { Stored as StoredSession };

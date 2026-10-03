@@ -277,3 +277,27 @@ test.describe('the places list', () => {
     expect(at!.y).toBeCloseTo(box.height / 2, -2);
   });
 });
+
+test('switches the map’s layers from the header, and remembers them', async ({ page }) => {
+  const header = page.locator('header');
+  await header.getByRole('button', { name: 'Layers' }).click();
+  const panel = page.getByRole('dialog', { name: 'Map layers' });
+  await expect(panel).toBeVisible();
+
+  await panel.getByRole('button', { name: 'Roads and rivers only' }).click();
+  await expect(panel.getByLabel('Plain')).toBeChecked();
+  await expect(panel.getByLabel('Names')).not.toBeChecked();
+  await expect(panel.getByLabel('Roads')).toBeChecked();
+
+  // Clicking away closes it; a reload keeps the choice.
+  await page.mouse.click(5, 300);
+  await expect(panel).toBeHidden();
+  await page.reload();
+  await page.locator('.map canvas').first().waitFor();
+  await header.getByRole('button', { name: 'Layers' }).click();
+  await expect(panel.getByLabel('Plain')).toBeChecked();
+
+  await panel.getByRole('button', { name: 'Everything' }).click();
+  await expect(panel.getByLabel('Terrain')).toBeChecked();
+  await expect(panel.getByLabel('Names')).toBeChecked();
+});

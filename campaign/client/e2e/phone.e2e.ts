@@ -297,3 +297,18 @@ test.describe('the places list', () => {
     await expect(list).toBeHidden();
   });
 });
+
+test.describe('the map’s layers', () => {
+  test('fold into More, and a tap changes the ground', async ({ page }) => {
+    await moreButton(page).click();
+    const sheet = page.getByRole('dialog', { name: 'More' });
+    await sheet.getByText('Map layers').click();
+    await sheet.getByLabel('Topographic').check();
+    await expect(sheet.getByLabel('Topographic')).toBeChecked();
+    await sheet.getByLabel('Names').uncheck();
+    await expect(sheet.getByLabel('Names')).not.toBeChecked();
+    // Back as it was, for the tests that follow in this browser's storage.
+    await sheet.getByRole('button', { name: 'Everything' }).click();
+    await expect(sheet.getByLabel('Terrain')).toBeChecked();
+  });
+});

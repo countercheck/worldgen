@@ -9,7 +9,8 @@
 
 import { copy } from '../copy.js';
 
-import type { WashMode } from '../map/draw.js';
+import type { MapLayers, WashMode } from '../map/draw.js';
+import { LayerControls } from './Layers.jsx';
 
 export type Identity = { id: string; label: string; token: string; color: string | undefined };
 
@@ -25,6 +26,8 @@ export function More({
   onSwitch,
   washMode,
   onWash,
+  layers,
+  onLayers,
   showReach,
   reachDisabled,
   onReach,
@@ -40,6 +43,8 @@ export function More({
   /** Null for a referee, who sees everything and so has nothing to shade. */
   washMode: WashMode | null;
   onWash: (mode: WashMode) => void;
+  layers: MapLayers;
+  onLayers: (layers: MapLayers) => void;
   showReach: boolean;
   reachDisabled: boolean;
   onReach: (on: boolean) => void;
@@ -106,6 +111,11 @@ export function More({
             ))}
           </fieldset>
         )}
+
+        <details className="more-layers">
+          <summary>{copy.layers.heading}</summary>
+          <LayerControls layers={layers} onChange={onLayers} />
+        </details>
 
         <label className="choice switch">
           <input

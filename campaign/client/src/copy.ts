@@ -213,6 +213,36 @@ export const copy = {
     reachNeedsSelection: 'Select a formation first',
   },
 
+  /** The map's layers: which reading of the ground, and which overlays on it. */
+  layers: {
+    open: 'Layers',
+    openHint: 'Choose what the map shows',
+    heading: 'Map layers',
+    ground: 'Ground',
+    grounds: {
+      terrain: 'Terrain',
+      relief: 'Topographic',
+      plain: 'Plain',
+    } as Record<string, string>,
+    groundBlurbs: {
+      terrain: 'Biomes, as the survey drew them',
+      relief: 'Height, shaded by slope',
+      plain: 'Paper and water, for reading the networks',
+    } as Record<string, string>,
+    overlays: 'Show',
+    overlayNames: {
+      names: 'Names',
+      settlements: 'Towns and villages',
+      roads: 'Roads',
+      rivers: 'Rivers',
+      crossings: 'Fords and bridges',
+      ports: 'Ports and ferries',
+    } as Record<string, string>,
+    networks: 'Roads and rivers only',
+    everything: 'Everything',
+    blurb: 'Columns, riders and orders are always drawn. This browser remembers your choice.',
+  },
+
   /**
    * The line in the corner of the map.
    *
