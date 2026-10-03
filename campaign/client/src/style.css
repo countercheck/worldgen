@@ -9,6 +9,11 @@
   --text: #e6e8ef;
   --muted: #8d93a6;
   --accent: #cba135;
+  /* Gold means "do this": the one button that is the next step. A heading, a chosen seat or
+     the formation a unit is already in is not an action, so it is drawn in these instead. */
+  --heading: #a7adbf;
+  --selected: #343949;
+  --selected-line: #6a7187;
   color-scheme: dark;
 }
 
@@ -54,7 +59,7 @@ header h1 {
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  color: var(--accent);
+  color: var(--text);
 }
 
 .roles {
@@ -97,9 +102,8 @@ button.home:hover {
 }
 
 .roles button.active {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: #16171d;
+  background: var(--selected);
+  border-color: var(--selected-line);
   font-weight: 600;
 }
 
@@ -186,9 +190,10 @@ button.home:hover {
   background: var(--panel-2);
   color: var(--text);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: 5px;
   font: inherit;
-  padding: 1px 7px;
+  min-height: 30px;
+  padding: 4px 10px;
   cursor: pointer;
 }
 
@@ -255,7 +260,7 @@ button.home:hover {
   font-weight: 600;
   letter-spacing: 0.09em;
   text-transform: uppercase;
-  color: var(--accent);
+  color: var(--heading);
 }
 
 .row,
@@ -506,7 +511,45 @@ table.grid td:first-child {
 
 .links strong {
   min-width: 72px;
-  text-transform: capitalize;
+  flex: none;
+}
+
+.links code {
+  flex: 1;
+  min-width: 0;
+}
+
+.links li.referee-link {
+  margin-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.links-tools {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 6px;
+}
+
+button.copy-button {
+  flex: none;
+  min-height: 32px;
+  padding: 4px 12px;
+  font: inherit;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+button.copy-button.copied {
+  color: #7cc289;
+  border-color: #3b6b45;
+}
+
+button.copy-button.failed {
+  color: #e2727f;
 }
 
 .links code,
@@ -590,7 +633,7 @@ code.link {
 
 .despatch-when {
   margin-top: 2px;
-  color: var(--accent);
+  color: var(--text);
   font-weight: 600;
 }
 
@@ -611,9 +654,9 @@ code.link {
 }
 
 .despatch-actions button {
-  padding: 3px 8px;
+  padding: 5px 10px;
   font: inherit;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--text);
   background: var(--panel);
   border: 1px solid var(--line);
@@ -721,6 +764,26 @@ button.wide {
 button:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+/* A primary button that cannot be pressed yet is grey, not a dimmed gold: dim gold reads
+   as "on, but faint" and the reader cannot tell it from one that works. */
+button.primary:disabled {
+  color: var(--muted);
+  background: var(--panel-2);
+  border-color: var(--line);
+  font-weight: 600;
+  opacity: 1;
+}
+
+/* What is already so — the formation a unit is in — rather than something to do. */
+button.current,
+button.current:disabled {
+  color: var(--text);
+  background: var(--selected);
+  border-color: var(--selected-line);
+  font-weight: 600;
+  opacity: 1;
 }
 
 /* ---- formations ----
@@ -831,13 +894,6 @@ button.formation:hover {
   border-radius: 4px;
   cursor: pointer;
   opacity: 0.7;
-}
-
-.map-hint.picking {
-  color: #17181f;
-  background: var(--accent);
-  font-weight: 600;
-  opacity: 1;
 }
 
 
@@ -1163,7 +1219,9 @@ p.cmd-details {
 
 .hours-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  /* Wide enough for "Dawn (06:00)" at the phone's larger type. Narrower, three fields
+     squeezed onto a phone and the select's own text was clipped. */
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 9px 12px;
   margin: 6px 0 8px;
 }
@@ -1171,6 +1229,9 @@ p.cmd-details {
 .hours-grid label {
   display: flex;
   flex-direction: column;
+  /* From the bottom, so a label that wraps to two lines does not push its field out of
+     line with its neighbours'. */
+  justify-content: flex-end;
   gap: 3px;
 }
 

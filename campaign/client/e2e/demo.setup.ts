@@ -14,7 +14,24 @@ import { CAMPAIGN_FILE, saveCampaignPath, STATE_DIR, STORAGE } from './helpers.j
 setup('create the demonstration campaign', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Or run the demonstration' }).click();
-  await page.getByRole('button', { name: 'Enter as referee' }).click({ timeout: 60_000 });
+  const enter = page.getByRole('button', { name: 'Enter as referee' });
+  await enter.waitFor({ timeout: 60_000 });
+
+  // Every link copies in one press — five commanders and the referee — and so do all the
+  // commanders' links at once. A link selected by hand gets sent short a character.
+  const links = page.locator('.links li');
+  await expect(links).toHaveCount(6);
+  await expect(page.locator('.links .copy-button')).toHaveCount(6);
+  await expect(page.locator('.links li').last()).toContainText('Referee');
+  await expect(page.locator('.links')).toContainText('The Earl of Uxbridge');
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.getByRole('button', { name: 'Copy all as one message' }).click();
+  await expect(page.getByRole('button', { name: 'Copied' })).toBeVisible();
+  const pasted = await page.evaluate(() => navigator.clipboard.readText());
+  expect(pasted).toContain('Marshal Ney: http');
+  expect(pasted).not.toContain(await page.locator('.links li').last().locator('code').innerText());
+
+  await enter.click();
   await expect(page).toHaveURL(/#\/c\//);
   await page.locator('.map canvas').first().waitFor();
 

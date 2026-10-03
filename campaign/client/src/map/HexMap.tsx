@@ -427,15 +427,12 @@ export function HexMap({
       <canvas ref={washRef} style={{ width: box.w, height: box.h }} />
       <canvas ref={overlayRef} style={{ width: box.w, height: box.h }} />
       <canvas ref={flashRef} className="map-flash" style={{ width: box.w, height: box.h }} />
-      <div className={`map-hint${onPick === undefined ? '' : ' picking'}`}>
-        {coarsePointer()
-          ? onPick === undefined
-            ? copy.map.hintTouch
-            : copy.map.pickingTouch
-          : onPick === undefined
-            ? copy.map.hint
-            : copy.map.picking}
-      </div>
+      {/* Only while nothing is being pointed at. Every pointing mode has a banner above the
+          map saying what a click will do and how to get out, and a second line down here
+          could only repeat it or, as it once did, contradict it. */}
+      {onPick === undefined && (
+        <div className="map-hint">{coarsePointer() ? copy.map.hintTouch : copy.map.hint}</div>
+      )}
     </div>
   );
 }
