@@ -290,7 +290,10 @@ export type EventPayload =
       readonly to: Formation;
       readonly atHours: number;
       readonly completesAtHours: number;
-      /** Why, for the referee reading the log: 'day_spent' | 'ordered' | 'break_camp'. */
+      /**
+       * Why, for the referee reading the log: 'day_spent' | 'standing_orders' | 'arrived' |
+       * 'ordered' | 'break_camp'.
+       */
       readonly reason: string;
     }
   | {

@@ -234,6 +234,58 @@ describe('marching', () => {
     expect(again.payloads.filter((p) => p.kind === 'unit_marched')).toHaveLength(0);
   });
 
+  describe('on arrival', () => {
+    const arrive = (c: CampaignConfig = cfg) => {
+      const state = stateFrom({ units: [red], commanders: [ney], tasks: [task] });
+      const { payloads } = advance(state, world, c, clean, { hours: 6 });
+      return { state, payloads, after: fold(state, payloads) };
+    };
+
+    it('makes camp where it stands, with nothing further ordered', () => {
+      const { payloads, after } = arrive();
+      const camp = payloads.find((p) => p.kind === 'formation_change_began');
+      expect(camp).toMatchObject({ to: 'rest', reason: 'arrived' });
+      // The two hours the rules give for making camp, and then it is in it.
+      expect(after.units.get('red-1')!.formation).toBe('rest');
+    });
+
+    it('breaks the camp for nothing when marched on before it is made', () => {
+      const state = stateFrom({ units: [red], commanders: [ney], tasks: [task] });
+      // Stop on the hour it arrives, as a referee running to the next decision would.
+      const halted = advance(state, world, cfg, clean, { hours: 6, untilDecision: true });
+      const there = fold(state, halted.payloads);
+      expect(there.units.get('red-1')!.formation).toBe('march');
+
+      const onward = marchTo(there.units.get('red-1')!, { q: 14, r: 5 }, there.clockHours, { q: 11, r: 5 });
+      const ordered = { ...there, tasks: new Map([['red-1', onward]]) };
+      const next = advance(ordered, world, cfg, clean, { hours: 3 });
+      // Still in column of march, so stepping off again costs no hours at all.
+      expect(kinds(next.payloads)).toContain('unit_marched');
+      expect(fold(ordered, next.payloads).units.get('red-1')!.column[0]!.q).toBeGreaterThan(10);
+    });
+
+    it('does not camp a column halted short of where it was sent', () => {
+      const red2 = unit('red-1', 'red', { q: 5, r: 5 });
+      const state = stateFrom({
+        units: [red2],
+        commanders: [ney],
+        tasks: [marchTo(red2, { q: 12, r: 5 }, 0, { q: 6, r: 5 })],
+      });
+      const { payloads } = advance(state, splitWorld(8), cfg, clean, { hours: 6 });
+      expect(kinds(payloads)).not.toContain('task_completed');
+      expect(payloads.some((p) => p.kind === 'formation_change_began' && p.reason === 'arrived')).toBe(
+        false,
+      );
+    });
+
+    it('stands formed up on the road when the rule is off', () => {
+      const { payloads, after } = arrive({ ...cfg, campOnArrival: false });
+      expect(kinds(payloads)).toContain('task_completed');
+      expect(kinds(payloads)).not.toContain('formation_change_began');
+      expect(after.units.get('red-1')!.formation).toBe('march');
+    });
+  });
+
   it('halts at the twenty-hour cap and starts again as hours fall out of the day', () => {
     // Nineteen and a half hours already marched leaves half an hour: one hex, and then
     // the column stands until its earliest hours are more than a day behind it.
@@ -430,14 +482,19 @@ describe('stepping off from camp or battle', () => {
    * How much ground the formation stands on after each hex its head enters, and then once
    * the hours are up.
    */
-  const lengthsAsItMarches = (u: Unit, destination: Hex, hours: number): number[] => {
+  const lengthsAsItMarches = (
+    u: Unit,
+    destination: Hex,
+    hours: number,
+    c: CampaignConfig = cfg,
+  ): number[] => {
     let state = stateFrom({
       units: [u],
       commanders: [ney],
       tasks: [marchTo(u, destination, 6, { q: 21, r: 5 })],
     });
     const lengths: number[] = [];
-    for (const p of advance(state, world, cfg, clean, { hours }).payloads) {
+    for (const p of advance(state, world, c, clean, { hours }).payloads) {
       state = fold(state, [p]);
       if (p.kind === 'unit_marched') {
         lengths.push(occupied(state.units.get('red-1')!, 'road', cfg.footprint).length);
@@ -459,9 +516,11 @@ describe('stepping off from camp or battle', () => {
   }
 
   it('stops stringing out where the head halts again', () => {
-    // Four hexes and then arrived: five hexes of column, and it stays five.
+    // Four hexes and then arrived: five hexes of column, and it stays five. With the rule
+    // off, so that what is measured is the halt and not the camp it would otherwise make —
+    // which closes the tail up again, and is pinned in 'on arrival' above.
     const u = gathered('rest');
-    const lengths = lengthsAsItMarches(u, { q: 24, r: 5 }, 12);
+    const lengths = lengthsAsItMarches(u, { q: 24, r: 5 }, 12, { ...cfg, campOnArrival: false });
     expect(lengths).toEqual([2, 3, 4, 5, 5]);
   });
 });
@@ -1660,25 +1719,7 @@ describe('what a day on the road costs', () => {
 describe('making and breaking camp', () => {
   const ney = commander('ney', 'red', 'red-1');
 
-  it('does not camp merely because it arrived', () => {
-    // Arriving is a decision for the referee, not a reason to unpack. The column stands
-    // where it was sent, in column of march, until somebody says otherwise.
-    const red = unit('red-1', 'red', { q: 5, r: 5 });
-    const state = stateFrom({
-      units: [red],
-      commanders: [ney],
-      tasks: [marchTo(red, { q: 8, r: 5 }, 6, { q: 6, r: 5 })],
-    });
-
-    const { payloads } = advance(state, world, cfg, clean, { hours: 6 });
-    const after = fold(state, payloads);
-
-    expect(kinds(payloads)).toContain('task_completed');
-    expect(after.units.get('red-1')!.formation).toBe('march');
-    expect(kinds(payloads)).not.toContain('formation_change_began');
-  });
-
-  it('alerts the referee when it arrives, rather than acting on its own', () => {
+  it('alerts the referee when it arrives', () => {
     const red = unit('red-1', 'red', { q: 5, r: 5 });
     const state = stateFrom({
       units: [red],
@@ -1693,7 +1734,7 @@ describe('making and breaking camp', () => {
     expect(raised[0]).toMatchObject({ decision: { trigger: 'objective_reached' } });
   });
 
-  it('camps of its own accord only when the day is spent', () => {
+  it('camps of its own accord when the day is spent', () => {
     const tired = unit('red-1', 'red', { q: 5, r: 5 }, onRoadFor(19.5, 20));
     const state = stateFrom({
       units: [tired],
