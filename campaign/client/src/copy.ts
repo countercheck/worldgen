@@ -107,6 +107,18 @@ export const copy = {
     refereeSeat: 'Referee',
     enterAsReferee: 'Enter as referee',
 
+    /**
+     * Copying the links. A link the referee has to select by hand out of a wrapped string
+     * of base64 is a link that gets sent with its last character missing.
+     */
+    copyLink: 'Copy link',
+    copied: 'Copied',
+    copyFailed: 'Copy by hand',
+    copyAll: 'Copy all as one message',
+    /** Every commander's link in one paste, a line each, for a group chat or an email. */
+    allLinks: (campaign: string, seats: readonly { label: string; link: string }[]): string =>
+      [`${campaign}: your links. Open only your own.`, '', ...seats.map((s) => `${s.label}: ${s.link}`)].join('\n'),
+
     demoCampaignName: 'Demonstration',
   },
 
@@ -246,15 +258,13 @@ export const copy = {
   /**
    * The line in the corner of the map.
    *
-   * Two sets, for a mouse and for a finger, chosen by what the device can do rather than
-   * how wide it is. The touch version has no Escape in it: there is no key to press, and
-   * the banner above the map carries a Cancel button instead.
+   * One for a mouse and one for a finger, chosen by what the device can do rather than how
+   * wide it is. It is hidden while the map is being pointed at: the banner above says
+   * what a click does then.
    */
   map: {
     hint: 'scroll to zoom · drag to pan · click a unit to select',
-    picking: 'click the ground you want them to march to · Esc to think again',
     hintTouch: 'pinch to zoom · drag to pan · tap a unit to select',
-    pickingTouch: 'tap the ground you want them to march to',
   },
 
   // -------------------------------------------------------------------------
@@ -878,7 +888,13 @@ export const copy = {
     blurbTouch: 'Tap the ground to read it, or a column to read the unit standing on it.',
     formations: 'Formations',
     contacts: 'Contacts',
-    contactLabel: (id: string): string => `Contact ${id}`,
+    /**
+     * A sighting nobody has put a name to: what is known of it first, then the staff's
+     * number, which is kept so a commander can tell two sightings apart. `Contact c1` on
+     * its own read as a debugging label.
+     */
+    contactLabel: (id: string, arm: string | null): string =>
+      `${arm === null ? 'Unidentified' : arm} column · ${id}`,
     campaignHeading: 'This campaign',
     /**
      * The campaign's own address, which is the thing worth bookmarking.

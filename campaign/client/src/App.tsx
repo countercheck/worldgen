@@ -847,7 +847,10 @@ function Console({
               {/* Beside the clock, because declaring a battle is a thing a referee does
                   the moment the clock stops for a contact. */}
               <button
-                className={ordering === DECLARE_BATTLE ? 'primary' : undefined}
+                // On while the field is being drawn, not a second gold Done: the banner's
+                // own button is the way out, and two gold buttons say neither is the one.
+                className={ordering === DECLARE_BATTLE ? 'current' : undefined}
+                aria-pressed={ordering === DECLARE_BATTLE}
                 title={copy.console.battleHint}
                 onClick={() =>
                   setOrdering((o) => (o === DECLARE_BATTLE ? null : DECLARE_BATTLE))
@@ -1602,7 +1605,7 @@ function Console({
                             className="swatch small ghost"
                             style={{ background: board.factions.get(c.faction)?.color }}
                           />
-                          {c.corps ?? copy.idle.contactLabel(c.id)}
+                          {c.corps ?? copy.idle.contactLabel(c.id, c.kind === null ? null : prettify(c.kind))}
                           <span className="muted">
                             {' '}
                             · {ageLabel(c.seenAtHours, clock)}
@@ -1757,7 +1760,8 @@ function FormationControl({
           return (
             <button
               key={to}
-              className={current ? 'primary' : ''}
+              className={current ? 'current' : ''}
+              aria-pressed={current}
               disabled={current}
               onClick={() => onSet(to)}
               title={

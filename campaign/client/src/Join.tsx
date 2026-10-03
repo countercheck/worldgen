@@ -89,13 +89,15 @@ export function Join({
   const [error, setError] = useState<string | null>(null);
   const [holding, setHolding] = useState<readonly CampaignSummary[]>(() => listCampaigns());
   const [links, setLinks] = useState<{
+    /** What the referee called it, for the message that carries everybody's links. */
+    name: string;
     referee: string;
     seats: { id: string; label: string; link: string }[];
   } | null>(null);
   const [pending, setPending] = useState<Joined | null>(null);
   const [help, setHelp] = useState(false);
 
-  const run = async (make: () => Promise<Joined>): Promise<void> => {
+  const run = async (name: string, make: () => Promise<Joined>): Promise<void> => {
     setError(null);
     try {
       const joined = await make();
@@ -104,6 +106,7 @@ export function Join({
       // reissued, never looked up — so a referee who clicks past this screen without
       // copying them has to start again.
       setLinks({
+        name,
         referee: joinLink(joined.session),
         seats: Object.entries(joined.held).map(([id, token]) => ({
           id,
@@ -121,7 +124,7 @@ export function Join({
 
   const startDemo = (): void => {
     setBusy(copy.join.loadingDemoWorld);
-    void run(async () => {
+    void run(copy.join.demoCampaignName, async () => {
       const { default: worldDoc } = await import(
         '../../shared/test/fixtures/world-32x32.json'
       );
@@ -131,11 +134,12 @@ export function Join({
 
   const startFromFile = (file: File): void => {
     setBusy(copy.join.readingWorld);
-    void run(async () => {
+    const name = file.name.replace(/\.json$/, '');
+    void run(name, async () => {
       const worldDoc: unknown = JSON.parse(await file.text());
       // No sides: the referee names and colours each one once the map is up. Only the
       // demonstration arrives with its two, because its scenario is written for them.
-      return startCampaign(file.name.replace(/\.json$/, ''), worldDoc, [], false, setBusy);
+      return startCampaign(name, worldDoc, [], false, setBusy);
     });
   };
 
@@ -144,17 +148,29 @@ export function Join({
       <div className="join">
         <h1>{copy.join.createdTitle}</h1>
         <p className="muted">{copy.join.createdBlurb}</p>
+        <div className="links-tools">
+          <CopyButton
+            label={copy.join.copyAll}
+            text={copy.join.allLinks(
+              links.name,
+              links.seats,
+            )}
+          />
+        </div>
         <ul className="links">
-          <li>
-            <strong>{copy.join.refereeSeat}</strong>
-            <code>{links.referee}</code>
-          </li>
           {links.seats.map((seat) => (
             <li key={seat.id}>
               <strong>{seat.label}</strong>
               <code>{seat.link}</code>
+              <CopyButton label={copy.join.copyLink} text={seat.link} />
             </li>
           ))}
+          {/* Last and apart: the one link not to send anybody. */}
+          <li className="referee-link">
+            <strong>{copy.join.refereeSeat}</strong>
+            <code>{links.referee}</code>
+            <CopyButton label={copy.join.copyLink} text={links.referee} />
+          </li>
         </ul>
         <button className="primary" onClick={() => onJoined(pending)}>
           {copy.join.enterAsReferee}
@@ -235,5 +251,29 @@ export function Join({
       </section>
     </div>
     </>
+  );
+}
+
+/**
+ * A button that puts `text` on the clipboard and says so.
+ *
+ * The clipboard needs a secure page, and a copy that fails without a word leaves the
+ * referee pasting whatever they copied last. So a failure says to copy by hand, and the
+ * link beside it is selectable in one click for exactly that.
+ */
+function CopyButton({ label, text }: { label: string; text: string }) {
+  const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  return (
+    <button
+      className={`copy-button ${state}`}
+      onClick={() => {
+        navigator.clipboard
+          .writeText(text)
+          .then(() => setState('copied'))
+          .catch(() => setState('failed'));
+      }}
+    >
+      {state === 'copied' ? copy.join.copied : state === 'failed' ? copy.join.copyFailed : label}
+    </button>
   );
 }

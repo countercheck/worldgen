@@ -52,8 +52,11 @@ test('still says Escape in a pointing banner, beside the new button', async ({ p
   await page.locator('header').getByRole('button', { name: 'Battle', exact: true }).click();
   const banner = page.locator('.notice.picking');
   await expect(banner).toContainText('Escape when the field is drawn.');
+  // One instruction at a time: the corner line once said "march" under a battle banner.
+  await expect(page.locator('.map-hint')).toBeHidden();
   await page.keyboard.press('Escape');
   await expect(banner).toBeHidden();
+  await expect(page.locator('.map-hint')).toBeVisible();
 });
 
 test('addresses a despatch with a dropdown', async ({ page }) => {
