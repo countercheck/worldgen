@@ -545,6 +545,31 @@ describe('a campaign carries its own numbers', () => {
     expect(loaded.config.speeds.infantry.road).toBe(3);
   });
 
+  it('gives a row written before a rule existed that rule, and keeps every number it stored', () => {
+    // A campaign stored before `campOnArrival` was added has no such field. It must read
+    // as the rule, not as `undefined` — while what it did store, the brisk day, stands.
+    const db = openDb();
+    new CampaignStore(db).create({
+      id: 'c1',
+      name: 'A',
+      worldDoc,
+      factions: [{ id: 'red', name: 'Red', color: '#f00' }],
+      ruleset: 'brisk',
+    });
+    const row = db
+      .prepare(`SELECT config_json FROM campaigns WHERE id = ?`)
+      .get('c1') as { config_json: string };
+    const older = JSON.parse(row.config_json) as Record<string, unknown>;
+    delete older.campOnArrival;
+    delete older.campFatigueRecoveryPerDay;
+    db.prepare(`UPDATE campaigns SET config_json = ? WHERE id = ?`).run(JSON.stringify(older), 'c1');
+
+    const loaded = new CampaignStore(db).campaign('c1')!;
+    expect(loaded.config.campOnArrival).toBe(true);
+    expect(loaded.config.campFatigueRecoveryPerDay).toBe(20);
+    expect(loaded.config.maxMarchHoursPerDay).toBe(12);
+  });
+
   it("runs commands on the campaign's own numbers", () => {
     // The whole point. A campaign under a ruleset that halves the day must cap a march at
     // that, not at the store's.

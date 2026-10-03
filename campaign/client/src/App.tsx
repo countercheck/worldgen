@@ -72,6 +72,7 @@ import { Command } from './panels/Command.jsx';
 import { Composer, type Draft } from './panels/Composer.jsx';
 import { ContactPanel } from './panels/ContactPanel.jsx';
 import { Help } from './panels/Help.jsx';
+import { LayerControls } from './panels/Layers.jsx';
 import { HexPanel } from './panels/HexPanel.js';
 import { DayNight, DaylightControl, StandingOrdersPanel } from './panels/Hours.jsx';
 import { UnitEdit } from './panels/UnitEdit.jsx';
@@ -95,14 +96,16 @@ import {
   forgetCampaign,
   joinLink,
   loadCampaign,
+  loadLayers,
   loadWash,
   nextWash,
   rememberCampaign,
   saveCampaign,
+  saveLayers,
   saveWash,
 } from './session.js';
 
-import type { WashMode } from './map/draw.js';
+import type { MapLayers, WashMode } from './map/draw.js';
 
 import type {
   CampaignConfig,
@@ -286,6 +289,8 @@ function Console({
   const [sheetOpen, setSheetOpen] = useState(false);
   const [more, setMore] = useState(false);
   const [help, setHelp] = useState(false);
+  const [layers, setLayersState] = useState<MapLayers>(loadLayers);
+  const [layersOpen, setLayersOpen] = useState(false);
   // The places list, and the place it last asked the map to show. `seq` counts requests, so
   // pointing at the same place twice flashes it twice.
   const [places, setPlaces] = useState(false);
@@ -713,6 +718,11 @@ function Console({
     setWashMode(next);
   };
 
+  const setLayers = (next: MapLayers): void => {
+    saveLayers(next);
+    setLayersState(next);
+  };
+
   const tabs = panesFor(isReferee ? 'referee' : 'commander');
 
   // The way out of every pointing mode that is not a key. Escape still works; a phone has
@@ -803,6 +813,15 @@ function Console({
           </button>
         )}
 
+        <button
+          className="layers-button"
+          title={copy.layers.openHint}
+          aria-expanded={layersOpen}
+          onClick={() => setLayersOpen((o) => !o)}
+        >
+          {copy.layers.open}
+        </button>
+
         <button className="help-button" title={copy.help.openHint} onClick={() => setHelp(true)}>
           {copy.help.open}
         </button>
@@ -871,6 +890,8 @@ function Console({
           }}
           washMode={isReferee ? null : washMode}
           onWash={setWash}
+          layers={layers}
+          onLayers={setLayers}
           showReach={showReach}
           reachDisabled={selectedUnit === null}
           onReach={setShowReach}
@@ -886,6 +907,25 @@ function Console({
           }}
           onClose={() => setMore(false)}
         />
+      )}
+
+      {layersOpen && (
+        <div className="layers-backdrop" onClick={() => setLayersOpen(false)}>
+          <section
+            className="layers-pop"
+            role="dialog"
+            aria-label={copy.layers.heading}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="more-head">
+              <h2>{copy.layers.heading}</h2>
+              <button className="dismiss" onClick={() => setLayersOpen(false)}>
+                {copy.more.close}
+              </button>
+            </div>
+            <LayerControls layers={layers} onChange={setLayers} />
+          </section>
+        </div>
       )}
 
       {help && (
@@ -1108,6 +1148,7 @@ function Console({
           world={board.world}
           marks={board.marks}
           theme={DEFAULT_THEME}
+          layers={layers}
           hovered={hovered}
           onHover={(hex, id) => {
             setHovered(hex);

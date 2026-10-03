@@ -191,6 +191,17 @@ export interface CampaignConfig {
    * every advance on a day anybody was fighting.
    */
   readonly haltTriggers: readonly DecisionTrigger[];
+  /**
+   * Whether a column that reaches the end of its march makes camp there by itself.
+   *
+   * On by default: a division that arrives where it was sent and has no further orders
+   * stands down and pitches, which is what troops do at the end of a march. Anything the
+   * referee orders after it arrives — another march, battle, occupation — takes over, and
+   * since the column is still in march formation until the camp is made, calling it off
+   * costs nothing. Off, a column stands formed up on the road where it halted, and goes on
+   * counting the hours as time on the road.
+   */
+  readonly campOnArrival: boolean;
   /** A ceiling on one advance, so a mistyped `advance 1000` cannot lock the server up. */
   readonly maxAdvanceHours: number;
 
@@ -241,7 +252,8 @@ export interface CampaignConfig {
    * Hours to change formation, `from` then `to`.
    *
    * The rules' own matrix. Making camp is the one that fires by itself — a formation that
-   * has spent its day stops and builds one — and everything else is ordered.
+   * has spent its day, or arrived with nothing further ordered, stops and builds one — and
+   * everything else is ordered.
    */
   readonly formationChangeHours: Readonly<Record<Formation, Readonly<Record<Formation, number>>>>;
   /**
@@ -395,6 +407,7 @@ export const DEFAULT_CONFIG: CampaignConfig = {
     // be handed the clock while the rider is still out there.
     'rider_sighted',
   ],
+  campOnArrival: true,
   maxAdvanceHours: 24 * 14,
 
   minDivisionPaperStrength: 4000,

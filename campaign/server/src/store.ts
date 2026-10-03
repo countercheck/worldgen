@@ -352,10 +352,15 @@ export class CampaignStore {
       // A campaign written before rulesets existed has no stored numbers. Resolving them
       // now gives it the rules as written, which is what it has been playing under all
       // along — there was nothing else to play under.
-      config:
-        row.config_json === null
-          ? resolveConfig(undefined, ruleset)
-          : (JSON.parse(row.config_json) as CampaignConfig),
+      //
+      // One written before a rule was added stores no number for it. Every number it did
+      // store stands — a game in progress is not re-tuned by a change to the ruleset — and
+      // only the ones it never had come from the ruleset, so a new rule reads as the rule
+      // rather than as `undefined`.
+      config: {
+        ...resolveConfig(undefined, ruleset),
+        ...(row.config_json === null ? {} : (JSON.parse(row.config_json) as Partial<CampaignConfig>)),
+      },
     });
   }
 

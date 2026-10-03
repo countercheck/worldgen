@@ -1082,8 +1082,9 @@ function simulate(state: CampaignState, world: World, base: CampaignConfig, rng:
 
     if (moved) {
       // A formation that has spent its twenty hours is done for the day and builds a camp
-      // where it stands. The rules make this the one change that happens without an order:
-      // nobody decides to stop after twenty hours on the road, they simply stop.
+      // where it stands: nobody decides to stop after twenty hours on the road, they simply
+      // stop. Making camp is the one change that happens without an order — here, when its
+      // commander's hours are up, and when it arrives with nothing further ordered.
       const next = atHours + HOURS_PER_STEP;
       const running = s.tasks.get(task.unitId)?.nextHex != null;
       if (marchHoursLeft(cfg, after, atHours) <= 1e-9) {
@@ -1096,6 +1097,14 @@ function simulate(state: CampaignState, world: World, base: CampaignConfig, rng:
         beginChange(after, 'rest', next, 'standing_orders');
       } else if (!running) {
         closeUp(after, next, lastSpeed);
+        // Arrived, with nothing further ordered: it stands down and makes camp, as at the
+        // end of any day's march. Not a column halted short by a river — that one is still
+        // under orders, and its decision is waiting for the referee. Any order given after
+        // this takes over: a fresh march breaks the half-built camp for nothing, since the
+        // column is still in march formation until the camp is made.
+        if (cfg.campOnArrival && s.tasks.get(task.unitId)?.complete === true) {
+          beginChange(after, 'rest', next, 'arrived');
+        }
       }
     }
     void lastGrade;

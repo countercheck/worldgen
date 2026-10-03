@@ -19,6 +19,8 @@ import {
   hexAt,
   key,
   riverClass,
+  TAG_BRIDGE,
+  TAG_FORD,
   type Hex,
   type HexKey,
   type River,
@@ -38,6 +40,7 @@ import {
   ROLE_GLYPH,
   type RiverMarkKind,
 } from './glyphs.js';
+import { labelFont, placeLabels } from './labels.js';
 import { drawSymbol, symbolSize, type SymbolSpec } from './symbols.js';
 
 export type { SymbolSpec } from './symbols.js';
@@ -102,6 +105,106 @@ export function fillFor(hex: WorldHex, theme: Theme = DEFAULT_THEME): string {
   return theme.terrain.flat ?? theme.fallback;
 }
 
+/**
+ * What the map draws, as the reader has chosen it.
+ *
+ * The ground is one of three readings of the same hexes; everything else is an overlay that
+ * can be switched off on its own. Units, riders, the wash and every pointing mode are not
+ * here: they are the game, not the map, and are always drawn.
+ */
+export type Ground = 'terrain' | 'relief' | 'plain';
+
+export const GROUNDS: readonly Ground[] = ['terrain', 'relief', 'plain'];
+
+export interface MapLayers {
+  readonly ground: Ground;
+  readonly names: boolean;
+  readonly settlements: boolean;
+  readonly roads: boolean;
+  readonly rivers: boolean;
+  readonly crossings: boolean;
+  readonly ports: boolean;
+}
+
+/** The overlays, in the order a control lists them. */
+export const OVERLAYS = ['names', 'settlements', 'roads', 'rivers', 'crossings', 'ports'] as const;
+export type Overlay = (typeof OVERLAYS)[number];
+
+/** Everything on, over the terrain: the map as it was before there were layers. */
+export const ALL_LAYERS: MapLayers = {
+  ground: 'terrain',
+  names: true,
+  settlements: true,
+  roads: true,
+  rivers: true,
+  crossings: true,
+  ports: true,
+};
+
+/** Paper and water, for reading the road and river networks with nothing behind them. */
+const PLAIN_LAND = '#f3ecd9';
+const PLAIN_WATER = '#cfe0ef';
+const PLAIN_ROAD_CASING = 'rgba(70,52,30,0.55)';
+
+/**
+ * Height colours, lowest first: the hypsometric tints of a printed atlas, green lowland
+ * through tan upland to rock and snow. Each stop is a fraction of the world's land range.
+ */
+const RELIEF_STOPS: readonly (readonly [number, readonly [number, number, number]])[] = [
+  [0, [120, 168, 104]],
+  [0.25, [178, 196, 128]],
+  [0.5, [222, 206, 146]],
+  [0.72, [196, 156, 104]],
+  [0.88, [150, 120, 96]],
+  [1, [246, 244, 240]],
+];
+
+/** The lowest and highest land on a world, for scaling the relief tints to it. */
+export function landRange(world: World): { lo: number; hi: number } {
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const h of world.hexes.values()) {
+    if (h.terrainClass === 'open_water' || h.terrainClass === 'inland_water' || h.tags.has('fog')) {
+      continue;
+    }
+    lo = Math.min(lo, h.elevation);
+    hi = Math.max(hi, h.elevation);
+  }
+  return Number.isFinite(lo) ? { lo, hi } : { lo: 0, hi: 1 };
+}
+
+/**
+ * A hex's height as a tint, darkened on steep ground so slopes read as relief.
+ *
+ * Scaled to this world's own range rather than to fixed metres: a lowland map and an alpine
+ * one each use the whole ramp, which is what makes the shape of the country legible.
+ */
+export function reliefColor(elevation: number, slope: number, range: { lo: number; hi: number }): string {
+  const t = range.hi > range.lo ? Math.min(1, Math.max(0, (elevation - range.lo) / (range.hi - range.lo))) : 0;
+  let i = 1;
+  while (i < RELIEF_STOPS.length - 1 && RELIEF_STOPS[i]![0] < t) i++;
+  const [t0, c0] = RELIEF_STOPS[i - 1]!;
+  const [t1, c1] = RELIEF_STOPS[i]!;
+  const f = t1 > t0 ? (t - t0) / (t1 - t0) : 0;
+  // A slope of 300 m/km — twice Bad Going — takes a third of the light away.
+  const shade = 1 - Math.min(0.35, Math.max(0, slope) / 900);
+  const ch = (k: number) => Math.round((c0[k]! + (c1[k]! - c0[k]!) * f) * shade);
+  return `rgb(${ch(0)},${ch(1)},${ch(2)})`;
+}
+
+/** The fill for one hex under the chosen ground. */
+export function groundFill(
+  hex: WorldHex,
+  ground: Ground,
+  range: { lo: number; hi: number },
+  theme: Theme = DEFAULT_THEME,
+): string {
+  if (ground === 'terrain' || hex.tags.has('fog')) return fillFor(hex, theme);
+  const wet = hex.terrainClass === 'open_water' || hex.terrainClass === 'inland_water';
+  if (ground === 'plain') return wet ? PLAIN_WATER : PLAIN_LAND;
+  return wet ? fillFor(hex, theme) : reliefColor(hex.elevation, hex.slope, range);
+}
+
 /** The extent of a world in pixels, for fitting it to a viewport. */
 export function worldExtent(world: World, size: number): {
   minX: number;
@@ -129,23 +232,37 @@ export function drawTerrain(
   world: World,
   view: View,
   theme: Theme = DEFAULT_THEME,
+  layers: MapLayers = ALL_LAYERS,
 ): void {
   ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
 
   ctx.lineWidth = Math.max(0.4, view.size * 0.04);
-  ctx.strokeStyle = 'rgba(0,0,0,0.18)';
+  // Fainter on plain paper, where the grid would otherwise be the loudest thing drawn.
+  ctx.strokeStyle = layers.ground === 'plain' ? 'rgba(0,0,0,0.07)' : 'rgba(0,0,0,0.18)';
 
+  const range = layers.ground === 'relief' ? landRange(world) : { lo: 0, hi: 1 };
   for (const hex of world.hexes.values()) {
     hexPath(ctx, toScreen(hex.coord, view), view.size);
-    ctx.fillStyle = fillFor(hex, theme);
+    ctx.fillStyle = groundFill(hex, layers.ground, range, theme);
     ctx.fill();
     ctx.stroke();
   }
 
-  drawRivers(ctx, world, view, theme);
-  drawRoads(ctx, world, view, theme);
-  // Over the roads, so a spring or white water on a road's reach still shows.
-  for (const mark of riverMarks(world)) {
+  if (layers.rivers) drawRivers(ctx, world, view, theme);
+  // The casing is pale so a road reads on forest and rock; on pale paper it vanishes, and
+  // the road with it. A dark edge does the same job there.
+  if (layers.roads) {
+    drawRoads(ctx, world, view, layers.ground === 'plain' ? { ...theme, roadCasing: PLAIN_ROAD_CASING } : theme);
+  }
+  if (layers.crossings) {
+    for (const c of crossingMarks(world)) {
+      const p = toScreen(c.coord, view);
+      drawCrossing(ctx, c.kind, p.x, p.y, c.bearing, view.size);
+    }
+  }
+  // Over the roads and the crossings, so a spring or white water on a forded reach still
+  // shows.
+  for (const mark of layers.rivers ? riverMarks(world) : []) {
     const p = toScreen(mark.coord, view);
     drawRiverMark(
       ctx,
@@ -157,7 +274,14 @@ export function drawTerrain(
       theme.river.major.color,
     );
   }
-  drawSettlements(ctx, world, view);
+  if (layers.ports) {
+    for (const c of anchoragePoints(world)) {
+      const p = toScreen(c, view);
+      drawAnchor(ctx, p.x, p.y, view.size);
+    }
+  }
+  if (layers.settlements) drawSettlements(ctx, world, view);
+  if (layers.names) drawLabels(ctx, world, view, theme, layers);
 }
 
 /** A river mark: where one rises, where it ends, or where it runs white. */
@@ -174,6 +298,24 @@ export interface RiverMark {
  * Python, so the campaign marks the same places the exported map does.
  */
 export function riverMarks(world: World): RiverMark[] {
+  const bearing = riverBearings(world);
+  const out: RiverMark[] = [];
+  for (const hex of world.hexes.values()) {
+    const b = bearing.get(key(hex.coord)) ?? 0;
+    if (hex.tags.has('river_source')) out.push({ coord: hex.coord, kind: 'source', bearing: b });
+    if (hex.tags.has('river_end')) out.push({ coord: hex.coord, kind: 'end', bearing: b });
+    if (hex.tags.has('cataract') || hex.tags.has('rapids')) {
+      out.push({ coord: hex.coord, kind: 'rapids', bearing: b });
+    }
+  }
+  return out;
+}
+
+/**
+ * The bearing of the river through each hex on a river's path, downstream, in radians:
+ * from the hex before it to the hex after. Mirrors `legend._bearings` in the Python.
+ */
+function riverBearings(world: World): Map<string, number> {
   const bearing = new Map<string, number>();
   for (const river of world.rivers) {
     river.hexes.forEach((c, i) => {
@@ -185,16 +327,166 @@ export function riverMarks(world: World): RiverMark[] {
       bearing.set(key(c), Math.atan2(b.y - a.y, b.x - a.x));
     });
   }
-  const out: RiverMark[] = [];
+  return bearing;
+}
+
+/** A ford or a bridge, and the bearing of the river it crosses. */
+export interface CrossingMark {
+  readonly coord: Hex;
+  readonly kind: 'ford' | 'bridge';
+  /** The river's bearing, in radians. The mark is laid square across it. */
+  readonly bearing: number;
+}
+
+/**
+ * Every tagged ford and bridge, in stable order. Mirrors `legend.crossings` in the Python,
+ * so the campaign marks the crossings the exported atlas does — and the ones the movement
+ * rules read, since both come off the same tags.
+ */
+export function crossingMarks(world: World): CrossingMark[] {
+  const bearing = riverBearings(world);
+  const out: CrossingMark[] = [];
   for (const hex of world.hexes.values()) {
-    const b = bearing.get(key(hex.coord)) ?? 0;
-    if (hex.tags.has('river_source')) out.push({ coord: hex.coord, kind: 'source', bearing: b });
-    if (hex.tags.has('river_end')) out.push({ coord: hex.coord, kind: 'end', bearing: b });
-    if (hex.tags.has('cataract') || hex.tags.has('rapids')) {
-      out.push({ coord: hex.coord, kind: 'rapids', bearing: b });
+    const kind = hex.tags.has(TAG_BRIDGE) ? 'bridge' : hex.tags.has(TAG_FORD) ? 'ford' : null;
+    if (kind !== null) out.push({ coord: hex.coord, kind, bearing: bearing.get(key(hex.coord)) ?? 0 });
+  }
+  return out.sort((a, b) => a.coord.q - b.coord.q || a.coord.r - b.coord.r);
+}
+
+/**
+ * Every land hex where a route takes to the water: a road's landing at a sea leg, and both
+ * ends of every ferry. Mirrors `legend.anchorage_points`, which is where the atlas puts its
+ * anchors — this is what a port looks like on the map.
+ *
+ * A landing counts only where a road reaches it, as in the Python: an anchor on a coast
+ * with no road at it would be a port nobody can get to.
+ */
+export function anchoragePoints(world: World): Hex[] {
+  const wet = (c: Hex): boolean => {
+    const h = hexAt(world, c);
+    return h === undefined || h.terrainClass === 'open_water' || h.terrainClass === 'inland_water';
+  };
+  const onRoad = new Set<string>();
+  for (const e of world.roadEdges.values()) {
+    if (wet(e.a) || wet(e.b)) continue;
+    onRoad.add(key(e.a));
+    onRoad.add(key(e.b));
+  }
+  const points = new Map<string, Hex>();
+  for (const e of world.seaEdges.values()) {
+    const aWet = wet(e.a);
+    if (aWet === wet(e.b)) continue;
+    const shore = aWet ? e.b : e.a;
+    if (onRoad.has(key(shore))) points.set(key(shore), shore);
+  }
+  for (const f of world.ferries) {
+    points.set(key(f.a), f.a);
+    points.set(key(f.b), f.b);
+  }
+  return [...points.values()].sort((a, b) => a.q - b.q || a.r - b.r);
+}
+
+const CROSSING_INK = '#2b2118';
+const ANCHOR_INK = '#1b3a5c';
+
+/**
+ * A ford or bridge, laid across the river rather than along it — the atlas's own marks
+ * (`_crossing_marker` in `svg_export.py`), at the same proportion of the hex.
+ *
+ * Bridge: two parallel decks closed by abutments at each bank. Ford: the same span broken
+ * into dashes, a way through the water rather than over it.
+ */
+function drawCrossing(
+  ctx: CanvasRenderingContext2D,
+  kind: 'ford' | 'bridge',
+  cx: number,
+  cy: number,
+  bearing: number,
+  hexSize: number,
+): void {
+  const s = (5 * hexSize) / 12;
+  const half = 0.78 * s;
+  const sep = 0.3 * s;
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(bearing + Math.PI / 2);
+  ctx.strokeStyle = CROSSING_INK;
+  ctx.lineWidth = Math.max(0.6, 0.26 * s);
+  ctx.setLineDash(kind === 'ford' ? [0.32 * s, 0.28 * s] : []);
+  ctx.beginPath();
+  for (const side of [-1, 1]) {
+    ctx.moveTo(-half, side * sep);
+    ctx.lineTo(half, side * sep);
+  }
+  if (kind === 'bridge') {
+    for (const side of [-1, 1]) {
+      ctx.moveTo(side * half, -sep * 1.7);
+      ctx.lineTo(side * half, sep * 1.7);
     }
   }
-  return out;
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** An anchor where a route takes to the water: `_anchorage_marker` in `svg_export.py`. */
+function drawAnchor(ctx: CanvasRenderingContext2D, cx: number, cy: number, hexSize: number): void {
+  const s = (5 * hexSize) / 12;
+  ctx.save();
+  ctx.strokeStyle = ANCHOR_INK;
+  ctx.lineWidth = Math.max(0.6, 0.28 * s);
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.arc(cx, cy - 0.8 * s, 0.26 * s, 0, Math.PI * 2);
+  ctx.moveTo(cx, cy - 0.54 * s);
+  ctx.lineTo(cx, cy + 0.92 * s);
+  ctx.moveTo(cx - 0.6 * s, cy - 0.26 * s);
+  ctx.lineTo(cx + 0.6 * s, cy - 0.26 * s);
+  ctx.moveTo(cx - 0.72 * s, cy + 0.4 * s);
+  ctx.quadraticCurveTo(cx, cy + 1.16 * s, cx + 0.72 * s, cy + 0.4 * s);
+  ctx.stroke();
+  ctx.restore();
+}
+
+/**
+ * Place and river names, by the atlas's rules (`labels.ts`).
+ *
+ * Measured on this canvas, at this zoom: a name is placed against the size it will actually
+ * be drawn, and one too small to read is left off. A pale halo under each keeps it legible
+ * over a road or a forest.
+ */
+function drawLabels(
+  ctx: CanvasRenderingContext2D,
+  world: World,
+  view: View,
+  theme: Theme,
+  layers: MapLayers,
+): void {
+  const measure = (text: string, size: number, bold: boolean): { w: number; h: number } => {
+    ctx.font = labelFont(size, bold, false);
+    return { w: ctx.measureText(text).width, h: size };
+  };
+  // A river's name means nothing without the river under it, so it goes with the rivers.
+  const labels = placeLabels(world, (c) => toScreen(c, view), view.size, measure, {
+    rivers: layers.rivers,
+    markers: layers.settlements,
+  });
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.lineJoin = 'round';
+  for (const l of labels) {
+    ctx.save();
+    ctx.translate(l.x, l.y);
+    if (l.angle !== 0) ctx.rotate(l.angle);
+    ctx.font = labelFont(l.size, l.bold, l.italic);
+    ctx.lineWidth = Math.max(2, l.size * 0.28);
+    ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+    ctx.strokeText(l.text, 0, 0);
+    ctx.fillStyle = l.river ? theme.river.major.color : '#1e1e1e';
+    ctx.fillText(l.text, 0, 0);
+    ctx.restore();
+  }
+  ctx.restore();
 }
 
 /** A stretch of one river drawn in one style. */
@@ -319,7 +611,10 @@ function drawSettlements(ctx: CanvasRenderingContext2D, world: World, view: View
     ctx.strokeStyle = '#222';
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.rect(p.x - r / 2, p.y - r / 2, r, r);
+    // A town is a square and a village a smaller disc, as on the atlas — the two read
+    // apart at a glance, which matters on a map that is mostly towns.
+    if (s.tier === 'village') ctx.arc(p.x, p.y, r * 0.36, 0, Math.PI * 2);
+    else ctx.rect(p.x - r / 2, p.y - r / 2, r, r);
     ctx.fill();
     ctx.stroke();
   }
