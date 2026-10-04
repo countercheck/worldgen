@@ -182,6 +182,32 @@ describe('rivers', () => {
   });
 });
 
+describe('river sides and corners', () => {
+  // (16,16) is known and (40,40) is far off the map of anything seen.
+  const sides = [
+    { side: [16, 16, 0], catchment_km2: 9, flow: 0.1, drop_m: 0, tags: [] }, // (16,16)|(17,16)
+    { side: [40, 40, 0], catchment_km2: 9, flow: 0.1, drop_m: 0, tags: [] },
+  ];
+  const corners = [
+    { corner: [15, 16, 0], tags: ['confluence'] }, // touches (16,16)
+    { corner: [40, 40, 1], tags: ['river_end'] },
+  ];
+  const withRivers: Doc = { ...doc, river_sides: sides, river_corners: corners };
+  const masked = maskWorld(withRivers, { seen, visible, faction: 'red', clockHours: 24 });
+
+  it('keeps a side seen from either bank, and drops one seen from neither', () => {
+    expect((masked.river_sides as Doc[]).map((d) => d.side)).toEqual([[16, 16, 0]]);
+  });
+
+  it('keeps a corner seen from any of its three hexes', () => {
+    expect((masked.river_corners as Doc[]).map((d) => d.corner)).toEqual([[15, 16, 0]]);
+  });
+
+  it('never passes a river’s corner course through the fog', () => {
+    for (const r of masked.rivers as Doc[]) expect(r.corners).toEqual([]);
+  });
+});
+
 describe('memory versus observation', () => {
   it('marks known-but-not-visible ground as remembered', () => {
     const masked = mask();

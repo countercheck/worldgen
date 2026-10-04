@@ -31,7 +31,7 @@
  * `metadata.fog` states it in the file itself.
  */
 
-import { key, type Hex, type HexKey } from './hex.js';
+import { cornerHexes, key, sideHexes, type Hex, type HexKey } from './hex.js';
 
 /** The tag an unseen hex carries. Nothing should hand-write this string. */
 export const FOG_TAG = 'fog';
@@ -141,10 +141,27 @@ export function maskWorld(doc: Doc, opts: MaskOptions): Doc {
     },
   );
 
+  // A river side is seen from either bank, and a corner from any of the three hexes at it.
+  const anyKnown = (hs: Hex[]): boolean => hs.some((h) => known.has(key(h)));
+  const riverSides = (Array.isArray(doc.river_sides) ? (doc.river_sides as Doc[]) : []).filter(
+    (d) => {
+      const [q, r, s] = d.side as number[];
+      return anyKnown(sideHexes({ q: q!, r: r!, s: s! }));
+    },
+  );
+  const riverCorners = (
+    Array.isArray(doc.river_corners) ? (doc.river_corners as Doc[]) : []
+  ).filter((d) => {
+    const [q, r, k] = d.corner as number[];
+    return anyKnown(cornerHexes({ q: q!, r: r!, k: k! }));
+  });
+
   return {
     ...doc,
     hexes,
     rivers: maskRivers(Array.isArray(doc.rivers) ? (doc.rivers as Doc[]) : [], known),
+    river_sides: riverSides,
+    river_corners: riverCorners,
     settlements,
     road_edges: edges('road_edges'),
     sea_edges: edges('sea_edges'),
@@ -184,7 +201,10 @@ function maskRivers(rivers: Doc[], known: ReadonlySet<HexKey>): Doc[] {
     let run: number[][] = [];
 
     const flush = (): void => {
-      if (run.length >= 2) out.push({ ...river, hexes: run });
+      // The corner course is cut to nothing rather than left whole: it would draw the
+      // river through country the faction has never seen. Masking it by corner comes
+      // with the move of the campaign layer onto hexside rivers.
+      if (run.length >= 2) out.push({ ...river, hexes: run, corners: [] });
       run = [];
     };
 
