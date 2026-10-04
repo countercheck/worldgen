@@ -8,6 +8,7 @@ import pytest
 
 from tests.worlds import build_world
 from worldgen.core.hex import TerrainClass
+from worldgen.core.hex_grid import corner_hexes, side_hexes
 from worldgen.export import legend
 from worldgen.export.svg_export import _river_mark
 from worldgen.render import glyphs
@@ -21,48 +22,39 @@ def world():
     return build_world(seed=42, width=64, height=64, until="CataractStage")
 
 
-def _land(ws, path):
-    return [c for c in path if c in ws.hexes and ws.hexes[c].terrain_class not in _WATER]
+def _tagged(ws, tag):
+    return {c for c, tags in ws.river_corners.items() if tag in tags}
 
 
-def test_every_source_is_the_first_hex_of_a_drawn_river(world):
-    firsts = {r.hexes[0] for r in world.rivers if len(_land(world, r.hexes)) >= 2}
-    sources = {c for c, h in world.hexes.items() if "river_source" in h.tags}
+def _at_water(ws, corner):
+    return any(h in ws.hexes and ws.hexes[h].terrain_class in _WATER for h in corner_hexes(corner))
+
+
+def test_every_source_is_the_first_corner_of_a_drawn_river(world):
+    firsts = {r.corners[0] for r in world.rivers}
+    sources = _tagged(world, "river_source")
     assert sources
     assert sources <= firsts
-    for c in sources:
-        assert "river_source_offmap" not in world.hexes[c].tags
+    assert not sources & _tagged(world, "river_source_offmap")
 
 
 def test_a_river_reaching_the_sea_or_a_lake_is_marked_where_it_ends(world):
+    ends = _tagged(world, "river_end")
     for river in world.rivers:
-        land = _land(world, river.hexes)
-        last = river.hexes[-1]
-        if len(land) >= 2 and world.hexes[last].terrain_class in _WATER:
-            assert "river_end" in world.hexes[land[-1]].tags
+        if _at_water(world, river.corners[-1]):
+            assert river.corners[-1] in ends
 
 
 def test_a_tributary_has_no_end_of_its_own(world):
-    """Its last hex is its trunk's, and the trunk flows on from there.
-
-    Unless the trunk ends there too: a tributary joining at the last land hex before the
-    sea meets a trunk that rightly marks its mouth on that hex, so it proves nothing here.
-    """
-    flows_on = {c for r in world.rivers for c in r.hexes[:-1]}
-    mouths = set()
-    for r in world.rivers:
-        land = _land(world, r.hexes)
-        if land and world.hexes[r.hexes[-1]].terrain_class in _WATER:
-            mouths.add(land[-1])
+    """Its last corner is its trunk's, and the trunk flows on from there."""
+    flows_on = {c for r in world.rivers for c in r.corners[:-1]}
     joined = [
-        r.hexes[-1]
+        r.corners[-1]
         for r in world.rivers
-        if world.hexes[r.hexes[-1]].terrain_class not in _WATER
-        and r.hexes[-1] in flows_on
-        and r.hexes[-1] not in mouths
+        if r.corners[-1] in flows_on and not _at_water(world, r.corners[-1])
     ]
     assert joined
-    assert not any("river_end" in world.hexes[c].tags for c in joined)
+    assert not set(joined) & _tagged(world, "river_end")
 
 
 def test_rapids_are_off_a_cataract_and_obey_their_settings():
@@ -110,19 +102,14 @@ def test_the_campaign_client_draws_the_same_marks():
 
 
 def test_no_river_is_drawn_across_water():
-    """A river ends at a lake as at the sea; what leaves the lake is a river of its own."""
+    """A river ends at a lake as at the sea; what leaves the lake is a river of its own.
+
+    On hexsides that is a rule about sides: every one a river runs along has land on both
+    hands, so no course crosses water or runs along a shore.
+    """
     for seed in (42, 7, 3):
         ws = build_world(seed=seed, width=64, height=64, until="HydrologyStage")
         for river in ws.rivers:
-            inner = [c for c in river.hexes[1:-1] if ws.hexes[c].terrain_class in _WATER]
-            assert not inner, f"seed {seed}: a river crosses {len(inner)} water hexes"
-
-
-def test_split_at_water_ends_at_the_shore_and_starts_again_beyond():
-    from worldgen.core.world_state import River
-    from worldgen.stages.hydrology import _split_at_water
-
-    lake = {(2, 0), (3, 0), (4, 0)}
-    path = [(0, 0), (1, 0), (2, 0), (3, 0), (4, 0), (5, 0), (6, 0)]
-    pieces = _split_at_water([River(hexes=path, flow_volume=1.0)], lake, {}, 1.0)
-    assert [p.hexes for p in pieces] == [[(0, 0), (1, 0), (2, 0)], [(4, 0), (5, 0), (6, 0)]]
+            for side in river.sides():
+                wet = [h for h in side_hexes(side) if ws.hexes[h].terrain_class in _WATER]
+                assert not wet, f"seed {seed}: a river runs along water at {side}"

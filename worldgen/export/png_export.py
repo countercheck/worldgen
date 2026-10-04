@@ -5,7 +5,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 from ..core.hex import DEFAULT_TERRAIN_BANDS, SettlementTier, terrain_bands, terrain_label
-from ..core.hex_grid import axial_to_pixel, neighbors, road_polylines
+from ..core.hex_grid import axial_to_pixel, corner_to_pixel, neighbors, road_polylines
 from ..core.world_state import RoadTier, WorldState
 from ..render import glyphs
 from ..render.debug_viewer import (
@@ -592,15 +592,15 @@ def render(ws: WorldState, config: PNGConfig | None = None) -> Image.Image:
             # at one width taken from its mouth.
             for run, sw in rivers.width_bands(
                 river,
-                ws.hexes,
+                ws.river_sides,
                 config.river_min_width,
                 config.river_max_width,
                 config.river_width_steps,
                 config.river_width_exponent,
             ):
                 pts = []
-                for coord in run:
-                    px, py = axial_to_pixel(coord, size)
+                for corner in run:
+                    px, py = corner_to_pixel(corner, size)
                     pts.append((int(px + ox), int(py + oy)))
                 bands.append((pts, max(1, round(sw * line_scale))))
         outline = config.feature_outline * line_scale

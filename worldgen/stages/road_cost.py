@@ -2,7 +2,7 @@ from collections import deque
 
 from ..core.errors import RoutingError
 from ..core.hex import TerrainClass
-from ..core.hex_grid import astar, distance, neighbors
+from ..core.hex_grid import astar, distance, hex_corner_keys, neighbors, side_hexes
 from ..core.world_state import ROAD_TIER_RANK, Ferry, RoadTier, road_edge_key
 
 WATER = (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
@@ -123,17 +123,21 @@ def water_edge_cost(from_hx, to_hx, cfg) -> float:
 
 
 def river_crossing_edge_cost(from_hx, to_hx, cfg) -> float:
-    """Penalty on each land↔river edge, scaled by the larger river_flow.
+    """Penalty on each land↔river edge, scaled by the river hex's river_flow.
 
     A perpendicular crossing of a 1-hex-wide river hits this twice (entering
     and leaving), so the configured base+flow values represent half of the
     total perpendicular crossing cost.
+
+    The river's flow, not the larger of the two: under `river_flow_continuous` the dry
+    hex carries a flow of its own, and on the far bank of a hexside river that can be the
+    whole river's.
     """
     from_river = is_river(from_hx)
     to_river = is_river(to_hx)
     if from_river == to_river:
         return 0.0
-    flow = max(from_hx.river_flow, to_hx.river_flow)
+    flow = (from_hx if from_river else to_hx).river_flow
     return cfg.road_river_crossing_base + cfg.road_river_crossing_flow * flow
 
 
@@ -176,18 +180,33 @@ def settlement_rings(seats) -> dict:
     return {k: frozenset(v) for k, v in out.items()}
 
 
-def river_edges(rivers) -> set[frozenset]:
-    """Every hexside a river runs along, as unordered coord pairs.
+def river_edges(rivers, hexes) -> set[frozenset]:
+    """The steps along a river's channel band, as unordered coord pairs.
 
-    A river is stored as an ordered hex sequence and drawn as a polyline through those
-    centres, so consecutive pairs are exactly the segments the map shows.  Two river
-    hexes that merely touch — a meander doubling back, or two different rivers running
-    side by side — are not one of these, and a road may use that hexside freely.
+    Rivers run along hexsides, and until roads learn to cross a side, hydrology marks a
+    one-hex band along each river by tagging the lower bank of every side "river".  A road
+    may not run down that band: these are the steps between two band hexes of the same
+    river that meet at a corner of its course.  Two band hexes that merely touch — two
+    rivers running side by side — are not one of these, and a road may use that hexside
+    freely.
     """
     out: set[frozenset] = set()
     for river in rivers:
-        for a, b in zip(river.hexes, river.hexes[1:], strict=False):
-            out.add(frozenset((a, b)))
+        course = set(river.corners)
+        band = {
+            h
+            for side in river.sides()
+            for h in side_hexes(side)
+            if h in hexes and "river" in hexes[h].tags
+        }
+        for a in band:
+            for b in neighbors(a):
+                if (
+                    b in band
+                    and a < b
+                    and course & set(hex_corner_keys(a)) & set(hex_corner_keys(b))
+                ):
+                    out.add(frozenset((a, b)))
     return out
 
 

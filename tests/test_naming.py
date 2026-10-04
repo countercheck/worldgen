@@ -64,14 +64,14 @@ def test_a_town_named_for_a_river_names_a_river_that_is_there(world):
         if " on the " not in s.etymology:
             continue
         river = by_name[s.etymology.rsplit(" on the ", 1)[1]]
-        assert min(distance(s.coord, c) for c in river.hexes) <= 1, (s.name, s.etymology)
+        assert min(distance(s.coord, c) for c in river.banks()) <= 1, (s.name, s.etymology)
 
 
 def test_rivers_are_named_largest_first_down_to_the_threshold(world):
     cfg = world.metadata["config"]
     hexes = world.hexes
     for r in world.rivers:
-        mouth = max(hexes[c].catchment_km2 for c in r.hexes if c in hexes)
+        mouth = max(hexes[c].catchment_km2 for c in r.banks() if c in hexes)
         if mouth < cfg["naming_river_min_catchment_km2"]:
             assert r.name == ""
 

@@ -24,6 +24,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from ..core.hex import HexCoord, SettlementTier, TerrainClass
+from ..core.hex_grid import Corner, corner_to_pixel
 from ..core.world_state import WorldState
 
 # Font size as a fraction of the hex size.
@@ -78,8 +79,9 @@ def _clear(box: Box, taken: list[Box]) -> bool:
     return all(x1 <= a0 or x0 >= a1 or y1 <= b0 or y0 >= b1 for a0, b0, a1, b1 in taken)
 
 
-def _river_reach(ws: WorldState, river) -> list[HexCoord]:
-    return [c for c in river.hexes if c in ws.hexes and ws.hexes[c].terrain_class not in _WATER]
+def _river_reach(ws: WorldState, river) -> list[Corner]:
+    """The corners the river runs through: its course, which never crosses water."""
+    return list(river.corners)
 
 
 def place_labels(
@@ -149,18 +151,26 @@ def _place_river(ws, river, to_pixel, hex_size, measure, taken) -> PlacedLabel |
     w, h = measure(river.name, size, False)
     reach = _river_reach(ws, river)
     n = len(reach)
+    # Corners are placed from the same origin `to_pixel` puts the hexes on.
+    ox, oy = to_pixel((0, 0))
+
+    def at(corner: Corner) -> tuple[float, float]:
+        px, py = corner_to_pixel(corner, hex_size)
+        return px + ox, py + oy
+
     # The middle of the reach first, then either third: the middle is where a reader's
-    # eye expects it, and the thirds are where there is often more room.
+    # eye expects it, and the thirds are where there is often more room.  Each angle is
+    # read across two sides either way, which smooths the zigzag of a hexside course.
     for i in dict.fromkeys((n // 2, n // 3, (2 * n) // 3)):
-        ax, ay = to_pixel(reach[max(0, i - 1)])
-        bx, by = to_pixel(reach[min(n - 1, i + 1)])
+        ax, ay = at(reach[max(0, i - 2)])
+        bx, by = at(reach[min(n - 1, i + 2)])
         angle = math.degrees(math.atan2(by - ay, bx - ax))
         # Never upside down: a name reads left to right whichever way the water runs.
         if angle > 90:
             angle -= 180
         elif angle <= -90:
             angle += 180
-        x, y = to_pixel(reach[i])
+        x, y = at(reach[i])
         # Beside the line rather than on it, on either bank.
         nx, ny = -math.sin(math.radians(angle)), math.cos(math.radians(angle))
         off = h * 0.5 + hex_size * 0.2

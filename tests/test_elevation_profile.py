@@ -175,25 +175,40 @@ def test_a_dry_region_fills_no_hollows():
 
 
 def _longest_straight_run(path) -> int:
-    best = cur = 1
-    for a, b, c in zip(path, path[1:], path[2:], strict=False):
-        same = (b[0] - a[0], b[1] - a[1]) == (c[0] - b[0], c[1] - b[1])
-        cur = cur + 1 if same else 1
+    """The most sides in a row a course runs without bending.
+
+    Along hexsides even a straight course zigzags between two headings 60 degrees apart,
+    so straight means the heading repeats every other side.
+    """
+    import math
+
+    from worldgen.core.hex_grid import corner_to_pixel
+
+    def heading(a, b):
+        (ax, ay), (bx, by) = corner_to_pixel(a, 1.0), corner_to_pixel(b, 1.0)
+        return round(math.degrees(math.atan2(by - ay, bx - ax)) / 60) % 6
+
+    steps = [heading(a, b) for a, b in zip(path, path[1:], strict=False)]
+    best = cur = min(len(steps), 2)
+    for i in range(2, len(steps)):
+        cur = cur + 1 if steps[i] == steps[i - 2] else 2
         best = max(best, cur)
     return best
 
 
 def test_rivers_still_run_downhill_to_water_when_they_wander(watered):
     hexes = watered.hexes
+    from worldgen.core.hex_grid import corner_hexes, corner_neighbors
+
+    interior = {c for r in watered.rivers for c in r.corners[:-1]}
     for river in watered.rivers:
-        for a, b in zip(river.hexes, river.hexes[1:], strict=False):
-            assert b in neighbors(a)
-        end = river.hexes[-1]
+        for a, b in zip(river.corners, river.corners[1:], strict=False):
+            assert b in corner_neighbors(a)
+        around = corner_hexes(river.corners[-1])
         assert (
-            hexes[end].terrain_class in _WATER
-            or watered.on_border(end)
-            or any(hexes[n].terrain_class in _WATER for n in neighbors(end) if n in hexes)
-            or any(end in r.hexes[:-1] for r in watered.rivers if r is not river)
+            any(h in hexes and hexes[h].terrain_class in _WATER for h in around)
+            or any(h not in hexes for h in around)
+            or river.corners[-1] in interior
         )
 
 
@@ -202,5 +217,5 @@ def test_wandering_breaks_up_straight_runs():
     runs = {}
     for power in (1.0, 50.0):
         ws = build_world(until="HydrologyStage", river_wander_exponent=power, width=64, height=64)
-        runs[power] = sum(_longest_straight_run(r.hexes) for r in ws.rivers) / len(ws.rivers)
+        runs[power] = sum(_longest_straight_run(r.corners) for r in ws.rivers) / len(ws.rivers)
     assert runs[1.0] < runs[50.0]

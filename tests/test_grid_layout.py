@@ -188,16 +188,18 @@ def test_offset_rivers_run_downhill_to_water_or_the_border(offset_world):
         for c, h in offset_world.hexes.items()
         if h.terrain_class in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
     }
-    river_hexes = {c for r in offset_world.rivers for c in r.hexes}
+    from worldgen.core.hex_grid import corner_hexes, corner_neighbors
+
+    interior = {c for r in offset_world.rivers for c in r.corners[:-1]}
     for river in offset_world.rivers:
-        for a, b in zip(river.hexes, river.hexes[1:], strict=False):
-            assert b in neighbors(a), f"river path breaks at {a} -> {b}"
-        mouth = river.hexes[-1]
+        for a, b in zip(river.corners, river.corners[1:], strict=False):
+            assert b in corner_neighbors(a), f"river course breaks at {a} -> {b}"
+        mouth = river.corners[-1]
+        around = corner_hexes(mouth)
         reaches = (
-            mouth in water
-            or any(n in water for n in neighbors(mouth))
-            or offset_world.on_border(mouth)
-            or any(n in river_hexes and n not in river.hexes for n in neighbors(mouth))
+            any(h in water for h in around)
+            or any(h not in offset_world.hexes for h in around)
+            or mouth in interior
         )
         assert reaches, f"river mouth {mouth} drains nowhere"
 
@@ -222,4 +224,4 @@ def test_offset_worlds_are_reproducible_from_the_seed():
     assert {c: h.elevation for c, h in a.hexes.items()} == {
         c: h.elevation for c, h in b.hexes.items()
     }
-    assert [r.hexes for r in a.rivers] == [r.hexes for r in b.rivers]
+    assert [r.corners for r in a.rivers] == [r.corners for r in b.rivers]

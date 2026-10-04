@@ -1,6 +1,6 @@
 import pytest
 
-from tests.worlds import lay_road
+from tests.worlds import lay_river, lay_road
 from worldgen.core.hex import (
     Biome,
     LandCover,
@@ -9,7 +9,7 @@ from worldgen.core.hex import (
     SettlementTier,
     TerrainClass,
 )
-from worldgen.core.world_state import Ferry, River, RoadTier, WorldState
+from worldgen.core.world_state import Ferry, RoadTier, WorldState
 from worldgen.export.svg_export import SVGConfig, render, save
 from worldgen.render import glyphs
 
@@ -43,7 +43,7 @@ def _small_world() -> WorldState:
             name="Millbrook",
         ),
     ]
-    ws.rivers = [River(hexes=[(0, 0), (1, 0), (2, 0)], flow_volume=1.5)]
+    lay_river(ws, [(0, 0), (1, 0), (2, 0)], flow_volume=1.5)
     lay_road(ws, [(1, 1), (2, 1), (3, 1)], RoadTier.PRIMARY)
     return ws
 
@@ -272,7 +272,7 @@ def _terrain_boxes(svg: str) -> list[tuple[float, float, float, float]]:
 def _sheared_world() -> WorldState:
     """A world wide enough that the axial shear opens up real corner space."""
     ws = WorldState.empty(seed=7, width=32, height=32)
-    ws.rivers = [River(hexes=[(0, 0), (1, 0), (2, 0)], flow_volume=1.5)]
+    lay_river(ws, [(0, 0), (1, 0), (2, 0)], flow_volume=1.5)
     lay_road(ws, [(1, 1), (2, 1), (3, 1)], RoadTier.PRIMARY)
     ws.settlements = [
         Settlement(
@@ -596,9 +596,10 @@ def test_ferry_puts_an_anchorage_row_in_the_legend():
 def _crossing_world() -> WorldState:
     """A river with a road crossing it: one hex tagged ford, one tagged bridge."""
     ws = WorldState.empty(seed=5, width=5, height=5)
-    ws.rivers = [River(hexes=[(2, 0), (2, 1), (2, 2), (2, 3)], flow_volume=1.0)]
+    lay_river(
+        ws, [(2, 0), (2, 1), (2, 2), (2, 3)], flow_volume=1.0, flow={(2, r): 0.8 for r in range(4)}
+    )
     for r in range(4):
-        ws.hexes[(2, r)].river_flow = 0.8
         ws.hexes[(2, r)].tags.add("river")
     ws.hexes[(2, 1)].tags.add("ford")
     ws.hexes[(2, 2)].tags.add("bridge")
@@ -695,7 +696,7 @@ def _flowing_river_world() -> WorldState:
     path = [(q, 1) for q in range(6)]
     for i, c in enumerate(path):
         ws.hexes[c].river_flow = 0.05 + i * 0.19
-    ws.rivers = [River(hexes=path, flow_volume=1.0)]
+    lay_river(ws, path, flow_volume=1.0, flow={c: ws.hexes[c].river_flow for c in path})
     return ws
 
 
@@ -734,7 +735,7 @@ def test_bigger_river_is_drawn_wider_than_a_smaller_one():
     trickle = [(q, 0) for q in range(4)]
     for c in trickle:
         ws.hexes[c].river_flow = 0.05
-    ws.rivers.append(River(hexes=trickle, flow_volume=0.05))
+    lay_river(ws, trickle, flow_volume=0.05, flow=dict.fromkeys(trickle, 0.05))
     widths = _river_widths(render(ws))
     assert max(widths) > min(widths)
 

@@ -7,11 +7,12 @@ of individual cost components and the A* behaviour they produce.
 
 import pytest
 
+from tests.worlds import lay_river
 from worldgen.core.config import WorldConfig
 from worldgen.core.errors import RoutingError
 from worldgen.core.hex import Hex, TerrainClass
 from worldgen.core.hex_grid import astar, distance
-from worldgen.core.world_state import River, RoadTier, road_edge_key
+from worldgen.core.world_state import RoadTier, WorldState, road_edge_key
 from worldgen.stages.road_cost import (
     ferry_link,
     fill_tier_gaps,
@@ -273,6 +274,11 @@ def test_astar_prefers_low_flow_river_for_crossing():
     )
 
 
+def _course(path, flow):
+    """A river course round the hexes of *path* (see `tests.worlds.lay_river`)."""
+    return lay_river(WorldState.empty(seed=1, width=1, height=1), path, flow_volume=flow)
+
+
 def _valley_grid(cfg, flow=0.8):
     """An 8x3 grid with a river running the length of row r=1, plus its edge set."""
 
@@ -282,8 +288,8 @@ def _valley_grid(cfg, flow=0.8):
         return _flat((q, r))
 
     hexes = _build_grid(8, 3, factory)
-    river = River(hexes=[(q, 1) for q in range(8)], flow_volume=flow)
-    return hexes, river_edges([river])
+    river = _course([(q, 1) for q in range(8)], flow)
+    return hexes, river_edges([river], hexes)
 
 
 def test_astar_follows_the_bank_not_the_channel():
@@ -346,23 +352,6 @@ def test_channel_hexside_between_two_river_hexes_is_never_exempt():
     assert exempt(hexes[(3, 1)], hexes[(4, 1)]) == float("inf")
 
 
-def test_settlement_exemption_opens_a_channel_hexside_onto_dry_land():
-    """Where a river's drawn path runs onto a dry hex, a town there is still reachable."""
-    cfg = WorldConfig()
-    hexes = {
-        (0, 0): _river_flat((0, 0), flow=0.8),
-        (1, 0): _flat((1, 0)),  # on the river's drawn path, but carries no flow
-    }
-    blocked = river_edges([River(hexes=[(0, 0), (1, 0)], flow_volume=0.8)])
-    assert frozenset(((0, 0), (1, 0))) in blocked
-
-    plain = make_road_edge_cost(cfg, blocked)
-    assert plain(hexes[(0, 0)], hexes[(1, 0)]) == float("inf")
-
-    exempt = make_road_edge_cost(cfg, blocked, exempt_coords={(0, 0)})
-    assert exempt(hexes[(0, 0)], hexes[(1, 0)]) < float("inf")
-
-
 # ---------- river_hex_cost -------------------------------------------------
 
 
@@ -398,13 +387,13 @@ def _cut_grid():
         return _river_flat((q, r), flow=0.9) if q in (2, 3) else _flat((q, r))
 
     hexes = _build_grid(6, 1, factory)
-    river = River(hexes=[(2, 0), (3, 0)], flow_volume=0.9)
+    river = _course([(2, 0), (3, 0)], 0.9)
     return hexes, river
 
 
 def test_reachable_under_constraint_stops_at_the_channel():
     hexes, river = _cut_grid()
-    seen = reachable_under_constraint(hexes, (0, 0), river_edges([river]), frozenset())
+    seen = reachable_under_constraint(hexes, (0, 0), river_edges([river], hexes), frozenset())
     assert seen == {(0, 0), (1, 0), (2, 0)}, "walk should stop at the channel hexside"
 
 
@@ -415,7 +404,7 @@ def test_reachable_under_constraint_matches_the_tightened_exemption():
     reasoning about a different map than the router.
     """
     hexes, river = _cut_grid()
-    blocked = river_edges([river])
+    blocked = river_edges([river], hexes)
     assert (3, 0) not in reachable_under_constraint(hexes, (0, 0), blocked, frozenset())
     assert (3, 0) not in reachable_under_constraint(hexes, (0, 0), blocked, {(2, 0)})
 
@@ -423,7 +412,7 @@ def test_reachable_under_constraint_matches_the_tightened_exemption():
 def test_ferry_link_picks_the_shortest_hop():
     cfg = WorldConfig()
     hexes, river = _cut_grid()
-    blocked = river_edges([river])
+    blocked = river_edges([river], hexes)
     near = reachable_under_constraint(hexes, (0, 0), blocked, frozenset())
     far = set(hexes) - near
     assert far, "the corridor must actually be severed for this test to mean anything"
@@ -454,7 +443,7 @@ def test_ferry_lands_on_dry_land_off_the_channel():
     """
     cfg = WorldConfig()
     hexes, river = _cut_grid()
-    blocked = river_edges([river])
+    blocked = river_edges([river], hexes)
     near = reachable_under_constraint(hexes, (0, 0), blocked, frozenset())
     far = set(hexes) - near
     assert (2, 0) in near and (3, 0) in far, "the tempting mid-channel pair must be on offer"
@@ -480,7 +469,7 @@ def test_ferry_link_raises_when_every_landing_is_wet():
     """No shore on one side is a routing failure, not a ferry moored in open water."""
     cfg = WorldConfig()
     hexes, river = _cut_grid()
-    blocked = river_edges([river])
+    blocked = river_edges([river], hexes)
     for coord in ((4, 0), (5, 0)):
         hexes[coord].terrain_class = TerrainClass.OPEN_WATER
     near = reachable_under_constraint(hexes, (0, 0), blocked, frozenset())
@@ -503,7 +492,7 @@ def test_ferry_link_raises_when_no_plausible_hop_exists():
     """Beyond road_ferry_max_hop a ferry is not a plausible reading of the map."""
     cfg = WorldConfig(road_ferry_max_hop=1)
     hexes, river = _cut_grid()
-    blocked = river_edges([river])
+    blocked = river_edges([river], hexes)
     near = reachable_under_constraint(hexes, (0, 0), blocked, frozenset())
 
     # The nearest dry landings are (1, 0) and (4, 0), three hexes apart.
@@ -524,7 +513,7 @@ def test_ferry_link_raises_when_no_plausible_hop_exists():
 def test_ferry_link_raises_when_nothing_lies_outside_the_component():
     cfg = WorldConfig()
     hexes, river = _cut_grid()
-    blocked = river_edges([river])
+    blocked = river_edges([river], hexes)
     near = reachable_under_constraint(hexes, (0, 0), blocked, frozenset())
 
     with pytest.raises(RoutingError, match="no hex outside"):

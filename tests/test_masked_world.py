@@ -142,20 +142,25 @@ def test_nothing_stands_on_ground_the_faction_has_not_seen(masked):
         for c in hx.road_connections:
             assert c in known, f"{hx.coord} has a road running to unseen {c}"
 
+    from worldgen.core.hex_grid import corner_hexes
+
     for river in masked.rivers:
-        for c in river.hexes:
-            assert c in known, f"river hex {c} is on unseen ground"
+        for c in river.corners:
+            assert any(h in known for h in corner_hexes(c)), f"river corner {c} is unseen"
 
 
 def test_each_river_is_still_a_connected_polyline(masked):
     """Runs are split rather than filtered, or a renderer draws a straight line between
-    two banks either side of unseen country."""
-    from worldgen.core.hex_grid import distance
+    two banks either side of unseen country.
+
+    The campaign masks a river's corner course to nothing for now (see `mask.ts`), so
+    this holds trivially until it masks courses corner by corner.
+    """
+    from worldgen.core.hex_grid import corner_neighbors
 
     for river in masked.rivers:
-        assert len(river.hexes) >= 2
-        for a, b in zip(river.hexes, river.hexes[1:], strict=False):
-            assert distance(a, b) == 1, f"river jumps from {a} to {b}"
+        for a, b in zip(river.corners, river.corners[1:], strict=False):
+            assert b in corner_neighbors(a), f"river jumps from {a} to {b}"
 
 
 def test_the_file_says_what_the_fog_tag_means(masked_json):

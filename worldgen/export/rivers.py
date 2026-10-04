@@ -4,56 +4,54 @@ Format-independent, so the SVG and PNG exporters band a river identically and ca
 drift apart on what a given width means.
 """
 
-from ..core.world_state import River
+from ..core.hex_grid import Corner, Side, side_joining
+from ..core.world_state import River, RiverSide
 
 
 def width_bands(
     river: River,
-    hexes: dict,
+    river_sides: dict[Side, RiverSide],
     min_width: float,
     max_width: float,
     steps: int,
     exponent: float = 0.5,
-) -> list[tuple[list, float]]:
-    """Contiguous runs of *river* that share a drawn width, as `(coords, width)`.
+) -> list[tuple[list[Corner], float]]:
+    """Contiguous runs of *river* that share a drawn width, as `(corners, width)`.
 
     A river carries more water the further down it you go.  Drawing the whole of one at a
     single width — taken from `River.flow_volume`, which is measured at the mouth — makes
-    a headwater trickle look exactly like the trunk it feeds.  Each segment is sized
-    instead by the `river_flow` at its wetter end, so a river visibly grows downstream and
-    a glance at the map ranks two rivers against each other.
+    a headwater trickle look exactly like the trunk it feeds.  Each side is sized instead
+    by its own `RiverSide.flow`, so a river visibly grows downstream and a glance at the
+    map ranks two rivers against each other.
 
     Width follows a curve over that flow rather than tracking it linearly (see
     *exponent* on `width_for_flow`); set *steps* to quantise it into discrete widths
     instead.
 
-    Adjacent segments of equal width merge into one run — which is most of them under
+    Adjacent sides of equal width merge into one run — which is most of them under
     banding, and few under continuous scaling, where a river costs roughly one polyline
-    per hex.  Consecutive runs share their joining vertex, so the drawn line stays
+    per side.  Consecutive runs share their joining corner, so the drawn line stays
     continuous across a change of width.
     """
-    path = river.hexes
+    path = river.corners
     if len(path) < 2:
         return []
 
     steps = max(0, int(steps))
 
-    def segment_width(a, b) -> float:
-        a_hx, b_hx = hexes.get(a), hexes.get(b)
-        flow = max(
-            a_hx.river_flow if a_hx is not None else 0.0,
-            b_hx.river_flow if b_hx is not None else 0.0,
-        )
+    def side_width(a: Corner, b: Corner) -> float:
+        rs = river_sides.get(side_joining(a, b))
+        flow = rs.flow if rs is not None else 0.0
         if flow <= 0:
-            # Drainage tails and off-grid coords carry no per-hex flow of their own.
+            # A side with no record of its own still belongs to a river that has a size.
             flow = river.flow_volume
         return width_for_flow(flow, min_width, max_width, steps, exponent)
 
-    out: list[tuple[list, float]] = []
+    out: list[tuple[list[Corner], float]] = []
     run = [path[0]]
     current: float | None = None
     for a, b in zip(path, path[1:], strict=False):
-        this = segment_width(a, b)
+        this = side_width(a, b)
         if current is None:
             current = this
         if this != current:

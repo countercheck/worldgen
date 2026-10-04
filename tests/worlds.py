@@ -122,3 +122,61 @@ def lay_road(ws, path, tier):
         ws.hexes[a].road_connections.add(b)
         ws.hexes[b].road_connections.add(a)
     return ws
+
+
+def lay_river(ws, path, flow_volume=1.0, flow=None):
+    """Put a river on *ws* along the hexes of *path*, and return it.
+
+    Rivers run along hexsides, but a test usually knows which hexes its river should pass,
+    so this walks round the hexes of *path* in turn: in across the side shared with the
+    hex before, out across the side shared with the hex after, the short way round each.
+    Every side gets a `RiverSide`; *flow* maps a hex of *path* to the flow of the sides
+    walked round it (default: *flow_volume*).  Each bank hex keeps whatever tags the test
+    gave it.
+    """
+    from worldgen.core.hex_grid import hex_corner_keys, side_joining
+    from worldgen.core.world_state import River, RiverSide
+
+    flow = flow or {}
+    path = list(path)
+    corners = [hex_corner_keys(h) for h in path]
+
+    def shared(i, j):
+        return [k for k, c in enumerate(corners[i]) if c in corners[j]]
+
+    def walk(i, start, targets):
+        best = None
+        for t in sorted(targets):
+            cw, ccw = (t - start) % 6, (start - t) % 6
+            step, n = (1, cw) if cw <= ccw else (-1, ccw)
+            steps = [(start + step * (s + 1)) % 6 for s in range(n)]
+            if best is None or len(steps) < len(best):
+                best = steps
+        return best or []
+
+    first = shared(0, 1)
+    start = corners[0][first[0]]
+    if len(path) > 2:
+        exit_side = shared(1, 2)
+        start = min(
+            (corners[0][k] for k in first),
+            key=lambda c: len(walk(1, corners[1].index(c), exit_side)),
+        )
+    course = [start]
+    owner = []
+    for i in range(1, len(path) - 1):
+        here = corners[i].index(course[-1])
+        for k in walk(i, here, shared(i, i + 1)):
+            course.append(corners[i][k])
+            owner.append(path[i])
+    if len(course) < 2:
+        # Two hexes: run along the one side they share.
+        a, b = (corners[0][k] for k in first)
+        course, owner = [a, b], [path[0]]
+    river = River(corners=course, flow_volume=flow_volume)
+    for (a, b), h in zip(zip(course, course[1:], strict=False), owner, strict=True):
+        ws.river_sides[side_joining(a, b)] = RiverSide(
+            catchment_km2=100.0 * flow.get(h, flow_volume), flow=flow.get(h, flow_volume)
+        )
+    ws.rivers.append(river)
+    return river

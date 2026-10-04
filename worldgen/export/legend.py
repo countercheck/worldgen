@@ -16,7 +16,13 @@ from ..core.hex import (
     terrain_bands,
     terrain_label,
 )
-from ..core.hex_grid import road_polylines, road_water_transitions
+from ..core.hex_grid import (
+    corner_to_pixel,
+    road_polylines,
+    road_water_transitions,
+    side_hexes,
+    side_joining,
+)
 from ..core.world_state import RoadTier, WorldState
 from ..render.debug_viewer import is_fog
 from ..render.glyphs import ROLE_GLYPH
@@ -155,19 +161,19 @@ def anchorage_points(ws: WorldState) -> list:
 
 
 def _bearings(ws: WorldState, axial_to_pixel, hex_size: float) -> dict:
-    """The screen bearing, in degrees, of the river through each hex on a drawn path:
-    from the hex before it to the hex after, so it runs downstream."""
+    """The screen bearing, in degrees, of the river beside each hex a river runs along:
+    the direction of the side it runs down, so it points downstream.
+
+    Rivers run along hexsides, and the marks and crossings that read this are still
+    placed on hexes, so each hex takes the bearing of the first river side beside it.
+    """
     bearing: dict = {}
     for river in ws.rivers:
-        hexes = river.hexes
-        for i, c in enumerate(hexes):
-            before = hexes[i - 1] if i > 0 else c
-            after = hexes[i + 1] if i + 1 < len(hexes) else c
-            if before == after:
-                continue
-            (ax, ay) = axial_to_pixel(before, hex_size)
-            (bx, by) = axial_to_pixel(after, hex_size)
-            bearing[c] = math.degrees(math.atan2(by - ay, bx - ax))
+        for a, b in zip(river.corners, river.corners[1:], strict=False):
+            (ax, ay), (bx, by) = corner_to_pixel(a, hex_size), corner_to_pixel(b, hex_size)
+            angle = math.degrees(math.atan2(by - ay, bx - ax))
+            for h in side_hexes(side_joining(a, b)):
+                bearing.setdefault(h, angle)
     return bearing
 
 
