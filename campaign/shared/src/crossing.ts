@@ -94,6 +94,39 @@ export function bridgeAt(world: World, from: Hex, to: Hex): boolean {
   return side.tags.has(TAG_BRIDGE) || world.roadEdges.has(edgeKey(from, to));
 }
 
+/**
+ * Whether two forces either side of this step could come to blows across it.
+ *
+ * Only where a division could get over without building anything: no river, a bridge or
+ * a road across, a ford, or a minor river with no white water. Across anything else they
+ * can see each other but not fight — the referee's ruling, and the rules' "impossible"
+ * for a major river without a bridge, read from the other side. Pontooneers do not count:
+ * a bridge that has yet to be built is not a field of battle.
+ */
+export function engageable(world: World, a: Hex, b: Hex): boolean {
+  const side = riverSideBetween(world, a, b);
+  if (side === undefined || bridgeAt(world, a, b) || side.tags.has(TAG_FORD)) return true;
+  return riverClass(side, world) === 'minor' && !whiteWater(side);
+}
+
+/**
+ * Pairs of neighbouring hexes among `coords` with a river nobody can cross between them:
+ * the places a battle declared on that ground would have forces fighting across water.
+ */
+export function riverBetween(world: World, coords: readonly Hex[]): [Hex, Hex][] {
+  const at = new Map(coords.map((c) => [`${c.q},${c.r}`, c]));
+  const out: [Hex, Hex][] = [];
+  for (const c of coords) {
+    for (const n of neighbors(c)) {
+      const other = at.get(`${n.q},${n.r}`);
+      // Each pair once: from the lesser coordinate.
+      if (other === undefined || other.q < c.q || (other.q === c.q && other.r < c.r)) continue;
+      if (!engageable(world, c, other)) out.push([c, other]);
+    }
+  }
+  return out;
+}
+
 /** Whether an existing crossing serves this step: a bridge, a ford, or none. */
 export function crossingAt(world: World, from: Hex, to: Hex): 'bridge' | 'ford' | null {
   if (bridgeAt(world, from, to)) return 'bridge';

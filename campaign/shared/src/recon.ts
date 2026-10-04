@@ -5,6 +5,11 @@
  * its march column in all directions, or two hexes if it has the Scout trait. There is no
  * line of sight, no ray-casting, no terrain occlusion — a ridge does not hide anything.
  *
+ * One exception, which is the referee's: a river nobody can cross (`engageable`). A
+ * column sees the far bank across it, but its scouts cannot get over to look further, so
+ * the zone stops at the far bank. Two forces either side of a major river watch each
+ * other across it and nothing more.
+ *
  * The interesting part is not the radius, it is what the radius is measured from. A
  * division is a column of hexes, not a point, so a scouting cavalry division eighteen
  * kilometres long sweeps a corridor two hexes wide and twenty-two long. Recon is a
@@ -14,7 +19,8 @@
 import { occupied } from './column.js';
 import { formationsUnder } from './commander.js';
 import type { CampaignConfig, Grade } from './config.js';
-import { distance, hexRange, key, type Hex, type HexKey } from './hex.js';
+import { engageable } from './crossing.js';
+import { distance, key, neighbors, type Hex, type HexKey } from './hex.js';
 import type { CampaignState } from './state.js';
 import { echelonOf, hasTrait, isDivision, type Echelon, type Unit } from './unit.js';
 import { hexAt, type World } from './world.js';
@@ -39,11 +45,41 @@ export function reconZone(
   const radius = reconRadius(cfg, unit);
   const seen = new Set<HexKey>();
   for (const c of occupied(unit, grade, cfg.footprint)) {
-    for (const h of hexRange(c, radius)) {
-      if (hexAt(world, h) !== undefined) seen.add(key(h));
-    }
+    for (const k of lookOut(world, c, radius)) seen.add(k);
   }
   return seen;
+}
+
+/**
+ * The hexes seen from one hex of a column, out to `radius` steps.
+ *
+ * Every hex within reach of steps a scout can make. A step across a river nobody can
+ * cross is allowed only from the column itself — it can see the far bank — and goes no
+ * further, because nobody can get across to look.
+ */
+function lookOut(world: World, from: Hex, radius: number): HexKey[] {
+  const out: HexKey[] = [key(from)];
+  const reached = new Map<HexKey, number>([[key(from), 0]]);
+  let frontier: Hex[] = [from];
+  for (let step = 1; step <= radius; step++) {
+    const next: Hex[] = [];
+    for (const h of frontier) {
+      for (const n of neighbors(h)) {
+        const k = key(n);
+        if (reached.has(k) || hexAt(world, n) === undefined) continue;
+        if (engageable(world, h, n)) {
+          next.push(n);
+        } else if (step !== 1) {
+          continue;
+        }
+        // Across water nobody can cross: seen from the column, but not walked on from.
+        reached.set(k, step);
+        out.push(k);
+      }
+    }
+    frontier = next;
+  }
+  return out;
 }
 
 /**

@@ -90,6 +90,8 @@ export const CODES = {
   MAJOR_RIVER_UNBRIDGED: 'major_river_unbridged',
   /** Rapids or a cataract on a minor river: no wading there. */
   WHITE_WATER_UNBRIDGED: 'white_water_unbridged',
+  /** A battle declared across a river nobody can cross: they observe, they do not fight. */
+  RIVER_BETWEEN_FORCES: 'river_between_forces',
   NO_CROSSING: 'no_crossing',
   MARCH_LIMIT: 'march_limit',
   NIGHT_MOVE: 'night_move',
