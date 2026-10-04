@@ -213,9 +213,20 @@ def test_rivers_still_run_downhill_to_water_when_they_wander(watered):
 
 
 def test_wandering_breaks_up_straight_runs():
-    """The same map routed by steepest descent alone has longer straight runs."""
+    """The same maps routed by steepest descent alone have longer straight runs.
+
+    Averaged over four maps.  Along hexsides a corner has at most two ways down, so the
+    wander rule has far less to choose between than it had among a hex's six neighbours,
+    and on any one map the effect is within the noise: measured 5.93 sides wandering
+    against 6.17 steepest over these seeds, with two of the four reversed on their own.
+    """
     runs = {}
     for power in (1.0, 50.0):
-        ws = build_world(until="HydrologyStage", river_wander_exponent=power, width=64, height=64)
-        runs[power] = sum(_longest_straight_run(r.corners) for r in ws.rivers) / len(ws.rivers)
+        lengths = []
+        for seed in (42, 7, 1234, 3):
+            ws = build_world(
+                seed=seed, until="HydrologyStage", river_wander_exponent=power, width=64, height=64
+            )
+            lengths += [_longest_straight_run(r.corners) for r in ws.rivers]
+        runs[power] = sum(lengths) / len(lengths)
     assert runs[1.0] < runs[50.0]

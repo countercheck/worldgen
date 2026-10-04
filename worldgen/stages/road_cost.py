@@ -244,15 +244,12 @@ def make_road_edge_cost(cfg, blocked_edges=None, exempt_coords=frozenset(), ring
     """
 
     def edge_cost(from_hx, to_hx) -> float:
-        # Any hexside joining two river hexes is channel travel, not just one that is a
-        # segment of a single river's polyline.  Where a river meanders back on itself,
-        # or two rivers run side by side, the two hexes are adjacent without being
-        # consecutive on either path — and a road stepping between them still reads as
-        # running down the water, which is the thing the exclusion exists to stop.
-        along_channel = is_river(from_hx) and is_river(to_hx)
-        if along_channel or (
-            blocked_edges and frozenset((from_hx.coord, to_hx.coord)) in blocked_edges
-        ):
+        # Channel travel is a step along a river's band (`river_edges`).  Two band hexes
+        # can also touch across the river, or belong to two rivers meeting at a
+        # confluence, and a step between those is a crossing, not a run down the water:
+        # with the band on alternate banks of a hexside river, forbidding every step
+        # between two of them sealed whole villages in.
+        if blocked_edges and frozenset((from_hx.coord, to_hx.coord)) in blocked_edges:
             exempt = (
                 from_hx.coord in exempt_coords
                 and not is_river(to_hx)

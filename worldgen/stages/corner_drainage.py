@@ -28,12 +28,12 @@ given, writes anything, or draws a random number except through the generator pa
 
 import heapq
 from collections import defaultdict, deque
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 
 import numpy as np
 
-from ..core.hex import Hex, HexCoord
+from ..core.hex import HexCoord
 from ..core.hex_grid import Corner, corner_hexes, hex_corner_keys, hex_side_keys, side_corners
 from ..core.hex_grid import side_hexes as _side_hexes
 
@@ -61,17 +61,19 @@ class CornerNetwork:
 
 
 def build_network(
-    hexes: dict[HexCoord, Hex],
+    elevation: Mapping[HexCoord, float],
     land: set[HexCoord],
     ocean: set[HexCoord],
     closed_lakes: set[HexCoord],
     open_lakes: Iterable[Iterable[HexCoord]],
 ) -> CornerNetwork:
-    """The corner graph over *hexes*.
+    """The corner graph over the hexes of *elevation*, which are the map.
 
     *land*, *ocean* and *closed_lakes* partition the water and land hexes (anything in none
-    of them is ignored); *open_lakes* lists the hexes of each lake that drains.
+    of them is ignored); *open_lakes* lists the hexes of each lake that drains.  Taking
+    heights rather than hexes lets erosion drain its own working surface the same way.
     """
+    hexes = elevation
     net = CornerNetwork()
     adjacency: dict[Node, set[Node]] = defaultdict(set)
 
@@ -80,7 +82,7 @@ def build_network(
             if corner in net.elevation:
                 continue
             around = corner_hexes(corner)
-            net.elevation[corner] = min(hexes[h].elevation for h in around if h in land)
+            net.elevation[corner] = min(hexes[h] for h in around if h in land)
             if any(h not in hexes for h in around):
                 net.terminal.add(corner)
             if any(h in ocean or h in closed_lakes for h in around):
@@ -99,7 +101,7 @@ def build_network(
             continue
         node: Node = (comp[0][0], comp[0][1], LAKE)
         net.lake_hexes[node] = comp
-        net.elevation[node] = min(hexes[h].elevation for h in comp)
+        net.elevation[node] = min(hexes[h] for h in comp)
         for h in comp:
             net.lake_node_of[h] = node
             for corner in hex_corner_keys(h):
@@ -160,7 +162,10 @@ def priority_flood(
 
 
 def flow_direction(
-    net: CornerNetwork, rng: np.random.Generator, wander_exponent: float
+    net: CornerNetwork,
+    rng: np.random.Generator,
+    wander_exponent: float,
+    draws: Mapping[Node, float] | None = None,
 ) -> Drainage:
     """Fill the network, then send each node's water to one lower neighbour.
 
@@ -171,7 +176,9 @@ def flow_direction(
     its floor and a flat one wanders.  "Lower" means earlier in the fill order, so a pick
     is always downhill and the network never loops.
 
-    Draws are made in sorted node order, and only where there is a real choice.
+    Draws are made in sorted node order, and only where there is a real choice.  With
+    *draws*, each node uses its own fixed draw instead, so a surface drained again after
+    it has changed keeps choosing the same way where the choice has not changed.
     """
     filled, order, parent = priority_flood(net)
     flow: dict[Node, Node | None] = {}
@@ -201,7 +208,8 @@ def flow_direction(
             weights = rel**wander_exponent
             if weights.sum() <= 0:
                 weights = np.ones(len(drops))
-            pick = rng.random() * weights.sum()
+            draw = draws.get(node, 0.5) if draws is not None else rng.random()
+            pick = draw * weights.sum()
             idx = min(int(np.searchsorted(np.cumsum(weights), pick)), len(options) - 1)
             flow[node] = options[idx]
     return Drainage(filled=filled, order=order, parent=parent, flow=flow)
@@ -306,3 +314,32 @@ def trace_streams(drainage: Drainage, threshold: float, forced: Iterable[Node] =
         if len(path) >= 2:
             paths.append(path)
     return Streams(paths=paths, channel=channel, upstream=dict(upstream))
+
+
+def inlet_corner(coord: HexCoord, net: CornerNetwork, drainage: Drainage) -> Corner | None:
+    """Where a river arriving over the border at *coord* joins the corner network.
+
+    The corner of that hex one side in from the map edge whose water then runs furthest,
+    so the inflow heads inland rather than along the frame.
+    """
+
+    def course(c) -> int:
+        n, seen = 0, set()
+        while c is not None and c not in seen:
+            seen.add(c)
+            n += 1
+            c = drainage.flow.get(c)
+        return n
+
+    corners = [
+        c
+        for c in hex_corner_keys(coord)
+        if c in drainage.order and c not in net.terminal and drainage.flow.get(c) is not None
+    ]
+    beside_edge = [
+        c for c in corners if any(n in net.terminal and n not in net.wet for n in net.neighbors[c])
+    ]
+    pool = beside_edge or corners
+    if not pool:
+        return None
+    return max(pool, key=lambda c: (course(c), c))
