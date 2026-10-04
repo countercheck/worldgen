@@ -30,6 +30,7 @@ from ..core.hex_grid import Side, hex_range, side_hexes
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
 from .habitability import potential_food
+from .haulage import catchment_carries_a_barge
 from .riverside import side_gradients, side_span
 
 FORD = "ford"
@@ -74,20 +75,54 @@ class CrossingStage(GeneratorStage):
         # A ford is any reach no harder to cross than the limit case: a stream at the
         # wading size on level ground. Steep water of the same size does not qualify.
         fords = [s for s in river if span[s] <= 1.0]
+
+        # Past that size a river is too big to wade, almost everywhere. Almost: a big
+        # river spreading slack and shallow over a gravel bed can be got across on foot,
+        # and those few places are the fords armies were marched to. So the slackest
+        # reaches a little past the wading size are fords too — the easiest first, and
+        # never two within `rare_ford_separation` of each other, which is what keeps them
+        # rare. Only a major river — one that floats a barge — qualifies: anything smaller
+        # is waded wherever it is not steep, and a small stream too steep to wade is a
+        # gorge, with no slack reach to find. Roads add more fords later, where they cross
+        # (`tag_river_crossings`).
+        rare = sorted(
+            (span[s], s)
+            for s in river
+            if 1.0 < span[s] <= cfg.rare_ford_max_span
+            and catchment_carries_a_barge(sides[s].catchment_km2, cfg)
+        )
+        near_rare: set = set()
+        for _, side in rare:
+            if any(b in near_rare for b in side_hexes(side)):
+                continue
+            fords.append(side)
+            near_rare |= _near(side, cfg.rare_ford_separation)
+
         for side in fords:
             sides[side].tags.add(FORD)
 
         # Bridges: only where the water cannot be waded, and only where enough lies on
         # either bank to be worth the capital. The threshold scales with discharge —
         # a wider river is a dearer structure and needs more traffic to justify it.
+        #
+        # A ford nearby makes a bridge needless only over water of its own size. A brook
+        # forded beside a trunk river gets nobody across the trunk; counting it would
+        # leave a well-watered map, fords on every brook, with hardly a bridge on it.
         sep = cfg.crossing_min_separation
-        taken: set = set()
+        forded: dict = {}  # hex -> the largest catchment forded within `sep` of it
         for side in fords:
-            taken |= _near(side, sep)
+            km2 = sides[side].catchment_km2
+            for c in _near(side, sep):
+                forded[c] = max(forded.get(c, 0.0), km2)
+        taken: set = set()
+
+        def served(side) -> bool:
+            km2 = sides[side].catchment_km2 * cfg.ford_serves_bridge_fraction
+            return any(b in taken or forded.get(b, 0.0) >= km2 for b in side_hexes(side))
 
         candidates = []
         for side in river:
-            if FORD in sides[side].tags or any(b in taken for b in side_hexes(side)):
+            if FORD in sides[side].tags or served(side):
                 continue
             needed = cfg.bridge_pressure_per_span * span[side]
             pressure = crossing_pressure(side, surplus, cfg.crossing_pressure_radius)
@@ -99,7 +134,7 @@ class CrossingStage(GeneratorStage):
         # surplus that would have justified the next.
         candidates.sort(key=lambda x: (-x[0], x[1]))
         for _, side in candidates:
-            if any(b in taken for b in side_hexes(side)):
+            if served(side):
                 continue
             sides[side].tags.add(BRIDGE)
             taken |= _near(side, sep)

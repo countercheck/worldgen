@@ -53,7 +53,7 @@ import { publicContact, reconZone, type PublicContact, type Sighting } from './r
 import type { CampaignState } from './state.js';
 import { gradeOf, isPassable } from './terrain.js';
 import type { Formation, Unit, UnitReport } from './unit.js';
-import { riverSideBetween, type World, type WorldHex } from './world.js';
+import { riverSideBetween, TAG_FORD, type World, type WorldHex } from './world.js';
 
 /**
  * What is written on the paper.
@@ -374,6 +374,7 @@ export const addresseesOf = (
 function courierCrossingHours(cfg: CampaignConfig, world: World, from: Hex, to: Hex): number {
   const side = riverSideBetween(world, from, to);
   if (side === undefined || bridgeAt(world, from, to)) return 0;
+  if (riverClass(side, world) === 'major' && side.tags.has(TAG_FORD)) return cfg.fordHours;
   return riverClass(side, world) === 'major' || whiteWater(side)
     ? cfg.courierMajorCrossingHours
     : cfg.fordHours;

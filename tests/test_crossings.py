@@ -7,6 +7,7 @@ from worldgen.core.config import WorldConfig
 from worldgen.core.hex_grid import distance, neighbors, side_hexes
 from worldgen.core.world_state import WorldState
 from worldgen.stages.crossings import BRIDGE, FORD
+from worldgen.stages.haulage import catchment_carries_a_barge
 from worldgen.stages.riverside import SIDE_KM, side_gradients, side_span
 
 _CROSSING = {FORD, BRIDGE}
@@ -149,12 +150,78 @@ def _spans(ws):
 
 
 def test_fords_are_exactly_the_reaches_that_can_be_waded(crossed):
-    """A ford is any reach no harder than the limit case: wading size on level ground."""
+    """A ford is any reach no harder than the limit case: wading size on level ground —
+    and, rarely, a slack reach of a major river a little past it."""
+    cfg = WorldConfig(**crossed.metadata["config"])
     for side, span in _spans(crossed).items():
-        if FORD in crossed.river_sides[side].tags:
-            assert span <= 1.0, f"ford at {side} on a reach of span {span:.2f}"
+        rs = crossed.river_sides[side]
+        if FORD in rs.tags:
+            rare = catchment_carries_a_barge(rs.catchment_km2, cfg)
+            limit = cfg.rare_ford_max_span if rare else 1.0
+            assert span <= limit, f"ford at {side} on a reach of span {span:.2f}"
         else:
             assert span > 1.0, f"wadeable reach at {side} was not tagged a ford"
+
+
+@pytest.fixture(scope="module")
+def big_rivers():
+    return _crossing_world(width=128, height=128)
+
+
+def _rare_fords(ws):
+    cfg = WorldConfig(**ws.metadata["config"])
+    spans = _spans(ws)
+    return [
+        s
+        for s, rs in ws.river_sides.items()
+        if FORD in rs.tags and spans[s] > 1.0 and catchment_carries_a_barge(rs.catchment_km2, cfg)
+    ]
+
+
+def test_a_major_river_has_a_few_fords_far_apart(big_rivers):
+    """Rare, so a ford on a big river is a place worth marching to, not a formality."""
+    cfg = WorldConfig(**big_rivers.metadata["config"])
+    rare = _rare_fords(big_rivers)
+    major = [
+        rs
+        for rs in big_rivers.river_sides.values()
+        if catchment_carries_a_barge(rs.catchment_km2, cfg)
+    ]
+    assert rare, "no major river on the fixture has a ford"
+    assert len(rare) < 0.05 * len(major), f"{len(rare)} fords on {len(major)} major sides"
+    for i, a in enumerate(rare):
+        for b in rare[i + 1 :]:
+            gap = min(distance(x, y) for x in side_hexes(a) for y in side_hexes(b))
+            assert gap > cfg.rare_ford_separation, f"fords at {a} and {b} are {gap} apart"
+
+
+def test_rare_fords_can_be_turned_off():
+    ws = _crossing_world(width=128, height=128, rare_ford_max_span=1.0)
+    assert not _rare_fords(ws)
+
+
+def test_a_brooks_ford_does_not_stand_in_for_a_bridge_over_the_trunk(big_rivers):
+    """Only a ford over water of the bridge's own size makes the bridge needless."""
+    cfg = WorldConfig(**big_rivers.metadata["config"])
+    sep = cfg.crossing_min_separation
+    fords = [(s, rs) for s, rs in big_rivers.river_sides.items() if FORD in rs.tags]
+    for side, rs in big_rivers.river_sides.items():
+        if BRIDGE not in rs.tags:
+            continue
+        need = rs.catchment_km2 * cfg.ford_serves_bridge_fraction
+        for f, frs in fords:
+            near = min(distance(x, y) for x in side_hexes(side) for y in side_hexes(f))
+            assert near > sep or frs.catchment_km2 < need, (
+                f"bridge at {side} beside a ford at {f} over water of its own size"
+            )
+    any_ford = _crossing_world(width=128, height=128, ford_serves_bridge_fraction=0.0)
+
+    def bridges(ws):
+        return sum(1 for r in ws.river_sides.values() if BRIDGE in r.tags)
+
+    assert bridges(big_rivers) > bridges(any_ford), (
+        "counting every brook's ford against a bridge should cost bridges"
+    )
 
 
 def test_some_small_water_is_still_unfordable_because_it_is_steep(crossed):
@@ -219,14 +286,6 @@ def test_crossings_keep_their_distance(crossed):
     for i, a in enumerate(bridges):
         for b in bridges[i + 1 :]:
             assert _gap(a, b) > sep, f"bridges at {a} and {b} are within sight"
-
-
-def test_no_bridge_beside_a_ford(crossed):
-    """Nobody pays for a structure where the water can already be waded nearby."""
-    sep = crossed.metadata["config"]["crossing_min_separation"]
-    fords = [s for s, rs in crossed.river_sides.items() if FORD in rs.tags]
-    for side in _bridged(crossed):
-        assert all(_gap(side, f) > sep for f in fords)
 
 
 # --- what crossings do to the map --------------------------------------------

@@ -461,6 +461,9 @@ crossing_relief_m: 60.0      # Local relief, in metres, that doubles how hard a 
 bridge_pressure_per_span: 3.0 # Surplus needed within reach per multiple of the widest wadeable span, before a bridge is worth building. A river twice that width needs twice the traffic. Nobody bridges to nowhere. Default: 3.0
 crossing_pressure_radius: 6   # How far either bank is searched for that surplus. Default: 6
 crossing_min_separation: 4    # Nobody builds two bridges within sight of each other. Default: 4
+ford_serves_bridge_fraction: 0.5 # A ford makes a nearby bridge needless only over water at least this fraction of its own catchment: a brook's ford gets nobody across the trunk river beside it. Default: 0.5
+rare_ford_max_span: 1.6       # A river too big to wade can still be forded at a rare slack, shallow reach. Sides up to this span (1.0 = the wading limit) become fords, easiest first, spaced by rare_ford_separation. 1.0 turns them off. Default: 1.6
+rare_ford_separation: 15      # Hexes between two such rare fords, which is what keeps them rare. Default: 15
 crossing_use_cost: 1.0        # Cost of using an existing ford or bridge, charged once per crossing. Default: 1.0
 
 # ---------------------------------------------------------------------------

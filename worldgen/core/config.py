@@ -563,6 +563,14 @@ class WorldConfig:
     bridge_pressure_per_span: float = 3.0
     crossing_pressure_radius: int = 6  # how far either bank is searched for that surplus
     crossing_min_separation: int = 4  # nobody builds two bridges within sight of each other
+    # A ford makes a bridge within `crossing_min_separation` needless only over water at
+    # least this fraction of its own catchment: a brook's ford gets nobody over the trunk.
+    ford_serves_bridge_fraction: float = 0.5
+    # The rare slack reach of a river too big to wade that can be waded all the same: any
+    # side up to this span (1.0 is the wading limit) is a ford, the easiest first, never
+    # two within `rare_ford_separation` hexes. 1.0 turns them off.
+    rare_ford_max_span: float = 1.6
+    rare_ford_separation: int = 15
     # Getting across away from a crossing, per multiple of the wadeable span, charged once
     # on the step across a river side. Deliberately has no fixed term, unlike
     # road_river_crossing_base: that base is the capital of building a bridge, and somebody

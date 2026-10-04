@@ -1375,7 +1375,8 @@ noticed afterwards.
 **Writes:** `hex.tags` (`"ford"`, `"bridge"`).
 
 **Config:** `ford_max_catchment_km2`, `crossing_relief_m`, `bridge_pressure_per_span`,
-`crossing_pressure_radius`, `crossing_min_separation`.
+`crossing_pressure_radius`, `crossing_min_separation`, `ford_serves_bridge_fraction`,
+`rare_ford_max_span`, `rare_ford_separation`.
 
 **The distinction the stage rests on:** a **ford is terrain and is free** — shallow
 braided water anyone can wade, needing nobody's permission. A **bridge is capital**, and
@@ -1385,10 +1386,24 @@ appears only where enough traffic will use it. Nobody bridges to nowhere.
 span      = effective width, in multiples of the wadeable catchment,
             inflated by local relief / crossing_relief_m
 ford      if span <= 1                      # you can wade it
+ford      if the river floats a barge and span <= rare_ford_max_span,
+             easiest first, none within rare_ford_separation of another
+                                            # the rare slack reach of a big river
 bridge    if surplus within crossing_pressure_radius
              >= bridge_pressure_per_span * span
-           and no other crossing within crossing_min_separation
+           and no bridge within crossing_min_separation
+           and no ford there over water >= ford_serves_bridge_fraction of its own
 ```
+
+**A big river's fords are rare.** Nothing that floats a barge is wadeable by size alone,
+so without the second rule a major river is forded only where a road later crosses it.
+The slackest reaches a little past the wading span are fords as well, spaced far apart:
+on a 200×200 map, about one major-river side in eighty. They are the places a column is
+marched to.
+
+**A brook's ford is no reason not to bridge the trunk.** A ford stands in for a bridge
+only over water of its own size; otherwise a map with a ford on every brook would bridge
+almost nothing.
 
 **Relief, not just discharge.** Fast water takes your feet from under you whatever its
 depth, and at a kilometre to the hex it is the approaches rather than the span that defeat
@@ -2545,6 +2560,9 @@ permission. A **bridge is capital** and appears only where enough traffic will u
 | `bridge_pressure_per_span` | `float` | `3.0` | `> 0` | Surplus needed within reach per multiple of the widest wadeable span before a bridge is worth building. A river twice that width needs twice the traffic. Nobody bridges to nowhere |
 | `crossing_pressure_radius` | `int` | `6` | `≥ 1` | How far either bank is searched for that surplus |
 | `crossing_min_separation` | `int` | `4` | `≥ 1` | Nobody builds two bridges within sight of each other |
+| `ford_serves_bridge_fraction` | `float` | `0.5` | `≥ 0` | A ford within `crossing_min_separation` makes a bridge needless only over water at least this fraction of the bridge's catchment. 0 lets any ford stand in for any bridge |
+| `rare_ford_max_span` | `float` | `1.6` | `≥ 1` | A river that floats a barge is forded at its slackest reaches up to this span (1.0 is the wading limit). 1.0 turns these fords off |
+| `rare_ford_separation` | `int` | `15` | `≥ 1` | Hexes kept between two such fords, which is what keeps them rare |
 | `crossing_use_cost` | `float` | `1.0` | `≥ 0` | Cost of using an existing ford or bridge, charged once per crossing |
 
 ### 4.12 Cultivation Radii — § [3.12](#312-cultivation-cities--towns), [3.15](#315-village-cultivation)

@@ -406,6 +406,17 @@ describe('a rider at a river', () => {
     expect(extra(minorRiver([]))).toBeCloseTo(DEFAULT_CONFIG.fordHours);
   });
 
+  it('fords a major river at a ford’s hour', () => {
+    const side = sideBetween(from, to);
+    const w = {
+      ...world,
+      riverSides: new Map([
+        [sideId(side), { side, catchmentKm2: 1000, flow: 0.5, dropM: 0, tags: new Set(['ford']) }],
+      ]),
+    };
+    expect(extra(w)).toBeCloseTo(DEFAULT_CONFIG.fordHours);
+  });
+
   it('pays a major river’s price where the minor one runs white', () => {
     for (const tag of ['rapids', 'cataract']) {
       expect(extra(minorRiver([tag])), tag).toBeCloseTo(DEFAULT_CONFIG.courierMajorCrossingHours);

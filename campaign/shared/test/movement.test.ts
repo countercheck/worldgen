@@ -358,10 +358,12 @@ describe('river crossings', () => {
     expect(c.violations).toEqual([]);
   });
 
-  it('does not let a ford tag serve a major river', () => {
-    // A ford on a navigable river is not a crossing a division can use.
+  it('crosses a major river at a ford, at an hour per division', () => {
+    // Rare on a big river, and so a known crossing: a column marched to it can use it.
     const w = riverAt(MAJOR, ['ford']);
-    expect(crossingFor(w, cfg, unit('infantry'), from, to).how).toBe('blocked');
+    const c = crossingFor(w, cfg, unit('infantry'), from, to);
+    expect(c).toMatchObject({ river: 'major', how: 'ford', hours: cfg.majorCrossingHours });
+    expect(c.violations).toEqual([]);
   });
 
   it('treats a road across the river as a bridge', () => {

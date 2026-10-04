@@ -4,6 +4,8 @@
  * The rules split rivers in two and treat them very differently:
  *
  *   Major (navigable, wide, deep)   with a bridge: 1 hour per division
+ *                                   at a ford:     1 hour per division — rare, and
+ *                                                  mostly where a road already crosses
  *                                   without:       impossible
  *   Minor (fordable, streams)       with a bridge: free
  *                                   without:       1 hour per division, wading anywhere
@@ -131,6 +133,11 @@ export function crossingFor(
   if (river === 'major') {
     if (bridged) {
       return { river, hours: cfg.majorCrossingHours, how: 'bridge', violations: [] };
+    }
+    // A big river is waded only where it spreads slack and shallow, and the generator
+    // keeps those rare: a ford here is a known crossing, and a column can use it.
+    if (side?.tags.has(TAG_FORD) === true) {
+      return { river, hours: cfg.majorCrossingHours, how: 'ford', violations: [] };
     }
     if (hasTrait(unit, 'pontooneers')) {
       return { river, hours: cfg.pontoonBuildHours, how: 'pontoon', violations: [] };
