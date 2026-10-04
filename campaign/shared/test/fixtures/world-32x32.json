@@ -2318,11 +2318,7 @@
     5
    ],
    "territory_cost": 7.0,
-   "tags": [
-    "river",
-    "river_end",
-    "river_mouth"
-   ],
+   "tags": [],
    "road_connections": []
   },
   {
@@ -3281,10 +3277,7 @@
     5
    ],
    "territory_cost": 4.0,
-   "tags": [
-    "ford",
-    "river"
-   ],
+   "tags": [],
    "road_connections": []
   },
   {
@@ -3313,9 +3306,7 @@
     5
    ],
    "territory_cost": 6.0,
-   "tags": [
-    "river"
-   ],
+   "tags": [],
    "road_connections": []
   },
   {
@@ -4199,9 +4190,7 @@
     5
    ],
    "territory_cost": 3.0,
-   "tags": [
-    "river"
-   ],
+   "tags": [],
    "road_connections": []
   },
   {
@@ -4230,12 +4219,7 @@
     5
    ],
    "territory_cost": 5.0,
-   "tags": [
-    "ford",
-    "headwater",
-    "river",
-    "river_source"
-   ],
+   "tags": [],
    "road_connections": []
   },
   {
@@ -5123,7 +5107,7 @@
    "soil": "grazing",
    "land_use": "pasture",
    "rural_population": 28.6498,
-   "river_flow": 0.0,
+   "river_flow": 0.2973,
    "catchment_km2": 26.0076,
    "habitability_city": 0.0,
    "habitability_town": 0.0,
@@ -5596,7 +5580,7 @@
    "soil": "marginal",
    "land_use": "pasture",
    "rural_population": 48.1308,
-   "river_flow": 0.0,
+   "river_flow": 0.0256,
    "catchment_km2": 2.2359,
    "habitability_city": 1.0,
    "habitability_town": 1.0,
@@ -5636,12 +5620,7 @@
     23
    ],
    "territory_cost": 5.0,
-   "tags": [
-    "ford",
-    "river",
-    "river_end",
-    "river_mouth"
-   ],
+   "tags": [],
    "road_connections": []
   },
   {
@@ -6398,11 +6377,7 @@
     23
    ],
    "territory_cost": 7.0,
-   "tags": [
-    "river",
-    "river_end",
-    "river_mouth"
-   ],
+   "tags": [],
    "road_connections": []
   },
   {
@@ -6536,7 +6511,7 @@
    "soil": "marginal",
    "land_use": "pasture",
    "rural_population": 50.2195,
-   "river_flow": 0.0,
+   "river_flow": 0.0117,
    "catchment_km2": 1.0221,
    "habitability_city": 0.9845,
    "habitability_town": 0.9953,
@@ -6938,12 +6913,7 @@
     5
    ],
    "territory_cost": 0.0,
-   "tags": [
-    "ford",
-    "river",
-    "river_end",
-    "river_mouth"
-   ],
+   "tags": [],
    "road_connections": [
     [
      7,
@@ -6981,10 +6951,7 @@
     5
    ],
    "territory_cost": 1.5316,
-   "tags": [
-    "ford",
-    "river"
-   ],
+   "tags": [],
    "road_connections": [
     [
      7,
@@ -7341,7 +7308,7 @@
    "soil": "arable",
    "land_use": "arable",
    "rural_population": 198.9376,
-   "river_flow": 0.0,
+   "river_flow": 0.2421,
    "catchment_km2": 21.1753,
    "habitability_city": 0.918,
    "habitability_town": 0.9743,
@@ -7390,12 +7357,7 @@
     17
    ],
    "territory_cost": 2.0,
-   "tags": [
-    "ford",
-    "river",
-    "river_end",
-    "river_mouth"
-   ],
+   "tags": [],
    "road_connections": []
   },
   {
@@ -7424,9 +7386,7 @@
     23
    ],
    "territory_cost": 6.0,
-   "tags": [
-    "river"
-   ],
+   "tags": [],
    "road_connections": []
   },
   {
@@ -7972,12 +7932,7 @@
     5
    ],
    "territory_cost": 2.5404,
-   "tags": [
-    "ford",
-    "headwater",
-    "river",
-    "river_source"
-   ],
+   "tags": [],
    "road_connections": []
   },
   {
@@ -7995,7 +7950,7 @@
    "soil": "arable",
    "land_use": "arable",
    "rural_population": 151.1971,
-   "river_flow": 0.0,
+   "river_flow": 0.1538,
    "catchment_km2": 13.452,
    "habitability_city": 0.2948,
    "habitability_town": 0.3266,
@@ -8325,10 +8280,7 @@
     17
    ],
    "territory_cost": 1.0521,
-   "tags": [
-    "ford",
-    "river"
-   ],
+   "tags": [],
    "road_connections": [
     [
      7,
@@ -8366,10 +8318,7 @@
     17
    ],
    "territory_cost": 2.0,
-   "tags": [
-    "ford",
-    "river"
-   ],
+   "tags": [],
    "road_connections": []
   },
   {
@@ -8398,9 +8347,7 @@
     17
    ],
    "territory_cost": 3.0063,
-   "tags": [
-    "river"
-   ],
+   "tags": [],
    "road_connections": []
   },
   {
@@ -8429,9 +8376,7 @@
     23
    ],
    "territory_cost": 5.0,
-   "tags": [
-    "river"
-   ],
+   "tags": [],
    "road_connections": []
   },
   {
@@ -9251,10 +9196,7 @@
     17
    ],
    "territory_cost": 2.068,
-   "tags": [
-    "ford",
-    "river"
-   ],
+   "tags": [],
    "road_connections": [
     [
      8,
@@ -9292,10 +9234,7 @@
     17
    ],
    "territory_cost": 3.0562,
-   "tags": [
-    "ford",
-    "river"
-   ],
+   "tags": [],
    "road_connections": []
   },
   {
@@ -9353,10 +9292,7 @@
     17
    ],
    "territory_cost": 4.0427,
-   "tags": [
-    "confluence",
-    "river"
-   ],
+   "tags": [],
    "road_connections": []
   },
   {
@@ -9385,10 +9321,7 @@
     23
    ],
    "territory_cost": 4.0,
-   "tags": [
-    "ford",
-    "river"
-   ],
+   "tags": [],
    "road_connections": []
   },
   {
@@ -9406,7 +9339,7 @@
    "soil": "arable",
    "land_use": "arable",
    "rural_population": 220.2696,
-   "river_flow": 0.0,
+   "river_flow": 0.2102,
    "catchment_km2": 18.3873,
    "habitability_city": 0.3618,
    "habitability_town": 0.4712,
@@ -10173,12 +10106,7 @@
     17
    ],
    "territory_cost": 3.3276,
-   "tags": [
-    "ford",
-    "headwater",
-    "river",
-    "river_source"
-   ],
+   "tags": [],
    "road_connections": [
     [
      9,
@@ -10205,7 +10133,7 @@
    "soil": "arable",
    "land_use": "arable",
    "rural_population": 167.5695,
-   "river_flow": 0.0,
+   "river_flow": 0.1967,
    "catchment_km2": 17.2055,
    "habitability_city": 0.3748,
    "habitability_town": 0.4147,
@@ -10263,7 +10191,7 @@
    "soil": "arable",
    "land_use": "arable",
    "rural_population": 200.3554,
-   "river_flow": 0.0,
+   "river_flow": 0.5913,
    "catchment_km2": 51.7207,
    "habitability_city": 0.3479,
    "habitability_town": 0.462,
@@ -10303,10 +10231,7 @@
     23
    ],
    "territory_cost": 6.0,
-   "tags": [
-    "ford",
-    "river"
-   ],
+   "tags": [],
    "road_connections": []
   },
   {
@@ -10335,10 +10260,7 @@
     23
    ],
    "territory_cost": 5.0,
-   "tags": [
-    "ford",
-    "river"
-   ],
+   "tags": [],
    "road_connections": []
   },
   {
@@ -10367,12 +10289,7 @@
     23
    ],
    "territory_cost": 3.0,
-   "tags": [
-    "ford",
-    "headwater",
-    "river",
-    "river_source"
-   ],
+   "tags": [],
    "road_connections": []
   },
   {
@@ -11132,7 +11049,7 @@
    "soil": "arable",
    "land_use": "arable",
    "rural_population": 155.981,
-   "river_flow": 0.0,
+   "river_flow": 0.1697,
    "catchment_km2": 14.8426,
    "habitability_city": 0.3476,
    "habitability_town": 0.3529,
@@ -11230,10 +11147,7 @@
     17
    ],
    "territory_cost": 5.1301,
-   "tags": [
-    "ford",
-    "river"
-   ],
+   "tags": [],
    "road_connections": []
   },
   {
@@ -11262,10 +11176,7 @@
     23
    ],
    "territory_cost": 5.0035,
-   "tags": [
-    "ford",
-    "river"
-   ],
+   "tags": [],
    "road_connections": []
   },
   {
@@ -11283,7 +11194,7 @@
    "soil": "arable",
    "land_use": "arable",
    "rural_population": 216.503,
-   "river_flow": 0.0,
+   "river_flow": 0.1707,
    "catchment_km2": 14.928,
    "habitability_city": 0.3452,
    "habitability_town": 0.4599,
@@ -12150,10 +12061,7 @@
     17
    ],
    "territory_cost": 6.1759,
-   "tags": [
-    "ford",
-    "river"
-   ],
+   "tags": [],
    "road_connections": []
   },
   {
@@ -12171,7 +12079,7 @@
    "soil": "arable",
    "land_use": "arable",
    "rural_population": 198.4576,
-   "river_flow": 0.0,
+   "river_flow": 0.563,
    "catchment_km2": 49.2423,
    "habitability_city": 0.3435,
    "habitability_town": 0.4454,
@@ -13053,7 +12961,7 @@
    "soil": "arable",
    "land_use": "wood",
    "rural_population": 28.8216,
-   "river_flow": 0.0,
+   "river_flow": 0.5039,
    "catchment_km2": 44.0762,
    "habitability_city": 0.4294,
    "habitability_town": 0.4954,
@@ -13093,10 +13001,7 @@
     23
    ],
    "territory_cost": 7.0,
-   "tags": [
-    "ford",
-    "river"
-   ],
+   "tags": [],
    "road_connections": []
   },
   {
@@ -14047,7 +13952,7 @@
    "soil": "arable",
    "land_use": "wood",
    "rural_population": 27.444,
-   "river_flow": 0.0,
+   "river_flow": 0.4643,
    "catchment_km2": 40.6119,
    "habitability_city": 0.429,
    "habitability_town": 0.4723,
@@ -14087,10 +13992,7 @@
     23
    ],
    "territory_cost": 7.1139,
-   "tags": [
-    "ford",
-    "river"
-   ],
+   "tags": [],
    "road_connections": []
   },
   {
@@ -14398,7 +14300,7 @@
    "soil": "marginal",
    "land_use": "arable",
    "rural_population": 85.0373,
-   "river_flow": 0.0,
+   "river_flow": 0.4038,
    "catchment_km2": 35.3207,
    "habitability_city": 0.9481,
    "habitability_town": 0.9662,
@@ -15105,9 +15007,7 @@
    "cultivated": false,
    "territory": null,
    "territory_cost": 0.0,
-   "tags": [
-    "river"
-   ],
+   "tags": [],
    "road_connections": []
   },
   {
@@ -15136,9 +15036,7 @@
     23
    ],
    "territory_cost": 7.9719,
-   "tags": [
-    "river"
-   ],
+   "tags": [],
    "road_connections": []
   },
   {
@@ -15374,7 +15272,7 @@
    "soil": "arable",
    "land_use": "arable",
    "rural_population": 156.5027,
-   "river_flow": 0.0,
+   "river_flow": 0.3875,
    "catchment_km2": 33.8963,
    "habitability_city": 0.4548,
    "habitability_town": 0.4693,
@@ -15423,12 +15321,7 @@
     25
    ],
    "territory_cost": 2.0,
-   "tags": [
-    "ford",
-    "river",
-    "river_end",
-    "river_mouth"
-   ],
+   "tags": [],
    "road_connections": []
   },
   {
@@ -15446,7 +15339,7 @@
    "soil": "marginal",
    "land_use": "pasture",
    "rural_population": 45.0367,
-   "river_flow": 0.0,
+   "river_flow": 0.1733,
    "catchment_km2": 15.155,
    "habitability_city": 0.9337,
    "habitability_town": 0.9672,
@@ -16078,10 +15971,7 @@
    "cultivated": false,
    "territory": null,
    "territory_cost": 0.0,
-   "tags": [
-    "ford",
-    "river"
-   ],
+   "tags": [],
    "road_connections": [
     [
      16,
@@ -16119,9 +16009,7 @@
     23
    ],
    "territory_cost": 8.1555,
-   "tags": [
-    "river"
-   ],
+   "tags": [],
    "road_connections": [
     [
      15,
@@ -16373,12 +16261,7 @@
     25
    ],
    "territory_cost": 3.0031,
-   "tags": [
-    "ford",
-    "headwater",
-    "river",
-    "river_source"
-   ],
+   "tags": [],
    "road_connections": []
   },
   {
@@ -16396,7 +16279,7 @@
    "soil": "arable",
    "land_use": "arable",
    "rural_population": 150.9657,
-   "river_flow": 0.0,
+   "river_flow": 0.1645,
    "catchment_km2": 14.388,
    "habitability_city": 0.4403,
    "habitability_town": 0.4661,
@@ -17053,9 +16936,7 @@
    "cultivated": false,
    "territory": null,
    "territory_cost": 0.0,
-   "tags": [
-    "river"
-   ],
+   "tags": [],
    "road_connections": []
   },
   {
@@ -17084,9 +16965,7 @@
     23
    ],
    "territory_cost": 9.7443,
-   "tags": [
-    "river"
-   ],
+   "tags": [],
    "road_connections": [
     [
      16,
@@ -18031,10 +17910,7 @@
    "cultivated": false,
    "territory": null,
    "territory_cost": 0.0,
-   "tags": [
-    "ford",
-    "river"
-   ],
+   "tags": [],
    "road_connections": []
   },
   {
@@ -18060,10 +17936,7 @@
    "cultivated": false,
    "territory": null,
    "territory_cost": 0.0,
-   "tags": [
-    "ford",
-    "river"
-   ],
+   "tags": [],
    "road_connections": [
     [
      17,
@@ -18090,7 +17963,7 @@
    "soil": "arable",
    "land_use": "wood",
    "rural_population": 26.1453,
-   "river_flow": 0.0,
+   "river_flow": 0.1694,
    "catchment_km2": 14.8123,
    "habitability_city": 0.301,
    "habitability_town": 0.2565,
@@ -18697,10 +18570,7 @@
     5
    ],
    "territory_cost": 3.0,
-   "tags": [
-    "ford",
-    "river"
-   ],
+   "tags": [],
    "road_connections": []
   },
   {
@@ -18718,7 +18588,7 @@
    "soil": "arable",
    "land_use": "arable",
    "rural_population": 199.7787,
-   "river_flow": 0.0,
+   "river_flow": 0.4841,
    "catchment_km2": 42.3443,
    "habitability_city": 0.45,
    "habitability_town": 0.4848,
@@ -18747,7 +18617,7 @@
    "soil": "arable",
    "land_use": "arable",
    "rural_population": 190.0626,
-   "river_flow": 0.0,
+   "river_flow": 0.4667,
    "catchment_km2": 40.8196,
    "habitability_city": 0.2901,
    "habitability_town": 0.3159,
@@ -18816,12 +18686,7 @@
     5
    ],
    "territory_cost": 5.1433,
-   "tags": [
-    "ford",
-    "headwater",
-    "river",
-    "river_source"
-   ],
+   "tags": [],
    "road_connections": []
   },
   {
@@ -18987,7 +18852,7 @@
    "soil": "unusable",
    "land_use": "waste",
    "rural_population": 0.0,
-   "river_flow": 0.0,
+   "river_flow": 0.2208,
    "catchment_km2": 19.3102,
    "habitability_city": 0.0,
    "habitability_town": 0.0,
@@ -19021,12 +18886,7 @@
    "cultivated": false,
    "territory": null,
    "territory_cost": 0.0,
-   "tags": [
-    "ford",
-    "headwater",
-    "river",
-    "river_source"
-   ],
+   "tags": [],
    "road_connections": []
   },
   {
@@ -19618,12 +19478,7 @@
     5
    ],
    "territory_cost": 3.0,
-   "tags": [
-    "ford",
-    "river",
-    "river_end",
-    "river_mouth"
-   ],
+   "tags": [],
    "road_connections": []
   },
   {
@@ -19652,10 +19507,7 @@
     5
    ],
    "territory_cost": 1.0,
-   "tags": [
-    "ford",
-    "river"
-   ],
+   "tags": [],
    "road_connections": []
   },
   {
@@ -19684,10 +19536,7 @@
     5
    ],
    "territory_cost": 1.0,
-   "tags": [
-    "ford",
-    "river"
-   ],
+   "tags": [],
    "road_connections": []
   },
   {
@@ -19716,10 +19565,7 @@
     5
    ],
    "territory_cost": 3.0133,
-   "tags": [
-    "ford",
-    "river"
-   ],
+   "tags": [],
    "road_connections": []
   },
   {
@@ -19748,10 +19594,7 @@
     5
    ],
    "territory_cost": 4.068,
-   "tags": [
-    "ford",
-    "river"
-   ],
+   "tags": [],
    "road_connections": []
   },
   {
@@ -19769,7 +19612,7 @@
    "soil": "grazing",
    "land_use": "pasture",
    "rural_population": 32.3568,
-   "river_flow": 0.0,
+   "river_flow": 0.2283,
    "catchment_km2": 19.9644,
    "habitability_city": 0.3057,
    "habitability_town": 0.314,
@@ -20319,14 +20162,7 @@
     26
    ],
    "territory_cost": 8.6623,
-   "tags": [
-    "ford",
-    "headwater",
-    "river",
-    "river_end",
-    "river_mouth",
-    "river_source"
-   ],
+   "tags": [],
    "road_connections": []
   },
   {
@@ -20628,10 +20464,7 @@
     5
    ],
    "territory_cost": 1.0067,
-   "tags": [
-    "ford",
-    "river"
-   ],
+   "tags": [],
    "road_connections": [
     [
      21,
@@ -20658,7 +20491,7 @@
    "soil": "arable",
    "land_use": "arable",
    "rural_population": 196.0777,
-   "river_flow": 0.0,
+   "river_flow": 0.2662,
    "catchment_km2": 23.2843,
    "habitability_city": 0.2969,
    "habitability_town": 0.3243,
@@ -20696,7 +20529,7 @@
    "soil": "arable",
    "land_use": "arable",
    "rural_population": 180.655,
-   "river_flow": 0.0,
+   "river_flow": 0.2485,
    "catchment_km2": 21.7379,
    "habitability_city": 0.303,
    "habitability_town": 0.3226,
@@ -21272,7 +21105,7 @@
    "soil": "grazing",
    "land_use": "pasture",
    "rural_population": 28.4823,
-   "river_flow": 0.0,
+   "river_flow": 0.1633,
    "catchment_km2": 14.281,
    "habitability_city": 0.0,
    "habitability_town": 0.0,
@@ -23572,7 +23405,7 @@
    "soil": "unusable",
    "land_use": "waste",
    "rural_population": 0.0,
-   "river_flow": 0.0,
+   "river_flow": 0.1665,
    "catchment_km2": 14.5588,
    "habitability_city": 0.0,
    "habitability_town": 0.0,
@@ -24070,12 +23903,7 @@
     26
    ],
    "territory_cost": 4.0,
-   "tags": [
-    "ford",
-    "headwater",
-    "river",
-    "river_source"
-   ],
+   "tags": [],
    "road_connections": []
   },
   {
@@ -24495,10 +24323,7 @@
     8
    ],
    "territory_cost": 1.0,
-   "tags": [
-    "ford",
-    "river"
-   ],
+   "tags": [],
    "road_connections": []
   },
   {
@@ -24527,12 +24352,7 @@
     8
    ],
    "territory_cost": 3.1402,
-   "tags": [
-    "ford",
-    "headwater",
-    "river",
-    "river_source"
-   ],
+   "tags": [],
    "road_connections": []
   },
   {
@@ -24973,7 +24793,7 @@
    "soil": "arable",
    "land_use": "arable",
    "rural_population": 148.4621,
-   "river_flow": 0.0,
+   "river_flow": 0.2569,
    "catchment_km2": 22.4703,
    "habitability_city": 0.2912,
    "habitability_town": 0.3058,
@@ -25022,10 +24842,7 @@
     26
    ],
    "territory_cost": 3.0,
-   "tags": [
-    "ford",
-    "river"
-   ],
+   "tags": [],
    "road_connections": []
   },
   {
@@ -25405,7 +25222,7 @@
    "soil": "marginal",
    "land_use": "arable",
    "rural_population": 82.4027,
-   "river_flow": 0.0,
+   "river_flow": 0.2492,
    "catchment_km2": 21.7996,
    "habitability_city": 0.9263,
    "habitability_town": 0.9398,
@@ -25454,10 +25271,7 @@
     8
    ],
    "territory_cost": 2.0,
-   "tags": [
-    "ford",
-    "river"
-   ],
+   "tags": [],
    "road_connections": []
   },
   {
@@ -25930,7 +25744,7 @@
    "soil": "arable",
    "land_use": "arable",
    "rural_population": 148.6446,
-   "river_flow": 0.0,
+   "river_flow": 0.3475,
    "catchment_km2": 30.3928,
    "habitability_city": 0.466,
    "habitability_town": 0.4863,
@@ -25979,12 +25793,7 @@
     26
    ],
    "territory_cost": 2.0,
-   "tags": [
-    "ford",
-    "river",
-    "river_end",
-    "river_mouth"
-   ],
+   "tags": [],
    "road_connections": []
   },
   {
@@ -26370,12 +26179,7 @@
     8
    ],
    "territory_cost": 2.0,
-   "tags": [
-    "ford",
-    "river",
-    "river_end",
-    "river_mouth"
-   ],
+   "tags": [],
    "road_connections": []
   },
   {
@@ -26877,7 +26681,7 @@
    "soil": "marginal",
    "land_use": "arable",
    "rural_population": 81.6142,
-   "river_flow": 0.0,
+   "river_flow": 0.3621,
    "catchment_km2": 31.6735,
    "habitability_city": 0.9103,
    "habitability_town": 0.9263,
@@ -27514,7 +27318,7 @@
    "soil": "marginal",
    "land_use": "wood",
    "rural_population": 15.9604,
-   "river_flow": 0.0,
+   "river_flow": 0.2427,
    "catchment_km2": 21.2278,
    "habitability_city": 0.9239,
    "habitability_town": 0.9558,
@@ -27548,14 +27352,7 @@
    "cultivated": false,
    "territory": null,
    "territory_cost": 0.0,
-   "tags": [
-    "ford",
-    "headwater",
-    "river",
-    "river_end",
-    "river_mouth",
-    "river_source"
-   ],
+   "tags": [],
    "road_connections": []
   },
   {
@@ -27866,7 +27663,7 @@
    "soil": "marginal",
    "land_use": "arable",
    "rural_population": 81.5105,
-   "river_flow": 0.0,
+   "river_flow": 0.4437,
    "catchment_km2": 38.8091,
    "habitability_city": 0.9249,
    "habitability_town": 0.9333,
@@ -27906,12 +27703,7 @@
     26
    ],
    "territory_cost": 3.0,
-   "tags": [
-    "ford",
-    "river",
-    "river_end",
-    "river_mouth"
-   ],
+   "tags": [],
    "road_connections": []
   },
   {
