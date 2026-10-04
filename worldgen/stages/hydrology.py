@@ -10,7 +10,6 @@ from ..core.hex_grid import (
     Side,
     corner_hexes,
     distance,
-    hex_corner_keys,
     neighbors,
     side_hexes,
     side_joining,
@@ -23,6 +22,7 @@ from .corner_drainage import (
     build_network,
     drain_corner,
     flow_direction,
+    inlet_corner,
     is_lake_node,
     trace_streams,
 )
@@ -206,7 +206,8 @@ class HydrologyStage(GeneratorStage):
         closed_lakes = {c for comp in closed for c in comp} & lakes
         open_lakes = _get_lake_components(lakes - closed_lakes, hexes)
 
-        net = build_network(hexes, land, ocean, closed_lakes, open_lakes)
+        heights = {c: hx.elevation for c, hx in hexes.items()}
+        net = build_network(heights, land, ocean, closed_lakes, open_lakes)
         drainage = flow_direction(net, self.rng, self.config.river_wander_exponent)
 
         # Rain runs off each hex to its lowest corner, and off an open lake out of it.
@@ -224,7 +225,7 @@ class HydrologyStage(GeneratorStage):
         inflow_volume = max(1.0, self.config.river_inflow_volume * len(land))
         inflow: set[Corner] = set()
         for coord in inlets:
-            corner = _inlet_corner(coord, net, drainage)
+            corner = inlet_corner(coord, net, drainage)
             if corner is not None:
                 sources[corner] += inflow_volume
                 inflow.add(corner)
@@ -1438,32 +1439,3 @@ def _write_hex_view(hexes, land, sides, corner_tags, drainage, drain_of, max_acc
         target = min(banks or around, key=lambda h: (hexes[h].elevation, h))
         for tag in tags:
             hexes[target].tags.update(_CORNER_TO_HEX_TAGS.get(tag, ()))
-
-
-def _inlet_corner(coord: HexCoord, net, drainage) -> Corner | None:
-    """Where a river arriving over the border at *coord* joins the corner network.
-
-    The corner of that hex one side in from the map edge whose water then runs furthest,
-    so the inflow heads inland rather than along the frame.
-    """
-
-    def course(c) -> int:
-        n, seen = 0, set()
-        while c is not None and c not in seen:
-            seen.add(c)
-            n += 1
-            c = drainage.flow.get(c)
-        return n
-
-    corners = [
-        c
-        for c in hex_corner_keys(coord)
-        if c in drainage.order and c not in net.terminal and drainage.flow.get(c) is not None
-    ]
-    beside_edge = [
-        c for c in corners if any(n in net.terminal and n not in net.wet for n in net.neighbors[c])
-    ]
-    pool = beside_edge or corners
-    if not pool:
-        return None
-    return max(pool, key=lambda c: (course(c), c))

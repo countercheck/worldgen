@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from worldgen.core.world_state import WorldState
-from worldgen.stages.erosion import _neighbour_table, _widen_valleys
+from worldgen.stages.erosion import _widen_valleys
 
 
 def _ridge_with_notch(w=21, h=9, notch_col=10):
@@ -86,26 +86,40 @@ def test_a_bigger_channel_gets_a_wider_valley():
     assert int(cut[:21].sum()) > int(cut[21:].sum())
 
 
+def _slope_down_rows(w=9, h=9):
+    arr = np.zeros((w, h))
+    for i in range(w):
+        for j in range(h):
+            arr[i, j] = 1.0 - 0.05 * j  # drains toward high j
+    return arr
+
+
+def _route(arr, state, inflow=None):
+    from worldgen.stages.erosion import _corner_routing
+
+    return _corner_routing(arr, 0.0, state, {}, 2.0, np.random.default_rng(0), inflow)
+
+
+def _leaves_the_map(net, drainage):
+    return sum(drainage.acc[t] for t in net.terminal if t in drainage.acc)
+
+
 def test_sink_filling_lets_drainage_cross_a_pit():
     """Without it, accumulation dies in the first depression and no trunk river forms.
 
     That was most of why the carved channels coincided with only a third of the rivers
     hydrology found: a pitted surface gives a scatter of short segments, not a network.
     """
-    from worldgen.core.world_state import WorldState
-    from worldgen.stages.erosion import _grid_flow_accumulation, _neighbour_table
-
     w = h = 9
     state = WorldState.empty(seed=1, width=w, height=h)
-    arr = np.zeros((w, h))
-    for i in range(w):
-        for j in range(h):
-            arr[i, j] = 1.0 - 0.05 * j  # drains toward high j
+    arr = _slope_down_rows(w, h)
     arr[4, 4] = 0.2  # a pit partway down
 
-    acc = _grid_flow_accumulation(arr, 0.0, _neighbour_table(state, w, h))
-    # Water reaching the pit must carry on past it rather than stopping there.
-    assert acc[:, 8].sum() > acc[4, 4], "drainage never left the pit"
+    net, drainage = _route(arr, state)
+    # Every corner off the map edge has somewhere to send its water, the pit's included,
+    # and all of the rain that fell gets off the map.
+    assert all(drainage.flow[c] is not None for c in drainage.order if c not in net.terminal)
+    assert _leaves_the_map(net, drainage) == pytest.approx(w * h)
 
 
 def test_widening_produces_flat_ground_beside_the_channel():
@@ -136,30 +150,27 @@ def test_an_off_map_catchment_makes_the_channel_below_it_a_trunk():
     on-map hexes would raise — and gets a trickle's valley, however much water hydrology
     later says crosses the border there.
     """
-    from worldgen.core.world_state import WorldState
-    from worldgen.stages.erosion import _grid_flow_accumulation, _neighbour_table
+    from worldgen.stages.erosion import _hex_discharge
 
     w = h = 9
     state = WorldState.empty(seed=1, width=w, height=h)
-    arr = np.zeros((w, h))
-    for i in range(w):
-        for j in range(h):
-            arr[i, j] = 1.0 - 0.05 * j  # drains toward high j
-    table = _neighbour_table(state, w, h)
+    arr = _slope_down_rows(w, h)
     mouth = (4, 0)
 
-    plain = _grid_flow_accumulation(arr, 0.0, table)
-    seeded = _grid_flow_accumulation(arr, 0.0, table, {mouth: 500.0})
+    plain_net, plain = _route(arr, state)
+    seeded_net, seeded = _route(arr, state, {mouth: 500.0})
 
-    assert seeded[mouth] > plain[mouth] * 10
-    # And it travels: the catchment has to reach the sea, not stop at the border hex.
-    assert seeded[:, 8].sum() > plain[:, 8].sum() + 400
+    assert _hex_discharge(state, seeded, w, h).max() > 10 * _hex_discharge(state, plain, w, h).max()
+    # And it travels: the catchment has to reach the sea, not stop at the border.
+    assert _leaves_the_map(seeded_net, seeded) == pytest.approx(
+        _leaves_the_map(plain_net, plain) + 500.0
+    )
 
 
 # --- channel incision --------------------------------------------------------
 
 
-def _ramp(w=12, h=5, drop=0.02):
+def _ramp(w=12, h=7, drop=0.02):
     """A plane tilting east, well above sea level, with no depressions in it."""
     arr = np.zeros((w, h), dtype=float)
     for i in range(w):
@@ -167,11 +178,16 @@ def _ramp(w=12, h=5, drop=0.02):
     return arr
 
 
-def _incise(arr, acc, state, **over):
-    from worldgen.stages.erosion import _grid_receivers, _incise_channels
+def _incise(arr, cell_acc, state, **over):
+    """Drain *arr*, give each corner the largest of its cells' catchments, and incise."""
+    from worldgen.core.hex_grid import corner_hexes
+    from worldgen.stages.erosion import _incise_channels
 
-    neighbours = _neighbour_table(state, *arr.shape)
-    receivers, order = _grid_receivers(arr, 0.0, neighbours)
+    _net, drainage = _route(arr, state)
+    drainage.acc = {
+        c: max(cell_acc[state.grid_index(h)] for h in corner_hexes(c) if h in state.hexes)
+        for c in drainage.order
+    }
     kwargs = dict(
         m_per_pass=12.0,
         area_exponent=0.5,
@@ -182,52 +198,76 @@ def _incise(arr, acc, state, **over):
         max_cut_m=40.0,
     )
     kwargs.update(over)
-    _incise_channels(arr, acc, receivers, order, 0.0, 1700.0, **kwargs)
-    return receivers
+    _incise_channels(arr, state, drainage, 0.0, 1700.0, **kwargs)
+    return drainage
+
+
+def _channel_row(arr):
+    """Catchments: one interior row drains 800 km2, everything else one."""
+    acc = np.ones_like(arr)
+    acc[:, 3] = 800.0
+    return acc
 
 
 def test_a_big_catchment_cuts_below_the_ground_beside_it():
-    """The whole point: without this a trunk can never get deeper than its hillslopes."""
+    """The whole point: without this a trunk can never get deeper than its hillslopes.
+
+    Row 3 drains a real catchment.  Row 1 is two rows off, so no corner it is a bank of
+    touches row 3: it is hillslope.  The cap is lifted so the channel's cut is the stream
+    power law's and not the cap's: a side is 0.58 km, so this ramp is steeper along one than
+    across a hex, and at the default cap both would be held to it.
+    """
     arr = _ramp()
-    state = WorldState.empty(seed=1, width=12, height=5)
-    acc = np.ones_like(arr)
-    acc[:, 2] = 800.0  # one row draining a real catchment
+    state = WorldState.empty(seed=1, width=12, height=7)
     before = arr.copy()
-    _incise(arr, acc, state)
-    channel_cut = before[6, 2] - arr[6, 2]
+    _incise(arr, _channel_row(arr), state, max_cut_m=500.0)
+    channel_cut = before[6, 3] - arr[6, 3]
     hillslope_cut = before[6, 1] - arr[6, 1]
     assert channel_cut > 10 * hillslope_cut, (
         f"a 800 km2 channel should outcut 1 km2 of hillslope by far: "
         f"{channel_cut:.5f} vs {hillslope_cut:.5f}"
     )
-    assert arr[6, 2] < arr[6, 1], "the channel should end up below the ground beside it"
+    assert arr[6, 3] < arr[6, 1], "the channel should end up below the ground beside it"
 
 
 def test_incision_never_inverts_the_flow():
-    """No cell may be cut below its own receiver, or the next sink fill has to undo it."""
+    """No corner may be cut below its receiver, or the next fill has to undo it.
+
+    Not "strictly above": two corners one side apart share two hexes, and a corner's
+    height is its lowest hex, so neighbouring corners often stand at one height.  The fill
+    order, not the heights, is what keeps the routing downhill across such a flat.
+    """
+    from worldgen.core.hex_grid import corner_hexes
+    from worldgen.stages.corner_drainage import is_lake_node
+
     arr = _ramp()
-    state = WorldState.empty(seed=1, width=12, height=5)
-    acc = np.full_like(arr, 400.0)
-    receivers = _incise(arr, acc, state)
-    for cell, receiver in receivers.items():
-        assert arr[cell] > arr[receiver], f"{cell} was cut to or below {receiver}"
+    state = WorldState.empty(seed=1, width=12, height=7)
+    drainage = _incise(arr, np.full_like(arr, 400.0), state)
+
+    def height(c):
+        return min(arr[state.grid_index(h)] for h in corner_hexes(c) if h in state.hexes)
+
+    for corner, receiver in drainage.flow.items():
+        if receiver is None or is_lake_node(receiver):
+            continue
+        assert height(corner) >= height(receiver), f"{corner} was cut below {receiver}"
 
 
 def test_a_zero_area_exponent_reverts_to_slope_alone():
     """The knob that turns the new term off has to actually turn it off."""
     arr_area, arr_flat = _ramp(), _ramp()
-    state = WorldState.empty(seed=1, width=12, height=5)
-    acc = np.ones_like(arr_area)
-    acc[:, 2] = 800.0
-    _incise(arr_area, acc, state)
-    _incise(arr_flat, acc, state, area_exponent=0.0)
-    assert arr_flat[6, 2] == pytest.approx(arr_flat[6, 1]), "no area term, no contrast"
-    assert arr_area[6, 2] < arr_area[6, 1]
+    state = WorldState.empty(seed=1, width=12, height=7)
+    _incise(arr_area, _channel_row(arr_area), state)
+    _incise(arr_flat, _channel_row(arr_flat), state, area_exponent=0.0)
+    flat_contrast = arr_flat[6, 1] - arr_flat[6, 3]
+    area_contrast = arr_area[6, 1] - arr_area[6, 3]
+    assert area_contrast > 0
+    assert abs(flat_contrast) < 0.1 * area_contrast, "no area term, no contrast"
 
 
 def test_incision_is_disabled_at_zero_metres():
     arr = _ramp()
-    state = WorldState.empty(seed=1, width=12, height=5)
+    state = WorldState.empty(seed=1, width=12, height=7)
     before = arr.copy()
     _incise(arr, np.full_like(arr, 900.0), state, m_per_pass=0.0)
     assert np.array_equal(arr, before)
@@ -238,7 +278,7 @@ def test_one_cell_cannot_lose_more_than_the_cap():
     arr = _ramp(drop=0.0)
     arr[3, :] = 0.9
     arr[4:, :] = 0.1  # a 1360 m step
-    state = WorldState.empty(seed=1, width=12, height=5)
+    state = WorldState.empty(seed=1, width=12, height=7)
     before = arr.copy()
     _incise(arr, np.full_like(arr, 5000.0), state, max_cut_m=40.0)
     worst_m = float((before - arr).max()) * 1700.0

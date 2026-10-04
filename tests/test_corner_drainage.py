@@ -36,7 +36,8 @@ def _world(elevation, water=(), lakes=()):
 def _drain(hexes, closed=(), open_lakes=(), seed=0, wander=2.0):
     land = {c for c, h in hexes.items() if h.terrain_class == TerrainClass.LAND}
     ocean = {c for c, h in hexes.items() if h.terrain_class == TerrainClass.OPEN_WATER}
-    net = build_network(hexes, land, ocean, set(closed), [list(x) for x in open_lakes])
+    heights = {c: h.elevation for c, h in hexes.items()}
+    net = build_network(heights, land, ocean, set(closed), [list(x) for x in open_lakes])
     drainage = flow_direction(net, np.random.default_rng(seed), wander)
     sources = {}
     for c in land:
