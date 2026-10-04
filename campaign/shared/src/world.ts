@@ -63,6 +63,8 @@ export const ROAD_TIER_RANK: Readonly<Record<RoadTier, number>> = {
 /** River side tags the campaign rules care about. The generator writes others. */
 export const TAG_FORD = 'ford';
 export const TAG_BRIDGE = 'bridge';
+export const TAG_RAPIDS = 'rapids';
+export const TAG_CATARACT = 'cataract';
 
 export interface WorldHex {
   readonly coord: Hex;

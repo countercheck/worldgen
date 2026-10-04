@@ -6,7 +6,9 @@
  *   Major (navigable, wide, deep)   with a bridge: 1 hour per division
  *                                   without:       impossible
  *   Minor (fordable, streams)       with a bridge: free
- *                                   without:       1 hour per division, at a ford
+ *                                   without:       1 hour per division, wading anywhere
+ *                                   — except across rapids or a cataract, which is
+ *                                   as closed to a column as a major river
  *
  * The line between them is already drawn in the generator. `haulage.navigable()` tests a
  * watercourse's discharge against `navigable_min_discharge` and is documented there as
@@ -31,7 +33,9 @@ import {
   edgeKey,
   riverSideBetween,
   TAG_BRIDGE,
+  TAG_CATARACT,
   TAG_FORD,
+  TAG_RAPIDS,
   type RiverSide,
   type World,
 } from './world.js';
@@ -52,6 +56,10 @@ export function riverClass(side: RiverSide | undefined, world: World): RiverClas
   if (side === undefined) return 'none';
   return discharge(side, world) >= world.config.navigableMinDischarge ? 'major' : 'minor';
 }
+
+/** Whether a river side runs white — rapids or a cataract — so nobody wades it. */
+export const whiteWater = (side: RiverSide): boolean =>
+  side.tags.has(TAG_RAPIDS) || side.tags.has(TAG_CATARACT);
 
 /**
  * The rivers along a hex's six sides, largest first, each with the hex across it.
@@ -143,8 +151,26 @@ export function crossingFor(
     };
   }
 
-  // Minor river: a bridge is free, a ford costs an hour, and there is always a ford —
-  // that is what makes it minor.
+  // Minor river: a bridge is free, and wading costs an hour almost anywhere — that is
+  // what makes it minor. Not across rapids or a cataract, though: there the water is as
+  // closed to a column as a major river's.
   if (bridged) return { river, hours: 0, how: 'bridge', violations: [] };
+  if (side !== undefined && whiteWater(side)) {
+    if (hasTrait(unit, 'pontooneers')) {
+      return { river, hours: cfg.pontoonBuildHours, how: 'pontoon', violations: [] };
+    }
+    return {
+      river,
+      hours: Infinity,
+      how: 'blocked',
+      violations: [
+        soft(
+          CODES.WHITE_WATER_UNBRIDGED,
+          `the river between ${from.q},${from.r} and ${to.q},${to.r} runs white here and ` +
+            `cannot be waded, and ${unit.id} has no pontooneers`,
+        ),
+      ],
+    };
+  }
   return { river, hours: cfg.fordHours, how: 'ford', violations: [] };
 }

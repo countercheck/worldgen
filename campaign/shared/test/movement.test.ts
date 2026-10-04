@@ -302,6 +302,24 @@ describe('river crossings', () => {
     expect(c.hours).toBe(cfg.fordHours);
   });
 
+  it('refuses to wade a minor river across rapids or a cataract', () => {
+    for (const tag of ['rapids', 'cataract']) {
+      const c = crossingFor(riverAt(MINOR, [tag]), cfg, unit('infantry'), from, to);
+      expect(c.how, tag).toBe('blocked');
+      expect(c.hours).toBe(Infinity);
+      expect(c.violations.map((v) => v.code)).toEqual(['white_water_unbridged']);
+      expect(c.violations.every((v) => v.severity === 'soft')).toBe(true);
+    }
+  });
+
+  it('crosses white water on a minor river at a bridge, or by pontoon', () => {
+    expect(crossingFor(riverAt(MINOR, ['rapids', 'bridge']), cfg, unit('infantry'), from, to))
+      .toMatchObject({ how: 'bridge', hours: 0 });
+    expect(
+      crossingFor(riverAt(MINOR, ['rapids']), cfg, unit('infantry', ['pontooneers']), from, to),
+    ).toMatchObject({ how: 'pontoon', hours: cfg.pontoonBuildHours });
+  });
+
   it('lets a minor river be crossed free at a bridge', () => {
     const w = riverAt(MINOR, ['bridge']);
     const c = crossingFor(w, cfg, unit('infantry'), from, to);

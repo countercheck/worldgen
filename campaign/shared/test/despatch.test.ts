@@ -14,6 +14,7 @@ import {
   addresseeCopy,
   addresseesOf,
   captorCopy,
+  courierStepHours,
   deliveredAt,
   formationsTouch,
   inSight,
@@ -26,7 +27,7 @@ import {
 } from '../src/despatch.js';
 import { DEFAULT_CONFIG } from '../src/config.js';
 import { EMPTY_STATE, type CampaignState } from '../src/state.js';
-import { key, type Hex, type HexKey } from '../src/hex.js';
+import { key, sideBetween, sideId, type Hex, type HexKey } from '../src/hex.js';
 import { reportOf, type Unit } from '../src/unit.js';
 import type { World, WorldHex } from '../src/world.js';
 
@@ -384,5 +385,30 @@ describe('formations touching', () => {
     const a = unit('a', 'red', [{ q: 5, r: 5 }]);
     const b = unit('b', 'red', [{ q: 6, r: 5 }]);
     expect(formationsTouch(a, b)).toBe(formationsTouch(b, a));
+  });
+});
+
+describe('a rider at a river', () => {
+  const from = { q: 2, r: 2 };
+  const to = { q: 3, r: 2 };
+  /** A minor river along the side between `from` and `to`, with the tags given. */
+  const minorRiver = (tags: string[]): World => {
+    const side = sideBetween(from, to);
+    const riverSides = new Map([
+      [sideId(side), { side, catchmentKm2: 10, flow: 0.5, dropM: 0, tags: new Set(tags) }],
+    ]);
+    return { ...world, riverSides };
+  };
+  const extra = (w: World) =>
+    courierStepHours(w, DEFAULT_CONFIG, from, to) - courierStepHours(world, DEFAULT_CONFIG, from, to);
+
+  it('wades a minor river at a ford’s hour', () => {
+    expect(extra(minorRiver([]))).toBeCloseTo(DEFAULT_CONFIG.fordHours);
+  });
+
+  it('pays a major river’s price where the minor one runs white', () => {
+    for (const tag of ['rapids', 'cataract']) {
+      expect(extra(minorRiver([tag])), tag).toBeCloseTo(DEFAULT_CONFIG.courierMajorCrossingHours);
+    }
   });
 });

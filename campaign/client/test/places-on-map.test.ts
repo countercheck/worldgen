@@ -51,6 +51,7 @@ function worldOf(cells: Record<string, Cell>, rest: Partial<World> = {}): World 
     roadEdges: new Map(),
     seaEdges: new Map(),
     ferries: [],
+    config: { navigableMinDischarge: 60000, runoffMm: 800 },
     ...rest,
   } as unknown as World;
 }
@@ -60,12 +61,18 @@ const edge = (a: Hex, b: Hex): [string, RoadEdge] => [
   { a, b, tier: 'track', deltaElevationM: 0 },
 ];
 
+/** 1,000 km² × 800 mm is well over the 60,000 navigable line: a major river. */
+const MAJOR_KM2 = 1000;
+
 /** River sides between the hex pairs given, each with the tags given. */
-function riverSides(pairs: [Hex, Hex, string[]][]): Map<string, RiverSide> {
+function riverSides(
+  pairs: [Hex, Hex, string[]][],
+  catchmentKm2 = MAJOR_KM2,
+): Map<string, RiverSide> {
   const out = new Map<string, RiverSide>();
   for (const [a, b, tags] of pairs) {
     const side = sideBetween(a, b);
-    out.set(sideId(side), { side, catchmentKm2: 10, flow: 0.5, dropM: 0, tags: new Set(tags) });
+    out.set(sideId(side), { side, catchmentKm2, flow: 0.5, dropM: 0, tags: new Set(tags) });
   }
   return out;
 }
@@ -83,6 +90,19 @@ describe('fords and bridges', () => {
     for (const m of marks) expect([...sides.keys()]).toContain(m.side);
   });
 
+  it('leaves a minor river’s fords unmarked, since it can be waded almost anywhere', () => {
+    const sides = riverSides(
+      [
+        [{ q: 0, r: 0 }, { q: 1, r: 0 }, ['ford']],
+        [{ q: 1, r: 0 }, { q: 2, r: 0 }, ['ford', 'bridge']],
+      ],
+      10,
+    );
+    expect(crossingMarks(worldOf({}, { riverSides: sides })).map((c) => c.kind)).toEqual([
+      'bridge',
+    ]);
+  });
+
   it('takes the river’s bearing along its side, so the mark can lie across it', () => {
     // A course down the column at q = 0, with a ford on its second side.
     const corners: Corner[] = [0, 1, 2].map((i) => ({ q: 0, r: Math.floor(i / 2), k: i % 2 }));
@@ -92,7 +112,10 @@ describe('fords and bridges', () => {
       {
         rivers: [{ corners, flowVolume: 1, name: '' }],
         riverSides: new Map([
-          [sideId(side), { side, catchmentKm2: 10, flow: 0.5, dropM: 0, tags: new Set(['ford']) }],
+          [
+            sideId(side),
+            { side, catchmentKm2: MAJOR_KM2, flow: 0.5, dropM: 0, tags: new Set(['ford']) },
+          ],
         ]),
       },
     );

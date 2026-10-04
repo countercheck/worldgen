@@ -88,6 +88,8 @@ export const CODES = {
   IMPASSABLE: 'impassable',
   NOT_ADJACENT: 'not_adjacent',
   MAJOR_RIVER_UNBRIDGED: 'major_river_unbridged',
+  /** Rapids or a cataract on a minor river: no wading there. */
+  WHITE_WATER_UNBRIDGED: 'white_water_unbridged',
   NO_CROSSING: 'no_crossing',
   MARCH_LIMIT: 'march_limit',
   NIGHT_MOVE: 'night_move',

@@ -4,8 +4,26 @@ Format-independent, so the SVG and PNG exporters band a river identically and ca
 drift apart on what a given width means.
 """
 
+from ..core.config import WorldConfig
 from ..core.hex_grid import Corner, Side, side_joining
-from ..core.world_state import River, RiverSide
+from ..core.world_state import River, RiverSide, WorldState
+
+
+def major_sides(ws: WorldState) -> set[Side]:
+    """The river sides carrying enough water to float a barge: the rivers that matter.
+
+    The same line the campaign rules draw between a major and a minor river.  A minor
+    river can be waded almost anywhere, so a ford on one marks nothing a reader needs;
+    only a major river's fords are worth putting on the map.  The world's own config and
+    runoff decide it, falling back to the defaults on a world that recorded neither.
+    """
+    cfg = WorldConfig.from_dict(ws.metadata.get("config") or {})
+    runoff = ws.metadata.get("runoff_mm") or cfg.runoff_mm(cfg.mean_precip_mm)
+    return {
+        side
+        for side, rs in ws.river_sides.items()
+        if rs.catchment_km2 * runoff >= cfg.navigable_min_discharge
+    }
 
 
 def width_bands(

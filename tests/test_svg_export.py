@@ -593,6 +593,10 @@ def test_ferry_puts_an_anchorage_row_in_the_legend():
 # --- fords and bridges -------------------------------------------------------
 
 
+# Enough catchment to float a barge under the default climate: a major river.
+_MAJOR_KM2 = 1e6
+
+
 def _crossing_world() -> WorldState:
     """A river with a road crossing it: one side a ford, one a bridge."""
     ws = WorldState.empty(seed=5, width=5, height=5)
@@ -600,6 +604,8 @@ def _crossing_world() -> WorldState:
         ws, [(2, 0), (2, 1), (2, 2), (2, 3)], flow_volume=1.0, flow={(2, r): 0.8 for r in range(4)}
     )
     ford, bridge = river.sides()[1], river.sides()[2]
+    for rs in ws.river_sides.values():
+        rs.catchment_km2 = _MAJOR_KM2  # a minor river's fords go unmarked
     ws.river_sides[ford].tags.add("ford")
     ws.river_sides[bridge].tags.add("bridge")
     lay_road(ws, [(1, 1), (2, 1), (3, 1)], RoadTier.PRIMARY)
@@ -656,6 +662,18 @@ def test_legend_lists_ford_and_bridge():
     body = render(_crossing_world()).split('<g id="layer-legend">')[1]
     assert ">Ford</text>" in body
     assert ">Bridge</text>" in body
+
+
+def test_a_minor_rivers_fords_go_unmarked():
+    """A minor river can be waded almost anywhere; marking its fords marks nothing."""
+    ws = _crossing_world()
+    for rs in ws.river_sides.values():
+        rs.catchment_km2 = 1.0
+    svg = render(ws)
+    group = _crossings_group(svg)
+    assert "stroke-dasharray" not in group, "a minor river's ford is drawn"
+    assert group.count("<line") == 4, "the bridge should still be drawn"
+    assert ">Ford</text>" not in svg.split('<g id="layer-legend">')[1]
 
 
 def test_legend_omits_crossings_not_present():

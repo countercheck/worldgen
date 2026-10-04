@@ -26,6 +26,7 @@ from ..core.hex_grid import (
 from ..core.world_state import RoadTier, WorldState
 from ..render.debug_viewer import is_fog
 from ..render.glyphs import ROLE_GLYPH
+from .rivers import major_sides
 
 # Stand-in steps for the continuous greyscale used by color_mode="elevation".
 ELEVATION_RAMP = (0.1, 0.3, 0.5, 0.7, 0.9)
@@ -204,17 +205,25 @@ def river_marks(ws: WorldState, hex_size: float) -> list:
 
 
 def crossings(ws: WorldState, hex_size: float) -> list:
-    """Every ford and bridge, as `(x, y, kind, angle)` in stable order, at the middle of
-    the river side it crosses, in pixels before the exporter's offset.
+    """Every bridge, and every ford on a major river, as `(x, y, kind, angle)` in stable
+    order, at the middle of the river side it crosses, in pixels before the exporter's
+    offset.  A minor river can be waded almost anywhere, so its fords go unmarked.
 
     *angle* is the bearing in degrees of the river along that side.  Both symbols are laid
     across the water rather than along it, so an exporter draws them rotated a further
     90°; a bridge aligned with the current would read as a second river.
     """
     bearing = _bearings(ws, hex_size)
+    major = major_sides(ws)
     out = []
     for side, rs in ws.river_sides.items():
-        kind = "bridge" if "bridge" in rs.tags else "ford" if "ford" in rs.tags else None
+        kind = (
+            "bridge"
+            if "bridge" in rs.tags
+            else "ford"
+            if "ford" in rs.tags and side in major
+            else None
+        )
         if kind is not None:
             out.append((*_midpoint(side, hex_size), kind, bearing.get(side, 0.0)))
     return sorted(out)
@@ -268,7 +277,8 @@ def rows(ws: WorldState, color_mode: str, layers: set[str]) -> list[LegendRow]:
         # Read straight off the side tags rather than via `crossings()`, which works out
         # positions and angles the legend does not use.
         tagged = {t for rs in ws.river_sides.values() for t in rs.tags}
-        if "ford" in tagged:
+        major = major_sides(ws)
+        if any("ford" in ws.river_sides[s].tags for s in major):
             out.append(LegendRow("ford", "Ford"))
         if "bridge" in tagged:
             out.append(LegendRow("bridge", "Bridge"))

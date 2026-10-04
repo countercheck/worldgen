@@ -386,7 +386,10 @@ export function crossingMarks(world: World): CrossingMark[] {
   const bearing = sideBearings(world);
   const out: CrossingMark[] = [];
   for (const [id, rs] of world.riverSides) {
-    const kind = rs.tags.has(TAG_BRIDGE) ? 'bridge' : rs.tags.has(TAG_FORD) ? 'ford' : null;
+    // A minor river is waded almost anywhere, so a ford on one marks nothing worth a
+    // symbol; only a major river's fords are. As `legend.crossings` in the Python.
+    const ford = rs.tags.has(TAG_FORD) && riverClass(rs, world) === 'major';
+    const kind = rs.tags.has(TAG_BRIDGE) ? 'bridge' : ford ? 'ford' : null;
     if (kind === null) continue;
     out.push({
       at: sideMiddle(rs.side),
