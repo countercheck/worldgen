@@ -241,9 +241,9 @@ save(
 | `padding` | `20` | border padding in pixels |
 | `legend_corner` | `"top-right"` | `"top-right"`, `"bottom-left"` |
 | `legend_scale` | `1.0` | legend size as a multiple of `hex_size` |
-| `river_min_width` | `0.5` (PNG `1.0`) | width of the thinnest headwater, at the reference 12px hex |
+| `river_min_width` | `0.5` (PNG `1.0`) | width of the thinnest stream near its source, at the reference 12px hex |
 | `river_max_width` | `4.0` | width at full flow, at the reference 12px hex |
-| `river_width_steps` | `0` | `0` scales continuously with each hex's flow; a positive value quantises into that many discrete widths |
+| `river_width_steps` | `0` | `0` scales continuously with each river side's flow; a positive value quantises into that many discrete widths |
 | `river_width_exponent` | `0.5` | curve applied to flow before it is mapped onto the width range; `1.0` is linear |
 
 `style` is a shortcut that sets `color_mode` and `layers` together: `"topographic"` forces elevation coloring with terrain + rivers + grid; `"wargame"` forces terrain coloring with roads + rivers + settlements + grid + anchorages + crossings — a wargame map is read while moving units, so the features that gate movement matter as much as the roads. Both include the legend. For `"topographic"` and `"wargame"`, the `color_mode` and `layers` values are fixed by the style and any explicitly provided values are ignored. Only `"atlas"` (the default) uses the `color_mode` and `layers` you provide.
@@ -285,8 +285,8 @@ cannot disagree, and falling to zero at `food_drowned_precip_mm`. Land cover alr
 
 On top of the catchment sit four flat site bonuses — river adjacency, coastal access, a
 hill overlooking a plain, and a river confluence. These are binary within each term: a hex
-with one river neighbour scores the same as one ringed by six, and adjacency is radius 1
-only. All nine values live in `WorldConfig`.
+with a river along one side scores the same as one with a river along three, and coastal
+adjacency is radius 1 only. All nine values live in `WorldConfig`.
 
 ### Roads and anchorages
 
@@ -300,43 +300,38 @@ crossing with an anchor symbol, so a route that continues by boat reads as one.
 
 ### Roads and rivers
 
-Roads follow river valleys along the **bank**, never down the channel. A road drawn on
-the river would hide which side of it the road — and anything standing on that hex — is
-on, which matters as soon as you are moving units around the map. Three things enforce
-it: the hexsides a river is drawn along are excluded from pathfinding outright, a node
-cost (`road_river_hex_cost`) prices out threading a meander or a braid where no drawn
-hexside exists to exclude, and the bank discount (`road_bank_discount`) gives routes a
-reason to hug the valley from beside it.
+Rivers run along the **hexsides** between hexes, not through them, so a road beside a
+river is simply on one bank. Which side of the water the road — and anything standing on
+it — is on is always readable, which matters as soon as you are moving units around the
+map, and nothing has to keep roads off the channel. Roads still follow river valleys,
+because a valley floor is low, level ground that leads somewhere; the cost model rewards
+that without being told about rivers.
 
-Crossing a river stays legal and stays expensive, scaled by flow — a big river costs
-roughly a 30-hex detour to cross, a headwater stream far less. Every crossing is tagged
-`"ford"`, upgraded to `"bridge"` where a second road crosses the same hex, and the
-`"crossings"` layer draws both: a bridge as a twin span with abutments, a ford as the
-same span broken, each laid square across the current.
+Crossing a river is one step across a river side, charged once: `road_river_crossing_base`
+for the crossing itself plus `road_river_crossing_flow` scaled by the river's flow, so a
+big river costs a long detour to cross and a small stream far less. What the water is
+decides what is built there, not how busy the road is: a road over water too big to wade
+gets a **bridge** whatever its tier, a road over wadeable water uses the **ford** (a
+primary road gets a bridge anyway), and every bridge on a finished map carries a road.
+The `"crossings"` layer draws them at the side's midpoint, laid square across the
+current: a bridge as a twin span with abutments, a ford as the same span broken. Bridges
+are always drawn; fords only on major rivers, since a minor river can be waded almost
+anywhere and a ford on it marks nothing a reader needs.
 
-Settlement hexes are exempt from the exclusion, but only far enough to be *reached* — the
-hexside opens when the town's counterpart is dry land, never when it is another river
-hex. A town on the water must be reachable; it is not a licence to carry on down the
-channel a hex at a time.
-
-Where a river mesh seals a city off completely — a delta island, a braided confluence —
-there is no bank route out, so the network is joined by a **ferry** instead of a road in
-the channel. A ferry is a real link (it counts for connectivity) drawn as a pair of
-anchorages, the same symbol used for sea legs. If the gap is wider than
-`road_ferry_max_hop`, no plausible ferry exists and generation raises `RoutingError`
-rather than quietly producing a compromised map — so a seed that fails is worth
-reporting.
+The old per-hex charge (`road_river_hex_cost`) and the river ferries that joined land a
+delta or braid had sealed off (`road_ferry_max_hop`) are retired: no land is cut off by a
+river along a hexside.
 
 ### River widths
 
 Rivers are drawn at several discrete widths so flow is readable at a glance and two
-rivers can be ranked against each other. Width comes from each hex's own `river_flow`,
+rivers can be ranked against each other. Width comes from each river side's own `flow`,
 not from the river's total, so a river visibly **grows downstream** rather than being
 drawn end-to-end at the volume measured at its mouth.
 
 Flow is not mapped onto width linearly. `river_flow` is drainage accumulation over the
 basin maximum, and accumulation is roughly power-law distributed — on a typical map the
-median river hex sits near `0.02` and the 90th percentile near `0.13`. Mapped straight
+median river stretch sits near `0.02` and the 90th percentile near `0.13`. Mapped straight
 onto the width range that spends the whole range on the last few hexes of the single
 largest trunk and draws the other nine tenths of the network as one indistinguishable
 hairline. `river_width_exponent` (default `0.5`, the square root — also what hydraulic
@@ -344,11 +339,11 @@ geometry gives for channel width against discharge) shapes the curve; `1.0` rest
 raw linear mapping and lower values widen small streams further.
 
 By default (`river_width_steps=0`) width then tracks that curve continuously, so a river
-tapers smoothly from headwater to mouth. That costs roughly one polyline per hex.
+tapers smoothly from headwater to mouth. That costs roughly one polyline per river side.
 
 Set a positive `river_width_steps` to quantise into that many discrete widths instead.
 Neighbouring segments sharing a width merge into one polyline, so a river costs a handful
-of elements rather than one per hex, and the result has the stepped look of a stream-order
+of elements rather than one per side, and the result has the stepped look of a stream-order
 map. Banding buckets the curved flow, so it spreads across the bands rather than piling
 into the thinnest one. `river_width_steps=1` draws every river uniformly at
 `river_max_width`.
@@ -423,15 +418,17 @@ degrees Celsius, millimetres of rain a year — so a value means the same thing 
 worldgen/
 ├── core/           # data types and pipeline only — no rendering, no file I/O
 │   ├── hex.py          # Hex dataclass, enums (TerrainClass, Biome, LandCover, ...)
-│   ├── world_state.py  # WorldState, River, Settlement, Road
-│   ├── hex_grid.py     # axial math, neighbors, A*, ring/range queries
+│   ├── world_state.py  # WorldState, River, RiverSide, Road (schema 2.0)
+│   ├── hex_grid.py     # axial math, corners and sides, neighbors, A*, ring/range queries
 │   ├── pipeline.py     # GeneratorPipeline, GeneratorStage base class
 │   └── config.py       # WorldConfig — all tunable parameters
 ├── stages/         # pure transformers: stage.run(WorldState) -> WorldState
 │   ├── elevation.py         # fractal Brownian motion + domain warping
 │   ├── erosion.py           # particle-based hydraulic erosion
 │   ├── terrain_class.py     # ocean / coast / flat / hill / mountain
-│   ├── hydrology.py         # Priority-Flood, flow accumulation, river extraction
+│   ├── hydrology.py         # lakes on hexes, then rivers along hexsides
+│   ├── corner_drainage.py   # the corner graph rivers drain on (shared with erosion)
+│   ├── riverside.py         # what the river sides mean to every later stage
 │   ├── climate.py           # temperature gradient, orographic moisture
 │   ├── biomes.py            # Whittaker-style temp × moisture → biome
 │   ├── land_cover.py        # land cover classification

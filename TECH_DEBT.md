@@ -40,7 +40,7 @@ building those features, not from a fresh audit.
 | 25 | Portage towns at cataracts stay small | Model | **10** | L | new 2026-09-27 |
 | 8a | `ImageElevationStage` imports a reader from `export/` | Architecture | **8** | S | unchanged |
 | 14 | Bare `dict`/`list` type annotations throughout stages | Code | **8** | S | 58 occurrences |
-| 15 | Rivers stay a list of paths while roads became a graph | Architecture | — | — | **do not "fix"** — see entry |
+| 15 | Rivers stay a list of paths while roads became a graph | Architecture | — | — | **do not "fix"** — premise changed by the hexside rework; see entry |
 
 ---
 
@@ -143,38 +143,29 @@ level so new occurrences are caught rather than counted later.
 ### 15 — Rivers stay a list of paths while roads became a graph
 **Category:** Architecture | **Priority: —** | **Effort: —** | *not a task*
 
-**Re-verified 2026-09-05:** `WorldState.rivers` is still `list[River]` and everything
-below still holds. This entry is a *do not fix* note, not a task — leave it in place.
+**Re-verified 2026-10-04, after the hexside rework (PRs #91–#106).** This entry used to
+say: leave rivers as a list of paths until they gain per-segment attributes the way roads
+did — "navigability by tonnage, a ford's difficulty, a named reach" — at which point an
+edge map earns its place. That has now happened, and the rework took both halves rather
+than choosing:
 
-`WorldState.road_edges` is now `{edge: RoadEdge}` — one tier and one delta elevation per
-undirected edge. `WorldState.rivers` is still `list[River]`, each a whole path with a
-`flow_volume`. The asymmetry is deliberate and this entry exists so nobody "fixes" it by
-mistake, but two things in it are worth revisiting.
+- `WorldState.rivers` is still `list[River]`, each a path — now of **corners**, upstream
+  to downstream — with a `flow_volume` and a `name`. A river is genuinely a path (source,
+  mouth, direction, a name), and a tributary still ends on its trunk's corner, so no
+  stretch is stored twice.
+- What is true of a stretch of river lives in `WorldState.river_sides`, an edge map keyed
+  by hexside: catchment, flow rank, drop, and the `ford` / `bridge` / `cataract` /
+  `rapids` tags. What is true of a point lives in `river_corners`.
 
-**Why rivers were left alone.** The redundancy that made the road conversion worth doing
-is not there. Measured at 128×128: 98 rivers, 970 hex entries over 872 distinct edges —
-**1.11 entries per edge, against 89 for roads before the change** — and *no* edge shared
-between two rivers, because a tributary terminates at its confluence rather than
-continuing down the trunk. A drainage network is a tree; road journeys shared trunks
-almost entirely. A river is also genuinely a path — source, mouth, direction, one day a
-name — where a `Road` was only a journey someone happened to make.
+So the asymmetry with roads this entry defended is gone, and so are the two things it
+flagged. The `"river"` hex tag and `river_edges()` no longer exist, so the tag-versus-path
+check has nothing to compare. `Hex.river_flow` survives, but only as a copy of the side
+flow written onto both banks for the viewer and erosion; nothing that decides anything
+reads it. `River.flow_volume` is still a second figure beside `RiverSide.flow`, taken at
+the course's last side.
 
-**The actual debt is two representations of flow.** `River.flow_volume` sits alongside
-`Hex.river_flow`, at different granularities, with nothing keeping them in step. The
-stages all read the per-hex value; `flow_volume` is written by hydrology and read by the
-renderers only. They have not drifted, and there is no test that would notice if they did.
-
-**And one asymmetry that has been checked and is fine.** `river_edges()` derives the
-hexsides a road may not travel from the *paths*, while `is_river()` and every road cost
-term read the `"river"` *tag*. If those disagreed a road could be blocked from a hexside
-whose hexes it does not consider river at all. Measured: 46 hexes sit on a river path
-untagged, and every one is the discharge — 33 LAKE, 13 OCEAN. No hex carries the tag
-without being on a path. The two agree exactly on land.
-
-**Do this if** rivers gain per-segment attributes the way roads did (navigability by
-tonnage, a ford's difficulty, a named reach), at which point an edge map earns its place.
-Until then the path form carries information the graph would lose.
-
+**Do not** fold `River.corners` into `river_sides`: the path carries order and identity
+the edge map would lose.
 
 ### 16 — Moisture smear blends the ocean's carrier value into coastal rainfall
 **Category:** Model | **Priority: 12** | **Effort: M**
@@ -500,7 +491,7 @@ the TypeScript copy automatically once the new glyph is listed there.
 
 **Score:** Impact 3 · Risk 2 · Effort 4 → **10**
 
-`CataractStage` makes a barge-sized river hex falling 20 m/km or more unnavigable, and a
+`CataractStage` makes a barge-sized river side falling 20 m/km or more unnavigable, and a
 portage round it is two river landings (`haulage_river_transship_cost`, 1.0). Trade through
 portages rose 2-6x when river landings got cheaper, but the portage towns themselves stay
 in the hundreds to low thousands. The cause is structural: provisioning flows are short

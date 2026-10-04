@@ -99,8 +99,11 @@ For hosting it somewhere rather than running it at home, see `deploy/README.md`.
 ## Setting a campaign up
 
 1. **Generate a world.** Use `--model organic`: the crossing stage only runs in that
-   model, so a `classic` world has no bridge or ford tags and every major river becomes
-   impassable.
+   model, so a `classic` world has none of its fords, and a major river there can be
+   crossed only where a road does. The world must be schema 2.0, with rivers along
+   hexsides: an older `world.json` is refused, and a campaign stored on one answers
+   `410 Gone` with a message to start again on a regenerated map, since a campaign cannot
+   move to a new world.
 
    ```bash
    python3 -m worldgen.cli generate --seed 42 --width 64 --height 64 \
@@ -158,10 +161,28 @@ Going — with no gradient term and no movement points. A road edge decides the 
 recon zone is measured from all of them, and its tail takes `columnLength / speed` hours to
 close up. This is where most of the interesting behaviour comes from.
 
-**Rivers are two-tier.** Major means navigable, using the same discharge threshold the
-generator used to decide what to ship grain down; crossing needs a bridge, or pontooneers.
-Minor is fordable at an hour per division. Delay is charged per division, so a corps queues
-at a bridge.
+**Rivers run along hexsides, and are two-tier.** A crossing is a step from one hex to the
+next across a river side (`riverSideBetween`); a march along a bank crosses nothing. Major
+means navigable — discharge, catchment × the world's `runoffMm`, at or over the same
+threshold the generator used to decide what to ship grain down. Delay is charged per
+division, so a corps queues at a bridge.
+
+| | Major river | Minor river |
+|---|---|---|
+| Bridge, or a road across | 1 h | free |
+| Ford | 1 h — rare: the generator keeps only the slackest reaches | 1 h, wading anywhere |
+| Otherwise | blocked (`major_river_unbridged`) unless pontooneers | — |
+| Rapids or a cataract | — | blocked (`white_water_unbridged`) unless pontooneers |
+
+Both blocks are soft: a referee modelling a hard frost or a boat bridge the map does not
+know about can let a unit across. A road across a river counts as a bridge — if the
+generator ran a road over the water, it built whatever the road needed to get across.
+
+A **courier** is one rider, who fords where a column cannot: a bridge or a road across is
+free, a ford or a minor river costs `fordHours`, and a major river without a ford or white
+water costs `courierMajorCrossingHours` rather than being impassable.
+
+Under terrain fog, a river side is known if either hex beside it is known.
 
 **Reconnaissance** is one hex from the column, two with Scout. No line of sight, no
 occlusion — a ridge hides nothing. The rules ask for terrain to mute the sound of guns and

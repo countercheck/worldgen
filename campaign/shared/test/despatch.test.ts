@@ -29,7 +29,7 @@ import { DEFAULT_CONFIG } from '../src/config.js';
 import { EMPTY_STATE, type CampaignState } from '../src/state.js';
 import { key, sideBetween, sideId, type Hex, type HexKey } from '../src/hex.js';
 import { reportOf, type Unit } from '../src/unit.js';
-import type { World, WorldHex } from '../src/world.js';
+import { edgeKey, type World, type WorldHex } from '../src/world.js';
 
 const cfg = DEFAULT_CONFIG;
 
@@ -404,6 +404,39 @@ describe('a rider at a river', () => {
 
   it('wades a minor river at a ford’s hour', () => {
     expect(extra(minorRiver([]))).toBeCloseTo(DEFAULT_CONFIG.fordHours);
+  });
+
+  // Ported from #90, which pinned these before rivers moved onto hexsides.
+  const majorRiver = (tags: string[] = []): World => {
+    const side = sideBetween(from, to);
+    const riverSides = new Map([
+      [sideId(side), { side, catchmentKm2: 1000, flow: 0.5, dropM: 0, tags: new Set(tags) }],
+    ]);
+    return { ...world, riverSides };
+  };
+
+  it('gets over a major river, at a cost, where a division could not', () => {
+    expect(extra(majorRiver())).toBeCloseTo(DEFAULT_CONFIG.courierMajorCrossingHours);
+  });
+
+  it('crosses free at a bridge', () => {
+    expect(extra(majorRiver(['bridge']))).toBeCloseTo(0);
+  });
+
+  it('treats a road across the river as a bridge', () => {
+    const w = majorRiver();
+    const roadEdges = new Map(w.roadEdges);
+    roadEdges.set(edgeKey(from, to), { a: from, b: to, tier: 'track', deltaElevationM: 0 });
+    expect(extra({ ...w, roadEdges })).toBeLessThan(0.0001);
+  });
+
+  it('pays nothing riding along a river rather than across it', () => {
+    // A river along the side between `from` and `to`; a ride from `from` to (2, 3) does
+    // not cross it.
+    const along = { q: 2, r: 3 };
+    expect(courierStepHours(majorRiver(), DEFAULT_CONFIG, from, along)).toBeCloseTo(
+      courierStepHours(world, DEFAULT_CONFIG, from, along),
+    );
   });
 
   it('fords a major river at a ford’s hour', () => {

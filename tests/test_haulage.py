@@ -348,6 +348,45 @@ def test_walking_across_a_river_is_charged_once_on_its_side():
     assert ford_cost(a, b, river_index(ws, cfg)) == cfg.crossing_use_cost
 
 
+@pytest.mark.parametrize("tag", ["ford", "bridge"])
+def test_a_crossing_costs_its_use_whichever_kind_it_is(tag):
+    """Ported from #90, which pinned this before rivers moved onto hexsides."""
+    from tests.worlds import river_to_sea
+    from worldgen.core.hex_grid import side_hexes
+    from worldgen.stages.haulage import ford_cost
+    from worldgen.stages.riverside import river_index
+
+    cfg = WorldConfig()
+    ws, river = river_to_sea(catchment_km2=cfg.ford_max_catchment_km2 * 4)
+    side = river.sides()[1]
+    ws.river_sides[side].tags.add(tag)
+    a, b = (ws.hexes[h] for h in side_hexes(side))
+    rivers = river_index(ws, cfg)
+    assert ford_cost(a, b, rivers) == ford_cost(b, a, rivers) == cfg.crossing_use_cost
+
+
+def test_wading_where_there_is_no_crossing_costs_more_the_bigger_the_river():
+    """Ported from #90: the cost of getting across is the river's span, times the toll."""
+    from tests.worlds import river_to_sea
+    from worldgen.core.hex_grid import side_hexes
+    from worldgen.stages.haulage import ford_cost
+    from worldgen.stages.riverside import river_index, side_gradients, side_span
+
+    cfg = WorldConfig()
+
+    def across(catchment_km2):
+        ws, river = river_to_sea(catchment_km2=catchment_km2)
+        side = river.sides()[1]
+        a, b = (ws.hexes[h] for h in side_hexes(side))
+        span = side_span(ws.river_sides[side].catchment_km2, side_gradients(ws).get(side, 0.0), cfg)
+        return ford_cost(a, b, river_index(ws, cfg)), span
+
+    big, big_span = across(cfg.ford_max_catchment_km2 * 8)
+    small, _ = across(cfg.ford_max_catchment_km2 * 2)
+    assert big == pytest.approx(cfg.travel_ford_cost * big_span)
+    assert 0.0 < small < big
+
+
 def test_a_cataract_cuts_the_river_into_two_reaches_with_a_portage_between():
     from tests.worlds import river_to_sea
     from worldgen.core.hex_grid import side_hexes

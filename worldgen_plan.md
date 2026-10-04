@@ -291,6 +291,12 @@ Gradient = average elevation difference from 6 neighbors.
 
 ## Phase 2 — Hydrology
 
+> **Note (2026-10):** this phase is kept as originally planned. Rivers have since moved
+> off the hexes and onto the hexsides between them: a river is a chain of corners, and its
+> fords, bridges and cataracts are tags on the sides it runs along, not on hexes. See
+> `docs/REFERENCE.md` § 3.5 and `docs/ARCHITECTURE.md` ("River model") for the current
+> model.
+
 **Goal:** Plausible river network flows from mountains to sea. Lakes form naturally. Confluences are tagged.
 
 ### Task 2.1 — `stages/hydrology.py`
