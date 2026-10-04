@@ -633,14 +633,10 @@ road_embark_cost: 20.0    # Overridden: raised so routes take to the water only 
 road_disembark_cost: 20.0 # Overridden to match. Default: 8.0
 
 # ---------------------------------------------------------------------------
-# Roads: river crossings (charged on each land↔river edge, scales with flow)
+# Roads: river crossings (charged once per step across a river side, scales with flow)
 # ---------------------------------------------------------------------------
-# A perpendicular crossing of a 1-hex-wide river is charged twice
-# (entering and leaving), so total ≈ 2 × (base + flow × max_river_flow).
-road_river_crossing_base: 4.0  # Base cost added on each land↔river edge. Default: 4.0
-road_river_crossing_flow: 12.0 # Additional cost × max(river_flow); biggest river adds the full amount. Default: 12.0
-road_river_hex_cost: 16.0      # Cost of standing a road *on* a river hex. Prices out threading a meander or braid, while leaving a genuine crossing affordable. Raised from 12 with road_delta_elevation_per_hex: pricing the climb made the valley floor more attractive, and roads began taking the channel as often as it occurs rather than declining it. Default: 16.0
-road_ferry_max_hop: 4          # Longest boat hop used to join a component a river mesh cuts off. Beyond this, routing raises RoutingError. Default: 4
+road_river_crossing_base: 8.0  # Fixed cost of crossing a river. Default: 8.0
+road_river_crossing_flow: 24.0 # Additional cost × the river's flow; the biggest river adds the full amount. Default: 24.0
 
 # Slope-based cost: grade % = (elevation_delta_m / hex_size_m) * 100
 road_delta_elevation_per_hex: 25.0 # Metres of elevation change costing as much as one hex of level going — the switchback, priced. At 1 hex = 1 km a road climbing 200 m is not a straight ramp but several km of zigzag folded inside that hex, and this is the exchange rate that says so. Anchored on travel_ascent_per_hex (125, Naismith for a walker) divided by about five, a laden cart being far more gradient-sensitive than a man on foot. Symmetric in up and down: a road is cut-and-fill, and a steep descent needs braking. Default: 25.0

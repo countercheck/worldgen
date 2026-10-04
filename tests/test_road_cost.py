@@ -9,20 +9,17 @@ import pytest
 
 from tests.worlds import lay_river
 from worldgen.core.config import WorldConfig
-from worldgen.core.errors import RoutingError
 from worldgen.core.hex import Hex, TerrainClass
-from worldgen.core.hex_grid import astar, distance
+from worldgen.core.hex_grid import astar, side_hexes
 from worldgen.core.world_state import RoadTier, WorldState, road_edge_key
 from worldgen.stages.road_cost import (
-    ferry_link,
     fill_tier_gaps,
     make_road_edge_cost,
-    reachable_under_constraint,
     river_crossing_edge_cost,
-    river_edges,
-    river_hex_cost,
+    river_crossings,
     road_edge_cost,
     slope_edge_cost,
+    tag_river_crossings,
     terrain_base_cost,
     tier_near,
     water_edge_cost,
@@ -41,15 +38,9 @@ def _lake(coord):
     return Hex(coord=coord, elevation=0.0, terrain_class=TerrainClass.INLAND_WATER)
 
 
-def _river_flat(coord, flow=1.0):
-    h = _flat(coord)
-    h.river_flow = flow
-    # HydrologyStage sets both on every channel hex, and the road costs identify a river
-    # by the tag — flow alone is written on all draining land when river_flow_continuous
-    # is on, so it cannot be the identity. A fixture setting only the flow would be
-    # describing a hex that production never produces.
-    h.tags.add("river")
-    return h
+def _between(a, b, flow):
+    """A crossings map with one river running between hexes *a* and *b*."""
+    return {frozenset((a, b)): flow}
 
 
 # ---------- terrain_base_cost ----------------------------------------------
@@ -118,31 +109,37 @@ def test_water_edge_cost_lake_treated_as_water():
 # ---------- river_crossing_edge_cost ---------------------------------------
 
 
-def test_river_crossing_zero_when_no_transition():
+def test_river_crossing_zero_where_no_river_runs_between():
     cfg = WorldConfig()
-    # Two land hexes, no rivers
     assert river_crossing_edge_cost(_flat((0, 0)), _flat((1, 0)), cfg) == 0.0
-    # Two river hexes — travelling along, not across
-    assert river_crossing_edge_cost(_river_flat((0, 0)), _river_flat((1, 0)), cfg) == 0.0
+    crossings = _between((0, 0), (1, 0), 0.5)
+    # A river elsewhere, even beside one of the hexes, is not crossed by this step.
+    assert river_crossing_edge_cost(_flat((0, 0)), _flat((0, 1)), cfg, crossings) == 0.0
 
 
 def test_river_crossing_scales_monotonically_with_flow():
     cfg = WorldConfig()
-    small = river_crossing_edge_cost(_flat((0, 0)), _river_flat((1, 0), flow=0.1), cfg)
-    big = river_crossing_edge_cost(_flat((0, 0)), _river_flat((1, 0), flow=1.0), cfg)
-    assert big > small
-    # base + 0.1 * flow_factor vs base + 1.0 * flow_factor
+    a, b = _flat((0, 0)), _flat((1, 0))
+    small = river_crossing_edge_cost(a, b, cfg, _between((0, 0), (1, 0), 0.1))
+    big = river_crossing_edge_cost(a, b, cfg, _between((0, 0), (1, 0), 1.0))
     assert big - small == pytest.approx(0.9 * cfg.road_river_crossing_flow)
 
 
-def test_river_crossing_uses_max_of_two_flows():
+def test_river_crossing_is_charged_once_whichever_way():
     cfg = WorldConfig()
-    # land → river: max is the river hex's flow
-    a = river_crossing_edge_cost(_flat((0, 0)), _river_flat((1, 0), flow=0.7), cfg)
-    # river → land: same edge, reversed; should be identical
-    b = river_crossing_edge_cost(_river_flat((1, 0), flow=0.7), _flat((0, 0)), cfg)
-    assert a == b
-    assert a == pytest.approx(cfg.road_river_crossing_base + 0.7 * cfg.road_river_crossing_flow)
+    crossings = _between((0, 0), (1, 0), 0.7)
+    there = river_crossing_edge_cost(_flat((0, 0)), _flat((1, 0)), cfg, crossings)
+    back = river_crossing_edge_cost(_flat((1, 0)), _flat((0, 0)), cfg, crossings)
+    assert there == back
+    assert there == pytest.approx(cfg.road_river_crossing_base + 0.7 * cfg.road_river_crossing_flow)
+
+
+def test_river_crossings_reads_the_world_river_sides():
+    ws = WorldState.empty(seed=1, width=4, height=4)
+    river = lay_river(ws, [(1, 1), (2, 1), (2, 2)], flow_volume=0.4)
+    crossings = river_crossings(ws.river_sides)
+    assert len(crossings) == len(river.sides())
+    assert all(v == pytest.approx(0.4) for v in crossings.values())
 
 
 # ---------- road_edge_cost (composition) -----------------------------------
@@ -150,9 +147,12 @@ def test_river_crossing_uses_max_of_two_flows():
 
 def test_road_edge_cost_symmetric():
     cfg = WorldConfig()
-    a = _flat((0, 0))
-    b = _river_flat((1, 0), flow=0.6)
-    assert road_edge_cost(a, b, cfg) == road_edge_cost(b, a, cfg)
+    a, b = _flat((0, 0)), _flat((1, 0))
+    b.elevation = 30.0
+    crossings = _between((0, 0), (1, 0), 0.6)
+    assert road_edge_cost(a, b, cfg, crossings=crossings) == road_edge_cost(
+        b, a, cfg, crossings=crossings
+    )
 
 
 def test_road_edge_cost_zero_for_identical_flat_hexes():
@@ -162,22 +162,15 @@ def test_road_edge_cost_zero_for_identical_flat_hexes():
     assert road_edge_cost(a, b, cfg) == 0.0
 
 
-def test_road_edge_cost_combines_water_and_river():
-    """An edge that both crosses a shoreline AND a river edge accumulates both costs."""
+def test_road_edge_cost_adds_the_crossing_to_the_climb():
     cfg = WorldConfig()
-    # Match elevations to neutralise slope_edge_cost; isolate water + river contributions.
-    # The river is the last *land* hex of its course, with the sea beyond it: hydrology
-    # never puts flow or a river tag on a water hex, so a river mouth is this shape, not
-    # an ocean hex carrying flow.  Stepping from it to the sea both embarks and leaves
-    # the channel, which is the combination under test.
-    river_mouth = _river_flat((0, 0), flow=0.5)
-    river_mouth.elevation = 0.5
-    sea = Hex(coord=(1, 0), elevation=0.5, terrain_class=TerrainClass.OPEN_WATER)
-    cost = road_edge_cost(river_mouth, sea, cfg)
-    expected = (
-        cfg.road_embark_cost + cfg.road_river_crossing_base + 0.5 * cfg.road_river_crossing_flow
+    a, b = _flat((0, 0)), _flat((1, 0))
+    b.elevation = 30.0
+    crossings = _between((0, 0), (1, 0), 0.5)
+    climb = road_edge_cost(a, b, cfg)
+    assert road_edge_cost(a, b, cfg, crossings=crossings) == pytest.approx(
+        climb + cfg.road_river_crossing_base + 0.5 * cfg.road_river_crossing_flow
     )
-    assert cost == pytest.approx(expected)
 
 
 # ---------- A* integration on synthetic grids ------------------------------
@@ -238,296 +231,76 @@ def test_astar_avoids_water_when_short_land_detour_available():
     assert not has_water, f"Short land detour should beat a 1-hex water hop, got {path}"
 
 
+def _river_between_rows(width, flow_of):
+    """A river along every side between rows r=1 and r=2, its flow set by column."""
+    crossings = {}
+    for q in range(width):
+        for below in ((q, 2), (q - 1, 2)):
+            if 0 <= below[0] < width:
+                crossings[frozenset(((q, 1), below))] = flow_of(q)
+    return crossings
+
+
+def _crossed(path, crossings):
+    return [
+        crossings[frozenset(e)]
+        for e in zip(path, path[1:], strict=False)
+        if frozenset(e) in crossings
+    ]
+
+
 def test_astar_prefers_low_flow_river_for_crossing():
-    """A single river barrier spans the full grid at row r=2, but the left half
-    (q < 3) is a high-flow trunk and the right half (q >= 3) is a low-flow stream.
-    A path from (0, 0) to (0, 4) must cross r=2 somewhere; A* should detour right
-    to use the cheaper stream crossing rather than the direct but costly trunk crossing."""
+    """A river runs the width of the grid between rows 1 and 2: a high-flow trunk on the
+    left (q < 3) and a low-flow stream on the right.  A path from (0, 0) to (0, 4) must
+    cross it somewhere, and should detour right to the cheap stream crossing."""
     cfg = WorldConfig()
-
-    def factory(q, r):
-        if r == 2:
-            flow = 1.0 if q < 3 else 0.1
-            return _river_flat((q, r), flow=flow)
-        return _flat((q, r))
-
-    hexes = _build_grid(7, 5, factory)
-
-    def node_cost(hx):
-        return terrain_base_cost(hx, cfg)
-
-    def edge_cost(a, b):
-        return road_edge_cost(a, b, cfg)
-
-    # Path from (0, 0) to (0, 4) must cross r=2; the crossing column is the choice.
-    # Direct crossing at q=0 (trunk, flow=1.0): 2 × (4 + 12×1.0) = 32 in edge cost
-    #   plus 4 nodes × 1.0 = 36 total.
-    # Detour to q=3 (stream, flow=0.1): 2 × (4 + 12×0.1) = 10.4, plus 10 nodes = 20.4.
-    path = astar(hexes, (0, 0), (0, 4), node_cost, edge_cost)
-    assert path is not None
-
-    # Find the column(s) where the path crosses the river row.
-    crossing_cols = [c[0] for c in path if c[1] == 2]
-    assert crossing_cols, "Path must cross river row r=2"
-    assert all(q >= 3 for q in crossing_cols), (
-        f"A* should detour to the low-flow stream half (q>=3), but crossed at q={crossing_cols}"
-    )
-
-
-def _course(path, flow):
-    """A river course round the hexes of *path* (see `tests.worlds.lay_river`)."""
-    return lay_river(WorldState.empty(seed=1, width=1, height=1), path, flow_volume=flow)
-
-
-def _valley_grid(cfg, flow=0.8):
-    """An 8x3 grid with a river running the length of row r=1, plus its edge set."""
-
-    def factory(q, r):
-        if r == 1:
-            return _river_flat((q, r), flow=flow)
-        return _flat((q, r))
-
-    hexes = _build_grid(8, 3, factory)
-    river = _course([(q, 1) for q in range(8)], flow)
-    return hexes, river_edges([river], hexes)
-
-
-def test_astar_follows_the_bank_not_the_channel():
-    """The valley pulls routes in, but along the bank rather than down the river.
-
-    It used to be `bank_discount` that did the pulling. That is deleted, and this is the
-    test that says the behaviour did not go with it: the valley is low, level ground that
-    leads somewhere, which the cost model already rewards without being told about rivers.
-    What keeps a road off the water is `river_hex_cost` and the channel hexsides excluded
-    outright by `make_road_edge_cost` — so which side of a river a road runs on, and
-    anything standing on it, stays readable.
-    """
-    cfg = WorldConfig()
-    hexes, blocked = _valley_grid(cfg)
-
-    def node_cost(hx):
-        return terrain_base_cost(hx, cfg) + river_hex_cost(hx, cfg)
-
-    edge_cost = make_road_edge_cost(cfg, blocked)
-
-    path = astar(hexes, (0, 0), (7, 0), node_cost, edge_cost)
-    assert path is not None
-    # No leg of the route may run along the river's own hexsides.
-    used = {frozenset((a, b)) for a, b in zip(path, path[1:], strict=False)}
-    assert not (used & blocked), "route travelled down the river channel"
-    # And it should stay in the valley rather than wandering off the far row.
-    assert all(c[1] in (0, 1) for c in path), f"route left the valley: {path}"
-
-
-def test_astar_may_still_cross_the_river():
-    """Crossing is untouched — only travelling *along* the channel is forbidden."""
-    cfg = WorldConfig()
-    hexes, blocked = _valley_grid(cfg)
-
-    def node_cost(hx):
-        return terrain_base_cost(hx, cfg) + river_hex_cost(hx, cfg)
-
-    path = astar(hexes, (0, 0), (0, 2), node_cost, make_road_edge_cost(cfg, blocked))
-    assert path is not None
-    assert any(c[1] == 1 for c in path), "a crossing must be able to enter the river row"
-    used = {frozenset((a, b)) for a, b in zip(path, path[1:], strict=False)}
-    assert not (used & blocked)
-
-
-def test_channel_hexside_between_two_river_hexes_is_never_exempt():
-    """A town on the water may be reached, not used as a licence to carry on down it.
-
-    Both ends here are river hexes, so exempting the edge would let a road step out of
-    the town and keep going along the channel one hex at a time — exactly what the
-    exclusion exists to stop.
-    """
-    cfg = WorldConfig()
-    hexes, blocked = _valley_grid(cfg)
-    assert frozenset(((3, 1), (4, 1))) in blocked  # really is a channel hexside
-
-    plain = make_road_edge_cost(cfg, blocked)
-    assert plain(hexes[(3, 1)], hexes[(4, 1)]) == float("inf")
-
-    exempt = make_road_edge_cost(cfg, blocked, exempt_coords={(3, 1)})
-    assert exempt(hexes[(3, 1)], hexes[(4, 1)]) == float("inf")
-
-
-# ---------- river_hex_cost -------------------------------------------------
-
-
-def test_river_hex_cost_only_on_river_hexes():
-    cfg = WorldConfig()
-    assert river_hex_cost(_flat((0, 0)), cfg) == 0.0
-    assert river_hex_cost(_river_flat((0, 0), flow=0.5), cfg) == cfg.road_river_hex_cost
-
-
-def test_river_hex_cost_leaves_a_crossing_affordable():
-    """Priced to stop channel travel without stopping a crossing outright."""
-    cfg = WorldConfig()
-    # One river hex crossed once, versus the same hex travelled along for five steps.
-    crossing = cfg.road_river_hex_cost
-    channel_run = 5 * cfg.road_river_hex_cost
-    detour_budget = 5 * cfg.road_flat_cost
-    assert crossing < 2 * (cfg.road_river_crossing_base + cfg.road_river_crossing_flow)
-    assert channel_run > detour_budget
-
-
-# ---------- ferries ---------------------------------------------------------
-
-
-def _cut_grid():
-    """A one-hex-wide corridor whose middle two hexes are a river running lengthwise.
-
-    Crossing a river is always legal, so a river only truly severs the map where the
-    channel *is* the corridor — there is no bank to walk along. Getting from q=0 to q=5
-    means using the drawn hexside between (2, 0) and (3, 0), which roads may not.
-    """
-
-    def factory(q, r):
-        return _river_flat((q, r), flow=0.9) if q in (2, 3) else _flat((q, r))
-
-    hexes = _build_grid(6, 1, factory)
-    river = _course([(2, 0), (3, 0)], 0.9)
-    return hexes, river
-
-
-def test_reachable_under_constraint_stops_at_the_channel():
-    hexes, river = _cut_grid()
-    seen = reachable_under_constraint(hexes, (0, 0), river_edges([river], hexes), frozenset())
-    assert seen == {(0, 0), (1, 0), (2, 0)}, "walk should stop at the channel hexside"
-
-
-def test_reachable_under_constraint_matches_the_tightened_exemption():
-    """A town on the channel does not reopen it — the walk still stops at the hexside.
-
-    The component walk and the edge cost have to agree, or the ferry fallback would be
-    reasoning about a different map than the router.
-    """
-    hexes, river = _cut_grid()
-    blocked = river_edges([river], hexes)
-    assert (3, 0) not in reachable_under_constraint(hexes, (0, 0), blocked, frozenset())
-    assert (3, 0) not in reachable_under_constraint(hexes, (0, 0), blocked, {(2, 0)})
-
-
-def test_ferry_link_picks_the_shortest_hop():
-    cfg = WorldConfig()
-    hexes, river = _cut_grid()
-    blocked = river_edges([river], hexes)
-    near = reachable_under_constraint(hexes, (0, 0), blocked, frozenset())
-    far = set(hexes) - near
-    assert far, "the corridor must actually be severed for this test to mean anything"
-
-    ferry, paths = ferry_link(
+    hexes = _build_grid(7, 5, lambda q, r: _flat((q, r)))
+    crossings = _river_between_rows(7, lambda q: 1.0 if q < 3 else 0.1)
+    path = astar(
         hexes,
         (0, 0),
-        "City Testburg",
-        far,
-        cfg,
-        blocked,
-        frozenset(),
+        (0, 4),
         lambda hx: terrain_base_cost(hx, cfg),
-        make_road_edge_cost(cfg, blocked),
+        make_road_edge_cost(cfg, crossings),
     )
-    assert distance(ferry.a, ferry.b) <= cfg.road_ferry_max_hop
-    assert ferry.a in near and ferry.b in far
-    for p in paths:
-        assert p[0] == (0, 0) and p[-1] == ferry.a
+    assert path is not None
+    assert _crossed(path, crossings) == [pytest.approx(0.1)]
 
 
-def test_ferry_lands_on_dry_land_off_the_channel():
-    """A ferry is drawn as two anchorages, so neither may sit in the channel.
-
-    Both components hold river hexes here — (2, 0) on the near side, (3, 0) on the far —
-    and they are the closest pair of all, so an unfiltered shortest-hop search picks a
-    crossing whose anchors both land mid-river.
-    """
+def test_a_road_beside_a_river_pays_nothing_for_it():
+    """A river along a hexside has no channel to run down: a road on the bank is on land."""
     cfg = WorldConfig()
-    hexes, river = _cut_grid()
-    blocked = river_edges([river], hexes)
-    near = reachable_under_constraint(hexes, (0, 0), blocked, frozenset())
-    far = set(hexes) - near
-    assert (2, 0) in near and (3, 0) in far, "the tempting mid-channel pair must be on offer"
-
-    ferry, _ = ferry_link(
+    hexes = _build_grid(7, 5, lambda q, r: _flat((q, r)))
+    crossings = _river_between_rows(7, lambda q: 1.0)
+    path = astar(
         hexes,
-        (0, 0),
-        "City Testburg",
-        far,
-        cfg,
-        blocked,
-        frozenset(),
+        (0, 1),
+        (6, 1),
         lambda hx: terrain_base_cost(hx, cfg),
-        make_road_edge_cost(cfg, blocked),
+        make_road_edge_cost(cfg, crossings),
     )
-    for landing in (ferry.a, ferry.b):
-        hx = hexes[landing]
-        assert hx.terrain_class not in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
-        assert hx.river_flow <= 0, f"anchorage at {landing} sits in the channel"
+    assert all(c[1] == 1 for c in path), f"the road left the bank: {path}"
+    assert not _crossed(path, crossings)
 
 
-def test_ferry_link_raises_when_every_landing_is_wet():
-    """No shore on one side is a routing failure, not a ferry moored in open water."""
-    cfg = WorldConfig()
-    hexes, river = _cut_grid()
-    blocked = river_edges([river], hexes)
-    for coord in ((4, 0), (5, 0)):
-        hexes[coord].terrain_class = TerrainClass.OPEN_WATER
-    near = reachable_under_constraint(hexes, (0, 0), blocked, frozenset())
-
-    with pytest.raises(RoutingError, match="no dry land off the channel"):
-        ferry_link(
-            hexes,
-            (0, 0),
-            "City Testburg",
-            set(hexes) - near,
-            cfg,
-            blocked,
-            frozenset(),
-            lambda hx: terrain_base_cost(hx, cfg),
-            make_road_edge_cost(cfg, blocked),
-        )
+def test_tag_river_crossings_tags_the_side_by_tier():
+    ws = WorldState.empty(seed=1, width=6, height=6)
+    river = lay_river(ws, [(1, 2), (2, 2), (3, 2), (4, 2)])
+    sides = river.sides()
+    primary, track = (road_edge_key(*side_hexes(s)) for s in sides[:2])
+    tag_river_crossings({primary: RoadTier.PRIMARY, track: RoadTier.TRACK}, ws)
+    assert "bridge" in ws.river_sides[sides[0]].tags
+    assert "ford" in ws.river_sides[sides[1]].tags
+    assert not ws.river_sides[sides[2]].tags
 
 
-def test_ferry_link_raises_when_no_plausible_hop_exists():
-    """Beyond road_ferry_max_hop a ferry is not a plausible reading of the map."""
-    cfg = WorldConfig(road_ferry_max_hop=1)
-    hexes, river = _cut_grid()
-    blocked = river_edges([river], hexes)
-    near = reachable_under_constraint(hexes, (0, 0), blocked, frozenset())
-
-    # The nearest dry landings are (1, 0) and (4, 0), three hexes apart.
-    with pytest.raises(RoutingError, match="no plausible ferry"):
-        ferry_link(
-            hexes,
-            (0, 0),
-            "City Testburg",
-            set(hexes) - near,
-            cfg,
-            blocked,
-            frozenset(),
-            lambda hx: terrain_base_cost(hx, cfg),
-            make_road_edge_cost(cfg, blocked),
-        )
-
-
-def test_ferry_link_raises_when_nothing_lies_outside_the_component():
-    cfg = WorldConfig()
-    hexes, river = _cut_grid()
-    blocked = river_edges([river], hexes)
-    near = reachable_under_constraint(hexes, (0, 0), blocked, frozenset())
-
-    with pytest.raises(RoutingError, match="no hex outside"):
-        ferry_link(
-            hexes,
-            (0, 0),
-            "City Testburg",
-            set(near),
-            cfg,
-            blocked,
-            frozenset(),
-            lambda hx: terrain_base_cost(hx, cfg),
-            make_road_edge_cost(cfg, blocked),
-        )
+def test_tag_river_crossings_never_demotes_a_bridge():
+    ws = WorldState.empty(seed=1, width=6, height=6)
+    river = lay_river(ws, [(1, 2), (2, 2), (3, 2)])
+    side = river.sides()[0]
+    ws.river_sides[side].tags.add("bridge")
+    tag_river_crossings({road_edge_key(*side_hexes(side)): RoadTier.TRACK}, ws)
+    assert ws.river_sides[side].tags == {"bridge"}
 
 
 # -- tier gaps ---------------------------------------------------------------

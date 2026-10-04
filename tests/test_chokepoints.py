@@ -19,9 +19,10 @@ from worldgen.core.hex import (
     SettlementTier,
     SoilQuality,
 )
-from worldgen.core.hex_grid import neighbors
+from worldgen.core.hex_grid import neighbors, side_between
 from worldgen.core.world_state import (
     ROAD_TIER_RANK,
+    RiverSide,
     RoadEdge,
     RoadTier,
     WorldState,
@@ -49,7 +50,10 @@ from worldgen.stages.chokepoints import (
 # reason to cross them. So the village tier is thinner everywhere by design, and a fixture
 # has to be somewhere with enough genuine crossings for the rules to have a subject. The
 # residual surplus is untouched by any of this: 511 before, 520 after.
-_CHOKE_SEED = 1
+#
+# Moved again, from seed 1 to 5, when rivers moved onto hexsides: seed 1's world kept four
+# bridgehead candidates and founded none of them. Seed 5 grows three villages.
+_CHOKE_SEED = 5
 _CHOKE_SIZE = 112
 # Axial, the grid these worlds were chosen on; offset became the default afterwards, and
 # the seeds below are picked for what they grow on this grid.
@@ -218,8 +222,8 @@ def test_a_spur_that_joins_no_settlements_is_not_a_chokepoint():
     for a, b in zip(through, through[1:], strict=False):
         state.road_edges[road_edge_key(a, b)] = RoadEdge(RoadTier.SECONDARY, 0.0)
     state.road_edges[road_edge_key(*spur)] = RoadEdge(RoadTier.SECONDARY, 0.0)
-    for coord in (through[1], spur[0]):
-        state.hexes[coord].tags.add(BRIDGE)
+    for a, b in ((through[0], through[1]), tuple(spur)):
+        state.river_sides[side_between(a, b)] = RiverSide(100.0, 0.5, tags={BRIDGE})
 
     for coord in (through[0], through[2]):
         s = Settlement(
@@ -413,9 +417,9 @@ def test_a_bridge_no_road_crosses_founds_nothing():
     for a, b in zip(road, road[1:], strict=False):
         state.road_edges[road_edge_key(a, b)] = RoadEdge(RoadTier.SECONDARY, 0.0)
 
-    # One bridge the road runs over, and one tagged beside the road that nothing crosses.
-    state.hexes[(2, 1)].tags.add(BRIDGE)  # two road edges: crossed
-    state.hexes[(4, 2)].tags.add(BRIDGE)  # neighbours (4, 1); no road edge at all
+    # One bridge the road runs over, and one beside the road that nothing crosses.
+    state.river_sides[side_between((2, 1), (3, 1))] = RiverSide(100.0, 0.5, tags={BRIDGE})
+    state.river_sides[side_between((4, 2), (4, 3))] = RiverSide(100.0, 0.5, tags={BRIDGE})
 
     for coord in (road[0], road[-1]):
         s = Settlement(
@@ -431,8 +435,8 @@ def test_a_bridge_no_road_crosses_founds_nothing():
     stage = ChokepointStage(cfg, np.random.default_rng(0))
     candidates = stage._candidates(state, cfg)
 
-    assert (2, 1) in candidates, "the bridge the road crosses is the chokepoint"
-    assert (3, 1) in candidates, "the bank beside a crossed bridge is a bridgehead"
+    assert (2, 1) in candidates, "a crossed bridge holds the bank on one side"
+    assert (3, 1) in candidates, "and the bank on the other"
     assert (4, 1) not in candidates, (
         "a road hex beside a bridge nothing crosses was accepted as a bridgehead"
     )

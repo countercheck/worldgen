@@ -6,8 +6,7 @@ from .road_cost import (
     WATER,
     as_road_edges,
     make_road_edge_cost,
-    river_edges,
-    river_hex_cost,
+    river_crossings,
     route_through_settlements,
     tag_river_crossings,
     tag_switchbacks,
@@ -50,9 +49,7 @@ class VillageTrackStage(GeneratorStage):
         }
         targets = road_hex_set | settled_major
 
-        # Roads may cross a river but never travel down the channel, so which bank a
-        # track runs on stays readable. Settlement hexes are exempt.
-        blocked = river_edges(state.rivers, state.hexes)
+        crossings = river_crossings(state.river_sides)
         settled = {s.coord for s in state.settlements}
 
         def node_cost(hx):
@@ -62,9 +59,9 @@ class VillageTrackStage(GeneratorStage):
             # cuts off simply gets no track; `astar` returns nothing and it is skipped.
             if hx.terrain_class in WATER:
                 return float("inf")
-            return terrain_base_cost(hx, cfg) + river_hex_cost(hx, cfg)
+            return terrain_base_cost(hx, cfg)
 
-        edge_cost = make_road_edge_cost(cfg, blocked, settled)
+        edge_cost = make_road_edge_cost(cfg, crossings)
 
         new_edges: dict = {}
 
@@ -103,9 +100,9 @@ class VillageTrackStage(GeneratorStage):
         # Tracks are laid after the trunk network, so they can skirt a village the way
         # trunk roads could skirt a town. Run the same rule again over the finished
         # network — this is the last stage that touches it.
-        route_through_settlements(tiers, hexes, settled, cfg, blocked)
+        route_through_settlements(tiers, hexes, settled, cfg, crossings)
 
-        tag_river_crossings(tiers, hexes)
+        tag_river_crossings(tiers, state)
         tag_switchbacks(tiers, hexes, cfg)
         state.road_edges = as_road_edges(tiers, hexes)
 

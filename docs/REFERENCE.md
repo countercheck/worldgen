@@ -255,15 +255,11 @@ Convenience accessors: `all_land()`, `all_open_water()`, `all_inland_water()`,
 | `"rapids"` | White water on a river too small for a cataract: see `rapids_min_drop_m` | Cataracts |
 | `"hollow"` | Land in a closed hollow too small or shallow for a lake, or a small island in a lake; waterlogs to wetland | Water bodies |
 
-Roads may cross a river but never travel along one: the hexsides a river is drawn
-along are excluded from road pathfinding outright (`make_road_edge_cost`), and
-`road_river_hex_cost` prices out the meander and braid cases the edge rule cannot
-see. Settlement hexes are exempt only far enough to be *reached*: the hexside opens
-when the town's counterpart is dry land, never when it is another river hex, so a
-town on the water cannot be used to carry on down the channel. Where a river mesh
-seals a component off entirely, the network is joined by a `Ferry` (drawn as a pair
-of anchorages) rather than a road in the channel; if the gap is wider than
-`road_ferry_max_hop`, routing raises `RoutingError` instead of degrading quietly.
+Rivers run along hexsides, so a road never stands in one: it runs beside a river on
+one bank, and crosses it by stepping across the side, which costs
+`road_river_crossing_base + road_river_crossing_flow × flow`. The crossings a road
+network makes are tagged on the river side (`"ford"`, or `"bridge"` on a primary road)
+by `tag_river_crossings`.
 
 ---
 
@@ -1688,7 +1684,6 @@ with self-reinforcing pheromone trails.
 `road_gravity_exponent`, `road_pheromone_factor`,
 `road_flat_cost`, `road_water_cost`, `road_embark_cost`, `road_disembark_cost`,
 `road_river_crossing_base`, `road_river_crossing_flow`,
-`road_river_hex_cost`, `road_ferry_max_hop`,
 `road_slope_cost`, `road_slope_free_pct`, `road_slope_cap_pct`,
 `road_slope_cap_mult`, `road_min_traffic`, `road_river_traffic_min`,
 `road_primary_pct`, `road_secondary_pct`, `hex_size_m`.
@@ -1712,11 +1707,9 @@ base_cost = match terrain_class:
 # two hexes; a per-hex surcharge on top billed the same ascent twice, and
 # billed it wrongly wherever the band and the grade disagreed.
 
-river_hex_cost = road_river_hex_cost if on a river else 0
-
 pheromone = road_pheromone_factor * traffic_so_far[hex]
 
-node_cost = max(0, base + river_hex_cost - pheromone)
+node_cost = max(0, base - pheromone)
 ```
 
 Roads follow river valleys — Roman "river roads" — but **nothing pays them to**.
@@ -1730,11 +1723,9 @@ occurs in the dry land. With the discount removed that falls to **2.52×** — n
 the effect survives the term that was supposed to cause it. What the discount bought was
 not worth two config knobs and a paragraph of tuning.
 
-`river_hex_cost` is the term that does earn its place, and it pulls the other way: it
-keeps roads *off* the channel, so which side of a river a road — and anything standing on
-it — is on stays readable. Travelling along the channel is excluded outright by
-`make_road_edge_cost`; `river_hex_cost` covers the meander and braid cases that hexside
-rule cannot see.
+Rivers run along hexsides, so a road beside one is simply on one bank and which side of
+the river it — and anything standing on it — is on is always readable; nothing has to keep
+it off the water.
 
 #### Traveller simulation — [interurban_roads.py:44–91](../worldgen/stages/interurban_roads.py#L44)
 
@@ -2620,10 +2611,8 @@ river hits this twice, entering and leaving the river hex.
 
 | Param | Type | Default | Effect |
 |---|---|---|---|
-| `road_river_crossing_base` | `float` | `4.0` | Constant component (validated `≥ 0`) — the capital of building a bridge |
-| `road_river_crossing_flow` | `float` | `12.0` | Multiplied by `max(from.river_flow, to.river_flow)`. Big rivers are dramatically more expensive to bridge |
-| `road_river_hex_cost` | `float` | `16.0` | Raised from `12.0` alongside `road_delta_elevation_per_hex` — pricing the climb continuously made the valley floor more attractive, it being the flattest line there is, and roads began taking the channel as often as it occurs (3.6% of road hexes against 3.2% of the land) rather than declining it. `16.0` restores the avoidance at 3.1% and improves bank-following with it, 2.72x to 2.78x; it saturates there, and `20.0` behaves identically. Node cost for standing a road *on* a river hex (validated `≥ 0`). Prices out threading a meander or braid while leaving a genuine crossing affordable |
-| `road_ferry_max_hop` | `int` | `4` | Longest boat hop used to join a component a river mesh cuts off (validated `≥ 1`). Beyond it, routing raises `RoutingError` |
+| `road_river_crossing_base` | `float` | `8.0` | Constant component (validated `≥ 0`), charged once per crossing of a river side — the capital of building a bridge |
+| `road_river_crossing_flow` | `float` | `24.0` | Multiplied by the river's flow at the side crossed. Big rivers are dramatically more expensive to bridge |
 
 ### 4.18 Roads — Slope Penalty
 
