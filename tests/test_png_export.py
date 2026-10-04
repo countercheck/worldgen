@@ -374,15 +374,14 @@ _CROSSING_INK = (43, 33, 24)
 
 
 def _crossing_world() -> WorldState:
-    """A river with a road crossing it: one hex tagged ford, one tagged bridge."""
+    """A river with a road crossing it: one side a ford, one a bridge."""
     ws = WorldState.empty(seed=5, width=5, height=5)
-    lay_river(
+    river = lay_river(
         ws, [(2, 0), (2, 1), (2, 2), (2, 3)], flow_volume=1.0, flow={(2, r): 0.8 for r in range(4)}
     )
-    for r in range(4):
-        ws.hexes[(2, r)].tags.add("river")
-    ws.hexes[(2, 1)].tags.add("ford")
-    ws.hexes[(2, 2)].tags.add("bridge")
+    ford, bridge = river.sides()[1], river.sides()[2]
+    ws.river_sides[ford].tags.add("ford")
+    ws.river_sides[bridge].tags.add("bridge")
     lay_road(ws, [(1, 1), (2, 1), (3, 1)], RoadTier.PRIMARY)
     return ws
 
@@ -400,9 +399,9 @@ def test_bridge_draws_more_ink_than_a_ford():
 
     def ink(tag):
         ws = _crossing_world()
-        for c in ((2, 1), (2, 2)):
-            ws.hexes[c].tags -= {"ford", "bridge"}
-        ws.hexes[(2, 1)].tags.add(tag)
+        for rs in ws.river_sides.values():
+            rs.tags -= {"ford", "bridge"}
+        ws.river_sides[ws.rivers[0].sides()[1]].tags.add(tag)
         cfg = PNGConfig(layers={"crossings"})
         img = render(ws, cfg)
         plain = render(WorldState.empty(seed=5, width=5, height=5), cfg)

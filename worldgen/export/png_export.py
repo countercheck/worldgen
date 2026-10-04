@@ -630,15 +630,13 @@ def render(ws: WorldState, config: PNGConfig | None = None) -> Image.Image:
             draw.line(pts, fill=_ROAD_COLOR[tier], width=lw)
 
     if "crossings" in layers:
-        for coord, kind, angle in legend.crossings(ws, axial_to_pixel, size):
-            px, py = axial_to_pixel(coord, size)
+        for px, py, kind, angle in legend.crossings(ws, size):
             _draw_crossing(draw, kind, px + ox, py + oy, angle, scale=size / 12.0)
 
     # Over the rivers and the crossings, so a spring or white water on a forded reach
     # still shows.
     if "rivers" in layers:
-        for coord, kind, bearing in legend.river_marks(ws, axial_to_pixel, size):
-            px, py = axial_to_pixel(coord, size)
+        for px, py, kind, bearing in legend.river_marks(ws, size):
             _draw_river_mark(draw, kind, px + ox, py + oy, bearing, scale=size / 12.0)
 
     if "anchorages" in layers:

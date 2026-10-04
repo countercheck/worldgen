@@ -594,15 +594,14 @@ def test_ferry_puts_an_anchorage_row_in_the_legend():
 
 
 def _crossing_world() -> WorldState:
-    """A river with a road crossing it: one hex tagged ford, one tagged bridge."""
+    """A river with a road crossing it: one side a ford, one a bridge."""
     ws = WorldState.empty(seed=5, width=5, height=5)
-    lay_river(
+    river = lay_river(
         ws, [(2, 0), (2, 1), (2, 2), (2, 3)], flow_volume=1.0, flow={(2, r): 0.8 for r in range(4)}
     )
-    for r in range(4):
-        ws.hexes[(2, r)].tags.add("river")
-    ws.hexes[(2, 1)].tags.add("ford")
-    ws.hexes[(2, 2)].tags.add("bridge")
+    ford, bridge = river.sides()[1], river.sides()[2]
+    ws.river_sides[ford].tags.add("ford")
+    ws.river_sides[bridge].tags.add("bridge")
     lay_road(ws, [(1, 1), (2, 1), (3, 1)], RoadTier.PRIMARY)
     return ws
 
@@ -611,7 +610,7 @@ def _crossings_group(svg: str) -> str:
     return svg.split('<g id="layer-crossings">')[1].split("\n  </g>")[0]
 
 
-def test_crossings_layer_draws_a_symbol_per_tagged_hex():
+def test_crossings_layer_draws_a_symbol_per_tagged_side():
     svg = render(_crossing_world())
     assert 'id="layer-crossings"' in svg
     group = _crossings_group(svg)
@@ -633,11 +632,15 @@ def test_crossings_are_rotated_square_to_the_river():
     """A span drawn along the current would read as a second river."""
     import re
 
-    group = _crossings_group(render(_crossing_world()))
-    angles = [float(a) for a in re.findall(r"rotate\(([-\d.]+)", group)]
+    from worldgen.export import legend
+
+    ws = _crossing_world()
+    group = _crossings_group(render(ws))
+    angles = sorted(float(a) % 180 for a in re.findall(r"rotate\(([-\d.]+)", group))
     assert angles, "crossing symbols are not rotated at all"
-    # River runs down a column here; the span must not be parallel to it.
-    assert all(abs((a % 180) - 90.0) > 1.0 for a in angles), angles
+    # Each span is turned square to the river along the side it crosses.
+    expected = sorted((angle + 90.0) % 180 for *_, angle in legend.crossings(ws, 12.0))
+    assert angles == pytest.approx(expected, abs=0.1)
 
 
 def test_crossings_layer_can_be_disabled():
@@ -658,7 +661,8 @@ def test_legend_lists_ford_and_bridge():
 def test_legend_omits_crossings_not_present():
     """Only the kinds the map actually contains earn a row."""
     ws = _crossing_world()
-    ws.hexes[(2, 2)].tags.discard("bridge")
+    for rs in ws.river_sides.values():
+        rs.tags.discard("bridge")
     body = render(ws).split('<g id="layer-legend">')[1]
     assert ">Ford</text>" in body
     assert ">Bridge</text>" not in body

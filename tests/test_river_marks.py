@@ -68,10 +68,8 @@ def test_rapids_are_off_a_cataract_and_obey_their_settings():
 
 
 def test_the_legend_and_the_svg_draw_the_marks(world):
-    from worldgen.core.hex_grid import axial_to_pixel
-
-    marks = legend.river_marks(world, axial_to_pixel, 12.0)
-    assert {k for _, k, _ in marks} >= {"source", "end"}
+    marks = legend.river_marks(world, 12.0)
+    assert {k for _, _, k, _ in marks} >= {"source", "end"}
     labels = {r.label for r in legend.rows(world, "terrain", {"rivers"})}
     assert {"River source", "River end"} <= labels
     for kind in ("source", "end", "rapids"):

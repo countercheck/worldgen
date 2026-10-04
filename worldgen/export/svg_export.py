@@ -638,11 +638,10 @@ def render(ws: WorldState, config: SVGConfig | None = None) -> str:
         out.append("  </g>")
 
     if "crossings" in layers:
-        marks = legend.crossings(ws, axial_to_pixel, size)
+        marks = legend.crossings(ws, size)
         if marks:
             out.append('  <g id="layer-crossings">')
-            for coord, kind, angle in marks:
-                px, py = axial_to_pixel(coord, size)
+            for px, py, kind, angle in marks:
                 out.append(
                     f"    {_crossing_marker(kind, px + ox, py + oy, angle, scale=size / 12.0)}"
                 )
@@ -651,11 +650,10 @@ def render(ws: WorldState, config: SVGConfig | None = None) -> str:
     # Over the rivers and the crossings, so a spring or white water on a forded reach
     # still shows.
     if "rivers" in layers:
-        marks = legend.river_marks(ws, axial_to_pixel, size)
+        marks = legend.river_marks(ws, size)
         if marks:
             out.append('  <g id="layer-river-marks">')
-            for coord, kind, bearing in marks:
-                px, py = axial_to_pixel(coord, size)
+            for px, py, kind, bearing in marks:
                 mark = _river_mark(kind, px + ox, py + oy, bearing, size / 12.0, config.river_color)
                 out.append(f"    {mark}")
             out.append("  </g>")
