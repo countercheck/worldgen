@@ -9,7 +9,9 @@ always taken on hexes, on a graph with half the connectivity and twice the nodes
 What the graph is
 -----------------
 *   A **corner** is a node if any of its three hexes is land.  Its height is the lowest
-    of its land hexes: a corner is where valley sides meet, so it sits at the floor.
+    of its land hexes — a corner is where valley sides meet, so it sits at the floor —
+    lifted a little toward their mean, so a corner against a valley side stands above
+    one in the middle of the floor and water gathers along the floor's middle.
 *   Water may run between two corners only along a side with **land on both sides**.  A
     side with water on one hand is a shoreline and a side with the map edge on one hand is
     the border; a river running along either would be a line drawn beside the water or
@@ -66,12 +68,17 @@ def build_network(
     ocean: set[HexCoord],
     closed_lakes: set[HexCoord],
     open_lakes: Iterable[Iterable[HexCoord]],
+    floor_blend: float = 0.0,
 ) -> CornerNetwork:
     """The corner graph over the hexes of *elevation*, which are the map.
 
     *land*, *ocean* and *closed_lakes* partition the water and land hexes (anything in none
     of them is ignored); *open_lakes* lists the hexes of each lake that drains.  Taking
     heights rather than hexes lets erosion drain its own working surface the same way.
+
+    A corner stands at the lowest of its land hexes plus *floor_blend* of the way to their
+    mean (`corner_floor_blend`).  At 0, every corner of a valley-floor hex sits exactly at
+    the floor, and the corners against the valley side are as low as the river's own.
     """
     hexes = elevation
     net = CornerNetwork()
@@ -82,7 +89,9 @@ def build_network(
             if corner in net.elevation:
                 continue
             around = corner_hexes(corner)
-            net.elevation[corner] = min(hexes[h] for h in around if h in land)
+            heights = [hexes[h] for h in around if h in land]
+            low = min(heights)
+            net.elevation[corner] = low + floor_blend * (sum(heights) / len(heights) - low)
             if any(h not in hexes for h in around):
                 net.terminal.add(corner)
             if any(h in ocean or h in closed_lakes for h in around):

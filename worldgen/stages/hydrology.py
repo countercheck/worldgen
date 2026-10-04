@@ -211,7 +211,9 @@ class HydrologyStage(GeneratorStage):
         open_lakes = _get_lake_components(lakes - closed_lakes, hexes)
 
         heights = {c: hx.elevation for c, hx in hexes.items()}
-        net = build_network(heights, land, ocean, closed_lakes, open_lakes)
+        net = build_network(
+            heights, land, ocean, closed_lakes, open_lakes, self.config.corner_floor_blend
+        )
         drainage = flow_direction(net, self.rng, self.config.river_wander_exponent)
 
         # Rain runs off each hex to its lowest corner, and off an open lake out of it.

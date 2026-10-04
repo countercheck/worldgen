@@ -300,6 +300,18 @@ def test_touching_channels_still_join(hydro_metrics):
     assert hydro_metrics.parallel_pair_fraction <= 0.15
 
 
+def test_tributaries_join_their_trunk_rather_than_running_beside_it(hydro_metrics):
+    """Two rivers down one valley floor, a hex or two apart, that never meet.
+
+    The share of tributaries running more than 5 km within 2 km of the river they join.
+    Measured at 64x64 on seeds 42, 7 and 1234: 0.105, 0.119 and 0.297 with each corner at
+    the floor (`corner_floor_blend` 0), which left a level lane a hex out from every river;
+    0.067, 0.070 and 0.051 at the default 0.25.  What remains is mostly the parallel
+    drainage of broad plains, which real landscapes have too.
+    """
+    assert hydro_metrics.long_side_by_side_fraction <= 0.15
+
+
 def test_rivers_do_not_share_one_heading(hydro_metrics):
     """Passes today, and is here to stay honest about what is wrong.
 

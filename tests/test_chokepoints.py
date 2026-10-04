@@ -54,7 +54,10 @@ from worldgen.stages.chokepoints import (
 # Moved again when rivers moved onto hexsides: seed 1's world kept four bridgehead
 # candidates and founded none of them. Seed 3 grows two villages both with roads crossing
 # rivers on sides and once walking costs followed (seed 5, briefly used, emptied then).
-_CHOKE_SEED = 3
+# And to seed 7 when valley floors were tilted toward their rivers (`corner_floor_blend`):
+# seed 3 founded none. Seed 7 grows four, the largest 280 people against a median town of
+# 1,195; seeds 4 and 8 also grow some, and 1, 2, 3 and 6 none.
+_CHOKE_SEED = 7
 _CHOKE_SIZE = 112
 # Axial, the grid these worlds were chosen on; offset became the default afterwards, and
 # the seeds below are picked for what they grow on this grid.

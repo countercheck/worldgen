@@ -92,6 +92,21 @@ def test_all_the_rain_leaves_the_map(slope):
     assert out == pytest.approx(sum(sources.values()))
 
 
+def test_a_corner_stands_at_the_floor_lifted_toward_its_hexes_mean():
+    """At 0 a corner is the lowest of its hexes; the blend lifts it toward their mean, so
+    a corner against a valley side stands above one in the middle of the floor."""
+    hexes = _world(_slope, water=SEA)
+    land = {c for c, h in hexes.items() if h.terrain_class == TerrainClass.LAND}
+    heights = {c: h.elevation for c, h in hexes.items()}
+    floor = build_network(heights, land, set(SEA), set(), [])
+    blended = build_network(heights, land, set(SEA), set(), [], floor_blend=0.25)
+    for corner, z in floor.elevation.items():
+        around = [heights[h] for h in corner_hexes(corner) if h in land]
+        assert z == min(around)
+        mean = sum(around) / len(around)
+        assert blended.elevation[corner] == pytest.approx(z + 0.25 * (mean - z))
+
+
 def test_a_pit_is_filled_and_drained_rather_than_trapping_water():
     def pitted(q, r):
         return _slope(q, r) - (40.0 if (q, r) == (6, 4) else 0.0)

@@ -104,7 +104,8 @@ def _courses_downstream(world):
 
 
 def _where_it_goes(world, start, lake_of, own):
-    """Follow the courses from *start*: "ocean", "border", a lake index, or None."""
+    """Follow the courses from *start*: "ocean", "border", "closed" (a lake with no outlet),
+    a lake index, or None."""
     down = _courses_downstream(world)
     seen, node = set(), start
     while node is not None and node not in seen:
@@ -112,10 +113,13 @@ def _where_it_goes(world, start, lake_of, own):
         for h in corner_hexes(node):
             if h not in world.hexes:
                 return "border"
-            if world.hexes[h].terrain_class == TerrainClass.OPEN_WATER:
+            hx = world.hexes[h]
+            if hx.terrain_class == TerrainClass.OPEN_WATER:
                 return "ocean"
             if h in lake_of and lake_of[h] != own and node != start:
                 return lake_of[h]
+            if hx.terrain_class == TerrainClass.INLAND_WATER and "endorheic" in hx.tags:
+                return "closed"
         node = down.get(node)
     return None
 
@@ -137,7 +141,8 @@ def _open_lakes(world):
 
 def test_lake_has_outflow_river(world):
     """Every lake that is not a closed basin has a river leaving it, and that river reaches
-    the sea, the map edge, or another lake."""
+    the sea, the map edge, or another lake — open, or closed like the Dead Sea at the end
+    of the Jordan."""
     lakes = _open_lakes(world)
     if not lakes:
         pytest.skip("No draining lakes in this world — nothing to check")
@@ -151,7 +156,8 @@ def test_lake_has_outflow_river(world):
 
 
 def test_lake_chain_terminates(world):
-    """Following lake outflows from lake to lake must reach the sea or the map edge."""
+    """Following lake outflows from lake to lake must reach the sea, the map edge, or a
+    closed lake that the water leaves only by evaporating."""
     lakes = _open_lakes(world)
     if not lakes:
         pytest.skip("No draining lakes in this world — nothing to check")
@@ -160,7 +166,7 @@ def test_lake_chain_terminates(world):
         visited, idx, end = {start}, start, None
         while end is None:
             goes = [_where_it_goes(world, o, lake_of, idx) for o in _outlets(world, lakes[idx])]
-            if "ocean" in goes or "border" in goes:
+            if "ocean" in goes or "border" in goes or "closed" in goes:
                 end = "out"
                 break
             onward = [g for g in goes if isinstance(g, int) and g not in visited]
@@ -170,7 +176,7 @@ def test_lake_chain_terminates(world):
             visited.add(idx)
         assert end == "out", (
             f"LAKE component {start} (size {len(lakes[start])}) outflow chain does not "
-            "reach the sea or the map edge"
+            "reach the sea, the map edge or a closed lake"
         )
 
 

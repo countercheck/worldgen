@@ -242,6 +242,7 @@ def _corner_routing(
     wander_exponent: float,
     rng: np.random.Generator,
     inflow: dict[tuple[int, int], float] | None = None,
+    floor_blend: float = 0.0,
 ) -> tuple[CornerNetwork, Drainage]:
     """Drain the working surface along hexsides, as hydrology will drain the finished one.
 
@@ -255,7 +256,7 @@ def _corner_routing(
     w, h = arr.shape
     elevation = {state.coord_at(i, j): float(arr[i, j]) for i in range(w) for j in range(h)}
     land = {c for c, z in elevation.items() if z >= sea_level}
-    net = build_network(elevation, land, set(elevation) - land, set(), [])
+    net = build_network(elevation, land, set(elevation) - land, set(), [], floor_blend)
     drainage = flow_direction(net, rng, wander_exponent, draws=draws)
 
     sources: dict = defaultdict(float)
@@ -770,7 +771,14 @@ class ErosionStage(GeneratorStage):
                 # Drained once per pass, shared by both carving steps: they are the same
                 # routing, and a second fill for the same answer is pure cost.
                 _net, drainage = _corner_routing(
-                    arr, sea_shaped, state, draws, cfg.river_wander_exponent, self.rng, inflow
+                    arr,
+                    sea_shaped,
+                    state,
+                    draws,
+                    cfg.river_wander_exponent,
+                    self.rng,
+                    inflow,
+                    cfg.corner_floor_blend,
                 )
                 acc = _hex_discharge(state, drainage, w, h)
                 # Incise first, then widen.  Incision cuts the line; widening planes the

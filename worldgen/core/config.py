@@ -321,6 +321,14 @@ class WorldConfig:
     # parallel lines, because on a flat every hex agrees on which way is down; a little
     # chance lets neighbouring streams wander into each other and join.
     river_wander_exponent: float = 1.0
+    # How high a corner stands between its three hexes. Water runs corner to corner, and a
+    # corner sits at the floor — the lowest of its hexes — plus this share of the way to
+    # their mean. At 0 all six corners of a valley-floor hex sit at the floor's height, so
+    # a level lane runs a hex out from every river and a tributary follows it for miles
+    # beside the trunk instead of joining it: a fifth of all tributaries ran more than 5 km
+    # within 2 km of their trunk. 0.25 lifts the corners against the valley side and
+    # halves that, leaving mostly the parallel drainage of broad plains, which is real.
+    corner_floor_blend: float = 0.25
     # Rain the ground and its plants take before anything runs off. Evapotranspiration
     # rises with temperature — that is most of what it is — so it is expressed as a base
     # plus a rate per degree rather than a flat figure. A flat one gave a boreal region
@@ -1394,6 +1402,8 @@ class WorldConfig:
         for name in ("rapids_min_drop_m", "rapids_min_catchment_km2"):
             if getattr(self, name) < 0:
                 raise ValueError(f"{name} must be >= 0, got {getattr(self, name)}")
+        if not (0.0 <= self.corner_floor_blend <= 1.0):
+            raise ValueError(f"corner_floor_blend must be in [0, 1], got {self.corner_floor_blend}")
         if self.river_wander_exponent < 0:
             raise ValueError(
                 f"river_wander_exponent must be >= 0, got {self.river_wander_exponent}"

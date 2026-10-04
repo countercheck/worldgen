@@ -279,6 +279,46 @@ def first_order_link_ratio(link_counts: dict[int, int]) -> float:
     return first / second
 
 
+# A side is 1/sqrt(3) km at one hex to the kilometre, measured from a hex's centre.
+_SIDE_KM = 1 / math.sqrt(3)
+
+
+def side_by_side_runs(state: WorldState, within_km: float = 2.0) -> list[float]:
+    """How far each tributary runs beside the river it joins, in km, before it joins.
+
+    Counted back from the confluence for as long as the tributary stays within
+    *within_km* of the river it meets.  A tributary crossing a valley to its trunk spends a
+    couple of kilometres in that band whatever its angle; one that runs down the floor
+    beside the trunk for many kilometres is two rivers in one valley that the routing never
+    let meet.  `pair_statistics` sees only rivers a side apart; this sees the ones a hex
+    or two apart, which is how the artefact actually looks on a map.
+    """
+
+    def at(c: Corner) -> complex:
+        x, y = corner_to_pixel(c, _SIDE_KM)
+        return complex(x, y)
+
+    on: dict[Corner, list[int]] = defaultdict(list)
+    for i, river in enumerate(state.rivers):
+        for c in river.corners:
+            on[c].append(i)
+    runs = []
+    for i, river in enumerate(state.rivers):
+        end = river.corners[-1]
+        joined = [j for j in on[end] if j != i and state.rivers[j].corners[-1] != end]
+        if not joined:
+            continue
+        trunk = [at(c) for c in state.rivers[joined[0]].corners]
+        n = 0
+        for c in reversed(river.corners[:-1]):
+            p = at(c)
+            if min(abs(p - t) for t in trunk) > within_km:
+                break
+            n += 1
+        runs.append(n * _SIDE_KM)
+    return runs
+
+
 def pair_statistics(net: DrainageNetwork, channel: set[Corner]) -> tuple[float, float]:
     """The fraction of touching channel corners that run side by side, and that join.
 
@@ -332,6 +372,8 @@ class DrainageMetrics:
     river_azimuth_concentration: float
     parallel_pair_fraction: float
     joined_pair_fraction: float
+    # Share of tributaries running more than 5 km within 2 km of the river they join.
+    long_side_by_side_fraction: float
     conflicts: int
 
     def summary(self) -> str:
@@ -369,6 +411,7 @@ def drainage_metrics(state: WorldState, net: DrainageNetwork | None = None) -> D
     lengths = [len(r.corners) - 1 for r in state.rivers]
     counts = links_by_order(net)
     parallel_fraction, joined_fraction = pair_statistics(net, channel)
+    runs = side_by_side_runs(state)
 
     return DrainageMetrics(
         land_hexes=len(land),
@@ -389,5 +432,6 @@ def drainage_metrics(state: WorldState, net: DrainageNetwork | None = None) -> D
         river_azimuth_concentration=river_azimuth_concentration(state),
         parallel_pair_fraction=parallel_fraction,
         joined_pair_fraction=joined_fraction,
+        long_side_by_side_fraction=sum(r > 5.0 for r in runs) / len(runs) if runs else 0.0,
         conflicts=net.conflicts,
     )
