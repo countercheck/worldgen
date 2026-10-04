@@ -99,19 +99,20 @@ def test_road_connections_symmetric(road_state):
             )
 
 
-def test_river_crossing_hexes_tagged(road_state):
-    """A river hex the road network reaches from dry land is a crossing, and is tagged."""
+def test_every_road_crossing_of_a_river_is_tagged(road_state):
+    """A road crosses a river by stepping across the side it runs along, and that side is
+    tagged a ford or a bridge — the only places roads cross rivers."""
+    from worldgen.core.hex_grid import side_between
+
+    crossed = 0
     for a, b in road_state.road_edges:
-        for coord, other in ((a, b), (b, a)):
-            hx = road_state.hexes.get(coord)
-            other_hx = road_state.hexes.get(other)
-            if hx is None or "river" not in hx.tags:
-                continue
-            if other_hx is not None and "river" in other_hx.tags:
-                continue
-            assert "ford" in hx.tags or "bridge" in hx.tags, (
-                f"River crossing hex {coord} on road not tagged ford/bridge"
+        side = side_between(a, b)
+        if side in road_state.river_sides:
+            crossed += 1
+            assert road_state.river_sides[side].tags & {"ford", "bridge"}, (
+                f"road crosses the river at {side} with no ford or bridge"
             )
+    assert crossed, "no road crosses a river on this map, so this asserts nothing"
 
 
 def test_valid_road_tiers(road_state):
@@ -138,8 +139,7 @@ def test_cities_mutually_reachable(road_state):
                 visited.add(n)
                 queue.append(n)
 
-    # Ferries are links too: where a river channel cuts a city off, the network is
-    # joined by boat rather than by a road running down the river.
+    # Ferries are links too, where a world has any.
     changed = True
     while changed:
         changed = False
@@ -193,11 +193,7 @@ def test_roads_route_when_river_flow_is_continuous():
 
 
 def test_river_corridor_preference_in_roads(road_state):
-    """Roads still follow river valleys — but along the corridor, not down the channel.
-
-    The pull used to sit on river hexes themselves, so this measured how often roads
-    landed *on* a river. Roads now take the bank instead, so the corridor (a river hex
-    or a hex beside one) is what they should over-represent.
+    """Roads follow river valleys: along the bank.
 
     This was `xfail` until the two halves of this branch met. It was failing because the
     slope measure underneath it was wrong: taking the mean absolute difference to all six
@@ -209,8 +205,6 @@ def test_river_corridor_preference_in_roads(road_state):
     2, 3, 5 and 8 the margin went from a mean of -0.048, positive on one seed, to +0.109,
     positive on all six.
     """
-    from worldgen.core.hex_grid import neighbors
-
     hexes = road_state.hexes
     road_hexes = {c for edge in road_state.road_edges for c in edge if c in hexes}
     all_land = {c for c, h in hexes.items() if h.terrain_class != TerrainClass.OPEN_WATER}
@@ -218,58 +212,18 @@ def test_river_corridor_preference_in_roads(road_state):
     if not road_hexes or not all_land:
         return
 
-    river = {c for c in all_land if "river" in hexes[c].tags}
-    # The banks, not the corridor. Measuring the corridor — banks *and* channel — asks
-    # two questions at once and fails on the answer to the wrong one: roads decline river
-    # hexes on purpose, at `road_river_hex_cost` and with channel travel excluded
-    # outright, so a corridor measure demands they over-use the banks by enough to make
-    # up for never touching the water. What `bank_discount` actually claims is narrower
-    # and is what is checked here: given dry land, a road prefers the bank beside a river
-    # to dry land away from one.
-    dry = all_land - river
-    banks = {n for c in river for n in neighbors(c) if n in dry}
-
-    road_dry = road_hexes & dry
-    if not road_dry or not banks:
+    # Rivers run along hexsides, so every hex beside one is a bank: roads should be on
+    # banks more often than banks occur in the land.
+    banks = {c for r in road_state.rivers for c in r.banks() if c in all_land}
+    if not banks:
         return
 
-    road_rate = len(road_dry & banks) / len(road_dry)
-    map_rate = len(banks) / len(dry)
+    road_rate = len(road_hexes & banks) / len(road_hexes & all_land)
+    map_rate = len(banks) / len(all_land)
 
     assert road_rate >= map_rate, (
         f"Riverbank preference not detected: roads run on a bank {road_rate:.3f} of the "
         f"time against {map_rate:.3f} of the dry land being bank"
-    )
-
-
-def test_a_road_touches_the_channel_only_to_cross_it(road_state):
-    """A road beside a river is following the valley; a road *in* it has nowhere to be a
-    bank of. So every road hex on the channel must be a crossing, and nothing else.
-
-    This used to compare rates — river hexes should be a smaller share of the road network
-    than of the land — and that measure conflates two different things. Crossing a river
-    puts a road hex on a river hex necessarily, so on a map with many settlements and few
-    watercourses the rate runs above the land rate with no road travelling the channel at
-    all: measured on this fixture, 20 road hexes sit on the channel and all 20 are tagged
-    ford or bridge. The rate comparison passed only because `bank_discount` happened to
-    reduce crossings by making the banks attractive, and failed the moment it was deleted —
-    for a reason that was never the defect it was watching for.
-
-    Asserting every channel hex is a crossing says the thing directly, and admits no
-    tolerance where the rate test admitted a whole percentage point. Travel *along* the
-    channel has its own tests either side of this one.
-    """
-    hexes = road_state.hexes
-    road_hexes = {c for edge in road_state.road_edges for c in edge if c in hexes}
-    river = {c for c in road_hexes if "river" in hexes[c].tags}
-    if not river:
-        return
-
-    settled = {s.coord for s in road_state.settlements}
-    offenders = [c for c in river if not ({"ford", "bridge"} & hexes[c].tags) and c not in settled]
-    assert not offenders, (
-        f"{len(offenders)} road hexes sit on the channel without being a crossing, "
-        f"e.g. {sorted(offenders)[0]} — a road with no bank to be on"
     )
 
 
@@ -370,157 +324,6 @@ def test_a_steep_road_hex_is_tagged_as_a_switchback():
     assert "switchback" not in hexes[(2, 0)].tags
 
 
-def _river_edges(state):
-    from worldgen.stages.road_cost import river_edges
-
-    return river_edges(state.rivers, state.hexes)
-
-
-def test_roads_never_run_along_a_river_channel(any_road_state):
-    """A road drawn on the channel hides which bank it — and anything on it — is on.
-
-    Crossing is fine; travelling down the river is not. A settlement exempts the hexside
-    only when its counterpart is dry land — enough to reach a riverside town, not enough
-    to leave one along the water.
-    """
-    state = any_road_state
-    hexes = state.hexes
-    settled = {s.coord for s in state.settlements}
-    channel = _river_edges(state)
-
-    def exempt(a, b):
-        return (a in settled and hexes[b].river_flow <= 0) or (
-            b in settled and hexes[a].river_flow <= 0
-        )
-
-    offenders = [
-        (a, b) for a, b in state.road_edges if frozenset((a, b)) in channel and not exempt(a, b)
-    ]
-    assert not offenders, f"roads run along the river channel at {offenders[:5]}"
-
-
-@pytest.mark.xfail(
-    # Not strict: since `elevation_hypsometry_exponent` flattened the lowland, the fixture
-    # seeds no longer happen to offer an offending crossing, so a pass here is luck and
-    # not a fix. The limitation below is unchanged.
-    strict=False,
-    reason="the road cost model cannot see where a road leaves a hex. "
-    "`make_road_edge_cost` prices one (from_hx, to_hx) edge at a time, so nothing can "
-    "charge for entering and leaving a river hex on the same bank; enforcing it needs the "
-    "incoming direction in the router's search state. Predates the drainage work and was "
-    "latent, not absent: at the old channel_min_discharge of 20,000 seeds 42, 7 and 1234 "
-    "offered 12 crossings between them and none offended. At 6,000 they offer 37 and one "
-    "does — (14, 25) -> (14, 26) -> (13, 27) on seed 42, a river_mouth hex. Strict, so "
-    "this goes red the moment the router learns to look both ways.",
-)
-def test_roads_cross_rivers_on_opposite_sides(road_state):
-    """A road entering a river hex must come out the other side, not back the same way.
-
-    Dipping into the channel and returning to the bank it came from would leave a unit
-    standing on that hex with no defined side, and would tag a ford that is not one.
-    The cost model should make it uneconomic; this checks that it actually does.
-    """
-    from worldgen.core.hex_grid import neighbors
-
-    hexes = road_state.hexes
-    settled = {s.coord for s in road_state.settlements}
-
-    # Local channel direction at each river hex: the ring indices of its up/downstream
-    # neighbours. Only hexes with both are two-sided; sources and mouths are skipped.
-    channel_dirs: dict = {}
-    for river in road_state.rivers:
-        for prev, cur, nxt in zip(river.hexes, river.hexes[1:], river.hexes[2:], strict=False):
-            ring = neighbors(cur)
-            if prev in ring and nxt in ring:
-                channel_dirs[cur] = (ring.index(prev), ring.index(nxt))
-
-    def same_arc(centre, i, j, p, n):
-        """True when ring positions p and n sit on the same side of the channel."""
-        ring = neighbors(centre)
-        if p not in ring or n not in ring:
-            return False
-        pi, ni = ring.index(p), ring.index(n)
-        lo, hi = min(i, j), max(i, j)
-        between = lo < pi < hi
-        return between == (lo < ni < hi)
-
-    # The graph answers this directly: a crossing is a river hex whose road edges reach
-    # exactly two banks, and those two must lie on opposite arcs of the channel.
-    road_adj: dict = {}
-    for a, b in road_state.road_edges:
-        road_adj.setdefault(a, set()).add(b)
-        road_adj.setdefault(b, set()).add(a)
-
-    offenders = []
-    for c, (i, j) in channel_dirs.items():
-        if c in settled or c not in road_adj:
-            continue
-        # Only a bank->river->bank crossing is in question; a neighbour that is itself a
-        # river hex is channel travel, covered by its own test below.
-        banks = [n for n in road_adj[c] if hexes[n].river_flow <= 0]
-        if len(banks) != 2 or len(banks) != len(road_adj[c]):
-            continue
-        if same_arc(c, i, j, banks[0], banks[1]):
-            offenders.append((banks[0], c, banks[1]))
-    assert not offenders, f"road re-enters the bank it came from at {offenders[:5]}"
-
-
-def test_ferry_endpoints_are_a_plausible_hop(road_state):
-    from worldgen.core.hex_grid import distance
-
-    cfg = WorldConfig()
-    for f in road_state.ferries:
-        assert f.a != f.b
-        assert distance(f.a, f.b) <= cfg.road_ferry_max_hop, (
-            f"ferry from {f.a} to {f.b} is longer than road_ferry_max_hop"
-        )
-
-
-def test_roads_never_occupy_consecutive_river_hexes(any_road_state):
-    """A road meets a river to cross it, and is back on a bank the very next hex.
-
-    This replaces an earlier ratio test that compared in-channel steps against crossings.
-    That premise was wrong twice over: it counted a road merely *approaching* a riverside
-    town as channel travel, and its threshold happened to hold at 64x64 while failing at
-    48x48. A run of consecutive river hexes is the thing that actually means "travelling
-    the river", and it does not depend on map size or settlement density.
-
-    Settlement hexes are excluded from a run: a town on the water is a road hex by
-    definition, and a road arriving at one through an adjacent river hex is unavoidable
-    where a river braids or meanders past the town.
-    """
-    state = any_road_state
-    hexes = state.hexes
-    settled = {s.coord for s in state.settlements}
-
-    # A run of channel travel is an edge joining two river hexes: on the graph there is
-    # no need to reconstruct the sequence, since the offending step *is* the edge.
-    worst = [
-        (a, b)
-        for a, b in state.road_edges
-        if hexes[a].river_flow > 0
-        and hexes[b].river_flow > 0
-        and a not in settled
-        and b not in settled
-    ]
-
-    assert not worst, f"roads travel along {len(worst)} river runs, e.g. {worst[:3]}"
-
-
-def test_road_hexes_on_rivers_are_rare(any_road_state):
-    """Whatever the route, a road should almost always have a bank under it."""
-    state = any_road_state
-    hexes = state.hexes
-    road_hexes = {c for edge in state.road_edges for c in edge if c in hexes}
-    settled = {s.coord for s in state.settlements}
-    if not road_hexes:
-        return
-    on_river = {c for c in road_hexes if hexes[c].river_flow > 0 and c not in settled}
-    assert len(on_river) / len(road_hexes) < 0.10, (
-        f"{len(on_river)}/{len(road_hexes)} road hexes sit in a river channel"
-    )
-
-
 def test_no_two_important_roads_run_side_by_side_for_long(road_state):
     """Two roads a kilometre apart are fine; two *highways* a kilometre apart are not.
 
@@ -604,17 +407,17 @@ def test_no_road_skirts_a_settlement_it_could_pass_through(road_state):
     equals the crow-flies distance at every radius out to four.
 
     "Could" is load-bearing: a road may decline a town that is dear to reach, up a bank it
-    cannot climb, or across a channel it has no business on. So the test asks the same
+    cannot climb, or across a river it has no need to cross. So the test asks the same
     question the rule does, through the same function — `detour_is_allowed`. Writing the
     guard out a second time here is exactly what went wrong before: the copy knew only
     about the cost bound, so a skirt refused for a 30% grade read as a defect.
     """
     from worldgen.core.hex_grid import neighbors
-    from worldgen.stages.road_cost import detour_is_allowed, river_edges
+    from worldgen.stages.road_cost import detour_is_allowed, river_crossings
 
     cfg = WorldConfig(**road_state.metadata["config"])
     settled = {s.coord for s in road_state.settlements}
-    blocked = river_edges(road_state.rivers, road_state.hexes)
+    crossings = river_crossings(road_state.river_sides)
 
     offenders = []
     for seat in settled:
@@ -622,7 +425,7 @@ def test_no_road_skirts_a_settlement_it_could_pass_through(road_state):
         for a, b in road_state.road_edges:
             if a not in ring or b not in ring:
                 continue
-            if detour_is_allowed(road_state.hexes, settled, cfg, blocked, a, seat, b):
+            if detour_is_allowed(road_state.hexes, settled, cfg, crossings, a, seat, b):
                 offenders.append((seat, a, b))
 
     assert not offenders, (
@@ -820,74 +623,42 @@ def test_a_bigger_settlement_sends_more_travellers(road_state):
     )
 
 
-def test_an_island_beyond_ferry_range_does_not_break_generation():
+def test_a_place_nothing_can_reach_does_not_break_generation():
     """Some maps are in pieces, and that is a fact about the world rather than an error.
 
-    `ferry_link` raises when the nearest landing is further than `road_ferry_max_hop`, on
-    the grounds that a silent long-haul boat link reads worse than a loud failure. True of a
-    delta island a few hexes off the bank; wrong as a reason to refuse to generate an
-    archipelago at all — two islands twenty hexes apart cannot be joined by road and never
-    will be. The stage records what it could not join and carries on.
-
-    Both escapes are shut off here: no land route exists and no ferry is plausible, which is
-    exactly the archipelago case.
+    A river is always crossable at a price, so what can strand a settlement now is ground
+    no cart can climb to.  Raising there would make such a map ungenerable; the stage
+    records what it could not join and carries on.
     """
-    from worldgen.core.errors import RoutingError
     from worldgen.stages import interurban_roads as ir
 
     state = _build_pipeline(seed=42, width=48, height=48).run()
     cfg = WorldConfig(**state.metadata["config"])
     stage = ir.InterurbanRoadStage(cfg, None)
 
-    def no_land_route(*_a, **_k):
+    def no_route(*_a, **_k):
         return None
 
-    def no_ferry(*_a, **_k):
-        raise RoutingError("no plausible ferry")
-
-    # `astar_to_any`, because that is what the connectivity guarantee routes with now:
-    # it asks the whole main component in one search rather than each settlement in turn.
-    # The stub's job is unchanged — say there is no land route and let the ferry fall over.
-    real_astar, real_ferry = ir.astar_to_any, ir.ferry_link
-    ir.astar_to_any, ir.ferry_link = no_land_route, no_ferry
+    real_astar = ir.astar_to_any
+    ir.astar_to_any = no_route
     try:
-        edges, ferries, unreachable = stage._guarantee_connectivity(
-            state.hexes,
-            state.settlements,
-            {},  # nothing joined yet, so every settlement is its own component
-            cfg,
-            frozenset(),
-            {s.coord for s in state.settlements},
+        _edges, unreachable = stage._guarantee_connectivity(
+            state.hexes, state.settlements, {}, cfg, {}
         )
     finally:
-        ir.astar_to_any, ir.ferry_link = real_astar, real_ferry
+        ir.astar_to_any = real_astar
 
     # It came back rather than raising, and it said what it could not reach.
-    assert ferries == []
     assert unreachable, "nothing was recorded as unreachable — the test did not bite"
     assert len(unreachable) >= len(state.settlements) - 1
     coord, reason = unreachable[0]
     assert coord in {s.coord for s in state.settlements}
-    assert "ferry" in reason
+    assert "no route" in reason
 
 
 def test_unreachable_settlements_are_recorded_on_the_world():
     """A map in pieces is something a reader of the output should be able to see."""
-    from worldgen.core.errors import RoutingError
-    from worldgen.stages import interurban_roads as ir
-
-    def no_ferry(*_a, **_k):
-        raise RoutingError("no plausible ferry")
-
-    real = ir.ferry_link
-    ir.ferry_link = no_ferry
-    try:
-        state = _build_pipeline(seed=42, width=48, height=48).run()
-    finally:
-        ir.ferry_link = real
-
-    # This map needs no ferries, so nothing should be recorded — but the key, when it is
-    # written at all, has to be shaped for the reader.
+    state = _build_pipeline(seed=42, width=48, height=48).run()
     for entry in state.metadata.get("unreachable_settlements", []):
         assert set(entry) == {"coord", "reason"}
         assert len(entry["coord"]) == 2
@@ -922,7 +693,11 @@ def test_connectivity_joins_an_isolated_settlement_to_the_nearest_of_the_network
     """
     from worldgen.core.hex_grid import astar_to_any
     from worldgen.stages import interurban_roads as ir
-    from worldgen.stages.road_cost import make_road_edge_cost, river_hex_cost, terrain_base_cost
+    from worldgen.stages.road_cost import (
+        make_road_edge_cost,
+        river_crossings,
+        terrain_base_cost,
+    )
 
     state = _build_pipeline(seed=42, width=48, height=48).run()
     cfg = WorldConfig(**state.metadata["config"])
@@ -931,16 +706,16 @@ def test_connectivity_joins_an_isolated_settlement_to_the_nearest_of_the_network
     if len(places) < 3:
         pytest.skip("needs at least three cities or towns to have something to join")
 
-    settled = {s.coord for s in state.settlements}
+    crossings = river_crossings(state.river_sides)
 
     def plain_cost(hx):
-        return terrain_base_cost(hx, cfg) + river_hex_cost(hx, cfg)
+        return terrain_base_cost(hx, cfg)
 
-    plain_edge = make_road_edge_cost(cfg, frozenset(), settled)
+    plain_edge = make_road_edge_cost(cfg, crossings)
 
     # Every settlement its own component: nothing is joined yet.
-    edges, _ferries, unreachable = ir.InterurbanRoadStage(cfg, None)._guarantee_connectivity(
-        hexes, places, {}, cfg, frozenset(), settled
+    edges, unreachable = ir.InterurbanRoadStage(cfg, None)._guarantee_connectivity(
+        hexes, places, {}, cfg, crossings
     )
     joined = {c for key in edges for c in key}
     unreachable_coords = {tuple(u[0]) for u in unreachable}
@@ -989,10 +764,9 @@ def test_a_stranded_place_is_joined_by_the_road_it_deserves(tier, road):
         coord=(7, 1), tier=tier, role=SettlementRole.MARKET, population=200, name="stranded"
     )
     existing = {((0, 1), (1, 1)): RoadTier.PRIMARY}
-    settled = {city.coord, stranded.coord}
 
-    edges, _, unreachable = ir.InterurbanRoadStage(cfg, None)._guarantee_connectivity(
-        hexes, [city, stranded], dict(existing), cfg, frozenset(), settled
+    edges, unreachable = ir.InterurbanRoadStage(cfg, None)._guarantee_connectivity(
+        hexes, [city, stranded], dict(existing), cfg, {}
     )
     assert not unreachable
     laid = {k: t for k, t in edges.items() if k not in existing}

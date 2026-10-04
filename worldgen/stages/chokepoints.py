@@ -23,9 +23,9 @@ which on 1500 m of relief is a couple of places on a map and on flat country is 
 """
 
 from ..core.hex import Settlement, SettlementTier
-from ..core.hex_grid import distance, hex_range, neighbors
+from ..core.hex_grid import distance, hex_range, neighbors, side_hexes
 from ..core.pipeline import GeneratorStage
-from ..core.world_state import ROAD_TIER_RANK, RoadTier, WorldState
+from ..core.world_state import ROAD_TIER_RANK, RoadTier, WorldState, road_edge_key
 from .city_town import _assign_role
 from .habitability import actual_food
 from .haulage import allocate_catchments, gather, settleable, usable_fraction
@@ -176,18 +176,16 @@ class ChokepointStage(GeneratorStage):
 
         # A bridge only holds anything if a road actually goes over it. `CrossingStage`
         # tags its bridges before any road exists — they are candidate sites, and most of
-        # them are never built at. Judged by the drawn network: a crossed bridge carries
-        # at least two road edges, one onto each bank; a tagged hex with one edge is a
-        # road that ends at the water, and one with none is a proposal nobody took up.
+        # them are never built at. A river runs along a hexside, so a road goes over a
+        # bridge exactly when it steps between the two hexes either side of a bridged side,
+        # and both of those are bridgeheads: the town stands at one end or the other.
         # Without this test the tier founded villages beside phantom crossings — on one
         # 96x96 fixture, six of seven stood at bridges no road touched.
-        degree: dict = {}
-        for a, b in state.road_edges:
-            degree[a] = degree.get(a, 0) + 1
-            degree[b] = degree.get(b, 0) + 1
-
-        def crossed(coord) -> bool:
-            return degree.get(coord, 0) >= 2
+        bridgeheads = set()
+        for side, rs in state.river_sides.items():
+            ends = side_hexes(side)
+            if BRIDGE in rs.tags and road_edge_key(*ends) in state.road_edges:
+                bridgeheads.update(ends)
 
         occupied = {s.coord for s in state.settlements}
         held = set()
@@ -195,12 +193,8 @@ class ChokepointStage(GeneratorStage):
             hx = hexes.get(coord)
             if hx is None:
                 continue
-            if PASS in hx.tags or (BRIDGE in hx.tags and crossed(coord)):
+            if PASS in hx.tags or coord in bridgeheads:
                 held.add(coord)
-            elif any(
-                BRIDGE in hexes[n].tags and crossed(n) for n in neighbors(coord) if n in hexes
-            ):
-                held.add(coord)  # the bridgehead, which is where the town stands
 
         return sorted(held & settleable(hexes, cfg) - occupied)
 

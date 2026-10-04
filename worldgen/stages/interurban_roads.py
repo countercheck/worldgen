@@ -1,22 +1,18 @@
 from collections import defaultdict, deque
 from heapq import heappop, heappush
 
-from ..core.errors import RoutingError
 from ..core.hex import SettlementRole, SettlementTier, TerrainClass
 from ..core.hex_grid import astar_to_any, distance, neighbors
 from ..core.pipeline import GeneratorStage
-from ..core.world_state import ROAD_TIER_RANK, Ferry, RoadTier, WorldState, road_edge_key
+from ..core.world_state import ROAD_TIER_RANK, RoadTier, WorldState, road_edge_key
 from .road_cost import (
     add_traffic,
     as_road_edges,
-    ferry_link,
     fill_tier_gaps,
-    is_river,
     make_road_edge_cost,
     pheromone_discount,
     prune_orphan_roads,
-    river_edges,
-    river_hex_cost,
+    river_crossings,
     route_through_settlements,
     settlement_rings,
     tag_river_crossings,
@@ -66,9 +62,8 @@ class InterurbanRoadStage(GeneratorStage):
         net_version = [0]
         home_cache: dict = {}
 
-        # Hexsides the rivers run along — roads may cross a river but never travel down
-        # it, so the bank a road takes stays readable. Settlement hexes are exempt.
-        blocked = river_edges(state.rivers, state.hexes)
+        # Where the rivers run between hexes: a step across one is a crossing, and pays.
+        crossings = river_crossings(state.river_sides)
         settled = {s.coord for s in state.settlements}
         # Which seats each hex neighbours, so an edge can be charged for skirting one.
         ring = settlement_rings(settled)
@@ -76,11 +71,11 @@ class InterurbanRoadStage(GeneratorStage):
         def node_cost(hx):
             # No discount for running beside a river. Roads follow valleys because valleys
             # are the low, level, well-watered ground that leads somewhere, not because a
-            # rule pays them to — see `river_hex_cost` for the term that does earn its place.
-            base = terrain_base_cost(hx, cfg) + river_hex_cost(hx, cfg)
+            # rule pays them to.
+            base = terrain_base_cost(hx, cfg)
             return pheromone_discount(base, hex_traffic[hx.coord], cfg)
 
-        edge_cost = make_road_edge_cost(cfg, blocked, settled, ring)
+        edge_cost = make_road_edge_cost(cfg, crossings, ring)
 
         # Travellers come from population rather than from tier, so a market of 6,200 wears
         # a deeper road out of its gates than one of 900. Population used to enter only on
@@ -169,22 +164,24 @@ class InterurbanRoadStage(GeneratorStage):
         # at a market can make a primary. Taking the higher of two tiers afterwards cannot
         # express that; adding the traffic first and cutting the percentiles after does it
         # for nothing.
-        route_through_settlements(edge_traffic, hexes, settled, cfg, blocked, combine=add_traffic)
+        route_through_settlements(edge_traffic, hexes, settled, cfg, crossings, combine=add_traffic)
 
-        # River edges use the lower `road_river_traffic_min` threshold so that
-        # well-trafficked riverbanks become drawn roads (towpaths, river roads).
+        # A step along a riverbank uses the lower `road_river_traffic_min` threshold, so
+        # that well-trafficked banks become drawn roads (towpaths, river roads).  Along the
+        # bank is both hexes beside the same river and not across it: a step across is a
+        # crossing, and earns no towpath.
+        banks_of: dict = defaultdict(set)
+        for i, river in enumerate(state.rivers):
+            for c in river.banks():
+                banks_of[c].add(i)
+
         def eligible_edge(key) -> bool:
             t = edge_traffic[key]
             if t >= cfg.road_min_traffic:
                 return True
-            # By the tag, not by `river_flow > 0`. Under `river_flow_continuous` hydrology
-            # writes a flow value onto every draining land hex, so a flow test calls the
-            # whole map a river and admits every quiet edge on it. The costs have always
-            # read the tag for this reason; eligibility was still reading the flow, and
-            # only got away with it while stitching kept traffic high enough everywhere
-            # that almost nothing sat in the one-to-two band where the two disagree.
-            on_river = any(c in hexes and is_river(hexes[c]) for c in key)
-            return on_river and t >= cfg.road_river_traffic_min
+            a, b = key
+            towpath = bool(banks_of[a] & banks_of[b]) and frozenset(key) not in crossings
+            return towpath and t >= cfg.road_river_traffic_min
 
         eligible = sorted(
             (k for k in edge_traffic if eligible_edge(k)),
@@ -216,10 +213,9 @@ class InterurbanRoadStage(GeneratorStage):
         # because stitching made almost every route a concatenation of the same few legs;
         # with routes pathfound independently the map broke into two components.
         if len(settlements) > 1:
-            road_edges, ferries, unreachable = self._guarantee_connectivity(
-                hexes, settlements, road_edges, cfg, blocked, settled
+            road_edges, unreachable = self._guarantee_connectivity(
+                hexes, settlements, road_edges, cfg, crossings
             )
-            state.ferries.extend(ferries)
             if unreachable:
                 # Kept on the world rather than logged away: a map in pieces is a fact a
                 # reader of the output should be able to see.
@@ -247,11 +243,11 @@ class InterurbanRoadStage(GeneratorStage):
         # for a journey and wrong for a network: it left the reference map as forty land
         # networks tied together by eight sea crossings, so a cart could not get from one
         # market to the next without a boat. This adds what the traffic model declined to.
-        self._join_by_land(hexes, settlements, road_edges, cfg, blocked, settled)
+        self._join_by_land(hexes, settlements, road_edges, cfg, crossings)
 
         # Last of all, on tiers: the connectivity guarantee and the land join both lay
         # roads of their own, and either can skirt a town like any other route.
-        route_through_settlements(road_edges, hexes, settled, cfg, blocked)
+        route_through_settlements(road_edges, hexes, settled, cfg, crossings)
 
         # Tiers are cut per edge, so where two routes part for a hex or two and rejoin, the
         # traffic splits between the branches and a trunk road steps down and back up again.
@@ -269,7 +265,7 @@ class InterurbanRoadStage(GeneratorStage):
                 hexes[a].road_connections.add(b)
                 hexes[b].road_connections.add(a)
 
-        tag_river_crossings(road_edges, hexes)
+        tag_river_crossings(road_edges, state)
         tag_switchbacks(road_edges, hexes, cfg)
 
         # Re-score habitability near roads so VillagePlacementStage benefits.  Only the
@@ -349,7 +345,7 @@ class InterurbanRoadStage(GeneratorStage):
         return leg + road_home(tree[leg[-1]])
 
     @staticmethod
-    def _join_by_land(hexes, places, road_edges, cfg, blocked, settled):
+    def _join_by_land(hexes, places, road_edges, cfg, crossings):
         """Join everything that shares a landmass into one road network.
 
         The traffic model has no reason to build these: a traveller crossing a bay is doing
@@ -377,9 +373,9 @@ class InterurbanRoadStage(GeneratorStage):
         def land_cost(hx):
             if hx.terrain_class in water:
                 return float("inf")
-            return terrain_base_cost(hx, cfg) + river_hex_cost(hx, cfg)
+            return terrain_base_cost(hx, cfg)
 
-        land_edge = make_road_edge_cost(cfg, blocked, settled)
+        land_edge = make_road_edge_cost(cfg, crossings)
 
         # What the ground itself connects, ignoring roads entirely.
         mass_of: dict = {}
@@ -493,8 +489,8 @@ class InterurbanRoadStage(GeneratorStage):
                     heappush(queue, (cost + step, n))
         return tree, home_cost
 
-    def _guarantee_connectivity(self, hexes, places, road_edges, cfg, blocked, settled):
-        """Join any settlement the traffic model left off the network, by land or by boat.
+    def _guarantee_connectivity(self, hexes, places, road_edges, cfg, crossings):
+        """Join any settlement the traffic model left off the network.
 
         Adjacency is the drawn network itself.  It used to be rebuilt from whichever
         canonical routes contributed a tier, which was a second, subtly different answer to
@@ -531,9 +527,9 @@ class InterurbanRoadStage(GeneratorStage):
         main = max(components, key=len)
 
         def plain_cost(hx):
-            return terrain_base_cost(hx, cfg) + river_hex_cost(hx, cfg)
+            return terrain_base_cost(hx, cfg)
 
-        plain_edge = make_road_edge_cost(cfg, blocked, settled)
+        plain_edge = make_road_edge_cost(cfg, crossings)
 
         def adopt(path, tier) -> None:
             """Lay *path* into the network at *tier*, without demoting anything."""
@@ -558,8 +554,7 @@ class InterurbanRoadStage(GeneratorStage):
             )
             return best
 
-        ferries: list[Ferry] = []
-        # Settlements the terrain puts beyond both road and ferry. Reported, not raised.
+        # Settlements nothing can reach. Reported, not raised.
         unreachable: list = []
         max_iter = len(places) * 2
         for _ in range(max_iter):
@@ -587,38 +582,16 @@ class InterurbanRoadStage(GeneratorStage):
                     progressed = True
                     break
             if not progressed:
-                # No land route to any settlement in the main component: the channel cuts
-                # this one off. Join it by boat where a boat is plausible — and where it is
-                # not, leave it apart. Some maps simply are in pieces: an island beyond
-                # ferry range cannot be reached by road, and that is a fact about the world
-                # rather than a failure of routing. Raising there would make an archipelago
-                # ungenerable, which is worse than a map that honestly shows two networks.
+                # No route to any settlement in the main component, over land or water: a
+                # river is always crossable at a price, so what is left is ground no cart
+                # can climb to.  Some maps simply are in pieces, and that is a fact about the
+                # world rather than a failure of routing; raising would make such a map
+                # ungenerable, which is worse than one that honestly shows two networks.
                 iso = isolated[0]
-                try:
-                    ferry, ferry_paths = ferry_link(
-                        hexes,
-                        iso.coord,
-                        iso.name,
-                        main,
-                        cfg,
-                        blocked,
-                        settled,
-                        plain_cost,
-                        plain_edge,
-                    )
-                except RoutingError as exc:
-                    unreachable.append((iso.coord, str(exc)))
-                    # Treat its component as settled so the loop moves on to the next one
-                    # rather than trying this same crossing again every pass.
-                    main |= bfs_component(iso.coord)
-                    main.add(iso.coord)
-                    continue
-                ferries.append(ferry)
-                tier = tier_for(iso.coord)
-                for fp in ferry_paths:
-                    adopt(fp, tier)
+                unreachable.append((iso.coord, f"{iso.name} has no route to the network"))
+                # Treat its component as settled so the loop moves on to the next one
+                # rather than trying the same search again every pass.
                 main |= bfs_component(iso.coord)
-                main.add(ferry.a)
-                main.add(ferry.b)
+                main.add(iso.coord)
 
-        return road_edges, ferries, unreachable
+        return road_edges, unreachable

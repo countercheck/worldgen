@@ -950,25 +950,11 @@ class WorldConfig:
     road_embark_cost: float = 8.0
     road_disembark_cost: float = 8.0
 
-    # Roads — river crossings (perpendicular to flow, charged on each land↔river edge)
-    road_river_crossing_base: float = 4.0
-    road_river_crossing_flow: float = 12.0
-
-    # Cost of standing a road *on* a river hex. The channel exclusion only covers the
-    # hexsides a river is drawn along; a meander or braid puts two river hexes side by
-    # side without one, and a road threading those is still in the water. This makes
-    # occupying the channel uneconomic while leaving a genuine crossing affordable.
-    # Raised from 12 with `road_delta_elevation_per_hex`. Pricing the climb continuously made the
-    # valley floor more attractive — it is the flattest line there is — and roads began
-    # taking the channel as often as it occurs rather than declining it, 3.6% of road hexes
-    # against 3.2% of the land. 16 restores the avoidance (3.1%) and slightly improves
-    # bank-following with it (2.72x to 2.78x). It saturates there; 20 behaves identically.
-    road_river_hex_cost: float = 16.0
-
-    # Roads — ferries. A component cut off by a river mesh (a delta island, a braided
-    # confluence) is joined by boat rather than by a road running down the channel.
-    # Longer than this and no plausible ferry exists, so routing raises instead.
-    road_ferry_max_hop: int = 4
+    # Roads — river crossings, charged once on a step across the side a river runs
+    # along: base + flow x the river's flow there.  Twice what they were when a river
+    # occupied a hex and a crossing paid on entering it and again on leaving.
+    road_river_crossing_base: float = 8.0
+    road_river_crossing_flow: float = 24.0
     # Metres of *delta elevation* that cost as much as one hex of level going.
     #
     # Delta, not ascent, and the name matters: the cost is the absolute height difference
@@ -1585,10 +1571,6 @@ class WorldConfig:
                 "marketable_surplus_fraction must be in (0, 1], got "
                 f"{self.marketable_surplus_fraction}"
             )
-        if self.road_river_hex_cost < 0:
-            raise ValueError(f"road_river_hex_cost must be >= 0, got {self.road_river_hex_cost}")
-        if self.road_ferry_max_hop < 1:
-            raise ValueError(f"road_ferry_max_hop must be >= 1, got {self.road_ferry_max_hop}")
         if self.road_water_cost < 0:
             raise ValueError(f"road_water_cost must be >= 0, got {self.road_water_cost}")
         if self.road_embark_cost < 0:
@@ -1805,6 +1787,14 @@ _RETIRED_FIELDS: dict[str, str] = {
     "road_slope_cap_mult": (
         "the slope curve no longer saturates — above road_slope_cap_pct the edge is "
         "refused outright rather than charged a capped price"
+    ),
+    "road_river_hex_cost": (
+        "rivers run along hexsides now, so a road never stands in one; crossing is priced "
+        "on the side, by road_river_crossing_base and road_river_crossing_flow"
+    ),
+    "road_ferry_max_hop": (
+        "a river along a hexside is always crossable at a price, so it never cuts the land "
+        "into pieces a ferry has to join"
     ),
     "road_bank_discount": (
         "retired outright: rivers carve real valleys now, so the valley floor is already "

@@ -105,18 +105,8 @@ def haulage_range(hx, cfg) -> float:
 def make_travel_cost(hexes, cfg):
     """Node and edge cost closures for people and goods moving over the ground.
 
-    Terrain and slope only.  Every river term in `road_cost.py` is deliberately left out,
-    because they answer a question about *roads* rather than about travel:
-
-    - `river_hex_cost` (12.0) prices a road out of threading a channel.  It is larger than
-      the whole 10.0 market-day budget, so including it made a single river hex an
-      absolute barrier and catchments came out covering a quarter of the map.
-    - The channel exclusion in `make_road_edge_cost` prices river-to-river edges at
-      infinity for the same reason.  Applied to a catchment it severs one along every
-      watercourse — the exact inverse of the truth, since a river valley is the best land
-      and the thing that holds a district together.
-    - `river_hex_cost` keeps roads off the channel so the side a road runs on stays
-      readable.  Nothing to do with how far a farmer walks.
+    Terrain and slope only: the river term in `road_cost.py` is deliberately left out,
+    because it answers a question about *roads* rather than about travel.
 
     River crossings are charged, but by `ford_cost` below rather than by
     `river_crossing_edge_cost`.  Those are the same idea weighted differently, and the
