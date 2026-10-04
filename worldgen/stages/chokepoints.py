@@ -22,7 +22,7 @@ takes it. A pass settlement therefore appears only where the ground leaves no wa
 which on 1500 m of relief is a couple of places on a map and on flat country is none.
 """
 
-from ..core.hex import Settlement, SettlementTier
+from ..core.hex import SOIL_RANK, Settlement, SettlementTier
 from ..core.hex_grid import distance, hex_range, neighbors, side_hexes
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import ROAD_TIER_RANK, RoadTier, WorldState, road_edge_key
@@ -182,11 +182,16 @@ class ChokepointStage(GeneratorStage):
         # and both of those are bridgeheads: the town stands at one end or the other.
         # Without this test the tier founded villages beside phantom crossings — on one
         # 96x96 fixture, six of seven stood at bridges no road touched.
+        #
+        # Of the two ends, the town grows on the one with the farmland: a bridge over a
+        # desert river has its village on the irrigated bank, not on the sand opposite.
+        # Both ends count where the ground is as good on either.
         bridgeheads = set()
         for side, rs in state.river_sides.items():
-            ends = side_hexes(side)
-            if BRIDGE in rs.tags and road_edge_key(*ends) in state.road_edges:
-                bridgeheads.update(ends)
+            ends = [h for h in side_hexes(side) if h in hexes]
+            if BRIDGE in rs.tags and road_edge_key(*side_hexes(side)) in state.road_edges:
+                rank = {h: SOIL_RANK.get(hexes[h].soil, 0) for h in ends}
+                bridgeheads.update(h for h in ends if rank[h] == max(rank.values()))
 
         occupied = {s.coord for s in state.settlements}
         held = set()

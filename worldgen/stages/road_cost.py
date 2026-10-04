@@ -1,6 +1,7 @@
 from ..core.hex import TerrainClass
 from ..core.hex_grid import neighbors, side_hexes
 from ..core.world_state import ROAD_TIER_RANK, RoadTier, road_edge_key
+from .riverside import side_gradients, side_span
 
 WATER = (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
 
@@ -194,15 +195,20 @@ def tag_switchbacks(road_edges, hexes, cfg) -> None:
             hb.tags.add("switchback")
 
 
-def tag_river_crossings(road_edges, state) -> None:
-    """Tag the river sides the road network crosses: ford, or bridge where the road is primary.
+def tag_river_crossings(road_edges, state, cfg) -> None:
+    """Tag the river sides the road network crosses: a bridge, or a ford where it can wade.
 
-    Mutates the sides' tags in place.  Edge tier is how busy a crossing is: a primary
-    crossing gets a bridge, a quieter one a ford, and the result does not depend on the
-    order routes happened to be built in.
+    Mutates the sides' tags in place.  What the water is decides it, not how busy the road
+    is: a road over a river too big to wade (`side_span` over 1) needs a bridge whatever
+    its tier — a track over a navigable river is not a track through it — and one over
+    water that can be waded uses the ford, unless it is a primary road, which is worth a
+    bridge anyway.  The result does not depend on the order routes were built in.
 
-    `CrossingStage` (the organic model) tags its own fords and bridges before roads exist;
-    those are left alone, since a bridge is not demoted by carrying a quiet road.
+    `CrossingStage` (the organic model) tags its own fords and bridges before roads exist.
+    A bridge a road crosses is left alone, since it is not demoted by carrying a quiet
+    road.  A bridge no road crosses is untagged: `CrossingStage` marks where traffic would
+    justify one, so markets can grow there, and a site the road network never reached was
+    never built.  A ford stays either way — it is terrain, and needs nobody to build it.
     """
     side_of = {frozenset(side_hexes(side)): side for side in state.river_sides}
     best: dict = {}
@@ -212,15 +218,22 @@ def tag_river_crossings(road_edges, state) -> None:
             continue
         if side not in best or ROAD_TIER_RANK[tier] > ROAD_TIER_RANK[best[side]]:
             best[side] = tier
+    gradient = side_gradients(state) if best else {}
     for side, tier in best.items():
-        tags = state.river_sides[side].tags
-        if "bridge" in tags:
+        rs = state.river_sides[side]
+        if "bridge" in rs.tags:
             continue
-        if tier is RoadTier.PRIMARY:
-            tags.discard("ford")
-            tags.add("bridge")
+        wadeable = "ford" in rs.tags or (
+            side_span(rs.catchment_km2, gradient.get(side, 0.0), cfg) <= 1.0
+        )
+        if tier is RoadTier.PRIMARY or not wadeable:
+            rs.tags.discard("ford")
+            rs.tags.add("bridge")
         else:
-            tags.add("ford")
+            rs.tags.add("ford")
+    for side, rs in state.river_sides.items():
+        if side not in best:
+            rs.tags.discard("bridge")
 
 
 def pheromone_discount(base: float, traffic: float, cfg) -> float:

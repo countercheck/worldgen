@@ -102,7 +102,7 @@ class VillageTrackStage(GeneratorStage):
         # network — this is the last stage that touches it.
         route_through_settlements(tiers, hexes, settled, cfg, crossings)
 
-        tag_river_crossings(tiers, state)
+        tag_river_crossings(tiers, state, cfg)
         tag_switchbacks(tiers, hexes, cfg)
         state.road_edges = as_road_edges(tiers, hexes)
 

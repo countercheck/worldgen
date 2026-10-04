@@ -265,7 +265,7 @@ class InterurbanRoadStage(GeneratorStage):
                 hexes[a].road_connections.add(b)
                 hexes[b].road_connections.add(a)
 
-        tag_river_crossings(road_edges, state)
+        tag_river_crossings(road_edges, state, cfg)
         tag_switchbacks(road_edges, hexes, cfg)
 
         # Re-score habitability near roads so VillagePlacementStage benefits.  Only the

@@ -287,11 +287,23 @@ def test_tag_river_crossings_tags_the_side_by_tier():
     ws = WorldState.empty(seed=1, width=6, height=6)
     river = lay_river(ws, [(1, 2), (2, 2), (3, 2), (4, 2)])
     sides = river.sides()
+    for rs in ws.river_sides.values():
+        rs.catchment_km2 = 1.0  # a brook, which a track can wade
     primary, track = (road_edge_key(*side_hexes(s)) for s in sides[:2])
-    tag_river_crossings({primary: RoadTier.PRIMARY, track: RoadTier.TRACK}, ws)
+    tag_river_crossings({primary: RoadTier.PRIMARY, track: RoadTier.TRACK}, ws, WorldConfig())
     assert "bridge" in ws.river_sides[sides[0]].tags
     assert "ford" in ws.river_sides[sides[1]].tags
     assert not ws.river_sides[sides[2]].tags
+
+
+def test_a_road_over_water_too_big_to_wade_gets_a_bridge_whatever_its_tier():
+    """A track over a navigable river is not a track through it."""
+    ws = WorldState.empty(seed=1, width=6, height=6)
+    river = lay_river(ws, [(1, 2), (2, 2), (3, 2)])
+    side = river.sides()[0]
+    ws.river_sides[side].catchment_km2 = 1e5
+    tag_river_crossings({road_edge_key(*side_hexes(side)): RoadTier.TRACK}, ws, WorldConfig())
+    assert ws.river_sides[side].tags == {"bridge"}
 
 
 def test_tag_river_crossings_never_demotes_a_bridge():
@@ -299,8 +311,22 @@ def test_tag_river_crossings_never_demotes_a_bridge():
     river = lay_river(ws, [(1, 2), (2, 2), (3, 2)])
     side = river.sides()[0]
     ws.river_sides[side].tags.add("bridge")
-    tag_river_crossings({road_edge_key(*side_hexes(side)): RoadTier.TRACK}, ws)
+    tag_river_crossings({road_edge_key(*side_hexes(side)): RoadTier.TRACK}, ws, WorldConfig())
     assert ws.river_sides[side].tags == {"bridge"}
+
+
+def test_tag_river_crossings_drops_a_bridge_no_road_crosses_and_keeps_a_ford():
+    """A bridge site the road network never reached was never built; a ford is terrain."""
+    ws = WorldState.empty(seed=1, width=6, height=6)
+    river = lay_river(ws, [(1, 2), (2, 2), (3, 2), (4, 2)])
+    crossed, unbuilt, forded = river.sides()[:3]
+    for side in (crossed, unbuilt):
+        ws.river_sides[side].tags.add("bridge")
+    ws.river_sides[forded].tags.add("ford")
+    tag_river_crossings({road_edge_key(*side_hexes(crossed)): RoadTier.TRACK}, ws, WorldConfig())
+    assert ws.river_sides[crossed].tags == {"bridge"}
+    assert not ws.river_sides[unbuilt].tags
+    assert ws.river_sides[forded].tags == {"ford"}
 
 
 # -- tier gaps ---------------------------------------------------------------

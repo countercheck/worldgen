@@ -336,6 +336,30 @@ def test_crossings_let_a_catchment_reach_the_far_bank(settled):
     assert spanning, "no catchment holds ground on both sides of a crossing"
 
 
+def test_every_bridge_on_a_finished_map_carries_a_road(settled):
+    """A bridge nobody built a road to was never built, so the map must not show one."""
+    from worldgen.core.world_state import road_edge_key
+
+    ws = _crossing_world(stop="InterurbanRoadStage")
+    bridged = [s for s, rs in ws.river_sides.items() if BRIDGE in rs.tags]
+    assert bridged, "no bridge on the fixture"
+    for side in bridged:
+        assert road_edge_key(*side_hexes(side)) in ws.road_edges, (
+            f"bridge at {side} carries no road"
+        )
+
+
+def test_no_road_wades_a_river_too_big_to_wade(settled):
+    """Where a road crosses unwadeable water, there is a bridge."""
+    from worldgen.core.world_state import road_edge_key
+
+    ws = _crossing_world(stop="InterurbanRoadStage")
+    spans = _spans(ws)
+    for side, rs in ws.river_sides.items():
+        if road_edge_key(*side_hexes(side)) in ws.road_edges and FORD not in rs.tags:
+            assert BRIDGE in rs.tags or spans[side] <= 1.0, f"a road wades {side}"
+
+
 def test_same_seed_same_crossings():
     a = _crossing_world(seed=99)
     b = _crossing_world(seed=99)
