@@ -29,7 +29,7 @@ from ..core.hex import LandUse, Settlement, SettlementRole, SettlementTier
 from ..core.hex_grid import distance, grade_reachable_count, hex_range, neighbors
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
-from .haulage import bulk_routes, floatable, usable_fraction
+from .haulage import bulk_routes, floatable, river_index, usable_fraction
 from .road_cost import WATER, grade_is_under_cap
 
 
@@ -162,7 +162,11 @@ class ResourceStage(GeneratorStage):
         if not outlets:
             return []
         to_outlet, _ = bulk_routes(
-            hexes, outlets, cfg, budget=cfg.haulage_range_land * cfg.ore_haul_range_mult
+            hexes,
+            outlets,
+            cfg,
+            budget=cfg.haulage_range_land * cfg.ore_haul_range_mult,
+            rivers=river_index(state, cfg),
         )
 
         upland = sorted(
@@ -222,13 +226,14 @@ class ResourceStage(GeneratorStage):
         cities = [s.coord for s in state.settlements if s.tier is SettlementTier.CITY]
         if not cities or cfg.lumber_min_score <= 0:
             return []
-        to_city, _ = bulk_routes(hexes, cities, cfg)
+        rivers = river_index(state, cfg)
+        to_city, _ = bulk_routes(hexes, cities, cfg, rivers=rivers)
 
         wood = {c for c, hx in hexes.items() if hx.land_use is LandUse.WOOD}
 
         def floats(coord) -> bool:
-            return floatable(hexes[coord], cfg) or any(
-                n in hexes and floatable(hexes[n], cfg) for n in neighbors(coord)
+            return floatable(hexes[coord], cfg, rivers) or any(
+                n in hexes and floatable(hexes[n], cfg, rivers) for n in neighbors(coord)
             )
 
         scored = []
@@ -278,7 +283,8 @@ class ResourceStage(GeneratorStage):
             return
         widest = cfg.haulage_range_land * max(1.0, cfg.ore_haul_range_mult)
         # One search per city, read by every mine and camp: cost of hauling there.
-        to = {c: bulk_routes(hexes, [c], cfg, budget=widest)[0] for c, _ in cities}
+        rivers = river_index(state, cfg)
+        to = {c: bulk_routes(hexes, [c], cfg, budget=widest, rivers=rivers)[0] for c, _ in cities}
         freight = state.metadata.setdefault("freight", [])
         for origin, people, role in worked:
             ore = role is SettlementRole.MINING
@@ -335,7 +341,7 @@ class ResourceStage(GeneratorStage):
         Returns how many moved, and who sent how many, so a failed founding can undo it.
         """
         cfg = self.config
-        cost, _ = bulk_routes(state.hexes, [site], cfg)
+        cost, _ = bulk_routes(state.hexes, [site], cfg, rivers=river_index(state, cfg))
         senders = [
             (s, s.population * usable_fraction(cost[s.coord], cfg.haulage_range_land))
             for s in state.settlements

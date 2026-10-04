@@ -28,7 +28,7 @@ from ..core.pipeline import GeneratorStage
 from ..core.world_state import ROAD_TIER_RANK, RoadTier, WorldState, road_edge_key
 from .city_town import _assign_role
 from .habitability import actual_food
-from .haulage import allocate_catchments, gather, settleable, usable_fraction
+from .haulage import allocate_catchments, gather, river_index, settleable, usable_fraction
 
 PASS = "pass"
 BRIDGE = "bridge"
@@ -134,19 +134,19 @@ class ChokepointStage(GeneratorStage):
         # draw off its real catchment, and the two differ by however rough the ground is.
         # The second pass re-partitions among the survivors, so a village is not left
         # holding the smaller catchment it had while a rejected neighbour was still in.
-        draw = self._draw(hexes, seats, residual, cfg)
+        draw = self._draw(hexes, seats, residual, cfg, river_index(state, cfg))
         seats = [s for s in seats if draw.get(s, 0.0) >= cfg.chokepoint_min_draw]
         if not seats:
             return state
-        draw = self._draw(hexes, seats, residual, cfg)
+        draw = self._draw(hexes, seats, residual, cfg, river_index(state, cfg))
 
         state.settlements.extend(self._found(seats, draw, hexes, cfg))
         return state
 
     @staticmethod
-    def _draw(hexes, seats, residual, cfg) -> dict:
+    def _draw(hexes, seats, residual, cfg, rivers) -> dict:
         """What each seat can actually fetch off its own fields."""
-        owner, cost = allocate_catchments(hexes, seats, cfg.rural_field_radius, cfg)
+        owner, cost = allocate_catchments(hexes, seats, cfg.rural_field_radius, cfg, rivers)
         return gather(residual, owner, cost, cfg.rural_field_radius)
 
     # -- what may be one -------------------------------------------------------

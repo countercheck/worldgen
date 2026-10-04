@@ -461,7 +461,7 @@ crossing_relief_m: 60.0      # Local relief, in metres, that doubles how hard a 
 bridge_pressure_per_span: 3.0 # Surplus needed within reach per multiple of the widest wadeable span, before a bridge is worth building. A river twice that width needs twice the traffic. Nobody bridges to nowhere. Default: 3.0
 crossing_pressure_radius: 6   # How far either bank is searched for that surplus. Default: 6
 crossing_min_separation: 4    # Nobody builds two bridges within sight of each other. Default: 4
-crossing_use_cost: 0.5        # Cost of using an existing ford or bridge. Default: 0.5
+crossing_use_cost: 1.0        # Cost of using an existing ford or bridge, charged once per crossing. Default: 1.0
 
 # ---------------------------------------------------------------------------
 # Haulage economics — § used by `--model organic`
@@ -492,7 +492,7 @@ haulage_range_water_mult: 15.0 # How much further the same cargo goes by water. 
 marketable_surplus_fraction: 0.40 # What leaves the farm: not only what the household sells but the rent, the tithe and the dues, all of which end up feeding somebody in a town. It is the one number setting the ratio between town and countryside — rural/town = (1 - s) / (s x mean haulage weight) — so 0.40, with yield_multiplier 1.7, puts 25% of the people in market towns of any size, against 27.5% in towns over 5,000 in England's 1801 census (Wrigley). 0.32 is England c. 1300. It also plants markets, since siting counts surplus: ~104 at 0.40 against ~85 at 0.32. See the era table. Default: 0.40
 people_per_food: 145.0     # People fed per unit of food, and the one scale factor for the whole population of the map — settlements and countryside alike, which is what makes the two reconcile by construction. Set from the rural side because that is where there is a figure to hit: 145 puts a temperate 128x128 map at 61 people per km2 at the default yield_multiplier of 1.7, against England's 59 in the 1801 census, and at 38-39 at 1.0 (England c. 1300 was 30-40). It was 180 until elevation_hypsometry_exponent laid most land low: flat ground farms better, and density rose by a quarter. At the old 400 the countryside came out at 88 per km2, which is Belgium in 1900. Default: 145
 travel_ascent_per_hex: 125.0 # Naismith's rule: metres of ascent that cost as much as one hex of level ground. Catchments are walked, not engineered, so they use this rather than road_delta_elevation_per_hex, which prices a graded road and is about five times stricter than a walker has reason to be. Default: 125
-travel_ford_cost: 8.0      # Getting across away from a crossing, per multiple of the wadeable span, charged on each land–river edge. Deliberately has no fixed term, unlike road_river_crossing_base: that base is the capital of building a bridge, and somebody walking to market pays no capital — what stops them is how much water is in the way. Default: 8.0
+travel_ford_cost: 16.0     # Getting across away from a crossing, per multiple of the wadeable span, charged once per river side crossed. Deliberately has no fixed term, unlike road_river_crossing_base: that base is the capital of building a bridge, and somebody walking to market pays no capital — what stops them is how much water is in the way. Default: 16.0
 
 # ---------------------------------------------------------------------------
 # Market centres — § used by `--model organic`

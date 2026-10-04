@@ -25,7 +25,7 @@ from ..core.hex_grid import grade_reachable_count, hex_range, ring
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
 from .habitability import potential_food, site_bonus
-from .haulage import allocate_catchments, fishery_rim, settleable, usable_fraction
+from .haulage import allocate_catchments, fishery_rim, river_index, settleable, usable_fraction
 from .road_cost import grade_is_under_cap
 
 # Float slop when comparing a recomputed score against the heap's next-best.  Without it,
@@ -75,7 +75,9 @@ class MarketStage(GeneratorStage):
         if not seats:
             return state
 
-        owner, cost = allocate_catchments(hexes, seats, cfg.market_day_radius, cfg)
+        owner, cost = allocate_catchments(
+            hexes, seats, cfg.market_day_radius, cfg, river_index(state, cfg)
+        )
         owner, cost = fishery_rim(hexes, owner, cost)
         for coord, seat in owner.items():
             hexes[coord].territory = seat

@@ -2487,7 +2487,7 @@ is the model's core claim and is enforced in `__post_init__`.
 | `marketable_surplus_fraction` | `float` | `0.40` | `(0, 1]` | Share of what a farming household grows that can leave for a market; it eats the rest. Sets the share of people in towns: 0.40 with `yield_multiplier` 1.7 is England c. 1800 (25% in market towns on the map, 27.5% over 5,000 in 1801); 0.32 is England c. 1300. Sizing markets off the *surplus* rather than the production is why the tier ratios come out right without target counts |
 | `people_per_food` | `float` | `145.0` | `> 0` | People fed per unit of food, and the one scale factor for the whole population of the map, settlements and countryside alike. 145 puts a temperate 128x128 map at 61 people per km² at the c. 1800 defaults, against 59 in England and Wales's 1801 census. It was 180 before `elevation_hypsometry_exponent` laid most land low, since flat ground farms better. Density is linear in it, so it is also the knob for a country thinner than the era table's rows |
 | `travel_ascent_per_hex` | `float` | `125.0` | `> 0` | Naismith's rule: metres of ascent costing as much as one hex of level ground. Catchments are *walked*, not engineered, so they use this rather than `road_slope_cost` — that curve prices grading a road and saturates at ten times base, which over eroded terrain shrinks a catchment to a third of its proper reach |
-| `travel_ford_cost` | `float` | `8.0` | `≥ 0` | Getting across away from a crossing, per multiple of the wadeable span, charged on each land–river edge. Deliberately has no fixed term, unlike `road_river_crossing_base`: that base is the capital of *building* a bridge, and somebody walking to market pays no capital |
+| `travel_ford_cost` | `float` | `16.0` | `≥ 0` | Getting across away from a crossing, per multiple of the wadeable span, charged once per river side crossed. Deliberately has no fixed term, unlike `road_river_crossing_base`: that base is the capital of *building* a bridge, and somebody walking to market pays no capital |
 
 Those set what a market can reach. The three below decide where markets are planted: a
 site is scored on the surplus it can gather inside a day's return, the best site is taken,
@@ -2545,7 +2545,7 @@ permission. A **bridge is capital** and appears only where enough traffic will u
 | `bridge_pressure_per_span` | `float` | `3.0` | `> 0` | Surplus needed within reach per multiple of the widest wadeable span before a bridge is worth building. A river twice that width needs twice the traffic. Nobody bridges to nowhere |
 | `crossing_pressure_radius` | `int` | `6` | `≥ 1` | How far either bank is searched for that surplus |
 | `crossing_min_separation` | `int` | `4` | `≥ 1` | Nobody builds two bridges within sight of each other |
-| `crossing_use_cost` | `float` | `0.5` | `≥ 0` | Cost of using an existing ford or bridge |
+| `crossing_use_cost` | `float` | `1.0` | `≥ 0` | Cost of using an existing ford or bridge, charged once per crossing |
 
 ### 4.12 Cultivation Radii — § [3.12](#312-cultivation-cities--towns), [3.15](#315-village-cultivation)
 
