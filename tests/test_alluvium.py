@@ -11,7 +11,7 @@ import pytest
 
 from worldgen.core.config import WorldConfig
 from worldgen.core.hex import TerrainClass
-from worldgen.core.hex_grid import neighbors
+from worldgen.core.hex_grid import neighbors, side_hexes
 from worldgen.core.pipeline import GeneratorPipeline
 from worldgen.core.world_state import WorldState
 from worldgen.stages import default_stages
@@ -44,8 +44,9 @@ def _land(state: WorldState) -> dict:
 
 
 def _distance_to_river(state: WorldState, land: dict) -> dict:
-    """Hops across land from each hex to the nearest river hex."""
-    dist = {c: 0 for c in land if "river" in state.hexes[c].tags}
+    """Hops across land from each hex to the nearest river bank."""
+    banks = {h for s in state.river_sides for h in side_hexes(s)}
+    dist = {c: 0 for c in land if c in banks}
     queue = deque(dist)
     while queue:
         c = queue.popleft()

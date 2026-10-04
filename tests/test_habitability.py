@@ -197,8 +197,9 @@ def test_at_least_one_nonzero(hab_state, field):
 
 @pytest.mark.parametrize("field", TIERS)
 def test_river_hexes_score_higher(hab_state, field):
-    from worldgen.core.hex_grid import neighbors
+    from worldgen.core.hex_grid import neighbors, side_hexes
 
+    banks = {b for s in hab_state.river_sides for b in side_hexes(s)}
     river_scores = []
     plain_scores = []
     for coord, h in hab_state.hexes.items():
@@ -210,7 +211,7 @@ def test_river_hexes_score_higher(hab_state, field):
         if h.biome == Biome.WETLAND:
             continue
         nbrs = [hab_state.hexes[n] for n in neighbors(coord) if n in hab_state.hexes]
-        has_river = "river" in h.tags or any("river" in n.tags for n in nbrs)
+        has_river = coord in banks or any(n in banks for n in neighbors(coord))
         has_coast = any(n.terrain_class == TerrainClass.COAST for n in nbrs)
         if has_river:
             river_scores.append(getattr(h, field))

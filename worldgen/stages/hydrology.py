@@ -275,7 +275,7 @@ class HydrologyStage(GeneratorStage):
         state.rivers = rivers
         state.river_sides = sides
         state.river_corners = dict(corner_tags)
-        _write_hex_view(hexes, land, sides, corner_tags, drainage, drain_of, max_acc, self.config)
+        _write_hex_catchments(hexes, land, sides, drainage, drain_of, max_acc, self.config)
 
     def _plateau_drain_distance(
         self,
@@ -1384,78 +1384,26 @@ def _get_lake_components(lakes: set[HexCoord], hexes: dict[HexCoord, "Hex"]) -> 
     return components
 
 
-# Tags the hex view of the river network writes, cleared before it does.
-_HEX_RIVER_TAGS = frozenset(
-    {
-        "river",
-        "headwater",
-        "confluence",
-        "river_mouth",
-        "river_source",
-        "river_source_offmap",
-        "river_end",
-    }
-)
+def _write_hex_catchments(hexes, land, sides, drainage, drain_of, max_acc, config):
+    """Record on each land hex the catchment beside it, for the viewer and for erosion.
 
-# Corner tag -> the hex tags it puts on the bank beside it.
-_CORNER_TO_HEX_TAGS = {
-    "river_source": ("river_source", "headwater"),
-    "river_source_offmap": ("river_source_offmap", "headwater"),
-    "confluence": ("confluence",),
-    "river_mouth": ("river_mouth",),
-    "river_end": ("river_end",),
-}
-
-
-def band_hex(side, hexes) -> HexCoord:
-    """The bank of *side* the hex view of the river network puts it on: the lower one.
-
-    Part of the temporary hex view `_write_hex_view` writes; stages that mirror a side's
-    tags onto the hexes put them here so they land on the hex tagged "river".
-    """
-    return min((h for h in side_hexes(side) if h in hexes), key=lambda h: (hexes[h].elevation, h))
-
-
-def mirror_on_band(state: WorldState, tags) -> None:
-    """Copy *tags* from each river side onto its band hex, for stages still reading hexes."""
-    for side, rs in state.river_sides.items():
-        found = rs.tags & set(tags)
-        if found:
-            state.hexes[band_hex(side, state.hexes)].tags.update(found)
-
-
-def _write_hex_view(hexes, land, sides, corner_tags, drainage, drain_of, max_acc, config):
-    """Describe the river network on the hexes, for stages that still read it there.
-
-    Temporary.  The stages after hydrology were written for rivers that occupy hexes,
-    and they move onto `river_sides` one by one; until they have, each river side tags
-    its *lower bank* hex "river", which keeps a one-hex-wide band along every river much
-    as before.  A hex's catchment is what drains to its own lowest corner, or, beside a
-    river, the largest river it touches.
+    A hex's catchment is what drains to its own lowest corner, or, on a river bank, the
+    largest river it touches.  Its `river_flow` is that catchment as a share of the
+    largest on the map, written on both banks of every river — or on every draining land
+    hex with `river_flow_continuous`, which is a diagnostic for the viewer.  The rivers
+    themselves are `river_sides`; nothing about a river is a hex tag.
     """
     for hx in hexes.values():
-        hx.tags -= _HEX_RIVER_TAGS
         hx.river_flow = 0.0
         hx.catchment_km2 = 0.0
 
     touching: dict[HexCoord, float] = {}
     for side, rs in sides.items():
-        a, b = side_hexes(side)
-        for h in (a, b):
+        for h in side_hexes(side):
             touching[h] = max(touching.get(h, 0.0), rs.catchment_km2)
-        hexes[band_hex(side, hexes)].tags.add("river")
 
     for coord in land:
         own = drainage.acc.get(drain_of.get(coord), 0.0) if coord in drain_of else 0.0
         hexes[coord].catchment_km2 = max(own, touching.get(coord, 0.0))
-        if config.river_flow_continuous or "river" in hexes[coord].tags:
+        if config.river_flow_continuous or coord in touching:
             hexes[coord].river_flow = hexes[coord].catchment_km2 / max_acc
-
-    for corner, tags in corner_tags.items():
-        around = [h for h in corner_hexes(corner) if h in land]
-        if not around:
-            continue
-        banks = [h for h in around if "river" in hexes[h].tags]
-        target = min(banks or around, key=lambda h: (hexes[h].elevation, h))
-        for tag in tags:
-            hexes[target].tags.update(_CORNER_TO_HEX_TAGS.get(tag, ()))

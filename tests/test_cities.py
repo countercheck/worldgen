@@ -509,7 +509,6 @@ def _row(kinds):
         else:
             hx = Hex(coord=(q, 0), terrain_class=TerrainClass.LAND)
             if kind == "r":
-                hx.tags.add("river")
                 hx.catchment_km2 = 1e6
             hexes[(q, 0)] = hx
     return hexes

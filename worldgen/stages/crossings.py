@@ -30,7 +30,6 @@ from ..core.hex_grid import Side, hex_range, side_hexes
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
 from .habitability import potential_food
-from .hydrology import mirror_on_band
 from .riverside import side_gradients, side_span
 
 FORD = "ford"
@@ -105,7 +104,4 @@ class CrossingStage(GeneratorStage):
             sides[side].tags.add(BRIDGE)
             taken |= _near(side, sep)
 
-        # Until the stages after this read crossings off the sides, each is mirrored onto
-        # the hex the river is drawn on.
-        mirror_on_band(state, (FORD, BRIDGE))
         return state

@@ -79,16 +79,17 @@ def test_flow_accumulates_downstream(hydro_state):
 def test_tags_assigned(hydro_state):
     corner_tags = {t for tags in hydro_state.river_corners.values() for t in tags}
     assert {"river_source", "river_mouth", "river_end"} <= corner_tags
+    # Sources, mouths and confluences are points on the river, not places on the map.
     hex_tags = {t for h in hydro_state.hexes.values() for t in h.tags}
-    assert "headwater" in hex_tags, "No headwater tags found"
-    assert "river_mouth" in hex_tags, "No river_mouth tags found"
+    assert not hex_tags & {"river", "headwater", "river_mouth", "river_source", "confluence"}
 
 
-def test_river_tag_on_river_paths(hydro_state):
-    # Until the stages after hydrology read river sides, every side marks one bank.
-    for side in hydro_state.river_sides:
-        banks = [h for h in side_hexes(side) if "river" in hydro_state.hexes[h].tags]
-        assert banks, f"river side {side} has no bank tagged 'river'"
+def test_both_banks_of_a_river_record_its_flow(hydro_state):
+    for side, rs in hydro_state.river_sides.items():
+        for h in side_hexes(side):
+            hx = hydro_state.hexes[h]
+            assert hx.river_flow > 0, f"bank {h} of river side {side} records no flow"
+            assert hx.catchment_km2 >= rs.catchment_km2
 
 
 def test_every_river_side_has_land_on_both_hands(hydro_state):

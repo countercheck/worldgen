@@ -7,9 +7,7 @@ from worldgen.core.config import WorldConfig
 from worldgen.core.hex_grid import distance, neighbors, side_hexes
 from worldgen.core.world_state import WorldState
 from worldgen.stages.crossings import BRIDGE, FORD
-from worldgen.stages.hydrology import band_hex
 from worldgen.stages.riverside import SIDE_KM, side_gradients, side_span
-from worldgen.stages.road_cost import is_river
 
 _CROSSING = {FORD, BRIDGE}
 
@@ -19,6 +17,11 @@ def _crossing_world(seed=42, width=64, height=64, stop="CrossingStage", **overri
         seed=seed, width=width, height=height, model="organic", until=stop, **overrides
     )
     return p.run()
+
+
+def _banks(ws):
+    """The land hexes on a bank of some river."""
+    return [ws.hexes[h] for s in ws.river_sides for h in side_hexes(s) if h in ws.hexes]
 
 
 @pytest.fixture(scope="module")
@@ -38,7 +41,7 @@ def settled():
 
 def test_catchment_area_is_recorded(crossed):
     """Hydrology normalises river_flow away; the area it was normalised from is kept."""
-    river = [h for h in crossed.hexes.values() if is_river(h)]
+    river = _banks(crossed)
     assert river, "no rivers on the fixture map"
     assert all(h.catchment_km2 > 0 for h in river)
 
@@ -65,7 +68,7 @@ def test_bigger_maps_really_do_have_bigger_rivers():
     large = _crossing_world(width=128, height=128)
 
     def biggest(ws, field):
-        return max(getattr(h, field) for h in ws.hexes.values() if is_river(h))
+        return max(getattr(h, field) for h in _banks(ws))
 
     assert biggest(small, "river_flow") == pytest.approx(biggest(large, "river_flow"), abs=0.01), (
         "river_flow should top out at 1.0 on both — that is what makes it a rank"
@@ -174,10 +177,9 @@ def test_a_ford_needs_nobody_to_want_it(crossed):
     assert not any(BRIDGE in rs.tags for rs in barren.river_sides.values())
 
 
-def test_crossings_are_mirrored_onto_the_river_hex_until_readers_move(crossed):
-    for side, rs in crossed.river_sides.items():
-        for tag in rs.tags & _CROSSING:
-            assert tag in crossed.hexes[band_hex(side, crossed.hexes)].tags
+def test_crossings_live_on_sides_only(crossed):
+    """A ford is where a river is crossed, which is a side; no hex carries one."""
+    assert not any(h.tags & _CROSSING for h in crossed.hexes.values())
 
 
 # --- bridges are capital -----------------------------------------------------
@@ -244,11 +246,12 @@ def test_markets_favour_crossings(settled):
     the rate that would arise if markets ignored crossings entirely.
     """
     hexes = settled.hexes
+    banks = {
+        h for s, rs in settled.river_sides.items() if rs.tags & _CROSSING for h in side_hexes(s)
+    }
 
     def at_crossing(coord):
-        return bool(hexes[coord].tags & _CROSSING) or any(
-            n in hexes and (hexes[n].tags & _CROSSING) for n in neighbors(coord)
-        )
+        return coord in banks or any(n in banks for n in neighbors(coord))
 
     land = [c for c, h in hexes.items() if h.terrain_class.value not in ("ocean", "lake")]
     base_rate = sum(1 for c in land if at_crossing(c)) / len(land)
@@ -265,15 +268,11 @@ def test_crossings_let_a_catchment_reach_the_far_bank(settled):
     """A district should span the river where it can be crossed and stop where it cannot."""
     hexes = settled.hexes
     spanning = 0
-    for coord, hx in hexes.items():
-        if not (hx.tags & _CROSSING) or hx.territory is None:
+    for side, rs in settled.river_sides.items():
+        if not rs.tags & _CROSSING:
             continue
-        owners = {
-            hexes[n].territory
-            for n in neighbors(coord)
-            if n in hexes and hexes[n].territory is not None
-        }
-        if len(owners) == 1 and hx.territory in owners:
+        owners = {hexes[h].territory for h in side_hexes(side)}
+        if len(owners) == 1 and None not in owners:
             spanning += 1
     assert spanning, "no catchment holds ground on both sides of a crossing"
 

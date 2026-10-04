@@ -31,7 +31,6 @@ def _strip(length, terrain=TerrainClass.LAND):
 
 def _river(hx, catchment_km2):
     hx.catchment_km2 = catchment_km2
-    hx.tags.add("river")
     return hx
 
 

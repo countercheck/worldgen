@@ -19,7 +19,7 @@ from worldgen.core.hex import (
     SettlementTier,
     SoilQuality,
 )
-from worldgen.core.hex_grid import neighbors, side_between
+from worldgen.core.hex_grid import neighbors, side_between, side_hexes
 from worldgen.core.world_state import (
     ROAD_TIER_RANK,
     RiverSide,
@@ -165,22 +165,19 @@ def test_a_pass_is_walled_by_ground_the_terrain_bands_call_impassable():
 def test_every_village_holds_a_chokepoint(choke_world):
     """The first half of the gate. No village is founded on ordinary ground.
 
-    A bridge only counts if the drawn network actually goes over it — at least two road
-    edges, one onto each bank. `CrossingStage` tags candidate sites before any road
-    exists, and a tag nothing crosses holds nothing.
+    A bridge only counts if the drawn network actually goes over it — a road edge between
+    the two hexes either side of the bridged side. `CrossingStage` tags candidate sites
+    before any road exists, and a tag nothing crosses holds nothing.
     """
-    degree: dict = {}
-    for a, b in choke_world.road_edges:
-        degree[a] = degree.get(a, 0) + 1
-        degree[b] = degree.get(b, 0) + 1
-
-    def crossed(coord):
-        return BRIDGE in choke_world.hexes[coord].tags and degree.get(coord, 0) >= 2
+    bridgeheads = set()
+    for side, rs in choke_world.river_sides.items():
+        ends = side_hexes(side)
+        if BRIDGE in rs.tags and road_edge_key(*ends) in choke_world.road_edges:
+            bridgeheads.update(ends)
 
     for s in _villages(choke_world):
         hx = choke_world.hexes[s.coord]
-        beside_bridge = any(crossed(n) for n in neighbors(s.coord) if n in choke_world.hexes)
-        assert PASS in hx.tags or crossed(s.coord) or beside_bridge, (
+        assert PASS in hx.tags or s.coord in bridgeheads, (
             f"village at {s.coord} holds no crossed bridge and no pass"
         )
 

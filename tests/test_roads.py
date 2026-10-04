@@ -169,17 +169,19 @@ def test_roads_route_when_river_flow_is_continuous():
     just the channels.  Anything in the road costs that identifies a river by
     `river_flow > 0` then calls the whole map a river: every land-to-land edge reads as
     channel travel and prices at infinity, and the network does not merely route badly,
-    it fails to route at all.  The costs identify a channel by the "river" tag for this
-    reason, so the two modes must produce the same roads.
+    it fails to route at all.  The costs identify a river by its sides for this reason,
+    so the two modes must produce the same roads.
     """
     plain = _build_pipeline(seed=42).run()
     continuous = _build_pipeline(seed=42, river_flow_continuous=True).run()
 
     assert continuous.road_edges, "no roads generated with river_flow_continuous"
     flowing = [h for h in continuous.hexes.values() if h.river_flow > 0]
-    tagged = [h for h in continuous.hexes.values() if "river" in h.tags]
+    from worldgen.core.hex_grid import side_hexes
+
+    tagged = {h for s in continuous.river_sides for h in side_hexes(s)}
     assert len(flowing) > len(tagged) * 2, (
-        "continuous mode should put flow on far more hexes than are tagged as river; "
+        "continuous mode should put flow on far more hexes than stand on a river bank; "
         "if it does not, this test is no longer exercising the case it was written for"
     )
 
@@ -188,7 +190,7 @@ def test_roads_route_when_river_flow_is_continuous():
 
     assert network(continuous) == network(plain), (
         "roads differ between flow modes: something is still identifying a river channel "
-        "by river_flow rather than by the tag"
+        "by river_flow rather than by its sides"
     )
 
 

@@ -84,19 +84,6 @@ def terrain_base_cost(hx, cfg) -> float:
     return cfg.road_flat_cost
 
 
-def is_river(hx) -> bool:
-    """True when this hex is a river channel.
-
-    The "river" tag, not `river_flow > 0`.  With `river_flow_continuous` the hydrology
-    stage writes a flow value onto every draining land hex, so a flow test calls the
-    whole map a river: every land-to-land edge reads as channel travel and prices at
-    infinity, which leaves the road network unroutable rather than merely mis-costed.
-    Everything here that asks "is this the channel?" wants the tag; only the terms that
-    scale by *how much* water flows should read `river_flow` itself.
-    """
-    return "river" in hx.tags
-
-
 def water_edge_cost(from_hx, to_hx, cfg) -> float:
     """Embark/disembark cost for transitions between land and water hexes."""
     from_water = from_hx.terrain_class in WATER
@@ -217,8 +204,6 @@ def tag_river_crossings(road_edges, state) -> None:
     `CrossingStage` (the organic model) tags its own fords and bridges before roads exist;
     those are left alone, since a bridge is not demoted by carrying a quiet road.
     """
-    from .hydrology import mirror_on_band
-
     side_of = {frozenset(side_hexes(side)): side for side in state.river_sides}
     best: dict = {}
     for key, tier in road_edges.items():
@@ -236,7 +221,6 @@ def tag_river_crossings(road_edges, state) -> None:
             tags.add("bridge")
         else:
             tags.add("ford")
-    mirror_on_band(state, ("ford", "bridge"))
 
 
 def pheromone_discount(base: float, traffic: float, cfg) -> float:

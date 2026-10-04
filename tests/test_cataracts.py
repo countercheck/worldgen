@@ -61,7 +61,6 @@ def _river(drops):
     height = sum(drops) + 10.0
     for q in range(len(drops) + 1):
         hx = Hex(coord=(q, 0), terrain_class=TerrainClass.LAND, elevation=height)
-        hx.tags.add("river")
         hx.catchment_km2 = 1e6
         hexes[(q, 0)] = hx
         if q < len(drops):
