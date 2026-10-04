@@ -25,15 +25,51 @@ Everywhere else the river stays a barrier, which is what makes a trunk river bou
 market catchment instead of being invisible to it.
 """
 
+import math
+
 from ..core.hex import TerrainClass
-from ..core.hex_grid import hex_range, neighbors
+from ..core.hex_grid import Side, hex_range, neighbors, side_hexes
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
 from .habitability import potential_food
+from .hydrology import mirror_on_band
 from .road_cost import is_river
 
 FORD = "ford"
 BRIDGE = "bridge"
+
+# A hexside is the side of a kilometre-wide hex: 1/sqrt(3) km of river.
+SIDE_KM = 1.0 / math.sqrt(3.0)
+
+
+def side_gradients(state: WorldState) -> dict[Side, float]:
+    """How fast the water falls along each river side, in metres per kilometre.
+
+    Measured along the river's own course — the fall over the side and the sides either
+    side of it — because that is what sets the velocity, and velocity is what decides
+    whether a reach can be waded.  Three sides rather than one because a corner stands at
+    its lowest hex, so the fall over any single side comes in lumps: nothing for a side or
+    two across one hex's foot, then all of it at once.  Never the height of the ground
+    beside the river, which says how tall the valley is, not how fast the water runs (see
+    `channel_drop_m`).
+    """
+    out: dict[Side, float] = {}
+    for river in state.rivers:
+        sides = river.sides()
+        drops = [state.river_sides[s].drop_m if s in state.river_sides else 0.0 for s in sides]
+        for i, side in enumerate(sides):
+            lo, hi = max(0, i - 1), min(len(sides), i + 2)
+            out[side] = sum(drops[lo:hi]) / ((hi - lo) * SIDE_KM)
+    return out
+
+
+def side_span(catchment_km2: float, gradient_m_per_km: float, cfg) -> float:
+    """`river_span` for a stretch of river along a hexside: how hard it is to get across,
+    in multiples of the easiest wadeable reach.  See `river_span` for why both terms."""
+    if cfg.ford_max_catchment_km2 <= 0:
+        return 0.0
+    width = (catchment_km2 / cfg.ford_max_catchment_km2) ** 0.5
+    return width * (1.0 + gradient_m_per_km / cfg.crossing_relief_m)
 
 
 def channel_drop_m(hx, hexes, cfg) -> float:
@@ -86,19 +122,19 @@ def river_span(hx, hexes, cfg) -> float:
     return width * (1.0 + drop / cfg.crossing_relief_m)
 
 
-def crossing_pressure(coord, surplus: dict, radius: int) -> float:
-    """How much there is on either side worth connecting.
+def crossing_pressure(side: Side, surplus: dict, radius: int) -> float:
+    """How much there is on either side worth connecting: the surplus within *radius* of
+    either bank."""
+    around = {c for bank in side_hexes(side) for c in hex_range(bank, radius)}
+    return sum(surplus.get(c, 0.0) for c in around)
 
-    Summed over the whole neighbourhood rather than split into banks: telling one bank
-    from the other on a hex grid needs the river's local direction, and a river running
-    through good country has good country on both sides of it.  The simplification costs
-    little and keeps this a single cheap pass.
-    """
-    return sum(surplus.get(c, 0.0) for c in hex_range(coord, radius))
+
+def _near(side: Side, radius: int) -> set:
+    return {c for bank in side_hexes(side) for c in hex_range(bank, radius)}
 
 
 class CrossingStage(GeneratorStage):
-    """Tags every river hex that can be crossed, as a ford or as a bridge."""
+    """Tags every river side that can be crossed, as a ford or as a bridge."""
 
     def run(self, state: WorldState) -> WorldState:
         hexes = state.hexes
@@ -112,9 +148,52 @@ class CrossingStage(GeneratorStage):
 
         # sorted() throughout: which of two equally good sites gets the bridge decides
         # where a market later grows, so it must not depend on dict ordering.
-        river = sorted(c for c, hx in hexes.items() if is_river(hx))
-        if not river:
+        sides = state.river_sides
+        if not sides:
             return state
+        gradient = side_gradients(state)
+        span = {
+            s: side_span(rs.catchment_km2, gradient.get(s, 0.0), cfg) for s, rs in sides.items()
+        }
+        river = sorted(sides)
+
+        # A ford is any reach no harder to cross than the limit case: a stream at the
+        # wading size on level ground. Steep water of the same size does not qualify.
+        fords = [s for s in river if span[s] <= 1.0]
+        for side in fords:
+            sides[side].tags.add(FORD)
+
+        # Bridges: only where the water cannot be waded, and only where enough lies on
+        # either bank to be worth the capital. The threshold scales with discharge —
+        # a wider river is a dearer structure and needs more traffic to justify it.
+        sep = cfg.crossing_min_separation
+        taken: set = set()
+        for side in fords:
+            taken |= _near(side, sep)
+
+        candidates = []
+        for side in river:
+            if FORD in sides[side].tags or any(b in taken for b in side_hexes(side)):
+                continue
+            needed = cfg.bridge_pressure_per_span * span[side]
+            pressure = crossing_pressure(side, surplus, cfg.crossing_pressure_radius)
+            if pressure >= needed:
+                candidates.append((pressure - needed, side))
+
+        # Best-served site first, then suppress its neighbours: nobody builds two bridges
+        # within sight of each other, and the surplus that justified one is the same
+        # surplus that would have justified the next.
+        candidates.sort(key=lambda x: (-x[0], x[1]))
+        for _, side in candidates:
+            if any(b in taken for b in side_hexes(side)):
+                continue
+            sides[side].tags.add(BRIDGE)
+            taken |= _near(side, sep)
+
+        # Until the stages after this read crossings off the sides, each is mirrored onto
+        # the hex the river is drawn on.
+        mirror_on_band(state, (FORD, BRIDGE))
+        return state
 
         # A ford is any reach no harder to cross than the limit case: a stream at the
         # wading size on level ground. Steep water of the same size does not qualify.

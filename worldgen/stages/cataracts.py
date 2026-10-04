@@ -29,40 +29,33 @@ boat can load there.
 
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
-from .crossings import channel_drop_m
-from .haulage import carries_a_barge
-from .road_cost import is_river
+from .crossings import side_gradients
+from .haulage import catchment_carries_a_barge
+from .hydrology import mirror_on_band
 
 
 class CataractStage(GeneratorStage):
     def run(self, state: WorldState) -> WorldState:
         cfg = self.config
-        hexes = state.hexes
         # Measured before any tag is set, so one reach's cataract cannot change how the
-        # next one reads: the drop is a fact about the ground, not about the tagging order.
-        falls = set()
-        rapids = set()
-        for coord, hx in hexes.items():
-            if not is_river(hx):
-                continue
-            drop = channel_drop_m(hx, hexes, cfg)
+        # next one reads: the fall is a fact about the ground, not about the tagging order.
+        gradient = side_gradients(state)
+        for side, rs in state.river_sides.items():
+            fall = gradient.get(side, 0.0)
             if (
                 cfg.cataract_min_drop_m > 0
-                and carries_a_barge(hx, cfg)
-                and drop >= cfg.cataract_min_drop_m
+                and catchment_carries_a_barge(rs.catchment_km2, cfg)
+                and fall >= cfg.cataract_min_drop_m
             ):
-                falls.add(coord)
-                continue
-            if (
+                rs.tags.add("cataract")
+            elif (
                 cfg.rapids_min_drop_m > 0
-                and hx.catchment_km2 >= cfg.rapids_min_catchment_km2
-                and drop >= cfg.rapids_min_drop_m
+                and rs.catchment_km2 >= cfg.rapids_min_catchment_km2
+                and fall >= cfg.rapids_min_drop_m
             ):
-                rapids.add(coord)
-        for coord in falls:
-            hexes[coord].tags.add("cataract")
-        for coord in rapids:
-            hexes[coord].tags.add("rapids")
+                rs.tags.add("rapids")
+        # Until navigation and the map read sides, each is mirrored onto the river's hex.
+        mirror_on_band(state, ("cataract", "rapids"))
         return state
 
 

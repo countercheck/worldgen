@@ -6,9 +6,9 @@ from tests.worlds import build_world
 from worldgen.core.config import WorldConfig
 from worldgen.core.hex import Hex, TerrainClass
 from worldgen.stages.cataracts import CataractStage
-from worldgen.stages.crossings import channel_drop_m
+from worldgen.stages.crossings import side_gradients
 from worldgen.stages.habitability import site_bonus
-from worldgen.stages.haulage import bulk_routes, carries_a_barge, navigable
+from worldgen.stages.haulage import bulk_routes, catchment_carries_a_barge, navigable
 
 # The 96x96 temperate world the city tests use: the 64x64 default has no river big and
 # steep enough to make a cataract, and a test asserting over no cataracts asserts nothing.
@@ -30,10 +30,12 @@ def _world(**over):
 def test_a_cataract_is_a_barge_river_falling_fast():
     state = _world()
     cfg = WorldConfig(**state.metadata["config"])
-    for hx in state.hexes.values():
-        if "cataract" in hx.tags:
-            assert "river" in hx.tags and carries_a_barge(hx, cfg)
-            assert channel_drop_m(hx, state.hexes, cfg) >= cfg.cataract_min_drop_m
+    gradient = side_gradients(state)
+    falls = [s for s, rs in state.river_sides.items() if "cataract" in rs.tags]
+    assert falls
+    for side in falls:
+        assert catchment_carries_a_barge(state.river_sides[side].catchment_km2, cfg)
+        assert gradient[side] >= cfg.cataract_min_drop_m
 
 
 def test_no_boat_passes_a_cataract():
@@ -64,13 +66,22 @@ def _river(drops):
 
 
 def test_the_stage_marks_only_the_steep_reach():
+    """A fall of 40 m over one side marks it and the sides either side — the gradient is
+    read over three sides — and nothing further off."""
+    from tests.worlds import lay_river
     from worldgen.core.world_state import WorldState
 
     cfg = WorldConfig(cataract_min_drop_m=20.0)
-    state = WorldState.empty(1, 8, 1, cfg.grid_layout)
-    state.hexes = _river([1.0, 1.0, 40.0, 1.0, 1.0])
+    state = WorldState.empty(1, 10, 3, cfg.grid_layout)
+    river = lay_river(state, [(q, 1) for q in range(9)])
+    sides = river.sides()
+    steep = len(sides) // 2
+    for i, side in enumerate(sides):
+        state.river_sides[side].catchment_km2 = 1e6
+        state.river_sides[side].drop_m = 40.0 if i == steep else 1.0
     CataractStage(cfg, np.random.default_rng(0)).run(state)
-    assert [q for (q, _), hx in state.hexes.items() if "cataract" in hx.tags] == [2]
+    marked = [i for i, s in enumerate(sides) if "cataract" in state.river_sides[s].tags]
+    assert marked == [steep - 1, steep, steep + 1]
 
 
 def test_a_cataract_forces_a_portage():
