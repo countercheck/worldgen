@@ -1,5 +1,6 @@
 import pytest
 
+from tests.worlds import lay_river
 from worldgen.core.hex import (
     Biome,
     LandCover,
@@ -12,7 +13,6 @@ from worldgen.core.hex import (
 )
 from worldgen.core.world_state import (
     Ferry,
-    River,
     RiverSide,
     RoadEdge,
     RoadTier,
@@ -51,7 +51,7 @@ def _small_world() -> WorldState:
     ]
     ws.hexes[(1, 1)].settlement = ws.settlements[0]
     ws.hexes[(1, 1)].road_connections = {(2, 1)}
-    ws.rivers = [River(hexes=[(0, 0), (1, 0), (2, 0)], flow_volume=1.5)]
+    lay_river(ws, [(0, 0), (1, 0), (2, 0)], flow_volume=1.5)
     ws.road_edges = {
         road_edge_key((1, 1), (2, 1)): RoadEdge(RoadTier.PRIMARY, 12.5),
         road_edge_key((2, 1), (3, 1)): RoadEdge(RoadTier.PRIMARY, -4.0),
@@ -175,7 +175,6 @@ def test_a_world_from_before_hexside_rivers_says_to_regenerate(version):
 
 def test_river_sides_and_corners_round_trip(tmp_path):
     ws = _small_world()
-    ws.rivers[0].corners = [(0, 0, 0), (0, 0, 1), (-1, 1, 0)]
     ws.river_sides = {
         (0, 0, 0): RiverSide(catchment_km2=42.0, flow=0.3, drop_m=1.5, tags={"ford"}),
         (-1, 1, 1): RiverSide(catchment_km2=7.0, flow=0.05),
@@ -184,7 +183,6 @@ def test_river_sides_and_corners_round_trip(tmp_path):
     path = tmp_path / "world.json"
     json_export.save(ws, path)
     back = json_export.load(path)
-    assert back.rivers[0].corners == ws.rivers[0].corners
     assert all(isinstance(c, tuple) for c in back.rivers[0].corners)
     assert back.river_sides == ws.river_sides
     assert back.river_corners == ws.river_corners
@@ -214,7 +212,8 @@ def test_river_preserved(tmp_path):
     ws2 = json_export.load(path)
     assert len(ws2.rivers) == 1
     assert ws2.rivers[0].flow_volume == pytest.approx(1.5)
-    assert ws2.rivers[0].hexes[0] == (0, 0)
+    assert ws2.rivers[0].corners == ws.rivers[0].corners
+    assert ws2.river_sides == ws.river_sides
 
 
 def test_delta_elevation_round_trips(tmp_path):

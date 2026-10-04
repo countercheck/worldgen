@@ -246,7 +246,7 @@ class Streams:
     upstream: dict[Corner, list[Corner]]
 
 
-def trace_streams(drainage: Drainage, threshold: float) -> Streams:
+def trace_streams(drainage: Drainage, threshold: float, forced: Iterable[Node] = ()) -> Streams:
     """Cut the channelled part of the network into courses.
 
     A corner is channel where at least *threshold* passes it.  Each course starts where a
@@ -256,8 +256,10 @@ def trace_streams(drainage: Drainage, threshold: float) -> Streams:
     course and a junction is the last corner of each tributary.  A course that reaches an
     open lake ends on the shore, and what leaves the lake is a course of its own.
 
-    If nothing reaches the threshold, the map keeps its single largest drainage line, so
-    lakes still have an outlet and the coast still has a river mouth.
+    Everything downstream of a corner in *forced* is channel whatever it carries: a lake
+    that overflows has a river leaving it, however little spills.  If nothing reaches the
+    threshold, the map keeps its single largest drainage line, so the coast still has a
+    river mouth.
     """
     acc = drainage.acc
     flow = drainage.flow
@@ -275,7 +277,12 @@ def trace_streams(drainage: Drainage, threshold: float) -> Streams:
         # Nothing big enough: keep the largest drainage line there is.
         bar = max(acc[n] for n in flowing)
     channel = {n for n in flowing if acc[n] >= bar}
-    channel |= {flow[n] for n in channel if not is_lake_node(flow[n])}
+    for start in forced:
+        node: Node | None = start
+        while node is not None and not is_lake_node(node) and node not in channel:
+            channel.add(node)
+            node = flow.get(node)
+    channel |= {flow[n] for n in channel if flow.get(n) is not None and not is_lake_node(flow[n])}
 
     upstream: dict[Corner, list[Corner]] = defaultdict(list)
     for n in sorted(channel):

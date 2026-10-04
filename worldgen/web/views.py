@@ -131,7 +131,7 @@ def describe(state: WorldState, h: Hex) -> dict:
             "culture": s.culture,
             "etymology": s.etymology,
         }
-    out["rivers"] = [r.name or "(unnamed)" for r in state.rivers if h.coord in r.hexes]
+    out["rivers"] = [r.name or "(unnamed)" for r in state.rivers if h.coord in r.banks()]
     if h.territory is not None:
         owner = state.hexes.get(h.territory)
         if owner is not None and owner.settlement is not None:

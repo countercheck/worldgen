@@ -5,9 +5,27 @@ from collections.abc import Callable
 import numpy as np
 
 from ..core.hex import Hex, HexCoord, TerrainClass
-from ..core.hex_grid import distance, neighbors
+from ..core.hex_grid import (
+    Corner,
+    Side,
+    corner_hexes,
+    distance,
+    hex_corner_keys,
+    neighbors,
+    side_hexes,
+    side_joining,
+)
 from ..core.pipeline import GeneratorStage
-from ..core.world_state import River, WorldState
+from ..core.world_state import River, RiverSide, WorldState
+from .corner_drainage import (
+    Node,
+    accumulate,
+    build_network,
+    drain_corner,
+    flow_direction,
+    is_lake_node,
+    trace_streams,
+)
 from .precipitation import rain_per_hex
 
 # True for hexes on the grid edge, which drain off the map.  Which coordinates those are
@@ -112,8 +130,11 @@ class HydrologyStage(GeneratorStage):
 
         max_acc = max(land_acc_vals)
 
-        # E — Build River objects (may extend river_set via fallback for stalled rivers)
-        state.rivers = self._build_rivers(
+        # E — The hex model's own courses.  They are not the map's rivers any more — those
+        # run along hexsides, below — but lake drainage is decided on this model: which
+        # basins overflow, and through which shore, is a question about whole basins and
+        # their water balance, and the routing fallbacks here feed it.
+        self._build_rivers(
             river_set,
             flow_dir,
             hexes,
@@ -127,109 +148,10 @@ class HydrologyStage(GeneratorStage):
             set(inlets),
         )
 
-        # F — Normalize river_flow; headwater/confluence/mouth tags set from river_set
-        if self.config.river_flow_continuous:
-            for coord in land:
-                hexes[coord].river_flow = acc.get(coord, 0.0) / max_acc
-        else:
-            for coord in river_set:
-                hexes[coord].river_flow = acc.get(coord, 0.0) / max_acc
-        self._tag_hexes(river_set, flow_dir, hexes, ocean, lakes, on_border)
-
-        # G — Ensure every lake has an outflow river (fill-to-spillway enforcement)
-        drainage_rivers, outlet_of = self._ensure_lake_drainage(
+        # G — Raise every lake to its spillway and decide which basins drain.
+        _, outlet_of = self._ensure_lake_drainage(
             river_set, flow_dir, hexes, land, ocean, lakes, acc, filled, on_border, rain
         )
-        if drainage_rivers:
-            state.rivers.extend(drainage_rivers)
-        # _ensure_lake_drainage may mutate acc/river_set even when no new rivers are
-        # appended (e.g., submerging former river land into lake). Always refresh
-        # normalization/tags/flow_volume before confluence splitting.
-        max_acc = max(acc.values()) if acc else 1.0
-        if self.config.river_flow_continuous:
-            for coord in land:
-                hexes[coord].river_flow = acc.get(coord, 0.0) / max_acc
-        else:
-            for coord in river_set:
-                hexes[coord].river_flow = acc.get(coord, 0.0) / max_acc
-
-        # `acc` is an upstream hex count, and at 1 hex = 1 km that is catchment area in
-        # square kilometres — a physical quantity, comparable between one map and another.
-        # `river_flow` divides it away: normalised against the largest accumulation on the
-        # map, it says only "this river is X% of the biggest one *here*", so every map has
-        # a 1.0 however small its rivers really are. That is right for drawing, where
-        # width by rank reads correctly, and useless for asking whether a river can be
-        # waded. Keep both: the rank for rendering, the area for physics.
-        for coord in land:
-            hexes[coord].catchment_km2 = acc.get(coord, 0.0)
-
-        # Clear stale river tags from hexes submerged into lake during drainage
-        # (they were removed from river_set but still carry tags from the first pass)
-        _river_tags = {"river", "headwater", "confluence", "river_mouth"}
-        for coord, hx in hexes.items():
-            if coord not in river_set:
-                hx.tags -= _river_tags
-        self._tag_hexes(river_set, flow_dir, hexes, ocean, lakes, on_border)
-        # An inlet is already tagged a headwater — it has no upstream hex on this map —
-        # so this is what separates a river arriving from beyond the border from one
-        # rising at a spring inside it.  Gated on river_set rather than on `inlets`
-        # alone: _ensure_lake_drainage may have submerged an inlet into a lake, and a
-        # lake hex must not be left labelled a river source.
-        for coord in inlets:
-            if coord in river_set:
-                hexes[coord].tags.add("river_source_offmap")
-        # Recompute flow_volume for all rivers now that max_acc is final;
-        # _ensure_lake_drainage may remove land hexes from acc (submerged into lake)
-        # which can change max_acc, making pre-drainage flow_volume values stale.
-        for river in state.rivers:
-            last_land = next((c for c in reversed(river.hexes) if c in acc), river.hexes[0])
-            river.flow_volume = acc.get(last_land, 0.0) / max_acc
-
-        # H — Split source-to-sea paths into source-to-confluence segments.
-        # Higher-flow rivers claim their land hexes first; lower-flow tributaries are
-        # trimmed at the first already-claimed hex, eliminating duplicate trunk renderings.
-        # This runs after all hydrological computation (river_set, acc, flow_dir) is final
-        # so that per-hex river_flow and lake drainage connectivity are unaffected.
-        state.rivers = _split_at_confluences(state.rivers, land, acc, max_acc)
-        # And at water: a river ends where it meets a lake, as it does the sea, and what
-        # leaves the lake is a river of its own. Lake drainage can route one path in at one
-        # shore and out at another, and drawn whole it ran a line across the open water.
-        water_hexes = {
-            c
-            for c, hx in hexes.items()
-            if hx.terrain_class in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
-        }
-        state.rivers = _split_at_water(state.rivers, water_hexes, acc, max_acc)
-
-        # H — Tag every non-water hex in any River path with "river".
-        # Done after all rivers (including drainage) are finalized, so drainage tail
-        # hexes that aren't in river_set (but are genuine river-path members) are covered.
-        water_classes = {TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER}
-        for river in state.rivers:
-            for coord in river.hexes:
-                if coord in hexes and hexes[coord].terrain_class not in water_classes:
-                    hexes[coord].tags.add("river")
-
-        # H — Where each drawn river rises and where it stops, for the map's symbols. A
-        # river drawn across a single hex has no course to mark. A source is a spring: the
-        # first hex of a path that is a headwater and not water arriving from off the map.
-        # An end is where a course stops without joining another — into the sea or a lake,
-        # off the map, or into the ground. A tributary's last hex belongs to its trunk, and
-        # the trunk flows on from it, so a tributary has no end of its own.
-        flows_on = {c for river in state.rivers for c in river.hexes[:-1]}
-        for river in state.rivers:
-            course = [
-                c for c in river.hexes if c in hexes and hexes[c].terrain_class not in water_classes
-            ]
-            if len(course) < 2:
-                continue
-            first, last = river.hexes[0], river.hexes[-1]
-            tags = hexes[first].tags if first in hexes else set()
-            if first == course[0] and "headwater" in tags and "river_source_offmap" not in tags:
-                tags.add("river_source")
-            ends_in_water = last in hexes and hexes[last].terrain_class in water_classes
-            if ends_in_water or last not in flows_on:
-                hexes[course[-1]].tags.add("river_end")
 
         # I — Mark basins that still have no way out.  Not every lake can be drained:
         # a bowl ringed by higher ground with no lower lake to spill into is a closed
@@ -237,7 +159,8 @@ class HydrologyStage(GeneratorStage):
         # leaves such a basin by evaporation instead, so its shore is tagged for
         # BiomeStage to turn into wetland — that is the "percolates out into marshes"
         # outlet, and it keeps the map honest about where the water goes.
-        for comp in _endorheic_components(hexes, lakes, ocean, flow_dir, outlet_of, on_border):
+        closed = _endorheic_components(hexes, lakes, ocean, flow_dir, outlet_of, on_border)
+        for comp in closed:
             for coord in comp:
                 hexes[coord].tags.add("endorheic")
             shore = set(comp)
@@ -255,7 +178,99 @@ class HydrologyStage(GeneratorStage):
                 for coord in frontier:
                     hexes[coord].tags.add("endorheic_shore")
 
+        # R — The rivers themselves, along the sides between hexes.
+        self._route_on_corners(state, inlets, closed, min_catchment)
         return state
+
+    def _route_on_corners(
+        self,
+        state: WorldState,
+        inlets: list[HexCoord],
+        closed: list[set[HexCoord]],
+        min_catchment: float,
+    ) -> None:
+        """Route the map's rivers on the corner graph and record them.
+
+        Everything up to here worked on hexes, to settle the ground: which hollows hold
+        lakes, at what level, and which of them overflow.  The water that falls on that
+        ground runs along the sides between hexes, so this drains the corner graph (see
+        `corner_drainage`) over the settled ground and writes what it finds — the courses
+        into `state.rivers`, each side a river runs along into `state.river_sides`, and its
+        sources, ends, mouths and confluences into `state.river_corners`.
+        """
+        hexes = state.hexes
+        water = (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
+        land = {c for c, hx in hexes.items() if hx.terrain_class not in water}
+        ocean = {c for c, hx in hexes.items() if hx.terrain_class == TerrainClass.OPEN_WATER}
+        lakes = {c for c, hx in hexes.items() if hx.terrain_class == TerrainClass.INLAND_WATER}
+        closed_lakes = {c for comp in closed for c in comp} & lakes
+        open_lakes = _get_lake_components(lakes - closed_lakes, hexes)
+
+        net = build_network(hexes, land, ocean, closed_lakes, open_lakes)
+        drainage = flow_direction(net, self.rng, self.config.river_wander_exponent)
+
+        # Rain runs off each hex to its lowest corner, and off an open lake out of it.
+        rain = rain_per_hex(state, self.config, land)
+        sources: dict[Node, float] = defaultdict(float)
+        drain_of: dict[HexCoord, Corner] = {}
+        for coord in sorted(land):
+            corner = drain_corner(coord, net, drainage)
+            if corner is not None:
+                drain_of[coord] = corner
+                sources[corner] += rain.get(coord, 1.0)
+        for node, comp in net.lake_hexes.items():
+            sources[node] += sum(rain.get(c, 1.0) for c in comp)
+        # A river arriving over the border carries a catchment it did not gather here.
+        inflow_volume = max(1.0, self.config.river_inflow_volume * len(land))
+        inflow: set[Corner] = set()
+        for coord in inlets:
+            corner = _inlet_corner(coord, net, drainage)
+            if corner is not None:
+                sources[corner] += inflow_volume
+                inflow.add(corner)
+
+        drainage.acc = accumulate(drainage.flow, sources)
+        acc = drainage.acc
+        # A lake that overflows has a river leaving it, however little spills over.
+        outlets = [drainage.flow[n] for n in sorted(net.lake_hexes) if drainage.flow.get(n)]
+        streams = trace_streams(drainage, min_catchment, forced=outlets)
+        max_acc = max((a for n, a in acc.items() if not is_lake_node(n)), default=1.0) or 1.0
+
+        rivers: list[River] = []
+        sides: dict[Side, RiverSide] = {}
+        corner_tags: dict[Corner, set[str]] = defaultdict(set)
+        lake_outlets = set(outlets)
+        for path in streams.paths:
+            for a, b in zip(path, path[1:], strict=False):
+                sides[side_joining(a, b)] = RiverSide(
+                    catchment_km2=acc[a],
+                    flow=acc[a] / max_acc,
+                    drop_m=max(0.0, net.elevation[a] - net.elevation[b]),
+                )
+            rivers.append(River(corners=path, flow_volume=acc[path[-2]] / max_acc))
+            first, last = path[0], path[-1]
+            if first in inflow:
+                corner_tags[first].add("river_source_offmap")
+            elif first not in lake_outlets:
+                corner_tags[first].add("river_source")
+            # A course that ends on a junction flows on as the trunk; any other end is
+            # where its water leaves the river network — the sea, a lake, the map edge.
+            onward = drainage.flow.get(last)
+            if onward is None or is_lake_node(onward) or onward not in streams.channel:
+                corner_tags[last].add("river_end")
+                if onward is None or is_lake_node(onward):
+                    corner_tags[last].add("river_mouth")
+        # Two rivers reaching the same stretch of shore have both arrived somewhere; they
+        # have not met.  A confluence is inland.
+        for corner, feeders in streams.upstream.items():
+            ashore = any(h in hexes and h not in land for h in corner_hexes(corner))
+            if len(feeders) >= 2 and not ashore:
+                corner_tags[corner].add("confluence")
+
+        state.rivers = rivers
+        state.river_sides = sides
+        state.river_corners = dict(corner_tags)
+        _write_hex_view(hexes, land, sides, corner_tags, drainage, drain_of, max_acc, self.config)
 
     def _plateau_drain_distance(
         self,
@@ -594,32 +609,6 @@ class HydrologyStage(GeneratorStage):
 
         return acc
 
-    def _tag_hexes(
-        self,
-        river_set: set[HexCoord],
-        flow_dir: dict[HexCoord, HexCoord | None],
-        hexes: dict[HexCoord, "Hex"],
-        ocean: set[HexCoord],
-        lakes: set[HexCoord],
-        on_border: OnBorder,
-    ) -> None:
-        # upstream river neighbors count
-        upstream_river_nbrs: dict[HexCoord, int] = defaultdict(int)
-        for coord in river_set:
-            ds = flow_dir.get(coord)
-            if ds is not None and ds in river_set:
-                upstream_river_nbrs[ds] += 1
-
-        for coord in river_set:
-            hx = hexes[coord]
-            up_count = upstream_river_nbrs[coord]
-            if up_count == 0:
-                hx.tags.add("headwater")
-            if up_count >= 2:
-                hx.tags.add("confluence")
-            if on_border(coord) or any(nbr in ocean or nbr in lakes for nbr in neighbors(coord)):
-                hx.tags.add("river_mouth")
-
     def _build_rivers(
         self,
         river_set: set[HexCoord],
@@ -633,7 +622,7 @@ class HydrologyStage(GeneratorStage):
         filled: dict[HexCoord, float],
         on_border: OnBorder,
         inflow_sources: set[HexCoord] | None = None,
-    ) -> list[River]:
+    ) -> list[list[HexCoord]]:
         """Trace each headwater downstream to ocean/border.
 
         Headwaters are derived directly from river_set and flow_dir (not from hex tags,
@@ -645,7 +634,7 @@ class HydrologyStage(GeneratorStage):
         Paths are built as full source-to-sea traces; split into source-to-confluence
         segments by the caller after all drainage rivers are also available.
         """
-        rivers: list[River] = []
+        rivers: list[list[HexCoord]] = []
         inflow_sources = inflow_sources or set()
 
         # Compute headwaters without relying on tags: any river hex with no upstream river hex
@@ -719,10 +708,7 @@ class HydrologyStage(GeneratorStage):
                     path.extend(extension)
 
             if len(path) > 1:
-                # Use the last land hex for flow_volume — path[-1] may be an ocean hex
-                # which has no accumulation value.
-                last_land = next((c for c in reversed(path) if c in acc), start)
-                rivers.append(River(hexes=path, flow_volume=acc[last_land] / max_acc))
+                rivers.append(path)
 
         return rivers
 
@@ -817,7 +803,7 @@ class HydrologyStage(GeneratorStage):
         filled: dict[HexCoord, float],
         on_border: OnBorder,
         rain: dict[HexCoord, float] | None = None,
-    ) -> tuple[list[River], dict[HexCoord, HexCoord | None]]:
+    ) -> tuple[list[list[HexCoord]], dict[HexCoord, HexCoord | None]]:
         """Raise each lake to its natural spillway, expand into submerged land, then
         route an outflow river.
 
@@ -913,8 +899,7 @@ class HydrologyStage(GeneratorStage):
                         queue.append(nbr)
             return comp
 
-        max_acc = max(acc.values()) if acc else 1.0
-        new_rivers: list[River] = []
+        new_rivers: list[list[HexCoord]] = []
         processed: set[HexCoord] = set()
 
         # --- Pass A: fill every basin to its spillway and expand into submerged land ---
@@ -1303,106 +1288,10 @@ class HydrologyStage(GeneratorStage):
             if merged_into_existing:
                 spillway_acc = min(spillway_acc, acc.get(prev, spillway_acc))
             acc[spillway] = spillway_acc
-            last_land = next((c for c in reversed(path) if c in acc), spillway)
             if len(path) > 1:
-                new_rivers.append(River(hexes=path, flow_volume=acc[last_land] / max_acc))
+                new_rivers.append(path)
 
         return new_rivers, outlet_of
-
-
-def _split_at_water(
-    rivers: list[River], water: set[HexCoord], acc: dict[HexCoord, float], max_acc: float
-) -> list[River]:
-    """Cut every river where it meets water, and start it again where it leaves.
-
-    A piece that reaches water keeps the first water hex as its last, the way a river into
-    the sea already ends; a piece leaving water starts from the last water hex it crossed,
-    so the line begins at the shore. Nothing is drawn across the water between. A piece
-    with fewer than two hexes is dropped. Each piece's flow_volume is its own last land
-    hex's, as `_build_rivers` sets it.
-    """
-    out: list[River] = []
-
-    def keep(piece: list[HexCoord]) -> None:
-        land = [c for c in piece if c not in water]
-        if len(piece) < 2 or not land:
-            return
-        out.append(River(hexes=piece, flow_volume=acc.get(land[-1], 0.0) / max_acc))
-
-    for river in rivers:
-        if not any(c in water for c in river.hexes[1:-1]):
-            out.append(river)
-            continue
-        piece: list[HexCoord] = []
-        shore: HexCoord | None = None
-        for c in river.hexes:
-            if c in water:
-                if any(p not in water for p in piece):
-                    piece.append(c)
-                    keep(piece)
-                piece = []
-                shore = c
-            else:
-                if not piece and shore is not None:
-                    piece = [shore]
-                piece.append(c)
-        keep(piece)
-    return out
-
-
-def _split_at_confluences(
-    rivers: list[River],
-    land: set[HexCoord],
-    acc: dict[HexCoord, float],
-    max_acc: float,
-) -> list[River]:
-    """Trim intersecting tributaries to include their confluence hex.
-
-    Higher-flow rivers process first and claim their land hexes.  A subsequent river
-    that intersects claimed land is cut at the first claimed land hex after its
-    headwater, and that confluence hex is kept so the tributary visually connects to
-    the trunk.  Rivers that never intersect claimed land (typically highest-flow
-    trunks) keep their full source-to-mouth path.  Rivers that shrink below 2 hexes
-    are dropped.  Original list order is preserved in the output.
-
-    This runs after all hydrological computation is final so that per-hex river_flow,
-    flow_dir, and lake drainage connectivity are unaffected.
-    """
-    # Sort by descending flow_volume; use hexes[0] as a tie-breaker for determinism.
-    indexed = sorted(enumerate(rivers), key=lambda iv: (-iv[1].flow_volume, iv[1].hexes[0]))
-
-    claimed: set[HexCoord] = set()
-    result: list[tuple[int, River]] = []
-
-    for orig_idx, river in indexed:
-        path = river.hexes
-        # If the headwater itself is already claimed, this river is fully subsumed by a
-        # higher-flow trunk that already covers its start — drop it entirely.
-        if path[0] in land and path[0] in claimed:
-            continue
-        # Find the first claimed land hex after the headwater (index 0 always kept).
-        cut = len(path)
-        intersects = False
-        for i, coord in enumerate(path[1:], 1):
-            if coord in land and coord in claimed:
-                cut = i + 1  # for an intersecting tributary, include the confluence hex
-                intersects = True
-                break
-        trimmed = path[:cut]
-        if len(trimmed) >= 2:
-            # Recalculate flow_volume from the last exclusive land hex in the trimmed path.
-            # An intersecting tributary ends on the shared confluence hex, whose accumulation
-            # already includes the trunk and any other branches — excluding it keeps the
-            # tributary rendered at its own pre-merge discharge.
-            exclusive = trimmed[:-1] if intersects else trimmed
-            last_land = next((c for c in reversed(exclusive) if c in acc), trimmed[0])
-            result.append(
-                (orig_idx, River(hexes=trimmed, flow_volume=acc.get(last_land, 0.0) / max_acc))
-            )
-            claimed.update(c for c in trimmed if c in land)
-
-    result.sort(key=lambda iv: iv[0])
-    return [r for _, r in result]
 
 
 def _endorheic_components(
@@ -1488,3 +1377,93 @@ def _get_lake_components(lakes: set[HexCoord], hexes: dict[HexCoord, "Hex"]) -> 
         visited |= component
         components.append(component)
     return components
+
+
+# Tags the hex view of the river network writes, cleared before it does.
+_HEX_RIVER_TAGS = frozenset(
+    {
+        "river",
+        "headwater",
+        "confluence",
+        "river_mouth",
+        "river_source",
+        "river_source_offmap",
+        "river_end",
+    }
+)
+
+# Corner tag -> the hex tags it puts on the bank beside it.
+_CORNER_TO_HEX_TAGS = {
+    "river_source": ("river_source", "headwater"),
+    "river_source_offmap": ("river_source_offmap", "headwater"),
+    "confluence": ("confluence",),
+    "river_mouth": ("river_mouth",),
+    "river_end": ("river_end",),
+}
+
+
+def _write_hex_view(hexes, land, sides, corner_tags, drainage, drain_of, max_acc, config):
+    """Describe the river network on the hexes, for stages that still read it there.
+
+    Temporary.  The stages after hydrology were written for rivers that occupy hexes,
+    and they move onto `river_sides` one by one; until they have, each river side tags
+    its *lower bank* hex "river", which keeps a one-hex-wide band along every river much
+    as before.  A hex's catchment is what drains to its own lowest corner, or, beside a
+    river, the largest river it touches.
+    """
+    for hx in hexes.values():
+        hx.tags -= _HEX_RIVER_TAGS
+        hx.river_flow = 0.0
+        hx.catchment_km2 = 0.0
+
+    touching: dict[HexCoord, float] = {}
+    for side, rs in sides.items():
+        a, b = side_hexes(side)
+        for h in (a, b):
+            touching[h] = max(touching.get(h, 0.0), rs.catchment_km2)
+        bank = min((a, b), key=lambda h: (hexes[h].elevation, h))
+        hexes[bank].tags.add("river")
+
+    for coord in land:
+        own = drainage.acc.get(drain_of.get(coord), 0.0) if coord in drain_of else 0.0
+        hexes[coord].catchment_km2 = max(own, touching.get(coord, 0.0))
+        if config.river_flow_continuous or "river" in hexes[coord].tags:
+            hexes[coord].river_flow = hexes[coord].catchment_km2 / max_acc
+
+    for corner, tags in corner_tags.items():
+        around = [h for h in corner_hexes(corner) if h in land]
+        if not around:
+            continue
+        banks = [h for h in around if "river" in hexes[h].tags]
+        target = min(banks or around, key=lambda h: (hexes[h].elevation, h))
+        for tag in tags:
+            hexes[target].tags.update(_CORNER_TO_HEX_TAGS.get(tag, ()))
+
+
+def _inlet_corner(coord: HexCoord, net, drainage) -> Corner | None:
+    """Where a river arriving over the border at *coord* joins the corner network.
+
+    The corner of that hex one side in from the map edge whose water then runs furthest,
+    so the inflow heads inland rather than along the frame.
+    """
+
+    def course(c) -> int:
+        n, seen = 0, set()
+        while c is not None and c not in seen:
+            seen.add(c)
+            n += 1
+            c = drainage.flow.get(c)
+        return n
+
+    corners = [
+        c
+        for c in hex_corner_keys(coord)
+        if c in drainage.order and c not in net.terminal and drainage.flow.get(c) is not None
+    ]
+    beside_edge = [
+        c for c in corners if any(n in net.terminal and n not in net.wet for n in net.neighbors[c])
+    ]
+    pool = beside_edge or corners
+    if not pool:
+        return None
+    return max(pool, key=lambda c: (course(c), c))

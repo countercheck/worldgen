@@ -2,7 +2,16 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from .hex import Hex, HexCoord, Settlement
-from .hex_grid import AXIAL, GRID_LAYOUTS, Corner, Side, grid_coord, grid_index
+from .hex_grid import (
+    AXIAL,
+    GRID_LAYOUTS,
+    Corner,
+    Side,
+    grid_coord,
+    grid_index,
+    side_hexes,
+    side_joining,
+)
 
 
 class RoadTier(Enum):
@@ -30,14 +39,34 @@ SUPPORTED_SCHEMA_VERSIONS = frozenset({"2.0"})
 
 @dataclass
 class River:
-    hexes: list[HexCoord]
+    """One course of the river network, from where it starts to where it ends.
+
+    A course runs along hexsides: *corners* is its path from upstream to downstream, each
+    corner one side from the next.  It starts at a spring, a lake's outlet or the map edge,
+    and ends where its water leaves the network or on the corner where it joins a larger
+    river, which carries on — so a tributary's last corner is a corner of its trunk.
+    """
+
+    corners: list[Corner]
+    # Catchment at the last side, as a fraction of the largest on the map.
     flow_volume: float
     # Empty for a river too small to have been named.
     name: str = ""
-    # The river's course along hexsides, upstream to downstream: consecutive corners are
-    # one side apart.  Hydrology still routes hex to hex and leaves this empty until it
-    # moves onto corners, when it replaces `hexes`.
-    corners: list[Corner] = field(default_factory=list)
+
+    def sides(self) -> list[Side]:
+        """The sides the course runs along, in order."""
+        return [side_joining(a, b) for a, b in zip(self.corners, self.corners[1:], strict=False)]
+
+    def banks(self) -> list[HexCoord]:
+        """Every hex beside the course, in order downstream, each once."""
+        out: list[HexCoord] = []
+        seen: set[HexCoord] = set()
+        for side in self.sides():
+            for h in side_hexes(side):
+                if h not in seen:
+                    seen.add(h)
+                    out.append(h)
+        return out
 
 
 @dataclass
@@ -263,7 +292,6 @@ class WorldState:
             ],
             "rivers": [
                 {
-                    "hexes": [list(c) for c in r.hexes],
                     "corners": [list(c) for c in r.corners],
                     "flow_volume": r.flow_volume,
                     "name": r.name,
@@ -403,10 +431,9 @@ class WorldState:
 
         ws.rivers = [
             River(
-                hexes=[tuple(c) for c in rd["hexes"]],
+                corners=[tuple(c) for c in rd["corners"]],
                 flow_volume=rd["flow_volume"],
                 name=rd["name"],
-                corners=[tuple(c) for c in rd["corners"]],
             )
             for rd in data["rivers"]
         ]

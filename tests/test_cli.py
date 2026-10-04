@@ -2,6 +2,7 @@ import pytest
 import yaml
 from click.testing import CliRunner
 
+from tests.worlds import lay_river
 from worldgen.cli import cli
 from worldgen.core.hex import (
     Biome,
@@ -11,7 +12,7 @@ from worldgen.core.hex import (
     SettlementTier,
     TerrainClass,
 )
-from worldgen.core.world_state import River, RoadEdge, RoadTier, WorldState, road_edge_key
+from worldgen.core.world_state import RoadEdge, RoadTier, WorldState, road_edge_key
 from worldgen.export.json_export import save as save_json
 
 
@@ -32,7 +33,7 @@ def _small_world() -> WorldState:
             name="Ironhaven",
         )
     ]
-    ws.rivers = [River(hexes=[(0, 0), (1, 0)], flow_volume=1.0)]
+    lay_river(ws, [(0, 0), (1, 0)], flow_volume=1.0)
     ws.road_edges = {road_edge_key((1, 1), (2, 1)): RoadEdge(RoadTier.PRIMARY, 0.0)}
     return ws
 

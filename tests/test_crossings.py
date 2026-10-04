@@ -4,7 +4,7 @@ import pytest
 
 from tests.worlds import build_pipeline
 from worldgen.core.config import WorldConfig
-from worldgen.core.hex import Hex, TerrainClass
+from worldgen.core.hex import Hex
 from worldgen.core.hex_grid import distance, neighbors
 from worldgen.stages.crossings import BRIDGE, FORD, river_span
 from worldgen.stages.road_cost import is_river
@@ -42,19 +42,10 @@ def test_catchment_area_is_recorded(crossed):
 
 
 def test_catchment_area_grows_downstream(crossed):
-    """A river only ever collects more; that is what makes the figure physical.
-
-    Measured over the land hexes only — a river's path ends on the water body it empties
-    into, and the sea drains nothing.
-    """
-    water = (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
+    """A river only ever collects more; that is what makes the figure physical."""
     checked = 0
     for river in crossed.rivers:
-        areas = [
-            crossed.hexes[c].catchment_km2
-            for c in river.hexes
-            if c in crossed.hexes and crossed.hexes[c].terrain_class not in water
-        ]
+        areas = [crossed.river_sides[s].catchment_km2 for s in river.sides()]
         if len(areas) > 2:
             checked += 1
             assert areas[-1] >= areas[0], f"catchment shrank downstream: {areas}"

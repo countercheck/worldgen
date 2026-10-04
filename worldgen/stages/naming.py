@@ -203,7 +203,7 @@ class NamingStage(GeneratorStage):
         hexes = state.hexes
 
         def mouth(river) -> tuple[float, HexCoord | None]:
-            land = [c for c in river.hexes if c in hexes and hexes[c].terrain_class not in _WATER]
+            land = [c for c in river.banks() if c in hexes and hexes[c].terrain_class not in _WATER]
             if not land:
                 return 0.0, None
             last = max(land, key=lambda c: (hexes[c].catchment_km2, c))
@@ -236,7 +236,7 @@ class NamingStage(GeneratorStage):
                 continue
             registry.add(name)
             river.name = name
-            for c in river.hexes:
+            for c in river.banks():
                 on_land = c in hexes and hexes[c].terrain_class not in _WATER
                 if on_land and catchment > river_at.get(c, (-1.0, ""))[0]:
                     river_at[c] = (catchment, name)

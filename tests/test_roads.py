@@ -371,11 +371,9 @@ def test_a_steep_road_hex_is_tagged_as_a_switchback():
 
 
 def _river_edges(state):
-    return {
-        frozenset((a, b))
-        for river in state.rivers
-        for a, b in zip(river.hexes, river.hexes[1:], strict=False)
-    }
+    from worldgen.stages.road_cost import river_edges
+
+    return river_edges(state.rivers, state.hexes)
 
 
 def test_roads_never_run_along_a_river_channel(any_road_state):
@@ -616,7 +614,7 @@ def test_no_road_skirts_a_settlement_it_could_pass_through(road_state):
 
     cfg = WorldConfig(**road_state.metadata["config"])
     settled = {s.coord for s in road_state.settlements}
-    blocked = river_edges(road_state.rivers)
+    blocked = river_edges(road_state.rivers, road_state.hexes)
 
     offenders = []
     for seat in settled:

@@ -2,21 +2,33 @@
 
 import pytest
 
-from worldgen.core.hex import Hex, TerrainClass
-from worldgen.core.world_state import River
+from worldgen.core.hex_grid import side_joining
+from worldgen.core.world_state import River, RiverSide
 from worldgen.export import rivers
 
 
-def _grid(flows: dict) -> dict:
-    """A grid of (q, 0) hexes carrying the given per-hex river flows."""
-    return {
-        (q, 0): Hex(coord=(q, 0), terrain_class=TerrainClass.LAND, river_flow=f)
-        for q, f in flows.items()
-    }
+def _corner(i: int):
+    """The i-th corner of a chain running down the column of hexes at q = 0."""
+    return (0, i // 2, i % 2)
 
 
 def _river(length: int, flow_volume: float = 1.0) -> River:
-    return River(hexes=[(q, 0) for q in range(length)], flow_volume=flow_volume)
+    return River(corners=[_corner(i) for i in range(length)], flow_volume=flow_volume)
+
+
+def _grid(flows: dict) -> dict:
+    """River sides along the chain, given a flow at each corner.
+
+    Each side carries the larger flow of its two ends — the wetter end, as a river's
+    width is read — so a test can say how much water passes each point of the course.
+    """
+    n = max(flows) + 1
+    return {
+        side_joining(_corner(i), _corner(i + 1)): RiverSide(
+            catchment_km2=0.0, flow=max(flows.get(i, 0.0), flows.get(i + 1, 0.0))
+        )
+        for i in range(n - 1)
+    }
 
 
 def test_uniform_flow_is_one_band():
@@ -25,7 +37,7 @@ def test_uniform_flow_is_one_band():
     bands = rivers.width_bands(_river(5), hexes, 1.0, 4.0, 4)
     assert len(bands) == 1
     run, width = bands[0]
-    assert run == [(q, 0) for q in range(5)]
+    assert run == [_corner(i) for i in range(5)]
     assert 1.0 <= width <= 4.0
 
 
@@ -51,7 +63,7 @@ def test_every_segment_is_drawn_exactly_once():
     hexes = _grid({0: 0.05, 1: 0.4, 2: 0.4, 3: 0.99, 4: 0.99})
     bands = rivers.width_bands(_river(5), hexes, 1.0, 4.0, 4)
     drawn = [frozenset((a, b)) for run, _ in bands for a, b in zip(run, run[1:], strict=False)]
-    expected = {frozenset(((q, 0), (q + 1, 0))) for q in range(4)}
+    expected = {frozenset((_corner(i), _corner(i + 1))) for i in range(4)}
     assert len(drawn) == len(set(drawn)) == len(expected)
     assert set(drawn) == expected
 
@@ -77,22 +89,22 @@ def test_more_steps_give_more_distinct_widths():
     assert len(fine) > len(coarse)
 
 
-def test_falls_back_to_flow_volume_where_a_hex_carries_no_flow():
-    """Drainage tails have no per-hex flow of their own; the river still gets drawn."""
+def test_falls_back_to_flow_volume_where_a_side_carries_no_flow():
+    """A side with no flow of its own still belongs to a river; it still gets drawn."""
     hexes = _grid({0: 0.0, 1: 0.0})
     bands = rivers.width_bands(_river(2, flow_volume=0.9), hexes, 1.0, 4.0, 4)
     assert len(bands) == 1
     assert bands[0][1] > 1.0, "fallback should not collapse to the thinnest band"
 
 
-def test_offgrid_coords_do_not_crash():
+def test_sides_with_no_record_do_not_crash():
     bands = rivers.width_bands(_river(3, flow_volume=0.5), {}, 1.0, 4.0, 4)
     assert len(bands) == 1
 
 
-def test_river_shorter_than_two_hexes_draws_nothing():
-    assert rivers.width_bands(River(hexes=[(0, 0)], flow_volume=1.0), {}, 1.0, 4.0, 4) == []
-    assert rivers.width_bands(River(hexes=[], flow_volume=1.0), {}, 1.0, 4.0, 4) == []
+def test_river_shorter_than_one_side_draws_nothing():
+    assert rivers.width_bands(River(corners=[(0, 0, 0)], flow_volume=1.0), {}, 1.0, 4.0, 4) == []
+    assert rivers.width_bands(River(corners=[], flow_volume=1.0), {}, 1.0, 4.0, 4) == []
 
 
 @pytest.mark.parametrize(
@@ -128,8 +140,8 @@ def test_validate_accepts_the_defaults():
 # --- continuous scaling (steps == 0, the default) ----------------------------
 
 
-def test_continuous_width_tracks_the_hex_flow_exactly():
-    """No buckets: the width is the hex's own flow mapped onto the width range."""
+def test_continuous_width_tracks_the_side_flow_exactly():
+    """No buckets: the width is the side's own flow mapped onto the width range."""
     hexes = _grid({0: 0.25, 1: 0.25})
     bands = rivers.width_bands(_river(2), hexes, 1.0, 5.0, 0, exponent=1.0)
     assert bands[0][1] == pytest.approx(1.0 + 4.0 * 0.25)

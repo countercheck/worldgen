@@ -68,7 +68,7 @@ class InterurbanRoadStage(GeneratorStage):
 
         # Hexsides the rivers run along — roads may cross a river but never travel down
         # it, so the bank a road takes stays readable. Settlement hexes are exempt.
-        blocked = river_edges(state.rivers)
+        blocked = river_edges(state.rivers, state.hexes)
         settled = {s.coord for s in state.settlements}
         # Which seats each hex neighbours, so an edge can be charged for skirting one.
         ring = settlement_rings(settled)

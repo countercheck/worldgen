@@ -14,7 +14,7 @@ from ..core.hex import (
     TerrainLabel,
     terrain_label,
 )
-from ..core.hex_grid import axial_to_pixel, road_polylines
+from ..core.hex_grid import axial_to_pixel, corner_to_pixel, road_polylines
 from ..core.world_state import RoadTier, WorldState
 from . import glyphs
 
@@ -298,11 +298,11 @@ _DRAINAGE_WIDTH_STEP = 1.4
 def _drainage_links(net) -> list[tuple[int, list]]:
     """The network as maximal runs of one order, headwater end first.
 
-    Every link `analysis.links_by_order` counts, including the one-hex ones — a single
-    channel hex that flows nowhere, which is a lone stream reaching the coast in one step.
+    Every link `analysis.links_by_order` counts, including the one-corner ones — a single
+    channel corner that flows nowhere, which is a lone stream reaching the coast in one step.
     Dropping those made the plate disagree with its own caption, since they still fed the
     N1/N2 and bifurcation figures: four of the fifteen links on seed 7 were invisible.
-    A one-hex run has no direction to draw, so `_drainage_overlay` marks it instead.
+    A one-corner run has no direction to draw, so `_drainage_overlay` marks it instead.
     """
     starts = [
         node
@@ -330,10 +330,10 @@ def _drainage_overlay(state: WorldState, hex_size: float, ox: float, oy: float) 
     lines above it, so drawing them from one graph and counting them from another would be
     both slower and a way for the two to disagree.
     """
-    from ..analysis import build_network, channel_hexes, confluences, drainage_metrics
+    from ..analysis import build_network, channel_corners, confluences, drainage_metrics
 
     net = build_network(state)
-    channel = channel_hexes(state, net)
+    channel = channel_corners(state, net)
     links = _drainage_links(net)
     highest = max((order for order, _ in links), default=1)
     cmap = mpl.colormaps["Blues"]
@@ -342,11 +342,11 @@ def _drainage_overlay(state: WorldState, hex_size: float, ox: float, oy: float) 
     # Ascending order, so a trunk paints over the tributaries feeding it rather than the
     # other way about — the same precedence the road overlay needs and for the same reason.
     for order, run in sorted(links, key=lambda pair: pair[0]):
-        pts = [(px + ox, py + oy) for px, py in (axial_to_pixel(c, hex_size) for c in run)]
+        pts = [(px + ox, py + oy) for px, py in (corner_to_pixel(c, hex_size) for c in run)]
         width = _DRAINAGE_BASE_WIDTH + (order - 1) * _DRAINAGE_WIDTH_STEP
         stroke = _rgb_to_hex(*cmap(0.35 + 0.65 * (order / highest))[:3])
         if len(pts) == 1:
-            # A one-hex link: no line to draw, so a dot the width of the line it would be.
+            # A one-corner link: no line to draw, so a dot the width of the line it would be.
             out.append(
                 f'    <circle cx="{pts[0][0]:.2f}" cy="{pts[0][1]:.2f}"'
                 f' r="{width / 2:.2f}" fill="{stroke}"/>'
@@ -357,7 +357,7 @@ def _drainage_overlay(state: WorldState, hex_size: float, ox: float, oy: float) 
             f' stroke-width="{width:.2f}" stroke-linecap="round" stroke-linejoin="round"/>'
         )
     for node in sorted(confluences(net, channel)):
-        px, py = axial_to_pixel(node, hex_size)
+        px, py = corner_to_pixel(node, hex_size)
         r = 2.0 + 0.8 * net.order.get(node, 1)
         out.append(
             f'    <circle cx="{px + ox:.2f}" cy="{py + oy:.2f}" r="{r:.2f}"'

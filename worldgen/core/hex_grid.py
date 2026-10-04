@@ -205,13 +205,16 @@ def side_corners(side: Side) -> list[Corner]:
 
 def corner_sides(corner: Corner) -> list[Side]:
     """The three sides meeting at a corner, in step with `corner_neighbors`."""
-    return [_side_joining(corner, n) for n in corner_neighbors(corner)]
+    return [side_joining(corner, n) for n in corner_neighbors(corner)]
 
 
-def _side_joining(a: Corner, b: Corner) -> Side:
+def side_joining(a: Corner, b: Corner) -> Side:
+    """The side running from corner *a* to neighbouring corner *b*."""
     # Two neighbouring corners share exactly two hexes, and the side between those two
     # hexes is the one that joins the corners.
     shared = [h for h in corner_hexes(a) if h in corner_hexes(b)]
+    if len(shared) != 2:
+        raise ValueError(f"{a} and {b} are not neighbouring corners")
     return side_between(shared[0], shared[1])
 
 

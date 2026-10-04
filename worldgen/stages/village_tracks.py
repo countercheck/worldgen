@@ -52,7 +52,7 @@ class VillageTrackStage(GeneratorStage):
 
         # Roads may cross a river but never travel down the channel, so which bank a
         # track runs on stays readable. Settlement hexes are exempt.
-        blocked = river_edges(state.rivers)
+        blocked = river_edges(state.rivers, state.hexes)
         settled = {s.coord for s in state.settlements}
 
         def node_cost(hx):
