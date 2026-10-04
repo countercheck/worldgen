@@ -14,6 +14,7 @@ import {
   addresseeCopy,
   addresseesOf,
   captorCopy,
+  courierStepHours,
   deliveredAt,
   formationsTouch,
   inSight,
@@ -28,7 +29,7 @@ import { DEFAULT_CONFIG } from '../src/config.js';
 import { EMPTY_STATE, type CampaignState } from '../src/state.js';
 import { key, type Hex, type HexKey } from '../src/hex.js';
 import { reportOf, type Unit } from '../src/unit.js';
-import type { World, WorldHex } from '../src/world.js';
+import { edgeKey, type World, type WorldHex } from '../src/world.js';
 
 const cfg = DEFAULT_CONFIG;
 
@@ -357,6 +358,51 @@ describe('riding', () => {
 
   it('returns null when there is nowhere to ride to', () => {
     expect(ridePath(world, cfg, { q: 2, r: 2 }, { q: 99, r: 99 })).toBeNull();
+  });
+});
+
+describe('a courier at a river', () => {
+  // Column q=1 is the river; a rider steps onto it from dry ground at q=0.
+  const MINOR = 10; // 10 km2 x 800 mm = 8,000, well under the 60,000 threshold
+  const MAJOR = 200; // 200 x 800 = 160,000, well over
+  const from: Hex = { q: 0, r: 0 };
+  const to: Hex = { q: 1, r: 0 };
+
+  function riverWorld(catchmentKm2: number, tags: string[] = []): World {
+    const w = flatWorld(4);
+    for (const [k, hex] of w.hexes) {
+      if (hex.coord.q === 1) {
+        w.hexes.set(k, { ...hex, catchmentKm2, tags: new Set(['river', ...tags]) });
+      }
+    }
+    return w;
+  }
+
+  const dry = courierStepHours(flatWorld(4), cfg, from, to);
+
+  it('fords a minor river at the ford hours', () => {
+    expect(courierStepHours(riverWorld(MINOR), cfg, from, to)).toBeCloseTo(dry + cfg.fordHours);
+  });
+
+  it('gets over a major river, at a cost, where a division could not', () => {
+    const hours = courierStepHours(riverWorld(MAJOR), cfg, from, to);
+    expect(hours).toBeCloseTo(dry + cfg.courierMajorCrossingHours);
+    expect(Number.isFinite(hours)).toBe(true);
+  });
+
+  it('crosses free at a bridge', () => {
+    expect(courierStepHours(riverWorld(MAJOR, ['bridge']), cfg, from, to)).toBeCloseTo(dry);
+  });
+
+  it('treats a road across the channel as a bridge', () => {
+    const w = riverWorld(MAJOR);
+    w.roadEdges.set(edgeKey(from, to), { a: from, b: to, tier: 'track', deltaElevationM: 0 });
+    expect(courierStepHours(w, cfg, from, to)).toBeLessThan(dry);
+  });
+
+  it('pays nothing riding along the channel', () => {
+    const along = courierStepHours(riverWorld(MAJOR), cfg, { q: 1, r: 0 }, { q: 1, r: 1 });
+    expect(along).toBeCloseTo(dry);
   });
 });
 
