@@ -180,3 +180,25 @@ def lay_river(ws, path, flow_volume=1.0, flow=None):
         )
     ws.rivers.append(river)
     return river
+
+
+def river_to_sea(catchment_km2=1e6, cataract_at=None):
+    """A river running east along row 1 into a sea that fills rows 1-2 from column 4.
+
+    Every side it runs along has land on both hands, as hydrology's always do, and it ends
+    on a corner of the sea.  *catchment_km2* is on every side (1e6 floats any barge);
+    *cataract_at* tags that side, counted from the head, a cataract.  Returns the world and
+    the river.
+    """
+    from worldgen.core.hex import TerrainClass
+    from worldgen.core.world_state import WorldState
+
+    ws = WorldState.empty(1, 7, 3)
+    for (q, r), hx in ws.hexes.items():
+        hx.terrain_class = TerrainClass.OPEN_WATER if q >= 4 and r >= 1 else TerrainClass.LAND
+    river = lay_river(ws, [(0, 1), (1, 1), (2, 1), (3, 1), (4, 1)])
+    for i, side in enumerate(river.sides()):
+        ws.river_sides[side].catchment_km2 = catchment_km2
+        if i == cataract_at:
+            ws.river_sides[side].tags.add("cataract")
+    return ws, river

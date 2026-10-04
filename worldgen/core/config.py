@@ -563,12 +563,14 @@ class WorldConfig:
     bridge_pressure_per_span: float = 3.0
     crossing_pressure_radius: int = 6  # how far either bank is searched for that surplus
     crossing_min_separation: int = 4  # nobody builds two bridges within sight of each other
-    # Getting across away from a crossing, per multiple of the wadeable span, charged on
-    # each land-river edge. Deliberately has no fixed term, unlike road_river_crossing_base:
-    # that base is the capital of building a bridge, and somebody walking to market pays no
-    # capital — what stops them is how much water is in the way.
-    travel_ford_cost: float = 8.0
-    crossing_use_cost: float = 0.5  # using an existing ford or bridge
+    # Getting across away from a crossing, per multiple of the wadeable span, charged once
+    # on the step across a river side. Deliberately has no fixed term, unlike
+    # road_river_crossing_base: that base is the capital of building a bridge, and somebody
+    # walking to market pays no capital — what stops them is how much water is in the way.
+    # Both are twice what they were when a river filled a hex and a walker paid going in and
+    # again coming out.
+    travel_ford_cost: float = 16.0
+    crossing_use_cost: float = 1.0  # using an existing ford or bridge
 
     # Biome thresholds
     # The mean annual temperature at which trees stop, in Celsius. The treeline is not a

@@ -158,13 +158,6 @@ def test_the_countryside_holds_the_people_the_markets_do_not(used):
     )
 
 
-@pytest.mark.xfail(
-    reason=(
-        "hexside rivers: 81.6/km2 on this map once fords moved onto river sides (master "
-        "79.3) — riverside weights and population are recalibrated in step 6 of the rework"
-    ),
-    strict=False,
-)
 def test_rural_density_is_pre_industrial(used):
     """England and Wales carried 59 people per km2 in 1801, the default era, and a hex is 1 km2.
 

@@ -174,16 +174,23 @@ def test_population_is_positive(markets):
 def test_bigger_catchments_make_bigger_markets(markets):
     """Population is what the catchment can send, not a draw from a range.
 
-    Comparing the largest and smallest market: if size were random these would be
-    uncorrelated with the ground each one holds.
+    If size were random it would be uncorrelated with the ground each market holds, so the
+    larger half of the markets must hold more ground than the smaller half.  Halves rather
+    than the single largest against the single smallest: the extremes are one market each,
+    and a fertile market holding little rich ground can sit beside a poor one holding much
+    — the correlation across all of them (0.44 here) is the claim, not either outlier.
     """
     by_pop = sorted(markets.settlements, key=lambda s: s.population)
-    smallest, largest = by_pop[0], by_pop[-1]
+    half = len(by_pop) // 2
 
     def owned(seat):
         return sum(1 for h in markets.hexes.values() if h.territory == seat)
 
-    assert owned(largest.coord) > owned(smallest.coord)
+    smaller = sum(owned(s.coord) for s in by_pop[:half]) / half
+    larger = sum(owned(s.coord) for s in by_pop[-half:]) / half
+    assert larger > smaller, (
+        f"the larger markets hold {larger:.1f} hexes, the smaller {smaller:.1f}"
+    )
 
 
 # --- counts follow the land --------------------------------------------------

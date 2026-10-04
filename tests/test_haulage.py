@@ -316,3 +316,64 @@ def test_settleable_excludes_water_mountain_and_bog():
         (5, 0): _hex((5, 0), land_cover=LandCover.OPEN),
     }
     assert settleable(hexes, WorldConfig()) == {(0, 0), (5, 0)}
+
+
+# ── Rivers: the river sides, read for movement ────────────────────────────────────────
+
+
+def test_walking_across_a_river_is_charged_once_on_its_side():
+    from tests.worlds import river_to_sea
+    from worldgen.core.hex_grid import side_hexes
+    from worldgen.stages.haulage import ford_cost, river_index
+
+    cfg = WorldConfig()
+    ws, river = river_to_sea(catchment_km2=cfg.ford_max_catchment_km2 * 4)
+    rivers = river_index(ws, cfg)
+    side = river.sides()[1]
+    a, b = (ws.hexes[h] for h in side_hexes(side))
+    across = ford_cost(a, b, rivers)
+    assert across == ford_cost(b, a, rivers) > 0.0
+    # A step that crosses no river side costs nothing to get across.
+    assert ford_cost(ws.hexes[(5, 0)], ws.hexes[(6, 0)], rivers) == 0.0
+    ws.river_sides[side].tags.add("ford")
+    assert ford_cost(a, b, river_index(ws, cfg)) == cfg.crossing_use_cost
+
+
+def test_a_cataract_cuts_the_river_into_two_reaches_with_a_portage_between():
+    from tests.worlds import river_to_sea
+    from worldgen.core.hex_grid import side_hexes
+    from worldgen.stages.haulage import river_index
+
+    cfg = WorldConfig()
+    ws, river = river_to_sea(cataract_at=2)
+    rivers = river_index(ws, cfg)
+    falls = set(side_hexes(river.sides()[2]))
+    assert falls <= rivers.portage
+    assert not falls & set(rivers.reaches)
+    above, below = ws.hexes[(1, 1)], ws.hexes[(3, 1)]
+    assert rivers.reaches[above.coord] != rivers.reaches[below.coord]
+
+
+def test_a_barge_reaches_the_sea_only_at_the_river_mouth():
+    from tests.worlds import river_to_sea
+    from worldgen.stages.haulage import river_index
+
+    cfg = WorldConfig()
+    ws, _ = river_to_sea()
+    rivers = river_index(ws, cfg)
+    assert rivers.joined(ws.hexes[(3, 1)], ws.hexes[(4, 1)]), "the mouth"
+    assert rivers.joined(ws.hexes[(1, 1)], ws.hexes[(2, 1)]), "along the reach"
+    # A field beside the river is not afloat: a cart has to bring the cargo to the bank.
+    assert not rivers.afloat(ws.hexes[(1, 2)])
+
+
+def test_a_brook_floats_no_barge_and_a_trunk_floats_timber():
+    from tests.worlds import river_to_sea
+    from worldgen.stages.haulage import river_index
+
+    cfg = WorldConfig()
+    brook, _ = river_to_sea(catchment_km2=1.0)
+    assert not river_index(brook, cfg).reaches
+    assert not river_index(brook, cfg).floats
+    trunk, _ = river_to_sea()
+    assert (1, 1) in river_index(trunk, cfg).floats

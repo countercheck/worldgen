@@ -51,9 +51,10 @@ from worldgen.stages.chokepoints import (
 # has to be somewhere with enough genuine crossings for the rules to have a subject. The
 # residual surplus is untouched by any of this: 511 before, 520 after.
 #
-# Moved again, from seed 1 to 5, when rivers moved onto hexsides: seed 1's world kept four
-# bridgehead candidates and founded none of them. Seed 5 grows three villages.
-_CHOKE_SEED = 5
+# Moved again when rivers moved onto hexsides: seed 1's world kept four bridgehead
+# candidates and founded none of them. Seed 3 grows two villages both with roads crossing
+# rivers on sides and once walking costs followed (seed 5, briefly used, emptied then).
+_CHOKE_SEED = 3
 _CHOKE_SIZE = 112
 # Axial, the grid these worlds were chosen on; offset became the default afterwards, and
 # the seeds below are picked for what they grow on this grid.
