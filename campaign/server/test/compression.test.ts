@@ -23,7 +23,7 @@ const FACTIONS = [{ id: 'red', name: 'Red', color: '#c00' }];
 
 /** A world that compresses like a real one: many hexes, few distinct keys. */
 const world = (hexes = 4000): unknown => ({
-  version: '1.8',
+  version: '2.0',
   seed: 1,
   width: hexes,
   height: 1,
@@ -43,6 +43,8 @@ const world = (hexes = 4000): unknown => ({
     road_connections: [],
   })),
   rivers: [],
+  river_sides: [],
+  river_corners: [],
   settlements: [],
   road_edges: [],
   sea_edges: [],

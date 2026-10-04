@@ -122,6 +122,10 @@ class HydrologyStage(GeneratorStage):
             state.rivers = []
             return state
         min_catchment = self.config.channel_min_discharge / runoff_mm
+        # What a square kilometre of this region sheds in a year, recorded so that anything
+        # reading the world — the campaign's Major/Minor river line — turns a catchment
+        # into discharge exactly as the generator does, without reimplementing runoff.
+        state.metadata["runoff_mm"] = runoff_mm
         river_set: set[HexCoord] = {c for c, a in acc.items() if a >= min_catchment}
         if not river_set:
             # However dry, the map keeps its single largest drainage line so that lakes

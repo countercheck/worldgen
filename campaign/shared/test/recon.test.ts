@@ -46,19 +46,22 @@ function flatWorld(size = 40): World {
     }
   }
   return {
-    schemaVersion: '1.8',
+    schemaVersion: '2.0',
     seed: 1,
     width: size,
     height: size,
     layout: 'axial',
     hexes,
     rivers: [],
+    riverSides: new Map(),
+    riverCorners: new Map(),
     settlements: [],
     roadEdges: new Map(),
     seaEdges: new Map(),
     ferries: [],
     config: {
       navigableMinDischarge: 60000,
+      runoffMm: 800,
       fordMaxCatchmentKm2: 60,
       crossingReliefM: 60,
       meanPrecipMm: 800,

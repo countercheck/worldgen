@@ -16,7 +16,7 @@
  * scale is not set at all, and so is no obstacle to the names that are.
  */
 
-import { key, type Hex, type World } from '@campaign/shared';
+import { cornerToPixel, type Hex, type World } from '@campaign/shared';
 
 /** Font size as a fraction of the hex size. */
 const TIER_SCALE: Readonly<Record<string, number>> = { city: 0.95, town: 0.75, village: 0.58 };
@@ -64,14 +64,9 @@ function rotatedBox(cx: number, cy: number, w: number, h: number, angle: number)
   return [cx - bw / 2, cy - bh / 2, cx + bw / 2, cy + bh / 2];
 }
 
-const isWaterAt = (world: World, c: Hex): boolean => {
-  const t = world.hexes.get(key(c))?.terrainClass;
-  return t === undefined || t === 'open_water' || t === 'inland_water';
-};
-
 type Job =
   | { order: readonly number[]; kind: 'settlement'; s: World['settlements'][number] }
-  | { order: readonly number[]; kind: 'river'; name: string; reach: readonly Hex[] };
+  | { order: readonly number[]; kind: 'river'; name: string; reach: readonly Point[] };
 
 const byOrder = (a: readonly number[], b: readonly number[]): number => {
   for (let i = 0; i < Math.max(a.length, b.length); i++) {
@@ -113,11 +108,18 @@ export function placeLabels(
       s,
     });
   }
+  // A river's course is its corners, which never stand in water; they are placed from
+  // the same origin `toPixel` puts the hexes on.
+  const origin = toPixel({ q: 0, r: 0 });
   for (const river of opts.rivers === false ? [] : world.rivers) {
-    const reach = river.hexes.filter((c) => !isWaterAt(world, c));
+    const reach = river.corners.map((c) => {
+      const p = cornerToPixel(c, hexSize);
+      return { x: p.x + origin.x, y: p.y + origin.y };
+    });
     if (river.name !== '' && reach.length >= 3) {
+      const first = river.corners[0]!;
       jobs.push({
-        order: [RIVER_ORDER, -reach.length, reach[0]!.q, reach[0]!.r],
+        order: [RIVER_ORDER, -reach.length, first.q, first.r, first.k],
         kind: 'river',
         name: river.name,
         reach,
@@ -131,7 +133,7 @@ export function placeLabels(
     const label =
       job.kind === 'settlement'
         ? placeSettlement(job.s, toPixel, hexSize, measure, taken)
-        : placeRiver(job.name, job.reach, toPixel, hexSize, measure, taken);
+        : placeRiver(job.name, job.reach, hexSize, measure, taken);
     if (label !== null) placed.push(label);
   }
   return placed;
@@ -167,8 +169,7 @@ function placeSettlement(
 
 function placeRiver(
   name: string,
-  reach: readonly Hex[],
-  toPixel: (c: Hex) => Point,
+  reach: readonly Point[],
   hexSize: number,
   measure: Measure,
   taken: Box[],
@@ -178,15 +179,16 @@ function placeRiver(
   const { w, h } = measure(name, size, false);
   const n = reach.length;
   // The middle of the reach first, then either third: the middle is where a reader's eye
-  // expects it, and the thirds are where there is often more room.
+  // expects it, and the thirds are where there is often more room. Each angle is read
+  // across two sides either way, which smooths the zigzag of a hexside course.
   for (const i of new Set([Math.floor(n / 2), Math.floor(n / 3), Math.floor((2 * n) / 3)])) {
-    const a = toPixel(reach[Math.max(0, i - 1)]!);
-    const b = toPixel(reach[Math.min(n - 1, i + 1)]!);
+    const a = reach[Math.max(0, i - 2)]!;
+    const b = reach[Math.min(n - 1, i + 2)]!;
     let angle = Math.atan2(b.y - a.y, b.x - a.x);
     // Never upside down: a name reads left to right whichever way the water runs.
     if (angle > Math.PI / 2) angle -= Math.PI;
     else if (angle <= -Math.PI / 2) angle += Math.PI;
-    const { x, y } = toPixel(reach[i]!);
+    const { x, y } = reach[i]!;
     // Beside the line rather than on it, on either bank.
     const nx = -Math.sin(angle);
     const ny = Math.cos(angle);

@@ -17,6 +17,7 @@ import {
   isWater,
   neighbors,
   riverClass,
+  riversBeside,
   roadBetween,
   speedKmh,
   type Hex,
@@ -55,7 +56,10 @@ export function HexPanel({
 
   const water = isWater(hex);
   const grade = gradeOfHex(hex, cfg);
-  const river = riverClass(hex, world);
+  // Rivers run along hexsides: what this hex has is the rivers beside it, largest first.
+  const beside = riversBeside(world, coord);
+  const main = beside[0];
+  const river = riverClass(main?.side, world);
 
   // Roads leaving this hex, by tier — the reason a hex may be quick to cross even
   // though the ground is not.
@@ -117,7 +121,7 @@ export function HexPanel({
         )}
       </Section>
 
-      {river !== 'none' && (
+      {main !== undefined && river !== 'none' && (
         <Section title={copy.hex.watercourseHeading}>
           <Row
             label={copy.hex.riverClass}
@@ -125,22 +129,25 @@ export function HexPanel({
           />
           <Row
             label={copy.hex.catchment}
-            value={copy.hex.catchmentValue(Math.round(hex.catchmentKm2))}
+            value={copy.hex.catchmentValue(Math.round(main.side.catchmentKm2))}
           />
           <Row
             label={copy.hex.discharge}
             value={copy.hex.dischargeValue(
-              Math.round(discharge(hex, world)).toLocaleString(),
+              Math.round(discharge(main.side, world)).toLocaleString(),
               world.config.navigableMinDischarge.toLocaleString(),
             )}
           />
-          {hex.tags.has('bridge') && (
+          {beside.some((b) => b.side.tags.has('bridge')) && (
             <Row label={copy.hex.crossing} value={copy.hex.bridge} />
           )}
-          {hex.tags.has('ford') && !hex.tags.has('bridge') && (
-            <Row label={copy.hex.crossing} value={copy.hex.ford} />
+          {beside.some((b) => b.side.tags.has('ford')) &&
+            !beside.some((b) => b.side.tags.has('bridge')) && (
+              <Row label={copy.hex.crossing} value={copy.hex.ford} />
+            )}
+          {selected !== null && (
+            <CrossingFor world={world} unit={selected} from={coord} to={main.across} cfg={cfg} />
           )}
-          {selected !== null && <CrossingFor world={world} unit={selected} to={coord} cfg={cfg} />}
         </Section>
       )}
 
@@ -159,26 +166,20 @@ export function HexPanel({
   );
 }
 
-/** What crossing here would cost the unit currently selected. */
+/** What crossing the largest river beside this hex would cost the unit selected. */
 function CrossingFor({
   world,
   unit,
+  from,
   to,
   cfg,
 }: {
   world: World;
   unit: Unit;
+  from: Hex;
   to: Hex;
   cfg: CampaignConfig;
 }) {
-  // Approached from a neighbour that is not itself in the channel, which is what a unit
-  // arriving at the bank would be doing.
-  const from =
-    neighbors(to).find((n) => {
-      const h = world.hexes.get(`${n.q},${n.r}`);
-      return h !== undefined && !h.tags.has('river');
-    }) ?? to;
-
   const c = crossingFor(world, cfg, unit, from, to);
 
   return (

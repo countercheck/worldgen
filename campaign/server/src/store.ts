@@ -24,6 +24,7 @@ import {
   EMPTY_STATE,
   knowledgeEvents,
   parseWorld,
+  WorldParseError,
   projectWorld,
   reduce,
   replay,
@@ -346,7 +347,7 @@ export class CampaignStore {
       name: row.name,
       worldHash: row.world_hash,
       worldDoc,
-      world: parseWorld(worldDoc),
+      world: worldOfCampaign(row.name, worldDoc),
       strictness: row.strictness as Strictness,
       ruleset,
       // A campaign written before rulesets existed has no stored numbers. Resolving them
@@ -651,4 +652,24 @@ export function deserialise(json: string): CampaignState {
     daylight: d.daylight ?? null,
     standingOrders: new Map(d.standingOrders ?? []),
   };
+}
+
+/**
+ * The world a stored campaign was made on, or an error that says which campaign cannot be
+ * opened and why.
+ *
+ * A campaign is played on the world it was made on, so a world this build no longer reads
+ * — rivers moved from hexes to hexsides in schema 2.0 — closes the campaign rather than
+ * reading it wrongly. The message is the one the players see.
+ */
+function worldOfCampaign(name: string, worldDoc: unknown): World {
+  try {
+    return parseWorld(worldDoc);
+  } catch (err) {
+    if (!(err instanceof WorldParseError)) throw err;
+    throw new WorldParseError(
+      `The campaign "${name}" cannot be opened: ${err.message} A campaign cannot move to a ` +
+        `new world, so start a new one on a regenerated map.`,
+    );
+  }
 }

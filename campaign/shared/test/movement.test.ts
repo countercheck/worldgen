@@ -14,7 +14,7 @@ import world32 from './fixtures/world-32x32.json' with { type: 'json' };
 
 import { DEFAULT_CONFIG, GRADES, type CampaignConfig, type Grade } from '../src/config.js';
 import { crossingFor, discharge, riverClass } from '../src/crossing.js';
-import { distance, key, type Hex, type HexKey } from '../src/hex.js';
+import { distance, key, sideBetween, sideId, type Hex, type HexKey } from '../src/hex.js';
 import {
   fastestHoursPerHex,
   hoursToEnter,
@@ -32,7 +32,14 @@ import {
 } from '../src/movement.js';
 import { gradeOf, gradeOfHex, isPassable } from '../src/terrain.js';
 import type { Trait, Unit, UnitKind } from '../src/unit.js';
-import { parseWorld, type LandCover, type RoadTier, type World, type WorldHex } from '../src/world.js';
+import {
+  parseWorld,
+  riverSideBetween,
+  type LandCover,
+  type RoadTier,
+  type World,
+  type WorldHex,
+} from '../src/world.js';
 
 const cfg = DEFAULT_CONFIG;
 const real: World = parseWorld(world32);
@@ -101,19 +108,22 @@ function grid(
   }
 
   return {
-    schemaVersion: '1.8',
+    schemaVersion: '2.0',
     seed: 1,
     width: size,
     height: size,
     layout: 'axial',
     hexes,
     rivers: [],
+    riverSides: new Map(),
+    riverCorners: new Map(),
     settlements: [],
     roadEdges,
     seaEdges: new Map(),
     ferries: [],
     config: {
       navigableMinDischarge: 60000,
+      runoffMm: 800,
       fordMaxCatchmentKm2: 60,
       crossingReliefM: 60,
       meanPrecipMm: 800,
@@ -243,28 +253,45 @@ describe('stepCost', () => {
 });
 
 describe('river crossings', () => {
-  /** A world whose column 1 is a river of the given size. */
+  const from = { q: 0, r: 0 };
+  const to = { q: 1, r: 0 };
+
+  /** A river of the given size along the side between `from` and `to`. */
+  const withRiver = (
+    w: World,
+    catchmentKm2: number,
+    tags: string[] = [],
+    a: Hex = from,
+    b: Hex = to,
+  ): World => {
+    const side = sideBetween(a, b);
+    const riverSides = new Map(w.riverSides);
+    riverSides.set(sideId(side), { side, catchmentKm2, flow: 0.5, dropM: 0, tags: new Set(tags) });
+    return { ...w, riverSides };
+  };
   const riverAt = (catchmentKm2: number, tags: string[] = []) =>
-    grid(5, (q) =>
-      q === 1 ? { catchmentKm2, tags: new Set(['river', ...tags]) } : {},
-    );
+    withRiver(grid(5), catchmentKm2, tags);
+  const sideOf = (w: World) => riverSideBetween(w, from, to);
 
   const MINOR = 10; // 10 km2 x 800 mm = 8,000, well under the 60,000 threshold
   const MAJOR = 200; // 200 x 800 = 160,000, well over
 
-  const from = { q: 0, r: 0 };
-  const to = { q: 1, r: 0 };
-
   it('splits rivers on discharge, not on the drawing rank', () => {
-    // riverFlow is a normalised rank for line widths; reading it as a physical quantity
-    // would make a river's class depend on how many other rivers the map happens to have.
+    // flow is a normalised rank for line widths; reading it as a physical quantity would
+    // make a river's class depend on how many other rivers the map happens to have.
     const minor = riverAt(MINOR);
     const major = riverAt(MAJOR);
-    expect(riverClass(minor.hexes.get(key(to))!, minor)).toBe('minor');
-    expect(riverClass(major.hexes.get(key(to))!, major)).toBe('major');
-    expect(discharge(major.hexes.get(key(to))!, major)).toBeGreaterThan(
-      major.config.navigableMinDischarge,
-    );
+    expect(riverClass(sideOf(minor), minor)).toBe('minor');
+    expect(riverClass(sideOf(major), major)).toBe('major');
+    expect(discharge(sideOf(major)!, major)).toBeGreaterThan(major.config.navigableMinDischarge);
+  });
+
+  it('reads discharge with the runoff the world was generated with, not the rainfall', () => {
+    // Rain is not all runoff: a river big enough in a wet country is a brook in a dry one.
+    const wet = riverAt(MAJOR);
+    const dry = { ...wet, config: { ...wet.config, runoffMm: 100 } };
+    expect(riverClass(sideOf(wet), wet)).toBe('major');
+    expect(riverClass(sideOf(dry), dry)).toBe('minor');
   });
 
   it('lets a minor river be forded, at an hour', () => {
@@ -319,24 +346,22 @@ describe('river crossings', () => {
     expect(crossingFor(w, cfg, unit('infantry'), from, to).how).toBe('blocked');
   });
 
-  it('treats a road across the channel as a bridge', () => {
+  it('treats a road across the river as a bridge', () => {
     // If the generator ran a road over a river here, it built whatever the road needed.
     // This is what keeps worlds without CrossingStage playable.
-    const w = grid(
-      5,
-      (q) => (q === 1 ? { catchmentKm2: MAJOR, tags: new Set(['river']) } : {}),
-      [{ a: from, b: to, tier: 'secondary' }],
-    );
+    const w = withRiver(grid(5, () => ({}), [{ a: from, b: to, tier: 'secondary' }]), MAJOR);
     expect(crossingFor(w, cfg, unit('infantry'), from, to).how).toBe('bridge');
   });
 
   it('charges nothing for marching along a river rather than across it', () => {
-    // Without this a unit following a valley pays a crossing every hex, which would make
-    // the best going on the map into the worst.
-    const w = grid(5, () => ({ catchmentKm2: MINOR, tags: new Set(['river']) }));
+    // A river runs along a hexside: a unit on its bank walks beside it, and only a step
+    // across the side the river runs along is a crossing.
+    const w = withRiver(grid(5), MINOR, [], { q: 1, r: 0 }, { q: 1, r: 1 });
     const c = crossingFor(w, cfg, unit('infantry'), { q: 1, r: 0 }, { q: 2, r: 0 });
     expect(c.river).toBe('none');
     expect(c.hours).toBe(0);
+    const across = crossingFor(w, cfg, unit('infantry'), { q: 1, r: 0 }, { q: 1, r: 1 });
+    expect(across.river).toBe('minor');
   });
 
   it('charges the crossing per division, so a corps queues', () => {

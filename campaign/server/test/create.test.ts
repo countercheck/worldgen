@@ -11,7 +11,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 import { buildApp } from '../src/app.js';
-import { openDb } from '../src/db.js';
+import { openDb, packWorld } from '../src/db.js';
 
 const world = (): unknown =>
   JSON.parse(
@@ -70,5 +70,37 @@ describe('creating a campaign', () => {
     const res = await app.inject({ method: 'POST', url: '/api/campaigns', payload: { name: 'c' } });
     expect(res.statusCode).toBe(400);
     await app.close();
+  });
+});
+
+describe('a campaign on a world this build no longer reads', () => {
+  it('answers gone, naming the campaign and saying to regenerate', async () => {
+    const db = openDb();
+    const app = await buildApp({ db });
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/campaigns',
+      payload: { name: 'Old Wars', world: world() },
+    });
+    const { id, refereeToken } = created.json() as { id: string; refereeToken: string };
+    await app.close();
+
+    // As if it had been made before rivers moved to hexsides.
+    const old = { ...(world() as Record<string, unknown>), version: '1.10' };
+    db.prepare(`UPDATE worlds SET blob = ?`).run(packWorld(JSON.stringify(old)));
+
+    // A fresh server, so nothing is answered from the cache.
+    const reopened = await buildApp({ db });
+    const view = await reopened.inject({
+      method: 'GET',
+      url: `/api/campaigns/${id}/view`,
+      headers: { 'x-campaign-token': refereeToken },
+    });
+    expect(view.statusCode).toBe(410);
+    const { error } = view.json() as { error: string };
+    expect(error).toMatch(/Old Wars/);
+    expect(error).toMatch(/schema 1\.10/);
+    expect(error).toMatch(/Regenerate/);
+    await reopened.close();
   });
 });

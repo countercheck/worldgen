@@ -57,7 +57,11 @@ FIXTURE = (
 # the first that carries everything and also passes the campaign suites unchanged — several
 # of those ride a unit across the fixture and read how far it got. If a change drops one,
 # search for a seed that restores it rather than weakening the test.
-SEED = 1
+#
+# Moved to seed 3 when rivers moved onto hexsides: on the axial grid seed 1 lost its
+# secondary and primary roads. Axial pinned explicitly, as the campaign tests were
+# written against it and offset has since become the generator's default.
+SEED = 3
 SIZE = 32
 MODEL = "organic"
 PLACES = 4
@@ -77,7 +81,7 @@ def round_floats(value, places: int = PLACES):
 
 
 def main() -> None:
-    cfg = WorldConfig(width=SIZE, height=SIZE, model=MODEL)
+    cfg = WorldConfig(width=SIZE, height=SIZE, model=MODEL, grid_layout="axial")
     pipeline = GeneratorPipeline(SEED, cfg)
     for stage in stages_for(cfg, cfg.model):
         pipeline.add_stage(stage)

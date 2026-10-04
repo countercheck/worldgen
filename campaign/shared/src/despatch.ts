@@ -46,14 +46,14 @@
 import { FOOTPRINT, occupied, type FootprintShape } from './column.js';
 import { inChain } from './commander.js';
 import type { CampaignConfig } from './config.js';
-import { crossingAt, riverClass } from './crossing.js';
+import { bridgeAt, riverClass } from './crossing.js';
 import { astar, distance, key, neighbors, type Hex } from './hex.js';
 import { speedKmh } from './movement.js';
 import { publicContact, reconZone, type PublicContact, type Sighting } from './recon.js';
 import type { CampaignState } from './state.js';
-import { gradeOf, isPassable, isRiver } from './terrain.js';
+import { gradeOf, isPassable } from './terrain.js';
 import type { Formation, Unit, UnitReport } from './unit.js';
-import { hexAt, type World, type WorldHex } from './world.js';
+import { riverSideBetween, type World, type WorldHex } from './world.js';
 
 /**
  * What is written on the paper.
@@ -371,14 +371,9 @@ export const addresseesOf = (
  * they get through or is caught trying.
  */
 function courierCrossingHours(cfg: CampaignConfig, world: World, from: Hex, to: Hex): number {
-  const target = hexAt(world, to);
-  if (target === undefined || !isRiver(target)) return 0;
-
-  const origin = hexAt(world, from);
-  if (origin !== undefined && isRiver(origin)) return 0;
-
-  if (crossingAt(world, from, to) === 'bridge') return 0;
-  return riverClass(target, world) === 'major' ? cfg.courierMajorCrossingHours : cfg.fordHours;
+  const side = riverSideBetween(world, from, to);
+  if (side === undefined || bridgeAt(world, from, to)) return 0;
+  return riverClass(side, world) === 'major' ? cfg.courierMajorCrossingHours : cfg.fordHours;
 }
 
 /** Hours for a rider to enter one hex from an adjacent one. `Infinity` if they cannot. */

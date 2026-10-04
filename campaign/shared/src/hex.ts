@@ -316,6 +316,16 @@ export function cornerSides(c: Corner): Side[] {
   });
 }
 
+/** The side running from corner `a` to neighbouring corner `b`. */
+export function sideJoining(a: Corner, b: Corner): Side {
+  // Two neighbouring corners share exactly two hexes; the side between them joins the
+  // two corners.
+  const theirs = new Set(cornerHexes(b).map(key));
+  const shared = cornerHexes(a).filter((h) => theirs.has(key(h)));
+  if (shared.length !== 2) throw new Error(`${cornerId(a)} and ${cornerId(b)} are not neighbouring corners`);
+  return sideBetween(shared[0]!, shared[1]!);
+}
+
 /** Pixel position of a corner (flat-top layout). */
 export function cornerToPixel(c: Corner, hexSize: number): { x: number; y: number } {
   const { x, y } = axialToPixel({ q: c.q, r: c.r }, hexSize);

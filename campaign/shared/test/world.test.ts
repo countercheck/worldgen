@@ -10,7 +10,16 @@ import { describe, expect, it } from 'vitest';
 
 import world32 from './fixtures/world-32x32.json' with { type: 'json' };
 
-import { distance, key, type Hex } from '../src/hex.js';
+import {
+  cornerId,
+  cornerNeighbors,
+  distance,
+  key,
+  sideHexes,
+  sideId,
+  sideJoining,
+  type Hex,
+} from '../src/hex.js';
 import {
   edgeKey,
   hexAt,
@@ -70,29 +79,38 @@ describe('terrain and rivers', () => {
     }
   });
 
-  it('gives river hexes an upstream catchment', () => {
+  it('gives every river side an upstream catchment', () => {
     const w = load();
-    const river = [...w.hexes.values()].filter((h) => h.tags.has('river'));
-    expect(river.length).toBeGreaterThan(0);
-    for (const h of river) expect(h.catchmentKm2).toBeGreaterThan(0);
+    expect(w.riverSides.size).toBeGreaterThan(0);
+    for (const rs of w.riverSides.values()) expect(rs.catchmentKm2).toBeGreaterThan(0);
   });
 
-  it('carries the ford tags the organic pipeline writes', () => {
+  it('carries the fords the organic pipeline writes, on river sides', () => {
     // The river-crossing rules key on these, and only the organic model produces them.
     const w = load();
-    const fords = [...w.hexes.values()].filter((h) => h.tags.has('ford'));
+    const fords = [...w.riverSides.values()].filter((rs) => rs.tags.has('ford'));
     expect(fords.length).toBeGreaterThan(0);
   });
 
-  it('runs each river along a connected chain of hexes that exist', () => {
+  it('runs each river along a chain of neighbouring corners, between hexes that exist', () => {
     const w = load();
     expect(w.rivers.length).toBeGreaterThan(0);
     for (const river of w.rivers) {
-      for (const c of river.hexes) expect(hexAt(w, c), `river hex ${key(c)}`).toBeDefined();
-      for (let i = 1; i < river.hexes.length; i++) {
-        expect(distance(river.hexes[i - 1]!, river.hexes[i]!)).toBe(1);
+      for (let i = 1; i < river.corners.length; i++) {
+        const a = river.corners[i - 1]!;
+        const b = river.corners[i]!;
+        expect(cornerNeighbors(a).map(cornerId)).toContain(cornerId(b));
+        const side = sideJoining(a, b);
+        expect(w.riverSides.has(sideId(side)), `river side ${sideId(side)}`).toBe(true);
+        for (const h of sideHexes(side)) expect(hexAt(w, h), `bank ${key(h)}`).toBeDefined();
       }
     }
+  });
+
+  it('reads the runoff the generator turned catchments into discharge with', () => {
+    const w = load();
+    expect(w.config.runoffMm).toBeGreaterThan(0);
+    expect(w.config.runoffMm).toBeLessThan(w.config.meanPrecipMm);
   });
 });
 
@@ -186,6 +204,8 @@ describe('rejecting malformed input', () => {
   it('refuses a schema version it does not read', () => {
     expect(() => parseWorld({ ...world32, version: '1.4' })).toThrow(WorldParseError);
     expect(() => parseWorld({ ...world32, version: '1.4' })).toThrow(/not supported/);
+    // A world from before rivers moved onto hexsides is refused too: its rivers are hexes.
+    expect(() => parseWorld({ ...world32, version: '1.10' })).toThrow(/Regenerate/);
   });
 
   it('refuses a non-object', () => {
