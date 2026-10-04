@@ -59,12 +59,12 @@ def test_a_tributary_has_no_end_of_its_own(world):
 
 def test_rapids_are_off_a_cataract_and_obey_their_settings():
     ws = build_world(seed=42, width=64, height=64, until="CataractStage", rapids_min_drop_m=1.0)
-    rapids = [h for h in ws.hexes.values() if "rapids" in h.tags]
+    rapids = [rs for rs in ws.river_sides.values() if "rapids" in rs.tags]
     assert rapids
-    assert not any("cataract" in h.tags for h in rapids)
-    assert all(h.catchment_km2 >= 200.0 for h in rapids)
+    assert not any("cataract" in rs.tags for rs in rapids)
+    assert all(rs.catchment_km2 >= 200.0 for rs in rapids)
     off = build_world(seed=42, width=64, height=64, until="CataractStage", rapids_min_drop_m=0.0)
-    assert not any("rapids" in h.tags for h in off.hexes.values())
+    assert not any("rapids" in rs.tags for rs in off.river_sides.values())
 
 
 def test_the_legend_and_the_svg_draw_the_marks(world):

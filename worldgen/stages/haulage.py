@@ -66,7 +66,12 @@ def carries_a_barge(hx, cfg) -> bool:
     `navigable` less the cataract test, because `CataractStage` has to ask this of a reach
     to decide whether it is a cataract — a small steep river is only a brook.
     """
-    discharge = hx.catchment_km2 * cfg.runoff_mm(cfg.mean_precip_mm)
+    return catchment_carries_a_barge(hx.catchment_km2, cfg)
+
+
+def catchment_carries_a_barge(catchment_km2: float, cfg) -> bool:
+    """`carries_a_barge` for a catchment area: a reach of river, or a side one runs along."""
+    discharge = catchment_km2 * cfg.runoff_mm(cfg.mean_precip_mm)
     return discharge >= cfg.navigable_min_discharge
 
 

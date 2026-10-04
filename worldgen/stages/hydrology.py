@@ -1403,6 +1403,23 @@ _CORNER_TO_HEX_TAGS = {
 }
 
 
+def band_hex(side, hexes) -> HexCoord:
+    """The bank of *side* the hex view of the river network puts it on: the lower one.
+
+    Part of the temporary hex view `_write_hex_view` writes; stages that mirror a side's
+    tags onto the hexes put them here so they land on the hex tagged "river".
+    """
+    return min((h for h in side_hexes(side) if h in hexes), key=lambda h: (hexes[h].elevation, h))
+
+
+def mirror_on_band(state: WorldState, tags) -> None:
+    """Copy *tags* from each river side onto its band hex, for stages still reading hexes."""
+    for side, rs in state.river_sides.items():
+        found = rs.tags & set(tags)
+        if found:
+            state.hexes[band_hex(side, state.hexes)].tags.update(found)
+
+
 def _write_hex_view(hexes, land, sides, corner_tags, drainage, drain_of, max_acc, config):
     """Describe the river network on the hexes, for stages that still read it there.
 
@@ -1422,8 +1439,7 @@ def _write_hex_view(hexes, land, sides, corner_tags, drainage, drain_of, max_acc
         a, b = side_hexes(side)
         for h in (a, b):
             touching[h] = max(touching.get(h, 0.0), rs.catchment_km2)
-        bank = min((a, b), key=lambda h: (hexes[h].elevation, h))
-        hexes[bank].tags.add("river")
+        hexes[band_hex(side, hexes)].tags.add("river")
 
     for coord in land:
         own = drainage.acc.get(drain_of.get(coord), 0.0) if coord in drain_of else 0.0
