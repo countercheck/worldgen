@@ -17,12 +17,12 @@ import { AXIAL, key, OFFSET, type Hex, type HexKey, type Layout } from './hex.js
 /**
  * Schema versions this parser accepts.
  *
- * Mirrors `SUPPORTED_SCHEMA_VERSIONS` in `worldgen/core/world_state.py`. The generator
- * migrates older files on load, so it accepts a wider range than we do — we only ever
- * see what it wrote most recently. Widen this deliberately, having checked that the
- * fields below actually survive the older shape.
+ * Mirrors `SUPPORTED_SCHEMA_VERSIONS` in `worldgen/core/world_state.py`. 2.0 moves
+ * rivers onto hexsides; until this parser reads them it still takes the hex-river fields
+ * every version carries, and the 1.x versions go once it does. Widen this deliberately,
+ * having checked that the fields below actually survive the older shape.
  */
-export const SUPPORTED_SCHEMA_VERSIONS = new Set(['1.8', '1.9', '1.10']);
+export const SUPPORTED_SCHEMA_VERSIONS = new Set(['1.8', '1.9', '1.10', '2.0']);
 
 export type TerrainClass = 'open_water' | 'inland_water' | 'coast' | 'land';
 

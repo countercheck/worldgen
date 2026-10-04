@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from .hex import Hex, HexCoord, Settlement
-from .hex_grid import AXIAL, GRID_LAYOUTS, grid_coord, grid_index
+from .hex_grid import AXIAL, GRID_LAYOUTS, Corner, Side, grid_coord, grid_index
 
 
 class RoadTier(Enum):
@@ -16,89 +16,45 @@ class RoadTier(Enum):
 ROAD_TIER_RANK = {RoadTier.TRACK: 0, RoadTier.SECONDARY: 1, RoadTier.PRIMARY: 2}
 
 
-# Serialised schema version.  1.1 replaced the single "habitability" key with one score
-# per settlement tier; a 1.0 file still loads, its lone value read into all three.  1.2
-# added four keys, from two lines of work that landed together:
+# Serialised schema version.
 #
-#   "layout"          how width/height map onto hex coordinates; a file predating offset
-#                     grids loads as "axial".
-#   "territory" and   which settlement works a hex, and what it costs that settlement to
-#   "territory_cost"  reach it.
-#   "catchment_km2"   the upstream area draining through a hex, kept alongside the
-#                     normalised "river_flow" because that one is a rank and this a
-#                     quantity.
-#
-# All four default when absent, so a 1.0 or 1.1 file still loads — and so does a 1.2 file
-# written before the other half existed, since neither half is required.  The bump exists
-# so the schema cannot change shape under a fixed version string: an old reader handed a
-# newer file fails with a clear message instead of silently missing fields.
-# 1.3 replaced "roads" — a list of whole journeys, each with its own path and tier — with
-# "road_edges", one tier per undirected edge.  A 1.2 file still loads: its paths are walked
-# into edges, the higher tier winning where journeys overlap, which is the rule the renderer
-# already applied when drawing them.  The reverse is not true, so 1.3 is a real bump.
-#
-# 1.4 split "sea_edges" out of "road_edges": an edge with a foot in the water is a sea leg,
-# not a road, and while the two were mixed there was no way to ask whether two places were
-# joined *by land*.  A 1.3 file loads with no sea edges, which reads its water legs as
-# roads — the shape it was written with.
-#
-# 1.5 put "delta_elevation_m" on each edge, signed in the direction of the key.  It is the
-# quantity that decides how slow a segment is, and nothing reading a world should have to
-# reconstruct the cost model to find it.  An older file loads with zeroes.
-# 1.7 stopped storing steepness as a class and started storing it as a measurement:
-# "slope" in metres of rise per kilometre and "relief" in metres of command over the
-# lowest neighbouring ground, with "terrain_class" reduced to the four kinds that are
-# genuinely kinds — open water, inland water, coast, land.  An older file loads: its
-# steepness bands translate to LAND and its water classes to the two new names, but the
-# numbers cannot be recovered from the words, so both default to zero.  A world written
-# before this re-renders flat.  Regenerate rather than re-render.
-#
-# 1.8 records "alluvium": the loose river-laid sediment the erosion model moves, as a
-# depth against the map's own richest ground.  An earlier file reads back as 0.0, which is
-# the honest answer — it was never measured, and unlike "slope" it cannot be recovered
-# from the elevations, because it records where sediment *travelled* rather than what
-# shape the ground ended up in.  Re-render an old world and its alluvium map is blank;
-# regenerate to get one.
-#
-# 1.9 adds two settlement roles, "mining" and "lumber", founded by `ResourceStage`. Nothing
-# else changed shape, so a 1.8 file loads as it always did; the bump is for readers, which
-# may not know the new role values.
-#
-# 1.10 names things. Each river carries a "name", empty if it was too small to have one,
-# and each settlement a "culture" and an "etymology" beside the name it always had. All
-# three read back as empty strings from an older file, whose settlements keep their
-# placeholder names.
-SCHEMA_VERSION = "1.10"
-SUPPORTED_SCHEMA_VERSIONS = frozenset(
-    {"1.0", "1.1", "1.2", "1.3", "1.4", "1.5", "1.6", "1.7", "1.8", "1.9", "1.10"}
-)
-
-
-# Terrain classes from before steepness stopped being a class at all.  "hill" and
-# "mountain" named landforms and were partly decided on altitude; the gradient bands that
-# briefly replaced them were named for slope; and now none of them is a terrain class,
-# because the ground's steepness is measured on the hex instead.  Every one of them loads
-# as LAND, and the two water names carry over to what they always meant.  A world saved
-# earlier still opens; it just has no `slope` to draw, which is why re-rendering one
-# comes out flat.
-_TERRAIN_ALIASES = {
-    "hill": "land",
-    "mountain": "land",
-    "flat": "land",
-    "rolling": "land",
-    "steep": "land",
-    "escarpment": "land",
-    "ocean": "open_water",
-    "lake": "inland_water",
-}
+# 2.0 moved rivers off the hexes and onto the sides between them: a river is a chain of
+# corners, and what is true of a stretch of it — its catchment, its fall, a ford or a
+# bridge — belongs to the side it runs along (`river_sides`), and what is true of a point
+# — a source, a mouth, a confluence — to a corner (`river_corners`).  That changes what
+# every reader of a world means by "on a river", so nothing older is loaded or migrated:
+# a world is regenerated from its seed.
+SCHEMA_VERSION = "2.0"
+SUPPORTED_SCHEMA_VERSIONS = frozenset({"2.0"})
 
 
 @dataclass
 class River:
     hexes: list[HexCoord]
     flow_volume: float
-    # Empty for a river too small to have been named, and for one from an older world.
+    # Empty for a river too small to have been named.
     name: str = ""
+    # The river's course along hexsides, upstream to downstream: consecutive corners are
+    # one side apart.  Hydrology still routes hex to hex and leaves this empty until it
+    # moves onto corners, when it replaces `hexes`.
+    corners: list[Corner] = field(default_factory=list)
+
+
+@dataclass
+class RiverSide:
+    """One hexside a river runs along, and what is true of that stretch of it.
+
+    `catchment_km2` is the area draining past it — the physical size of the river, and
+    what fording, bridging and navigation are decided on.  `flow` is the same thing as a
+    rank against the largest river on the map, for drawing.  `drop_m` is how far the
+    river falls along the side.  `tags` hold what later stages put there: ford, bridge,
+    cataract, rapids.
+    """
+
+    catchment_km2: float
+    flow: float
+    drop_m: float = 0.0
+    tags: set[str] = field(default_factory=set)
 
 
 @dataclass
@@ -197,6 +153,10 @@ class WorldState:
     # connectivity by any means is the components of both.
     sea_edges: dict[tuple[HexCoord, HexCoord], RoadEdge] = field(default_factory=dict)
     ferries: list[Ferry] = field(default_factory=list)
+    # Every hexside some river runs along, keyed by `hex_grid.side_of` names.
+    river_sides: dict[Side, RiverSide] = field(default_factory=dict)
+    # Tags on the corners of the river network: source, end, confluence, mouth.
+    river_corners: dict[Corner, set[str]] = field(default_factory=dict)
     metadata: dict = field(default_factory=dict)
 
     @classmethod
@@ -302,8 +262,27 @@ class WorldState:
                 for h in self.hexes.values()
             ],
             "rivers": [
-                {"hexes": [list(c) for c in r.hexes], "flow_volume": r.flow_volume, "name": r.name}
+                {
+                    "hexes": [list(c) for c in r.hexes],
+                    "corners": [list(c) for c in r.corners],
+                    "flow_volume": r.flow_volume,
+                    "name": r.name,
+                }
                 for r in self.rivers
+            ],
+            "river_sides": [
+                {
+                    "side": list(side),
+                    "catchment_km2": rs.catchment_km2,
+                    "flow": rs.flow,
+                    "drop_m": rs.drop_m,
+                    "tags": sorted(rs.tags),
+                }
+                for side, rs in sorted(self.river_sides.items())
+            ],
+            "river_corners": [
+                {"corner": list(corner), "tags": sorted(tags)}
+                for corner, tags in sorted(self.river_corners.items())
             ],
             "settlements": [
                 {
@@ -354,12 +333,13 @@ class WorldState:
         )
 
         version = data.get("version")
-        if version is not None and version not in SUPPORTED_SCHEMA_VERSIONS:
-            # Numerically, or "1.10" sorts between "1.1" and "1.2".
-            supported = ", ".join(
-                sorted(SUPPORTED_SCHEMA_VERSIONS, key=lambda v: tuple(map(int, v.split("."))))
+        if version not in SUPPORTED_SCHEMA_VERSIONS:
+            supported = ", ".join(sorted(SUPPORTED_SCHEMA_VERSIONS))
+            raise ValueError(
+                f"Unsupported WorldState version '{version}'. Supported: {supported}. "
+                "Worlds from before 2.0 put rivers on hexes rather than between them and "
+                "cannot be converted; regenerate this one from its seed."
             )
-            raise ValueError(f"Unsupported WorldState version '{version}'. Supported: {supported}.")
 
         layout = data.get("layout", AXIAL)
         if layout not in GRID_LAYOUTS:
@@ -381,8 +361,8 @@ class WorldState:
                 role=SettlementRole(sd["role"]),
                 population=sd["population"],
                 name=sd["name"],
-                culture=sd.get("culture", ""),
-                etymology=sd.get("etymology", ""),
+                culture=sd["culture"],
+                etymology=sd["etymology"],
             )
             for sd in data.get("settlements", [])
         ]
@@ -391,41 +371,30 @@ class WorldState:
 
         for hd in data.get("hexes", []):
             coord = (hd["q"], hd["r"])
-            # Terrain classes were renamed when they stopped meaning landform and started
-            # meaning gradient. The stored strings carry over so older worlds still open.
-            terrain = _TERRAIN_ALIASES.get(hd["terrain_class"], hd["terrain_class"])
             h = Hex(
                 coord=coord,
                 elevation=hd["elevation"],
                 moisture=hd["moisture"],
                 temperature=hd["temperature"],
                 biome=Biome(hd["biome"]) if hd.get("biome") is not None else None,
-                terrain_class=TerrainClass(terrain),
-                # Absent before 1.7, and not recoverable from the class name that
-                # replaced them: a world written earlier draws flat until regenerated.
-                slope=hd.get("slope", 0.0),
-                relief=hd.get("relief", 0.0),
-                alluvium=hd.get("alluvium", 0.0),
+                terrain_class=TerrainClass(hd["terrain_class"]),
+                slope=hd["slope"],
+                relief=hd["relief"],
+                alluvium=hd["alluvium"],
                 land_cover=LandCover(hd["land_cover"])
                 if hd.get("land_cover") is not None
                 else None,
                 river_flow=hd["river_flow"],
-                catchment_km2=hd.get("catchment_km2", 0.0),
-                # Files written before habitability was split per tier carry a single
-                # "habitability"; read it into all three rather than rejecting them.
-                habitability_city=hd.get("habitability_city", hd.get("habitability", 0.0)),
-                habitability_town=hd.get("habitability_town", hd.get("habitability", 0.0)),
-                habitability_village=hd.get("habitability_village", hd.get("habitability", 0.0)),
+                catchment_km2=hd["catchment_km2"],
+                habitability_city=hd["habitability_city"],
+                habitability_town=hd["habitability_town"],
+                habitability_village=hd["habitability_village"],
                 cultivated=hd["cultivated"],
-                # Added at schema 1.6. Absent in anything older, and a world written before
-                # soil existed has no answer to give — reading one back leaves these None
-                # rather than inventing a class the generator never assigned.
                 soil=SoilQuality(hd["soil"]) if hd.get("soil") else None,
                 land_use=LandUse(hd["land_use"]) if hd.get("land_use") else None,
-                rural_population=hd.get("rural_population", 0.0),
-                # Absent before 1.2: such a file simply records no catchments.
+                rural_population=hd["rural_population"],
                 territory=tuple(hd["territory"]) if hd.get("territory") is not None else None,
-                territory_cost=hd.get("territory_cost", 0.0),
+                territory_cost=hd["territory_cost"],
                 tags=set(hd.get("tags", [])),
                 road_connections={tuple(c) for c in hd.get("road_connections", [])},
             )
@@ -436,34 +405,32 @@ class WorldState:
             River(
                 hexes=[tuple(c) for c in rd["hexes"]],
                 flow_volume=rd["flow_volume"],
-                name=rd.get("name", ""),
+                name=rd["name"],
+                corners=[tuple(c) for c in rd["corners"]],
             )
-            for rd in data.get("rivers", [])
+            for rd in data["rivers"]
         ]
+        ws.river_sides = {
+            tuple(sd["side"]): RiverSide(
+                catchment_km2=sd["catchment_km2"],
+                flow=sd["flow"],
+                drop_m=sd["drop_m"],
+                tags=set(sd["tags"]),
+            )
+            for sd in data["river_sides"]
+        }
+        ws.river_corners = {tuple(cd["corner"]): set(cd["tags"]) for cd in data["river_corners"]}
 
         def read_edges(rows):
             return {
                 road_edge_key(tuple(ed["a"]), tuple(ed["b"])): RoadEdge(
-                    RoadTier(ed["tier"]), ed.get("delta_elevation_m", 0.0)
+                    RoadTier(ed["tier"]), ed["delta_elevation_m"]
                 )
                 for ed in rows
             }
 
-        ws.sea_edges = read_edges(data.get("sea_edges", []))
-        if "road_edges" in data:
-            ws.road_edges = read_edges(data["road_edges"])
-        else:
-            # Schema 1.2 and earlier stored whole journeys, which overlap. Where two of
-            # them share an edge the higher tier wins, which is the rule the renderer
-            # applied at draw time anyway — so an old file loads as the network it drew.
-            for rd in data.get("roads", []):
-                tier = RoadTier(rd["tier"])
-                path = [tuple(c) for c in rd["path"]]
-                for a, b in zip(path, path[1:], strict=False):
-                    key = road_edge_key(a, b)
-                    have = ws.road_edges.get(key)
-                    if have is None or ROAD_TIER_RANK[tier] > ROAD_TIER_RANK[have.tier]:
-                        ws.road_edges[key] = RoadEdge(tier)
-        ws.ferries = [Ferry(a=tuple(fd["a"]), b=tuple(fd["b"])) for fd in data.get("ferries", [])]
+        ws.sea_edges = read_edges(data["sea_edges"])
+        ws.road_edges = read_edges(data["road_edges"])
+        ws.ferries = [Ferry(a=tuple(fd["a"]), b=tuple(fd["b"])) for fd in data["ferries"]]
 
         return ws

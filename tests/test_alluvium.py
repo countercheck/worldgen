@@ -231,18 +231,6 @@ def test_alluvium_survives_a_round_trip(tmp_path):
         assert back.hexes[coord].alluvium == h.alluvium, f"alluvium lost at {coord}"
 
 
-def test_older_files_load_without_alluvium():
-    """A pre-1.5 file never measured it, and 0.0 is the honest answer — unlike slope it
-    cannot be recovered from the elevations."""
-    state = _eroded(size=12)
-    data = state.to_dict()
-    data["version"] = "1.4"
-    for hd in data["hexes"]:
-        hd.pop("alluvium")
-    back = WorldState.from_dict(data)
-    assert all(h.alluvium == 0.0 for h in back.hexes.values())
-
-
 def test_config_validation():
     for bad in ({"alluvium_floodplain_gain": -0.1}, {"alluvium_smoothing": -1.0}):
         name = next(iter(bad))
