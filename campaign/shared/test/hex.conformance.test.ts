@@ -14,8 +14,21 @@ import {
   astar,
   axialToOffset,
   axialToPixel,
+  cornerHexes,
+  cornerId,
+  cornerNeighbors,
+  cornerSides,
+  cornerToPixel,
   distance,
+  hexCorners,
   hexRange,
+  hexSides,
+  sideBetween,
+  sideCorners,
+  sideHexes,
+  sideId,
+  type Corner,
+  type Side,
   key,
   neighbors,
   offsetToAxial,
@@ -27,6 +40,13 @@ import {
 
 const pair = (h: Hex): [number, number] => [h.q, h.r];
 const hex = ([q, r]: number[]): Hex => ({ q: q!, r: r! });
+const corner = ([q, r, k]: number[]): Corner => ({ q: q!, r: r!, k: k! });
+const side = ([q, r, s]: number[]): Side => ({ q: q!, r: r!, s: s! });
+const triple = (c: Corner | Side): [number, number, number] => [
+  c.q,
+  c.r,
+  'k' in c ? c.k : c.s,
+];
 
 describe('neighbors', () => {
   it('matches the Python, including the direction ordering', () => {
@@ -160,5 +180,64 @@ describe('astar', () => {
     // impassable edge is skipped rather than pushed with an infinite score.
     const blockAll = (): number => Infinity;
     expect(astar(grid, hex(start), hex(goal), (n) => n.cost, blockAll)).toBeNull();
+  });
+});
+
+describe('corners and sides', () => {
+  it('names a hex’s corners and sides as the Python does', () => {
+    for (const c of fixture.hexCorners) {
+      expect(hexCorners(hex(c.coord)).map(triple), `hexCorners(${c.coord})`).toEqual(c.result);
+    }
+    for (const c of fixture.hexSides) {
+      expect(hexSides(hex(c.coord)).map(triple), `hexSides(${c.coord})`).toEqual(c.result);
+    }
+  });
+
+  it('finds the hexes, neighbours and sides at a corner as the Python does', () => {
+    for (const c of fixture.cornerHexes) {
+      expect(cornerHexes(corner(c.corner)).map(pair), `cornerHexes(${c.corner})`).toEqual(
+        c.result,
+      );
+    }
+    for (const c of fixture.cornerNeighbors) {
+      expect(
+        cornerNeighbors(corner(c.corner)).map(triple),
+        `cornerNeighbors(${c.corner})`,
+      ).toEqual(c.result);
+    }
+    for (const c of fixture.cornerSides) {
+      expect(cornerSides(corner(c.corner)).map(triple), `cornerSides(${c.corner})`).toEqual(
+        c.result,
+      );
+    }
+  });
+
+  it('places a corner as the Python does', () => {
+    for (const c of fixture.cornerToPixel) {
+      const { x, y } = cornerToPixel(corner(c.corner), fixture.hexSize);
+      expect(x, `x of ${c.corner}`).toBeCloseTo(c.result[0]!, 10);
+      expect(y, `y of ${c.corner}`).toBeCloseTo(c.result[1]!, 10);
+    }
+  });
+
+  it('names the side between two hexes, and its hexes and ends, as the Python does', () => {
+    for (const c of fixture.sideBetween) {
+      expect(triple(sideBetween(hex(c.a), hex(c.b))), `sideBetween(${c.a}, ${c.b})`).toEqual(
+        c.result,
+      );
+    }
+    for (const c of fixture.sideHexes) {
+      expect(sideHexes(side(c.side)).map(pair), `sideHexes(${c.side})`).toEqual(c.result);
+    }
+    for (const c of fixture.sideCorners) {
+      expect(sideCorners(side(c.side)).map(triple), `sideCorners(${c.side})`).toEqual(c.result);
+    }
+  });
+
+  it('writes the same string ids', () => {
+    for (const c of fixture.ids) {
+      expect(cornerId(corner(c.corner))).toBe(c.cornerId);
+      expect(sideId(side(c.corner))).toBe(c.sideId);
+    }
   });
 });
