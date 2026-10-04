@@ -25,72 +25,16 @@ Everywhere else the river stays a barrier, which is what makes a trunk river bou
 market catchment instead of being invisible to it.
 """
 
-import math
-
 from ..core.hex import TerrainClass
 from ..core.hex_grid import Side, hex_range, side_hexes
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
 from .habitability import potential_food
 from .hydrology import mirror_on_band
+from .riverside import side_gradients, side_span
 
 FORD = "ford"
 BRIDGE = "bridge"
-
-# A hexside is the side of a kilometre-wide hex: 1/sqrt(3) km of river.
-SIDE_KM = 1.0 / math.sqrt(3.0)
-
-
-def side_gradients(state: WorldState) -> dict[Side, float]:
-    """How fast the water falls along each river side, in metres per kilometre.
-
-    Measured along the river's own course — the fall over the side and the sides either
-    side of it — because that is what sets the velocity, and velocity is what decides
-    whether a reach can be waded.  Slack water spreads and braids into shallows; the same
-    discharge running fast will take your feet from under you at half the depth.  Three
-    sides rather than one because a corner stands at its lowest hex, so the fall over any
-    single side comes in lumps: nothing for a side or two across one hex's foot, then all
-    of it at once.
-
-    Deliberately not the spread of the ground beside the river.  An earlier version
-    measured highest neighbour against lowest, which sounds like the same question and is
-    not: a river runs in a valley, so that figure reports how tall the valley sides are.
-    It came out at a median of 255 m on a 64x64 map and called all but two reaches
-    unfordable — but a river winding down a broad vale with hills either side is
-    perfectly wadeable at the water's edge.  What the crossing cares about is the channel,
-    not the skyline.
-    """
-    out: dict[Side, float] = {}
-    for river in state.rivers:
-        sides = river.sides()
-        drops = [state.river_sides[s].drop_m if s in state.river_sides else 0.0 for s in sides]
-        for i, side in enumerate(sides):
-            lo, hi = max(0, i - 1), min(len(sides), i + 2)
-            out[side] = sum(drops[lo:hi]) / ((hi - lo) * SIDE_KM)
-    return out
-
-
-def side_span(catchment_km2: float, gradient_m_per_km: float, cfg) -> float:
-    """How hard a stretch of river is to get across, in multiples of the easiest wadeable one.
-
-    Two things make it hard, and they multiply rather than compete.
-
-    **How much water.**  Catchment area is the physical input, and width goes as the
-    square root of discharge by hydraulic geometry — the same exponent the river renderer
-    uses (`river_width_exponent: 0.5`), so the two agree about what a big river looks like.
-    Deliberately not the flow rank: that is normalised against the largest accumulation on
-    the map, so a threshold on it meant different things at different map sizes.
-
-    **How fast it runs** (`side_gradients`).  A steep reach is also an incised one, and at
-    a kilometre to the hex what defeats a bridge is rarely the span but the approaches,
-    which then have to be cut.  So gradient makes a reach behave like a bigger river for
-    both purposes, which is why one number serves fording, bridging, and the cost of
-    getting across where there is no crossing at all.
-    """
-    if cfg.ford_max_catchment_km2 <= 0:
-        return 0.0
-    width = (catchment_km2 / cfg.ford_max_catchment_km2) ** 0.5
-    return width * (1.0 + gradient_m_per_km / cfg.crossing_relief_m)
 
 
 def crossing_pressure(side: Side, surplus: dict, radius: int) -> float:

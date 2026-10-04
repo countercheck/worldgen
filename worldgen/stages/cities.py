@@ -23,7 +23,8 @@ from ..core.hex_grid import distance, hex_range
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
 from .habitability import actual_food
-from .haulage import WATER, bulk_routes, gather, navigable, river_index, usable_fraction
+from .haulage import bulk_routes, gather, navigable, usable_fraction
+from .riverside import WATER, river_index
 
 # How a cargo travels on a hex: by cart, by barge on a river or a lake, or by ship.
 _LAND, _INLAND_WATER, _SEA = 0, 1, 2

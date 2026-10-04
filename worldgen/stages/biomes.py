@@ -1,5 +1,6 @@
 from ..core.config import CLIMATE_CONTEXTS
 from ..core.hex import Biome, TerrainClass
+from ..core.hex_grid import side_hexes
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
 
@@ -93,12 +94,21 @@ class BiomeStage(GeneratorStage):
         # band, which on a temperate map at 800 mm almost nothing reaches, so bogs
         # vanished entirely; and it would have called a cold region dry when cold country
         # is exactly where peat forms, because so little of its rain evaporates away.
+        #
+        # A river runs along a hexside, and it floods over the lower of its two banks: the
+        # higher one sheds its water back into the river.  So the ground that waterlogs is
+        # the lower bank of each side.
         min_runoff = self.config.wetland_min_runoff_mm
-        for h in state.hexes.values():
+        hexes = state.hexes
+        beside = {
+            min((h for h in side_hexes(side) if h in hexes), key=lambda h: (hexes[h].elevation, h))
+            for side in state.river_sides
+        }
+        for coord, h in state.hexes.items():
             if (
                 _is_level(h, self.config)
                 and self.config.runoff_mm(h.moisture, h.temperature) > min_runoff
-                and "river" in h.tags
+                and coord in beside
                 and h.temperature >= treeline_temp
             ):
                 h.biome = Biome.WETLAND

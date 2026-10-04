@@ -37,6 +37,7 @@ from ..naming import (
     read_site,
 )
 from ..naming.packs import CulturePackError, PackCulture
+from .riverside import river_index
 
 _WATER = (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
 _TIER_ORDER = {SettlementTier.CITY: 0, SettlementTier.TOWN: 1, SettlementTier.VILLAGE: 2}
@@ -104,13 +105,19 @@ class NamingStage(GeneratorStage):
             substrate = self._languages(1, rng, {c.name for c in cultures})[0]
             if cfg.naming_substrate_pack:
                 substrate = PackCulture(packs[cfg.naming_substrate_pack].pack)
+        rivers = river_index(state, cfg)
+        great = frozenset(
+            pair
+            for pair, area in rivers.side_catchment.items()
+            if area >= cfg.naming_great_river_km2
+        )
         regions = culture_regions(
             state.hexes,
             len(cultures),
             rng,
             cfg.naming_region_climb_m,
             cfg.naming_region_river_cost,
-            cfg.naming_great_river_km2,
+            great,
             cfg.naming_region_water_cost,
         )
         registry = NameRegistry(cfg.naming_min_edit_distance)
@@ -122,7 +129,14 @@ class NamingStage(GeneratorStage):
         ):
             culture = cultures[regions.get(s.coord, 0)]
             self._name_settlement(
-                state.hexes, s, culture, river_at, anchors.get(s.coord), registry, rng
+                state.hexes,
+                s,
+                culture,
+                river_at,
+                anchors.get(s.coord),
+                registry,
+                rng,
+                rivers.features,
             )
 
         def record(culture, role: str) -> dict:
@@ -276,9 +290,12 @@ class NamingStage(GeneratorStage):
         anchor: HexCoord | None,
         registry: NameRegistry,
         rng: np.random.Generator,
+        river_features: dict | None = None,
     ) -> None:
         cfg = self.config
-        site = read_site(hexes, s, cfg.naming_hill_relief_m, cfg.naming_high_elevation_m)
+        site = read_site(
+            hexes, s, cfg.naming_hill_relief_m, cfg.naming_high_elevation_m, river_features
+        )
         if anchor is not None:
             add_direction(site, anchor)
         river = self._river_near(s.coord, river_at)

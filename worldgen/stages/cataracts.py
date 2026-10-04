@@ -29,9 +29,9 @@ boat can load there.
 
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
-from .crossings import side_gradients
 from .haulage import catchment_carries_a_barge
 from .hydrology import mirror_on_band
+from .riverside import side_gradients
 
 
 class CataractStage(GeneratorStage):

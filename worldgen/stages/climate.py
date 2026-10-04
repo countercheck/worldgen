@@ -4,7 +4,7 @@ import numpy as np
 from scipy.ndimage import gaussian_filter
 
 from ..core.hex import TerrainClass
-from ..core.hex_grid import neighbors
+from ..core.hex_grid import corner_hexes, neighbors, side_corners, side_hexes
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
 from .precipitation import orographic_pattern
@@ -57,14 +57,12 @@ class ClimateStage(GeneratorStage):
 
         # River-adjacency and coastal moisture bonuses
         water = (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
+        near_river = _near_rivers(state)
         for coord, h in state.hexes.items():
             if h.terrain_class in water:
                 continue
-            if self.config.moisture_bleed_passes == 0:
-                for n in neighbors(coord):
-                    if n in state.hexes and "river" in state.hexes[n].tags:
-                        h.moisture += 0.15
-                        break
+            if self.config.moisture_bleed_passes == 0 and coord in near_river:
+                h.moisture += 0.15
             for n in neighbors(coord):
                 if n in state.hexes and state.hexes[n].terrain_class in water:
                     h.moisture += 0.1
@@ -112,18 +110,9 @@ class ClimateStage(GeneratorStage):
                     if h.terrain_class in water:
                         continue
                     best = 0.0
-                    for n in neighbors(coord):
-                        if n not in state.hexes:
-                            continue
-                        nh = state.hexes[n]
-                        if nh.terrain_class in water:
-                            continue
-                        if "river" not in nh.tags:
-                            continue
-                        if nh.elevation < h.elevation - 1e-6:
-                            continue
-                        if nh.river_flow > best:
-                            best = nh.river_flow
+                    for level, flow in near_river.get(coord, ()):
+                        if level >= h.elevation - 1e-6 and flow > best:
+                            best = flow
                     additions[coord] = best
                 for coord, h in state.hexes.items():
                     if h.terrain_class not in water:
@@ -145,3 +134,26 @@ class ClimateStage(GeneratorStage):
         for h in state.hexes.values():
             if h.terrain_class in water:
                 h.moisture = self.config.mean_precip_mm
+
+
+def _near_rivers(state: WorldState) -> dict:
+    """Every land hex near a river, with the level and flow of each river near it.
+
+    A river runs along a hexside, and the ground it waters is the four hexes at that side's
+    two corners: the two banks and the hex at either end.  *level* is the water's own
+    height, the lower of its banks, since moisture spreads down to ground at or below the
+    river and not up the far slope.
+    """
+    hexes = state.hexes
+    water = (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
+    out: dict = {}
+    for side, rs in state.river_sides.items():
+        banks = [h for h in side_hexes(side) if h in hexes]
+        if not banks:
+            continue
+        level = min(hexes[h].elevation for h in banks)
+        around = {h for c in side_corners(side) for h in corner_hexes(c)}
+        for h in around:
+            if h in hexes and hexes[h].terrain_class not in water:
+                out.setdefault(h, []).append((level, rs.flow))
+    return out

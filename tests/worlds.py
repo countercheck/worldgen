@@ -183,7 +183,7 @@ def lay_river(ws, path, flow_volume=1.0, flow=None):
 
 
 def river_to_sea(catchment_km2=1e6, cataract_at=None):
-    """A river running east along row 1 into a sea that fills rows 1-2 from column 4.
+    """A river running east along row 1 into a sea that fills rows 1-4 from column 4.
 
     Every side it runs along has land on both hands, as hydrology's always do, and it ends
     on a corner of the sea.  *catchment_km2* is on every side (1e6 floats any barge);
@@ -193,7 +193,7 @@ def river_to_sea(catchment_km2=1e6, cataract_at=None):
     from worldgen.core.hex import TerrainClass
     from worldgen.core.world_state import WorldState
 
-    ws = WorldState.empty(1, 7, 3)
+    ws = WorldState.empty(1, 7, 5)
     for (q, r), hx in ws.hexes.items():
         hx.terrain_class = TerrainClass.OPEN_WATER if q >= 4 and r >= 1 else TerrainClass.LAND
     river = lay_river(ws, [(0, 1), (1, 1), (2, 1), (3, 1), (4, 1)])

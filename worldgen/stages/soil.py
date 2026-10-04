@@ -28,9 +28,9 @@ and however much rain falls on it, which is why the boreal map grows no wheat.
 """
 
 from ..core.hex import SOIL_RANK, Biome, SoilQuality, TerrainClass
-from ..core.hex_grid import neighbors
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
+from .riverside import river_index
 
 WATER = (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
 # Neither is ploughland, so neither takes a soil class: the sea is a fishery and a bog is a
@@ -67,24 +67,21 @@ def rainfall_soil(precip_mm: float, cfg) -> SoilQuality:
     return SoilQuality.UNUSABLE
 
 
-def is_alluvium(coord, hx, hexes, cfg) -> bool:
-    """Gentle ground on or beside a river too big to wade.
+def is_alluvium(coord, hx, cfg, rivers) -> bool:
+    """Gentle ground beside a river too big to wade.
 
     `ford_max_catchment_km2` is the threshold rather than one of its own, and it is exactly
     the right question asked from the other side: a stream draining a few tens of square
     kilometres is ankle deep and a step across, and a river you cannot wade is one that
     floods and lays down silt. `catchment_km2` is upstream drainage area, a physical
     quantity comparable between maps, so this means the same thing on any of them.
+
+    A river runs along a hexside; its floodplain is the level ground of its valley, the banks
+    and the hexes next to them (`Rivers.near`).
     """
     if hx.slope >= cfg.terrain_rolling_gradient_m:
         return False
-
-    def big(other) -> bool:
-        return "river" in other.tags and other.catchment_km2 >= cfg.ford_max_catchment_km2
-
-    if big(hx):
-        return True
-    return any(big(hexes[n]) for n in neighbors(coord) if n in hexes)
+    return rivers.near.get(coord, 0.0) >= cfg.ford_max_catchment_km2
 
 
 class SoilStage(GeneratorStage):
@@ -93,6 +90,7 @@ class SoilStage(GeneratorStage):
     def run(self, state: WorldState) -> WorldState:
         hexes = state.hexes
         cfg = self.config
+        rivers = river_index(state, cfg)
 
         for coord, hx in hexes.items():
             if hx.terrain_class in WATER or hx.biome in NOT_PLOUGHLAND:
@@ -102,7 +100,7 @@ class SoilStage(GeneratorStage):
                 hx.soil = SoilQuality.UNUSABLE
                 continue
 
-            if is_alluvium(coord, hx, hexes, cfg):
+            if is_alluvium(coord, hx, cfg, rivers):
                 soil = SoilQuality.PRIME
             else:
                 soil = _worse(

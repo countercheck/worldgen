@@ -44,10 +44,14 @@ def test_every_settlement_belongs_to_a_culture_the_world_records(world):
 
 def test_a_name_means_something_about_its_site(world):
     """The etymology's head is one of the heads the ground offered."""
+    from worldgen.core.config import WorldConfig
+    from worldgen.stages.riverside import river_index
+
     cfg = world.metadata["config"]
+    features = river_index(world, WorldConfig(**cfg)).features
     for s in world.settlements:
         site = read_site(
-            world.hexes, s, cfg["naming_hill_relief_m"], cfg["naming_high_elevation_m"]
+            world.hexes, s, cfg["naming_hill_relief_m"], cfg["naming_high_elevation_m"], features
         )
         heads = {GLOSS[g] for g in site.generics}
         assert s.etymology

@@ -96,57 +96,59 @@ def _navigable_catchment(cfg):
     return cfg.navigable_min_discharge / cfg.runoff_mm(cfg.mean_precip_mm) * 1.1
 
 
-def test_city_town_port_role_requires_a_river_tag():
-    """Adjacency to water alone is not a port — the neighbour must carry the river tag.
+def _riverside(catchment_km2):
+    """A river along row 1, and the bank beside it and a field beyond (see `river_to_sea`)."""
+    from tests.worlds import river_to_sea
+    from worldgen.stages.riverside import river_index
 
-    `river_flow` is set on the neighbour throughout: with `river_flow_continuous` the
-    hydrology stage writes a flow value onto every draining land hex, so flow alone says
-    nothing about whether a hex is a channel.
-    """
+    ws, _ = river_to_sea(catchment_km2=catchment_km2)
+    return ws, river_index(ws, WorldConfig())
+
+
+def test_city_town_port_role_requires_a_river_beside_it():
+    """A port is on the bank or a step from it; a field further off is not, however near."""
     cfg = WorldConfig()
-    center, river_neighbor, hexes = _make_port_role_test_hexes()
-    river_neighbor.catchment_km2 = _navigable_catchment(cfg)
-
-    assert assign_city_town_role(center.coord, center, hexes, cfg) is not SettlementRole.PORT
-
-    river_neighbor.tags.add("river")
-    assert assign_city_town_role(center.coord, center, hexes, cfg) is SettlementRole.PORT
+    ws, rivers = _riverside(_navigable_catchment(cfg))
+    bank, field = (1, 1), (1, 4)
+    assert assign_city_town_role(bank, ws.hexes[bank], ws.hexes, cfg, rivers) is SettlementRole.PORT
+    assert (
+        assign_city_town_role(field, ws.hexes[field], ws.hexes, cfg, rivers)
+        is not SettlementRole.PORT
+    )
 
 
 def test_city_town_port_role_requires_water_a_boat_can_use():
-    """A headwater brook is not a port, however tagged.
+    """A headwater brook is not a port.
 
     This is the claim that separates a port from a riverside town. Nearly every settlement
-    on a generated map stands on water of some kind, so a role that fired on any river tag
+    on a generated map stands on water of some kind, so a role that fired on any river
     labelled 43% of the land a port and told nobody anything. The discharge test is what
     makes the role rare enough to mean something.
     """
     cfg = WorldConfig()
-    center, brook, hexes = _make_port_role_test_hexes()
-    brook.tags.add("river")
-
-    brook.catchment_km2 = 1.0
-    assert assign_city_town_role(center.coord, center, hexes, cfg) is not SettlementRole.PORT
-
-    brook.catchment_km2 = _navigable_catchment(cfg)
-    assert assign_city_town_role(center.coord, center, hexes, cfg) is SettlementRole.PORT
+    bank = (1, 1)
+    ws, rivers = _riverside(1.0)
+    assert (
+        assign_city_town_role(bank, ws.hexes[bank], ws.hexes, cfg, rivers)
+        is not SettlementRole.PORT
+    )
+    ws, rivers = _riverside(_navigable_catchment(cfg))
+    assert assign_city_town_role(bank, ws.hexes[bank], ws.hexes, cfg, rivers) is SettlementRole.PORT
 
 
 def test_city_town_port_role_agrees_with_the_harbour_bonus():
     """The site scored as a harbour is the settlement labelled a port.
 
-    Both now read `haulage.navigable`. They used to answer differently — habitability on
+    Both read `riverside.waterside`. They used to answer differently — habitability on
     discharge, the role on adjacency — so a hamlet could be a `PORT` on water the site
     score gave no harbour credit for.
     """
-    from worldgen.stages.haulage import navigable
+    from worldgen.stages.riverside import waterside
 
     cfg = WorldConfig()
     for catchment in (1.0, _navigable_catchment(cfg)):
-        center, river_neighbor, hexes = _make_port_role_test_hexes()
-        river_neighbor.tags.add("river")
-        river_neighbor.catchment_km2 = catchment
-        nbrs = [river_neighbor]
-        scored_harbour = navigable(center, cfg) or any(navigable(n, cfg) for n in nbrs)
-        is_port = assign_city_town_role(center.coord, center, hexes, cfg) is SettlementRole.PORT
-        assert scored_harbour == is_port, f"disagreement at catchment {catchment}"
+        ws, rivers = _riverside(catchment)
+        for coord, hx in ws.hexes.items():
+            harbour = waterside(coord, hx, ws.hexes, rivers)
+            is_port = assign_city_town_role(coord, hx, ws.hexes, cfg, rivers) is SettlementRole.PORT
+            assert harbour == is_port, f"disagreement at {coord}, catchment {catchment}"

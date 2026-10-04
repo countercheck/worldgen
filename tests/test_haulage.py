@@ -17,6 +17,7 @@ from worldgen.stages.haulage import (
     settleable,
     usable_fraction,
 )
+from worldgen.stages.riverside import Rivers, river_index
 
 
 def _hex(coord, terrain=TerrainClass.LAND, **kw):
@@ -77,23 +78,31 @@ def test_zero_range_carries_nothing():
 def test_open_water_is_navigable():
     cfg = WorldConfig()
     for terrain in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER):
-        assert navigable(_hex((0, 0), terrain), cfg)
+        assert navigable(_hex((0, 0), terrain), cfg, Rivers())
+
+
+def _bank_on(catchment_km2, cfg):
+    from tests.worlds import river_to_sea
+
+    ws, _ = river_to_sea(catchment_km2=catchment_km2)
+    return ws, river_index(ws, cfg)
 
 
 def test_a_big_river_floats_a_boat_and_a_headwater_does_not():
     cfg = WorldConfig()
-    big = _river(_hex((0, 0)), _catchment_for(cfg, cfg.navigable_min_discharge * 2))
-    trickle = _river(_hex((1, 0)), _catchment_for(cfg, cfg.navigable_min_discharge * 0.5))
-    assert navigable(big, cfg)
-    assert not navigable(trickle, cfg)
+    ws, rivers = _bank_on(_catchment_for(cfg, cfg.navigable_min_discharge * 2), cfg)
+    assert navigable(ws.hexes[(1, 1)], cfg, rivers)
+    ws, rivers = _bank_on(_catchment_for(cfg, cfg.navigable_min_discharge * 0.5), cfg)
+    assert not navigable(ws.hexes[(1, 1)], cfg, rivers)
 
 
-def test_catchment_without_the_river_tag_is_not_a_channel():
-    """Every hex drains something; only the tag says a channel runs through it."""
+def test_a_hex_away_from_the_river_is_not_afloat_however_much_drains_it():
+    """Every hex drains something; only a river side beside it says a boat can be there."""
     cfg = WorldConfig()
-    hx = _hex((0, 0))
-    hx.catchment_km2 = 1e6
-    assert not navigable(hx, cfg)
+    ws, rivers = _bank_on(1e6, cfg)
+    field = ws.hexes[(1, 4)]
+    field.catchment_km2 = 1e6
+    assert not navigable(field, cfg, rivers)
 
 
 def test_a_dry_region_cannot_float_a_boat_on_the_same_river():
@@ -105,9 +114,9 @@ def test_a_dry_region_cannot_float_a_boat_on_the_same_river():
     """
     wet = WorldConfig(regional_climate="tropical")
     dry = WorldConfig(regional_climate="arid")
-    hx = _river(_hex((0, 0)), _catchment_for(wet, wet.navigable_min_discharge * 1.5))
-    assert navigable(hx, wet)
-    assert not navigable(hx, dry)
+    ws, wet_rivers = _bank_on(_catchment_for(wet, wet.navigable_min_discharge * 1.5), wet)
+    assert navigable(ws.hexes[(1, 1)], wet, wet_rivers)
+    assert not navigable(ws.hexes[(1, 1)], dry, river_index(ws, dry))
 
 
 def test_water_multiplies_reach():
@@ -117,8 +126,8 @@ def test_water_multiplies_reach():
     gap between a river city and an inland one follows from this one multiplier.
     """
     cfg = WorldConfig()
-    inland = haulage_range(_hex((0, 0)), cfg)
-    port = haulage_range(_hex((1, 0), TerrainClass.OPEN_WATER), cfg)
+    inland = haulage_range(_hex((0, 0)), cfg, Rivers())
+    port = haulage_range(_hex((1, 0), TerrainClass.OPEN_WATER), cfg, Rivers())
     assert inland == cfg.haulage_range_land
     assert port == pytest.approx(inland * cfg.haulage_range_water_mult)
     assert port > inland
@@ -324,7 +333,8 @@ def test_settleable_excludes_water_mountain_and_bog():
 def test_walking_across_a_river_is_charged_once_on_its_side():
     from tests.worlds import river_to_sea
     from worldgen.core.hex_grid import side_hexes
-    from worldgen.stages.haulage import ford_cost, river_index
+    from worldgen.stages.haulage import ford_cost
+    from worldgen.stages.riverside import river_index
 
     cfg = WorldConfig()
     ws, river = river_to_sea(catchment_km2=cfg.ford_max_catchment_km2 * 4)
@@ -342,7 +352,7 @@ def test_walking_across_a_river_is_charged_once_on_its_side():
 def test_a_cataract_cuts_the_river_into_two_reaches_with_a_portage_between():
     from tests.worlds import river_to_sea
     from worldgen.core.hex_grid import side_hexes
-    from worldgen.stages.haulage import river_index
+    from worldgen.stages.riverside import river_index
 
     cfg = WorldConfig()
     ws, river = river_to_sea(cataract_at=2)
@@ -356,7 +366,7 @@ def test_a_cataract_cuts_the_river_into_two_reaches_with_a_portage_between():
 
 def test_a_barge_reaches_the_sea_only_at_the_river_mouth():
     from tests.worlds import river_to_sea
-    from worldgen.stages.haulage import river_index
+    from worldgen.stages.riverside import river_index
 
     cfg = WorldConfig()
     ws, _ = river_to_sea()
@@ -369,7 +379,7 @@ def test_a_barge_reaches_the_sea_only_at_the_river_mouth():
 
 def test_a_brook_floats_no_barge_and_a_trunk_floats_timber():
     from tests.worlds import river_to_sea
-    from worldgen.stages.haulage import river_index
+    from worldgen.stages.riverside import river_index
 
     cfg = WorldConfig()
     brook, _ = river_to_sea(catchment_km2=1.0)

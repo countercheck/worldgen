@@ -42,14 +42,14 @@ def _homelands(hexes: dict[HexCoord, Hex], count: int, rng: np.random.Generator)
 
 
 def _step_cost(
-    a: Hex, b: Hex, climb_m: float, river_cost: float, great_river_km2: float, water_cost: float
+    a: Hex, b: Hex, climb_m: float, river_cost: float, great: frozenset, water_cost: float
 ) -> float:
     cost = 1.0
     if climb_m > 0:
         cost += abs(b.elevation - a.elevation) / climb_m
     if b.terrain_class in _WATER:
         cost += water_cost
-    elif "river" in b.tags and b.catchment_km2 >= great_river_km2:
+    elif frozenset((a.coord, b.coord)) in great:
         cost += river_cost
     return cost
 
@@ -60,11 +60,14 @@ def culture_regions(
     rng: np.random.Generator,
     climb_m: float,
     river_cost: float,
-    great_river_km2: float,
+    great_rivers: frozenset,
     water_cost: float,
     homes: list[HexCoord] | None = None,
 ) -> dict[HexCoord, int]:
     """Map every hex to the index of the culture that holds it, 0 to *count* - 1.
+
+    *great_rivers* holds the pairs of hexes either side of a river too great to cross
+    casually: a step between them pays *river_cost*, so a frontier settles along it.
 
     A multi-source cheapest-path flood, so each region is connected: a hex is only ever
     claimed through a neighbour its own culture already holds. *homes* places the
@@ -87,7 +90,7 @@ def culture_regions(
         for n in neighbors(coord):
             if n not in hexes or n in owner:
                 continue
-            step = _step_cost(here, hexes[n], climb_m, river_cost, great_river_km2, water_cost)
+            step = _step_cost(here, hexes[n], climb_m, river_cost, great_rivers, water_cost)
             if cost + step < best.get(n, float("inf")):
                 best[n] = cost + step
                 heapq.heappush(frontier, (cost + step, n, culture))

@@ -29,7 +29,8 @@ from ..core.hex import LandUse, Settlement, SettlementRole, SettlementTier
 from ..core.hex_grid import distance, grade_reachable_count, hex_range, neighbors
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
-from .haulage import bulk_routes, floatable, river_index, usable_fraction
+from .haulage import bulk_routes, floatable, usable_fraction
+from .riverside import river_index
 from .road_cost import WATER, grade_is_under_cap
 
 

@@ -6,9 +6,9 @@ from tests.worlds import build_world
 from worldgen.core.config import WorldConfig
 from worldgen.core.hex import Hex, TerrainClass
 from worldgen.stages.cataracts import CataractStage
-from worldgen.stages.crossings import side_gradients
 from worldgen.stages.habitability import site_bonus
 from worldgen.stages.haulage import bulk_routes, catchment_carries_a_barge, navigable
+from worldgen.stages.riverside import side_gradients
 
 # The 96x96 temperate world the city tests use: the 64x64 default has no river big and
 # steep enough to make a cataract, and a test asserting over no cataracts asserts nothing.
@@ -41,9 +41,13 @@ def test_a_cataract_is_a_barge_river_falling_fast():
 def test_no_boat_passes_a_cataract():
     state = _world()
     cfg = WorldConfig(**state.metadata["config"])
-    falls = [hx for hx in state.hexes.values() if "cataract" in hx.tags]
+    from worldgen.core.hex_grid import side_hexes
+    from worldgen.stages.riverside import river_index
+
+    rivers = river_index(state, cfg)
+    falls = [s for s, rs in state.river_sides.items() if "cataract" in rs.tags]
     assert falls, "the fixture map has no cataract, so the tests above assert over nothing"
-    assert all(not navigable(hx, cfg) for hx in falls)
+    assert all(not navigable(state.hexes[h], cfg, rivers) for s in falls for h in side_hexes(s))
 
 
 def test_zero_turns_cataracts_off():
@@ -89,7 +93,7 @@ def test_a_cataract_forces_a_portage():
     reach of the same river, which is what makes the portage a quay. River landings, since
     both sides of the falls are river."""
     from tests.worlds import river_to_sea
-    from worldgen.stages.haulage import river_index
+    from worldgen.stages.riverside import river_index
 
     cfg = WorldConfig()
     slack, _ = river_to_sea()
@@ -101,18 +105,26 @@ def test_a_cataract_forces_a_portage():
 
 
 def test_a_site_beside_the_falls_has_water_power():
+    from tests.worlds import river_to_sea
+    from worldgen.core.hex_grid import side_hexes
+    from worldgen.stages.riverside import river_index
+
     cfg = WorldConfig()
-    hexes = _river([1.0] * 4)
-    before = site_bonus((1, 0), hexes[(1, 0)], hexes, cfg)
-    hexes[(2, 0)].tags.add("cataract")
-    after = site_bonus((1, 0), hexes[(1, 0)], hexes, cfg)
+    slack, river = river_to_sea()
+    falls, _ = river_to_sea(cataract_at=2)
+    bank = side_hexes(river.sides()[2])[0]
+    before = site_bonus(bank, slack.hexes[bank], slack.hexes, cfg, river_index(slack, cfg))
+    after = site_bonus(bank, falls.hexes[bank], falls.hexes, cfg, river_index(falls, cfg))
+    # The falls stop barges at the bank, but it is still a step from the navigable reach
+    # either side, so it keeps its harbour and gains the mill.
     assert after == before + cfg.habitability_mill_bonus
 
 
 def test_a_river_landing_is_cheaper_than_a_harbour():
     """A barge ties up at a bank; a sea-going ship wants a harbour."""
     from tests.worlds import river_to_sea
-    from worldgen.stages.haulage import make_bulk_cost, river_index
+    from worldgen.stages.haulage import make_bulk_cost
+    from worldgen.stages.riverside import river_index
 
     cfg = WorldConfig()
     ws, _ = river_to_sea()

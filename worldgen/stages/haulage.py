@@ -19,119 +19,10 @@ mutation, so it can be unit-tested on synthetic grids.
 """
 
 import heapq
-from collections import defaultdict
-from dataclasses import dataclass, field
 
-from ..core.hex import HexCoord, TerrainClass
-from ..core.hex_grid import Corner, hex_corner_keys, neighbors, side_corners, side_hexes
-from .road_cost import WATER, is_river
-
-
-@dataclass
-class Rivers:
-    """What a world's rivers mean to somebody moving goods or themselves across it.
-
-    Rivers run along hexsides, but people and cargo move hex to hex, so this reads the
-    river sides into the terms a hex-to-hex search can use:
-
-    *   **crossing** — what it costs to get across the river between two hexes on foot,
-        keyed by the unordered pair either side of each river side (`ford_cost`).
-    *   **reaches** — the navigable stretches of river each hex lies beside.  A reach is a
-        run of sides a barge can use, joined corner to corner and cut at every cataract;
-        a boat goes from one hex to the next only if both lie beside the same reach.
-    *   **portage** — the hexes beside a cataract.  Nothing afloat passes them, so a cargo
-        coming down the river lands above the falls and loads again below.
-    *   **floats** — hexes beside a river carrying enough to drive logs.
-    """
-
-    crossing: dict[frozenset, float] = field(default_factory=dict)
-    reaches: dict[HexCoord, frozenset[int]] = field(default_factory=dict)
-    reach_corners: dict[int, frozenset[Corner]] = field(default_factory=dict)
-    portage: frozenset[HexCoord] = frozenset()
-    floats: frozenset[HexCoord] = frozenset()
-
-    def afloat(self, hx) -> bool:
-        """True where a boat can be: open water, a lake, or the bank of a navigable reach."""
-        return hx.terrain_class in WATER or hx.coord in self.reaches
-
-    def joined(self, a_hx, b_hx) -> bool:
-        """True where a boat goes from *a* to *b* without landing.
-
-        Water to water; a bank to the water its reach flows into, at a corner the two
-        share; or two banks of the same reach.
-        """
-        a_wet, b_wet = a_hx.terrain_class in WATER, b_hx.terrain_class in WATER
-        if a_wet and b_wet:
-            return True
-        if a_wet != b_wet:
-            water, bank = (a_hx, b_hx) if a_wet else (b_hx, a_hx)
-            shared = set(hex_corner_keys(water.coord)) & set(hex_corner_keys(bank.coord))
-            return any(shared & self.reach_corners[r] for r in self.reaches.get(bank.coord, ()))
-        return bool(
-            self.reaches.get(a_hx.coord, frozenset()) & self.reaches.get(b_hx.coord, frozenset())
-        )
-
-
-def river_index(state, cfg) -> Rivers:
-    """Read *state*'s river sides into a `Rivers` for the movement costs here."""
-    from .crossings import side_gradients, side_span
-
-    gradient = side_gradients(state)
-    runoff = cfg.runoff_mm(cfg.mean_precip_mm)
-    crossing: dict[frozenset, float] = {}
-    navigable_sides = []
-    portage: set[HexCoord] = set()
-    floats: set[HexCoord] = set()
-    for side, rs in sorted(state.river_sides.items()):
-        pair = frozenset(side_hexes(side))
-        if rs.tags & {"ford", "bridge"}:
-            crossing[pair] = cfg.crossing_use_cost
-        else:
-            span = side_span(rs.catchment_km2, gradient.get(side, 0.0), cfg)
-            crossing[pair] = cfg.travel_ford_cost * span
-        discharge = rs.catchment_km2 * runoff
-        if "cataract" in rs.tags:
-            portage |= pair
-        elif discharge >= cfg.navigable_min_discharge:
-            navigable_sides.append(side)
-        if discharge >= cfg.timber_float_min_discharge:
-            floats |= pair
-
-    # Reaches: navigable sides joined where they share a corner.
-    root = {s: s for s in navigable_sides}
-
-    def find(s):
-        while root[s] != s:
-            root[s] = root[root[s]]
-            s = root[s]
-        return s
-
-    at_corner: dict = defaultdict(list)
-    for s in navigable_sides:
-        for c in side_corners(s):
-            at_corner[c].append(s)
-    for sides in at_corner.values():
-        for other in sides[1:]:
-            ra, rb = find(sides[0]), find(other)
-            if ra != rb:
-                root[max(ra, rb)] = min(ra, rb)
-    ids = {r: i for i, r in enumerate(sorted({find(s) for s in navigable_sides}))}
-
-    reaches: dict = defaultdict(set)
-    corners: dict = defaultdict(set)
-    for s in navigable_sides:
-        r = ids[find(s)]
-        corners[r] |= set(side_corners(s))
-        for h in side_hexes(s):
-            if h in state.hexes and h not in portage:
-                reaches[h].add(r)
-    return Rivers(
-        crossing=crossing,
-        reaches={h: frozenset(v) for h, v in reaches.items()},
-        reach_corners={r: frozenset(v) for r, v in corners.items()},
-        portage=frozenset(portage),
-        floats=frozenset(floats),
-    )
+from ..core.hex import TerrainClass
+from ..core.hex_grid import neighbors
+from .riverside import WATER, Rivers
 
 
 def usable_fraction(cost: float, range_limit: float) -> float:
@@ -151,68 +42,49 @@ def usable_fraction(cost: float, range_limit: float) -> float:
     return 1.0 - cost / range_limit
 
 
-def navigable(hx, cfg, rivers: Rivers | None = None) -> bool:
-    """True where a boat can carry bulk: open water, or a river big enough to float one.
+def navigable(hx, cfg, rivers: Rivers) -> bool:
+    """True where a boat can carry bulk: open water, or the bank of a river big enough to
+    float one (`Rivers.afloat`).
 
-    Judged on discharge — catchment area times runoff depth — rather than on `river_flow`,
+    Judged on discharge — catchment area times runoff depth — rather than on the flow rank,
     which is normalised against the largest accumulation on the map and so says only how
-    this river compares with its neighbours.  On the old test every map had a navigable
-    trunk by construction, however small its rivers really were.  Discharge means the same
-    thing everywhere: an arid region's biggest watercourse can now simply fail to float a
-    boat, which is the point.
-
-    With *rivers*, read off the river sides: a hex beside a navigable reach.  Without,
-    off the hex view hydrology writes until the stages reading it have moved to sides.
+    this river compares with its neighbours.  On a rank every map had a navigable trunk by
+    construction, however small its rivers really were.  Discharge means the same thing
+    everywhere: an arid region's biggest watercourse can simply fail to float a boat, which
+    is the point.
     """
-    if rivers is not None:
-        return rivers.afloat(hx)
-    if hx.terrain_class in WATER:
-        return True
-    if not is_river(hx) or "cataract" in hx.tags:
-        return False
-    return carries_a_barge(hx, cfg)
-
-
-def carries_a_barge(hx, cfg) -> bool:
-    """Enough water to float a barge, whatever the reach is doing.
-
-    `navigable` less the cataract test, because `CataractStage` has to ask this of a reach
-    to decide whether it is a cataract — a small steep river is only a brook.
-    """
-    return catchment_carries_a_barge(hx.catchment_km2, cfg)
+    return rivers.afloat(hx)
 
 
 def catchment_carries_a_barge(catchment_km2: float, cfg) -> bool:
-    """`carries_a_barge` for a catchment area: a reach of river, or a side one runs along."""
+    """Enough water to float a barge, whatever the reach is doing.
+
+    The navigability test less the cataract, because `CataractStage` has to ask this of a
+    reach to decide whether it is a cataract — a small steep river is only a brook.
+    """
     discharge = catchment_km2 * cfg.runoff_mm(cfg.mean_precip_mm)
     return discharge >= cfg.navigable_min_discharge
 
 
-def floatable(hx, cfg, rivers: Rivers | None = None) -> bool:
-    """True where timber can be floated: open water, or a river carrying enough to drive logs.
+def floatable(hx, cfg, rivers: Rivers) -> bool:
+    """True where timber can be floated: open water, or beside a river carrying enough to
+    drive logs.
 
     A lower bar than `navigable`. Logs were driven and rafted down rivers far too small for
     a barge, but not down a brook: `timber_float_min_discharge` is that bar, in the same
     km2 x mm of discharge.
     """
-    if hx.terrain_class in WATER:
-        return True
-    if rivers is not None:
-        return hx.coord in rivers.floats
-    if not is_river(hx):
-        return False
-    discharge = hx.catchment_km2 * cfg.runoff_mm(cfg.mean_precip_mm)
-    return discharge >= cfg.timber_float_min_discharge
+    return hx.terrain_class in WATER or hx.coord in rivers.floats
 
 
-def haulage_range(hx, cfg) -> float:
+def haulage_range(hx, cfg, rivers: Rivers) -> float:
     """The distance bulk goods can travel from *hx* before they are worth nothing.
 
     Water multiplies it.  Diocletian's Price Edict prices land carriage at 28-56x sea and
     6-11x river for the same tonne-kilometre, so the multiplier — not the absolute land
     range — is the well-attested half of this pair.
     """
-    if navigable(hx, cfg):
+    if navigable(hx, cfg, rivers):
         return cfg.haulage_range_land * cfg.haulage_range_water_mult
     return cfg.haulage_range_land
 

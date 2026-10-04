@@ -247,36 +247,26 @@ def test_base_precip_has_no_artificial_ceiling():
         )
 
 
-def test_moisture_bleed_requires_river_tag():
-    cfg = WorldConfig(
-        width=3,
-        height=1,
-        moisture_bleed_passes=1,
-        moisture_bleed_strength=0.5,
-    )
+def test_moisture_bleed_requires_a_river():
+    """A river wets the ground beside it at or below its own level, and nothing else does."""
+    from worldgen.core.hex_grid import side_between
+    from worldgen.core.world_state import RiverSide
+
+    cfg = WorldConfig(width=3, height=1, moisture_bleed_passes=1, moisture_bleed_strength=0.5)
     stage = ClimateStage(cfg, None)
 
-    state = WorldState.empty(seed=1, width=3, height=1)
-    for hx in state.hexes.values():
-        hx.terrain_class = TerrainClass.LAND
-        hx.elevation = 0.0
-    state.hexes[(0, 0)].elevation = 500.0
-    state.hexes[(0, 0)].river_flow = 1.0
+    def world(with_river):
+        state = WorldState.empty(seed=1, width=3, height=1)
+        for hx in state.hexes.values():
+            hx.terrain_class = TerrainClass.LAND
+            hx.elevation = 0.0
+        if with_river:
+            state.river_sides[side_between((0, 0), (1, 0))] = RiverSide(100.0, 1.0)
+        return stage.run(state)
 
-    without_tag = stage.run(state)
-    dry_neighbour = without_tag.hexes[(1, 0)].moisture
-
-    tagged_state = WorldState.empty(seed=1, width=3, height=1)
-    for hx in tagged_state.hexes.values():
-        hx.terrain_class = TerrainClass.LAND
-        hx.elevation = 0.0
-    tagged_state.hexes[(0, 0)].elevation = 500.0
-    tagged_state.hexes[(0, 0)].river_flow = 1.0
-    tagged_state.hexes[(0, 0)].tags.add("river")
-
-    with_tag = stage.run(tagged_state)
-    assert with_tag.hexes[(1, 0)].moisture > dry_neighbour, (
-        "the bleed did nothing: only a hex tagged as a river should wet its neighbours"
+    dry = world(False).hexes[(1, 0)].moisture
+    assert world(True).hexes[(1, 0)].moisture > dry, (
+        "the bleed did nothing: a river beside a hex should wet it"
     )
 
 

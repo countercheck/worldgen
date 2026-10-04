@@ -10,7 +10,7 @@ import collections
 from tests.worlds import build_world
 from worldgen.core.config import WorldConfig
 from worldgen.core.hex import SOIL_RANK, Biome, Hex, LandCover, SoilQuality, TerrainClass
-from worldgen.core.hex_grid import neighbors
+from worldgen.stages.riverside import Rivers, river_index
 from worldgen.stages.soil import is_alluvium, rainfall_soil, slope_soil
 
 # --- the slope arm -----------------------------------------------------------
@@ -72,22 +72,14 @@ def test_rainfall_is_monotonic_toward_the_band():
 
 
 def _river_pair(catchment_km2, gradient_drop_m=0.0):
-    """A gentle hex beside one river hex of the given catchment."""
+    """A hex in the valley of a river of the given catchment, and the rivers index saying so.
+
+    `slope` is measured by TerrainClassificationStage and read from the hex, so a hand-built
+    hex has to state it rather than leave it to be re-derived.
+    """
     here = (0, 0)
-    there = neighbors(here)[0]
-    hexes = {
-        # `slope` is measured by TerrainClassificationStage and read from the hex, so a
-        # hand-built pair has to state it rather than leave it to be re-derived.
-        here: Hex(coord=here, elevation=100.0, slope=gradient_drop_m),
-        there: Hex(
-            coord=there,
-            elevation=100.0 - gradient_drop_m,
-            catchment_km2=catchment_km2,
-            slope=gradient_drop_m,
-            tags={"river"},
-        ),
-    }
-    return here, hexes
+    hx = Hex(coord=here, elevation=100.0, slope=gradient_drop_m)
+    return here, hx, Rivers(near={here: catchment_km2})
 
 
 def test_alluvium_wants_a_river_too_big_to_wade():
@@ -99,24 +91,22 @@ def test_alluvium_wants_a_river_too_big_to_wade():
     for what it deposits.
     """
     cfg = WorldConfig()
-    big, hexes = _river_pair(cfg.ford_max_catchment_km2 + 1)
-    assert is_alluvium(big, hexes[big], hexes, cfg)
-
-    small, hexes = _river_pair(cfg.ford_max_catchment_km2 - 1)
-    assert not is_alluvium(small, hexes[small], hexes, cfg)
+    coord, hx, rivers = _river_pair(cfg.ford_max_catchment_km2 + 1)
+    assert is_alluvium(coord, hx, cfg, rivers)
+    coord, hx, rivers = _river_pair(cfg.ford_max_catchment_km2 - 1)
+    assert not is_alluvium(coord, hx, cfg, rivers)
 
 
 def test_alluvium_wants_ground_the_river_can_spread_over():
     """Silt settles where the water slows and spreads. A torrent in a gorge cuts."""
     cfg = WorldConfig()
-    coord, hexes = _river_pair(500.0, gradient_drop_m=cfg.terrain_rolling_gradient_m * 3)
-    assert not is_alluvium(coord, hexes[coord], hexes, cfg)
+    coord, hx, rivers = _river_pair(500.0, gradient_drop_m=cfg.terrain_rolling_gradient_m * 3)
+    assert not is_alluvium(coord, hx, cfg, rivers)
 
 
 def test_a_hex_with_no_river_near_it_is_not_alluvium():
     cfg = WorldConfig()
-    hexes = {(0, 0): Hex(coord=(0, 0), elevation=100.0)}
-    assert not is_alluvium((0, 0), hexes[(0, 0)], hexes, cfg)
+    assert not is_alluvium((0, 0), Hex(coord=(0, 0), elevation=100.0), cfg, Rivers())
 
 
 # --- whole maps --------------------------------------------------------------
@@ -151,9 +141,10 @@ def test_prime_is_scarce_and_always_on_a_river():
     assert 0.0 < shares.get(SoilQuality.PRIME, 0.0) < 0.15, (
         f"prime is {shares.get(SoilQuality.PRIME, 0.0):.1%} of the map"
     )
+    rivers = river_index(state, cfg)
     for coord, hx in state.hexes.items():
         if hx.soil is SoilQuality.PRIME:
-            assert is_alluvium(coord, hx, state.hexes, cfg), f"{coord} is prime off a floodplain"
+            assert is_alluvium(coord, hx, cfg, rivers), f"{coord} is prime off a floodplain"
 
 
 def test_water_and_wetland_take_no_soil_class():

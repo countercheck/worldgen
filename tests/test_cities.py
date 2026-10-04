@@ -46,8 +46,11 @@ def _on_water(state, cfg, coord):
     ground, and a market two kilometres from a river quay can then gather a city's worth
     by water — which is bulk haulage deciding, as the claim requires.
     """
+    from worldgen.stages.riverside import river_index
+
+    rivers = river_index(state, cfg)
     return any(
-        navigable(state.hexes[c], cfg)
+        navigable(state.hexes[c], cfg, rivers)
         for c in hex_range(coord, cfg.transship_radius)
         if c in state.hexes
     )
@@ -340,7 +343,7 @@ def test_bulk_reach_prices_the_haul_toward_the_seat():
     """
     from worldgen.core.hex import Hex
     from worldgen.stages.cities import CityPromotionStage
-    from worldgen.stages.haulage import Rivers
+    from worldgen.stages.riverside import Rivers
 
     cfg = WorldConfig()
     hexes = {(q, 0): Hex(coord=(q, 0), elevation=q * 60.0) for q in range(10)}
@@ -519,7 +522,7 @@ def _eastward(n):
 
 def test_a_cargo_changes_hands_where_it_changes_mode():
     """Cart to boat and boat to cart, each at its land-side quay."""
-    from worldgen.stages.haulage import Rivers
+    from worldgen.stages.riverside import Rivers
 
     hexes = _row("llsssll")
     quays = CityPromotionStage._break_points(
@@ -535,7 +538,7 @@ def test_a_river_mouth_is_a_quay_of_its_own():
     dry land, and it is the quay whether the cargo came by cart or leaves by ship.
     """
     from tests.worlds import river_to_sea
-    from worldgen.stages.haulage import river_index
+    from worldgen.stages.riverside import river_index
 
     ws, _ = river_to_sea()
     cfg = WorldConfig()

@@ -225,19 +225,25 @@ def read_site(
     settlement: Settlement,
     hill_relief_m: float,
     high_elevation_m: float,
+    river_features: dict[HexCoord, frozenset[str]] | None = None,
 ) -> Site:
     """Read a settlement's hex and the ring around it into weighted meanings.
 
     The ring matters: a town beside a marsh is named for the marsh even though its own hex
     was drained and ploughed, and a harbour town's water is next door, not underfoot.
+
+    *river_features* carries what the rivers beside each hex have there — a ford, a bridge,
+    falls, a mouth, a confluence, a spring — since rivers run between hexes rather than on
+    them.
     """
     coord = settlement.coord
     hx = hexes[coord]
     ring = [hexes[n] for n in neighbors(coord) if n in hexes]
     site = Site(coord)
 
+    here = hx.tags | (river_features or {}).get(coord, frozenset())
     for tag, generic in _TAG_GENERIC.items():
-        if tag in hx.tags:
+        if tag in here:
             site.add_generic(generic, _GENERIC_WEIGHT[generic])
     if settlement.role in _ROLE_GENERIC:
         generic = _ROLE_GENERIC[settlement.role]

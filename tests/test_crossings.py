@@ -6,8 +6,9 @@ from tests.worlds import build_pipeline, lay_river
 from worldgen.core.config import WorldConfig
 from worldgen.core.hex_grid import distance, neighbors, side_hexes
 from worldgen.core.world_state import WorldState
-from worldgen.stages.crossings import BRIDGE, FORD, SIDE_KM, side_gradients, side_span
+from worldgen.stages.crossings import BRIDGE, FORD
 from worldgen.stages.hydrology import band_hex
+from worldgen.stages.riverside import SIDE_KM, side_gradients, side_span
 from worldgen.stages.road_cost import is_river
 
 _CROSSING = {FORD, BRIDGE}

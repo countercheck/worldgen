@@ -28,7 +28,8 @@ from ..core.pipeline import GeneratorStage
 from ..core.world_state import ROAD_TIER_RANK, RoadTier, WorldState, road_edge_key
 from .city_town import _assign_role
 from .habitability import actual_food
-from .haulage import allocate_catchments, gather, river_index, settleable, usable_fraction
+from .haulage import allocate_catchments, gather, settleable, usable_fraction
+from .riverside import river_index
 
 PASS = "pass"
 BRIDGE = "bridge"
@@ -140,7 +141,7 @@ class ChokepointStage(GeneratorStage):
             return state
         draw = self._draw(hexes, seats, residual, cfg, river_index(state, cfg))
 
-        state.settlements.extend(self._found(seats, draw, hexes, cfg))
+        state.settlements.extend(self._found(seats, draw, hexes, cfg, river_index(state, cfg)))
         return state
 
     @staticmethod
@@ -285,7 +286,7 @@ class ChokepointStage(GeneratorStage):
 
     # -- founding --------------------------------------------------------------
 
-    def _found(self, seats, draw, hexes, cfg) -> list:
+    def _found(self, seats, draw, hexes, cfg, rivers) -> list:
         """Sized by the fields it can work, the same arithmetic as every other tier.
 
         What differs is only the range: `rural_field_radius`, the daily walk out to the
@@ -301,7 +302,7 @@ class ChokepointStage(GeneratorStage):
             s = Settlement(
                 coord=coord,
                 tier=SettlementTier.VILLAGE,
-                role=_assign_role(coord, hx, hexes, cfg),
+                role=_assign_role(coord, hx, hexes, cfg, rivers),
                 population=population,
                 name=f"{hx.biome.name.lower()}_{kind}_{i}",
             )
