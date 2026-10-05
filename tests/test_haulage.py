@@ -8,9 +8,11 @@ import pytest
 
 from worldgen.core.config import WorldConfig
 from worldgen.core.hex import Hex, LandCover, TerrainClass
+from worldgen.stages.crossings import river_span
 from worldgen.stages.haulage import (
     allocate_catchments,
     fishery_rim,
+    ford_cost,
     gather,
     haulage_range,
     navigable,
@@ -316,3 +318,39 @@ def test_settleable_excludes_water_mountain_and_bog():
         (5, 0): _hex((5, 0), land_cover=LandCover.OPEN),
     }
     assert settleable(hexes, WorldConfig()) == {(0, 0), (5, 0)}
+
+
+# ── ford_cost: what a walker pays to get across a river ─────────────────────────────────
+
+
+def _bank_and_channel(catchment_km2, *tags):
+    bank = _hex((0, 0))
+    channel = _river(_hex((1, 0)), catchment_km2)
+    channel.tags.update(tags)
+    return bank, channel, {bank.coord: bank, channel.coord: channel}
+
+
+def test_ford_cost_is_nothing_off_the_river_and_along_it():
+    cfg = WorldConfig()
+    a, b = _hex((0, 0)), _hex((1, 0))
+    assert ford_cost(a, b, {}, cfg) == 0.0
+    c, d = _river(_hex((0, 0)), 500), _river(_hex((1, 0)), 500)
+    assert ford_cost(c, d, {}, cfg) == 0.0
+
+
+@pytest.mark.parametrize("tag", ["ford", "bridge"])
+def test_ford_cost_at_a_crossing_is_the_use_cost_either_way(tag):
+    cfg = WorldConfig()
+    bank, channel, hexes = _bank_and_channel(500, tag)
+    assert ford_cost(bank, channel, hexes, cfg) == cfg.crossing_use_cost
+    assert ford_cost(channel, bank, hexes, cfg) == cfg.crossing_use_cost
+
+
+def test_ford_cost_without_a_crossing_scales_with_the_span():
+    cfg = WorldConfig()
+    bank, channel, hexes = _bank_and_channel(500)
+    cost = ford_cost(bank, channel, hexes, cfg)
+    assert cost == pytest.approx(cfg.travel_ford_cost * river_span(channel, hexes, cfg))
+    assert ford_cost(channel, bank, hexes, cfg) == cost
+    _, small, small_hexes = _bank_and_channel(5)
+    assert 0.0 < ford_cost(bank, small, small_hexes, cfg) < cost
