@@ -63,9 +63,20 @@ jobs:
       # took 20m15s against 6m26s with numba, turning a 13-minute job into a 27-minute
       # one on every push. Fourteen minutes a run is not worth making a number look
       # right about code that was never actually untested. See TECH_DEBT.md item 1.
+      #
+      # `NPY_DISABLE_CPU_FEATURES` keeps the world the same on every runner. GitHub hands
+      # this job a mix of CPUs, and on the ones with AVX-512 (Intel Xeons, AMD EPYC 9xxx)
+      # NumPy dispatches `exp`, `log`, `power` and `arctan2` to different routines that
+      # round differently in the last bit. ElevationStage feeds those into everything
+      # after it, so the seed-42 test world came out two ways and a seed-sensitive test
+      # passed or failed by which machine the job landed on (see PR #109). Turning the
+      # AVX-512 paths off puts every runner on the AVX2 ones; probed across eight runners
+      # and four CPU models, all eight then built the identical world. These are NumPy 2
+      # feature names — the old `AVX512F`-style names have no effect.
       - name: Run tests and check coverage
         env:
           COVERAGE_CORE: sysmon
+          NPY_DISABLE_CPU_FEATURES: "X86_V4 AVX512_ICL AVX512_SPR"
         run: python -m pytest -v --tb=short --cov=worldgen --cov-fail-under=85
 
   # ---- campaign/, the TypeScript half -----------------------------------
