@@ -184,9 +184,16 @@ water costs `courierMajorCrossingHours` rather than being impassable.
 
 Under terrain fog, a river side is known if either hex beside it is known.
 
+**Across a river nobody can cross, forces observe and do not engage.** That is a major river
+with no bridge, road or ford, or white water on a minor one. A battle declared on ground
+with such a river running through it is refused (`river_between_forces`), softly, so a
+referee with a boat bridge or two separate fights in mind can still declare it.
+
 **Reconnaissance** is one hex from the column, two with Scout. No line of sight, no
 occlusion — a ridge hides nothing. The rules ask for terrain to mute the sound of guns and
-that one clause is not modelled, being the only place the ruleset wants occlusion.
+that one clause is not modelled, being the only place the ruleset wants occlusion. The one
+thing that does stop it is a river nobody can cross: a column sees the far bank, but its
+scouts cannot get over to look further, so the zone ends there.
 
 **Couriers** ride at 10 km/h on roads, 24 hours a day, taking the least-*time* path. Passing
 an enemy column they throw a die, plus one for cavalry, one for a scouting formation, one
