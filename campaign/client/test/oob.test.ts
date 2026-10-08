@@ -115,6 +115,30 @@ describe('reading a formation', () => {
     expect(unit).toEqual(byHand);
   });
 
+  it('gives any formation the guns the file says, whatever its arm', () => {
+    const out = ok(
+      one(`
+unit: Garde
+commander: Ney
+guns: 40
+at: {q: 14, r: 15}
+subordinates:
+  - {unit: Hussards, commander: Lasalle, kind: cavalry, guns: 0, at: {q: 14, r: 15}}
+  - {unit: Ligne, commander: Gérard, at: {q: 14, r: 15}}`),
+    );
+    const guns = Object.fromEntries(units(out.commands).map((u) => [u.name, u.guns]));
+    // Left out, the arm's usual battery, exactly as the raise form gives it.
+    expect(guns).toEqual({ Garde: 40, Hussards: 0, Ligne: 6 });
+  });
+
+  it('refuses guns that are not a whole number of 0 or more', () => {
+    for (const bad of ['-2', '1.5', 'many']) {
+      expect(problems(one(`unit: Garde\ncommander: Ney\nguns: ${bad}\nat: {q: 14, r: 15}`))).toEqual([
+        expect.stringMatching(/`guns`/),
+      ]);
+    }
+  });
+
   it('puts every superior ahead of those who answer to them', () => {
     const appointed = new Set<string>();
     for (const c of ok(example).commands) {
