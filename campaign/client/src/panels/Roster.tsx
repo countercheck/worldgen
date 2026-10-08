@@ -60,6 +60,8 @@ export interface OrbatEditing {
   readonly onAppoint: (commander: Commander) => void;
   /** Add a side. A campaign starts with none. */
   readonly onAddFaction: (faction: Faction) => void;
+  /** Raise a whole order of battle from the text of a YAML file. See `oob.ts`. */
+  readonly onImportOob: (text: string) => void;
   /**
    * The join link for a commander's seat: the one this browser already holds, or a new one.
    * Rejects when the server will not issue it.
@@ -425,6 +427,27 @@ export function Roster({
           </div>
         )}
         {form?.kind === 'raise' && form.superiorId === null && raiseForm(null)}
+
+        {editing !== undefined && (
+          // Shown with no sides too: a file brings its own, and that is when it saves most.
+          <div className="despatch-actions">
+            <label className="file">
+              <input
+                type="file"
+                accept=".yaml,.yml,application/yaml,text/yaml"
+                disabled={editing.busy}
+                onChange={(e) => {
+                  const input = e.target;
+                  const file = input.files?.[0];
+                  // Cleared at once, so choosing the same file again after fixing it imports it.
+                  input.value = '';
+                  if (file !== undefined) void file.text().then(editing.onImportOob);
+                }}
+              />
+              <span>{copy.oob.importButton}</span>
+            </label>
+          </div>
+        )}
 
         {current !== undefined && current.uncommanded.length > 0 && (
           <section className="roster-group">

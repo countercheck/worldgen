@@ -14,10 +14,18 @@
 
 import { useState } from 'react';
 
-import { DEMO_FACTIONS, demoCommands, parseWorld, type Faction } from '@campaign/shared';
+import {
+  DEFAULT_CONFIG,
+  DEMO_FACTIONS,
+  demoCommands,
+  parseWorld,
+  type Command,
+  type Faction,
+} from '@campaign/shared';
 
-import { createCampaign, fetchView, issueSeatToken, sendCommand, type Session } from './api.js';
+import { createCampaign, fetchView, issueSeatToken, sendAll, type Session } from './api.js';
 import { copy } from './copy.js';
+import { parseOob, rehearse } from './oob.js';
 import { Help } from './panels/Help.jsx';
 import { campaignHash, navigate } from './route.js';
 import { forgetCampaign, joinLink, listCampaigns, type CampaignSummary, type HeldTokens } from './session.js';
@@ -31,7 +39,7 @@ export interface Joined {
 }
 
 /**
- * Build a campaign from a world document and populate it with the demo scenario.
+ * Build a campaign from a world document and put an order of battle on it.
  *
  * Three phases, in the order a real game is prepared: upload the world, put the order of
  * battle on the map, then issue a link per seat. The seats come last because a commander
@@ -41,26 +49,22 @@ async function startCampaign(
   name: string,
   worldDoc: unknown,
   factions: readonly Faction[],
-  populate: boolean,
+  commands: readonly Command[],
   onProgress: (message: string) => void,
 ): Promise<Joined> {
   onProgress(copy.join.uploadingWorld);
   const created = await createCampaign({ name, world: worldDoc, factions, seed: 20260906 });
   const session: Session = { campaignId: created.id, token: created.refereeToken };
 
-  if (populate) {
-    const commands = demoCommands(parseWorld(worldDoc));
-    for (const [i, command] of commands.entries()) {
-      onProgress(copy.join.formingArmy(i + 1, commands.length));
-      const result = await sendCommand(session, command);
-      if (!result.ok) {
-        // A refusal is worth showing rather than swallowing: it means the engine
-        // disagrees with the scenario, which is a real answer about the world.
-        throw new Error(
-          result.violations?.map((v) => v.message).join('; ') ?? copy.join.commandRefused,
-        );
-      }
-    }
+  const result = await sendAll(session, commands, (done, total) =>
+    onProgress(copy.join.formingArmy(done, total)),
+  );
+  if (!result.ok) {
+    // A refusal is worth showing rather than swallowing: it means the engine
+    // disagrees with the scenario, which is a real answer about the world.
+    throw new Error(
+      result.violations?.map((v) => v.message).join('; ') ?? copy.join.commandRefused,
+    );
   }
 
   // One link per seat, so the referee can hand any of them to a player.
@@ -96,6 +100,8 @@ export function Join({
   } | null>(null);
   const [pending, setPending] = useState<Joined | null>(null);
   const [help, setHelp] = useState(false);
+  /** An order of battle chosen ahead of the world, which is what starts the campaign. */
+  const [oob, setOob] = useState<{ name: string; text: string } | null>(null);
 
   const run = async (name: string, make: () => Promise<Joined>): Promise<void> => {
     setError(null);
@@ -128,7 +134,13 @@ export function Join({
       const { default: worldDoc } = await import(
         '../../shared/test/fixtures/world-32x32.json'
       );
-      return startCampaign(copy.join.demoCampaignName, worldDoc, DEMO_FACTIONS, true, setBusy);
+      return startCampaign(
+        copy.join.demoCampaignName,
+        worldDoc,
+        DEMO_FACTIONS,
+        demoCommands(parseWorld(worldDoc)),
+        setBusy,
+      );
     });
   };
 
@@ -137,9 +149,20 @@ export function Join({
     const name = file.name.replace(/\.json$/, '');
     void run(name, async () => {
       const worldDoc: unknown = JSON.parse(await file.text());
-      // No sides: the referee names and colours each one once the map is up. Only the
-      // demonstration arrives with its two, because its scenario is written for them.
-      return startCampaign(name, worldDoc, [], false, setBusy);
+      if (oob === null) {
+        // No sides: the referee names and colours each one once the map is up. Only the
+        // demonstration and an uploaded order of battle arrive with theirs.
+        return startCampaign(name, worldDoc, [], [], setBusy);
+      }
+      // Checked in full before the campaign exists, so a mistake in the file costs a
+      // second try rather than a half-raised campaign to throw away.
+      setBusy(copy.oob.readingFile);
+      const world = parseWorld(worldDoc);
+      const read = parseOob(oob.text, world, DEFAULT_CONFIG);
+      if (!read.ok) throw new Error(read.problems.join('\n'));
+      const refused = rehearse(world, read);
+      if (refused.length > 0) throw new Error(refused.join('\n'));
+      return startCampaign(name, worldDoc, read.newFactions, read.commands, setBusy);
     });
   };
 
@@ -224,6 +247,20 @@ export function Join({
 
       <section>
         <h3>{copy.join.startHeading}</h3>
+        <label className="file">
+          <input
+            type="file"
+            accept=".yaml,.yml,application/yaml,text/yaml"
+            disabled={busy !== null}
+            onChange={(e) => {
+              const file = e.target.files?.[0];
+              if (file === undefined) return setOob(null);
+              void file.text().then((text) => setOob({ name: file.name, text }));
+            }}
+          />
+          <span>{oob === null ? copy.oob.uploadLabel : copy.oob.chosen(oob.name)}</span>
+        </label>
+        <p className="muted">{copy.oob.uploadHint}</p>
         <label className="file">
           <input
             type="file"

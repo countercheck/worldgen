@@ -180,6 +180,26 @@ export async function sendCommand(
 }
 
 /**
+ * Issue a list of commands in order, stopping at the first refusal.
+ *
+ * One at a time, because each may depend on the last — a commander cannot be appointed
+ * to a unit the server has not yet raised. The refusal comes back with what was already
+ * done counted, so the referee is told how far it got rather than left to work it out.
+ */
+export async function sendAll(
+  session: Session,
+  commands: readonly Command[],
+  onProgress: (done: number, total: number) => void = () => {},
+): Promise<CommandResult & { readonly sent: number }> {
+  for (const [i, command] of commands.entries()) {
+    onProgress(i + 1, commands.length);
+    const result = await sendCommand(session, command);
+    if (!result.ok) return { ...result, sent: i };
+  }
+  return { ok: true, sent: commands.length };
+}
+
+/**
  * Write a despatch.
  *
  * For a commander, `from` is filled in by the server from the token rather than taken from
