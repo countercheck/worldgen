@@ -427,6 +427,8 @@ worldgen/
 │   ├── erosion.py           # particle-based hydraulic erosion
 │   ├── terrain_class.py     # ocean / coast / flat / hill / mountain
 │   ├── hydrology.py         # lakes on hexes, then rivers along hexsides
+│   ├── hydrology_fill.py    # sink fill, flow direction, flow accumulation
+│   ├── hydrology_rivers.py  # river tracing, lake drainage, routing on corners
 │   ├── corner_drainage.py   # the corner graph rivers drain on (shared with erosion)
 │   ├── riverside.py         # what the river sides mean to every later stage
 │   ├── climate.py           # temperature gradient, orographic moisture
