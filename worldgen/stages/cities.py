@@ -18,12 +18,15 @@ absorbs off the markets that sent it.  The size gap between a port and an inland
 produced by one constant rather than by a rule that says ports are bigger.
 """
 
+from typing import Any
+
 from ..core.hex import HexCoord, SettlementTier, TerrainClass
 from ..core.hex_grid import distance, hex_range
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
 from .habitability import actual_food
 from .haulage import bulk_routes, gather, navigable, usable_fraction
+from .river_trade import river_trade_flows
 from .riverside import WATER, river_index
 
 # How a cargo travels on a hex: by cart, by barge on a river or a lake, or by ship.
@@ -60,6 +63,7 @@ class CityPromotionStage(GeneratorStage):
             toward = {coord: way for coord, (_, way) in routes.items()}
             self._resize(state, markets, absorbed, draw, promoted, cfg, toward)
             self._trade(state, cfg)
+        self._river_trade(state, cfg)
 
         # The second road to a city: a town grown past `city_min_population`, which after
         # transshipment is an entrepôt that feeds nobody's hinterland but handles everyone's.
@@ -451,6 +455,73 @@ class CityPromotionStage(GeneratorStage):
         for coord, d in delta.items():
             s = by_coord[coord]
             s.population = max(1, round(s.population + d))
+        if handled:
+            state.metadata["transshipment"] = [
+                [q, r, round(f, 3)] for (q, r), f in sorted(handled.items())
+            ]
+        if unhandled:
+            state.metadata["unhandled_quays"] = [
+                [q, r, sq, sr, round(f, 3), round(p, 3)]
+                for ((q, r), (sq, sr)), (f, p) in sorted(unhandled.items())
+            ]
+
+    # -- long-haul river trade ------------------------------------------------
+
+    def _river_trade(self, state, cfg) -> None:
+        """The interior's trade down its rivers to the coast, paying its way at every quay.
+
+        `river_trade_flows` finds each inland river town's way downstream to the coastal
+        town it reaches most cheaply, and what its cargo is worth. Here each one pays
+        `transship_share` of itself at every change of mode on the way — the landing above
+        a cataract and the loading below it are two — to whoever stands at the quay, drawn
+        half from each end, exactly as `_trade` does; quays nobody stands at are left for
+        `ResourceStage` to found a port on. Recorded as freight of kind `river`, which wears
+        no road: it went by water. Each flow's whole path is kept in
+        `metadata["river_trade"]`, so a toll at a chokepoint can tell which flows pass it.
+        """
+        if cfg.river_trade_share <= 0.0:
+            return
+        rivers = river_index(state, cfg)
+        flows = river_trade_flows(state, cfg, rivers)
+        if not flows:
+            return
+        hexes = state.hexes
+        by_coord = {s.coord: s for s in state.settlements}
+        handled = {(q, r): f for q, r, f in state.metadata.get("transshipment", [])}
+        unhandled: dict[tuple[HexCoord, HexCoord], tuple[float, float]] = {}
+        for q, r, sq, sr, food, people in state.metadata.get("unhandled_quays", []):
+            unhandled[((q, r), (sq, sr))] = (food, people)
+        freight = state.metadata.setdefault("freight", [])
+        routes: list[list[Any]] = []
+        delta: dict[HexCoord, float] = {}
+
+        for flow in flows:
+            origin, dest, volume = flow.origin, flow.dest, flow.people
+            freight.append([*origin, *dest, round(volume, 3), "river"])
+            routes.append([*origin, *dest, round(volume, 3), [list(h) for h in flow.path]])
+            toward = dict(zip(flow.path, flow.path[1:], strict=False))
+            food = volume / cfg.people_per_food
+            paid = 0.0
+            for quay in self._break_points(origin, dest, toward, hexes, cfg, rivers):
+                handler = self._handler(quay, by_coord, cfg.transship_radius)
+                if handler in (origin, dest):
+                    continue
+                cut = min(volume * cfg.transship_share, volume - paid)
+                paid += cut
+                if handler is None:
+                    for seat in (origin, dest):
+                        f, p = unhandled.get((quay, seat), (0.0, 0.0))
+                        unhandled[(quay, seat)] = (f + food / 2, p + cut / 2)
+                    continue
+                delta[handler] = delta.get(handler, 0.0) + cut
+                delta[origin] = delta.get(origin, 0.0) - cut / 2
+                delta[dest] = delta.get(dest, 0.0) - cut / 2
+                handled[handler] = handled.get(handler, 0.0) + food
+
+        for coord, d in delta.items():
+            s = by_coord[coord]
+            s.population = max(1, round(s.population + d))
+        state.metadata["river_trade"] = routes
         if handled:
             state.metadata["transshipment"] = [
                 [q, r, round(f, 3)] for (q, r), f in sorted(handled.items())

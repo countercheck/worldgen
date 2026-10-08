@@ -245,6 +245,44 @@ def test_a_spur_that_joins_no_settlements_is_not_a_chokepoint():
     )
 
 
+@pytest.mark.parametrize(
+    ("left", "right", "expected"),
+    [
+        (SoilQuality.UNUSABLE, SoilQuality.UNUSABLE, set()),
+        (SoilQuality.UNUSABLE, SoilQuality.GRAZING, {(2, 1)}),
+        (SoilQuality.ARABLE, SoilQuality.UNUSABLE, {(1, 1)}),
+    ],
+)
+def test_a_bridge_over_sand_founds_nothing_on_the_sand(left, right, expected):
+    """A village on ground that feeds nobody could only live on tolls, which the model
+    does not yet collect. So a bridge between two unusable banks is no candidate at all,
+    and one with a single good bank is a candidate only on that bank."""
+    cfg = WorldConfig(
+        width=12, height=12, grid_layout="axial", chokepoint_min_road_tier="secondary"
+    )
+    state = WorldState.empty(1, cfg.width, cfg.height, cfg.grid_layout)
+    road = [(0, 1), (1, 1), (2, 1), (3, 1)]
+    for a, b in zip(road, road[1:], strict=False):
+        state.road_edges[road_edge_key(a, b)] = RoadEdge(RoadTier.SECONDARY, 0.0)
+    state.river_sides[side_between((1, 1), (2, 1))] = RiverSide(100.0, 0.5, tags={BRIDGE})
+    for coord in road:
+        state.hexes[coord].soil = SoilQuality.ARABLE
+    state.hexes[(1, 1)].soil, state.hexes[(2, 1)].soil = left, right
+    for coord in (road[0], road[-1]):
+        s = Settlement(
+            coord=coord,
+            tier=SettlementTier.TOWN,
+            role=SettlementRole.MARKET,
+            population=500,
+            name="market",
+        )
+        state.settlements.append(s)
+        state.hexes[coord].settlement = s
+
+    candidates = ChokepointStage(cfg, np.random.default_rng(0))._candidates(state, cfg)
+    assert set(candidates) & {(1, 1), (2, 1)} == expected
+
+
 def test_a_stricter_gate_founds_fewer():
     """Traffic is what makes a crossing worth a settlement, so demanding more gives less."""
     counts = [
