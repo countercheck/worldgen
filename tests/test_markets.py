@@ -12,9 +12,19 @@ import pytest
 from tests.worlds import build_pipeline
 from worldgen.core.config import WorldConfig
 from worldgen.core.hex import Biome, SettlementTier, TerrainClass
-from worldgen.core.hex_grid import distance
+from worldgen.core.hex_grid import distance, grade_reachable_count, hex_range, ring
+from worldgen.stages.habitability import potential_food, site_bonus
+from worldgen.stages.haulage import (
+    allocate_catchments,
+    fishery_rim,
+    make_travel_cost,
+    settleable,
+    usable_fraction,
+)
 from worldgen.stages.land_use import LandUseStage
-from worldgen.stages.markets import MarketStage, depletion_kernel
+from worldgen.stages.markets import MarketStage, day_reach
+from worldgen.stages.riverside import river_index
+from worldgen.stages.road_cost import grade_is_under_cap
 
 _WATER = (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
 
@@ -39,26 +49,122 @@ def markets():
     return _market_world()
 
 
-# --- the depletion kernel ----------------------------------------------------
+# --- siting reads the ground the catchment walks ---------------------------
 
 
-def test_kernel_takes_everything_at_the_seat_and_less_further_out():
-    kernel = depletion_kernel(10.0, 4.0)
-    shares = [share for _, share in kernel]
-    assert shares[0] == 1.0
-    assert shares == sorted(shares, reverse=True)
-    assert all(0.0 < s <= 1.0 for s in shares)
+@pytest.fixture(scope="module")
+def sited():
+    """A small world stopped before markets, with what siting reads off it."""
+    state = build_pipeline(seed=42, width=32, height=32, until="HabitabilityStage").run()
+    cfg = WorldConfig(**state.metadata["config"])
+    rivers = river_index(state, cfg)
+    return state, cfg, rivers
 
 
-def test_kernel_covers_the_whole_radius():
-    assert [d for d, _ in depletion_kernel(10.0, 4.0)] == list(range(11))
+def test_day_reach_is_the_catchment_a_lone_seat_would_get(sited):
+    """Siting and the gather agree: a candidate is scored on exactly its catchment.
+
+    The disc this replaced counted every hex within ten rings, whatever stood between, so
+    a market was ranked on countryside its catchment then failed to deliver. The day-reach
+    must be what `allocate_catchments` and `fishery_rim` hand a seat standing alone, at
+    the weight the market is sized on.
+    """
+    state, cfg, rivers = sited
+    hexes = state.hexes
+    radius = cfg.market_day_radius
+    node_cost, edge_cost = make_travel_cost(hexes, cfg, rivers)
+    for seat in sorted(settleable(hexes, cfg))[::17]:
+        owner, cost = allocate_catchments(hexes, [seat], radius, cfg, rivers)
+        owner, cost = fishery_rim(hexes, owner, cost)
+        expected = {
+            c: usable_fraction(cost[c], radius)
+            for c in owner
+            if usable_fraction(cost[c], radius) > 0.0
+        }
+        got = dict(day_reach(seat, hexes, radius, node_cost, edge_cost))
+        assert got.keys() == expected.keys(), f"day-reach of {seat} is not its catchment"
+        for c, w in got.items():
+            assert w == pytest.approx(expected[c])
 
 
-def test_slower_decay_leaves_less_behind_further_out():
-    """The decay is what grades spacing with the land rather than fixing it at a radius."""
-    quick = dict(depletion_kernel(10.0, 1.0))
-    slow = dict(depletion_kernel(10.0, 8.0))
-    assert slow[8] > quick[8]
+def test_a_ridge_beside_a_candidate_lowers_its_score(sited):
+    """The bug in #117: the disc scored the far side of a ridge as if it could be walked."""
+    import copy
+
+    state, cfg, rivers = sited
+    radius = cfg.market_day_radius
+    surplus = {c: potential_food(h, cfg) for c, h in state.hexes.items()}
+
+    def score(hexes, seat):
+        node_cost, edge_cost = make_travel_cost(hexes, cfg, rivers)
+        return sum(surplus[c] * w for c, w in day_reach(seat, hexes, radius, node_cost, edge_cost))
+
+    # The best-fed candidate, so there is countryside beyond the ridge to lose.
+    seat = max(sorted(settleable(state.hexes, cfg)), key=lambda c: score(state.hexes, c))
+    open_score = score(state.hexes, seat)
+
+    walled = copy.deepcopy(state.hexes)
+    for c in ring(seat, 2):
+        if c in walled:
+            walled[c].elevation += 5000.0
+    walled_score = score(walled, seat)
+
+    assert walled_score < open_score, (
+        f"a ridge round {seat} left its score at {walled_score:.1f} against "
+        f"{open_score:.1f} — siting is not reading travel cost"
+    )
+
+
+def test_lazy_greedy_sites_the_same_markets_as_brute_force(sited):
+    """Lazy greedy over the disc bound is exact, not a heuristic.
+
+    The heap is seeded with the plain ring disc as an upper bound so the day-reach Dijkstra
+    only runs on candidates that pop. If that bound were ever below a true score, lazy
+    greedy would plant somewhere other than the true best site. So rescore every candidate
+    after every plant, the slow way, and the seats must come out the same.
+    """
+    state, cfg, rivers = sited
+    hexes = state.hexes
+    radius = cfg.market_day_radius
+    floor = 6.0
+    cfg = WorldConfig(**{**state.metadata["config"], "market_viability_floor": floor})
+    surplus = {
+        c: potential_food(h, cfg) * cfg.marketable_surplus_fraction for c, h in hexes.items()
+    }
+    lazy = MarketStage(cfg, None)._plant(hexes, surplus, cfg, rivers)
+    assert len(lazy) >= 3, f"only {len(lazy)} markets; the comparison needs a subject"
+
+    node_cost, edge_cost = make_travel_cost(hexes, cfg, rivers)
+    candidates = [
+        c
+        for c in sorted(settleable(hexes, cfg))
+        if grade_reachable_count(
+            c, hexes, lambda a, b: grade_is_under_cap(a, b, cfg), cfg.settlement_min_reachable
+        )
+        >= cfg.settlement_min_reachable
+    ]
+    reach = {c: day_reach(c, hexes, radius, node_cost, edge_cost) for c in candidates}
+    bonus = {c: 1.0 + site_bonus(c, hexes[c], hexes, cfg, rivers) for c in candidates}
+    remaining = dict(surplus)
+    suppressed: set = set()
+    brute = []
+    while True:
+        scored = [
+            (sum(remaining[n] * w for n, w in reach[c]) * bonus[c], c)
+            for c in candidates
+            if c not in suppressed
+        ]
+        if not scored:
+            break
+        best, seat = max(scored, key=lambda sc: (sc[0], tuple(-x for x in sc[1])))
+        if best < floor:
+            break
+        brute.append(seat)
+        suppressed |= set(hex_range(seat, cfg.market_min_separation))
+        for n, w in reach[seat]:
+            remaining[n] *= 1.0 - w
+
+    assert lazy == brute
 
 
 # --- where markets land ------------------------------------------------------
@@ -73,9 +179,27 @@ def test_a_subarctic_region_is_settled_but_thinly():
     400 mm that separates desert from steppe was being asked where trees stop. Both are
     worth no food at all, so there was nothing to gather. Taiga is poor ground, not dead
     ground, and the difference is the whole tier.
+
+    On a 128x128 mainland rather than the 64x64 island the rest of this module uses. Since
+    #117 a market is sited on what a day's walk from it actually reaches, which reads
+    *local* concentration where the old ring disc read a regional total — and taiga is
+    fertility spread thin, so its best sites score near the viability floor wherever they
+    are. How many of them clear it is then a question of how many sites there are to draw
+    from: the island has too few for the claim to rest on, a bigger mainland has enough.
+    Temperate is grown on the same ground, so "thinly" is still measured against it.
     """
-    boreal = len(_market_world(regional_climate="boreal").settlements)
-    temperate = len(_market_world(regional_climate="temperate").settlements)
+
+    def world(climate):
+        return _market_world(
+            width=128,
+            height=128,
+            model="organic",
+            continent_falloff_edges=("south",),
+            regional_climate=climate,
+        )
+
+    boreal = len(world("boreal").settlements)
+    temperate = len(world("temperate").settlements)
     assert boreal >= 3, f"a subarctic region supported {boreal} markets — it is not empty land"
     assert boreal < temperate, (
         f"boreal grew {boreal} markets against temperate's {temperate}; cold country should "

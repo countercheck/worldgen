@@ -672,7 +672,6 @@ class WorldConfig:
     # Market centres. A market goes where it can gather the most surplus inside a day's
     # return — central-place logic with a real transport cost rather than an abstract one.
     market_day_radius: float = 10.0
-    market_kernel_decay: float = 4.0  # d0 in the 1/(1 + d/d0) depletion share
     # A suppression disc only, to stop two markets sharing a hexside. Real spacing comes
     # from competition for surplus, which is what makes it dense on rich ground and sparse
     # on poor — a fixed separation cannot express that.
@@ -695,15 +694,25 @@ class WorldConfig:
     # not how big each one grows.
     # Raised from 14.0 with `habitability_harbour_bonus`, then to 24.0 with the soil model:
     # planting scores are surplus, so they scale with `marketable_surplus_fraction`, and
-    # that went 0.20 to 0.32. 24.0 gives 76-92 markets across seeds 42/7/3/11/19.
+    # that went 0.20 to 0.32.
+    #
+    # Lowered to 20.8 when siting moved onto the day-reach (#117). A site is now scored on
+    # the ground its catchment actually walks, at the weight it will be sized on, rather
+    # than on a plain ring disc that ran about four times the real gather — so the number
+    # changed units. 20.8 sits mid-window: every acceptance test passes from 20.3 to 21.3,
+    # bounded below by rural density on the 96x96 mainland (100.3 per km2 at 20.2, over
+    # the ceiling) and above by the arid village on `test_chokepoints`' thin-country map.
+    # The window is narrow; a terrain change that moves either end will want it re-swept.
+    # On a temperate 128x128 map with continent_falloff_edges = ("south",) it gives
+    # 153-159 markets across seeds 42/7/3/11/19, against 36 on an arid one.
     #
     # One consequence worth knowing, because it is a real feedback and not a rounding
     # effect: lowering this raises the *rural* population as well as the count. More markets
     # mean more catchments, more catchments mean more ground cleared, and cleared ground
-    # feeds more people than the wood it replaced — 38 per km2 at 24.0 against 48 at 16.0 on
-    # the same terrain. Settlement improves the land, which is what the assarting centuries
+    # feeds more people than the wood it replaced — 98.5 per km2 at 20.8 against 100.3 at
+    # 20.2 on the 96x96 test mainland. Settlement improves the land, which is what the assarting centuries
     # actually did.
-    market_viability_floor: float = 24.0
+    market_viability_floor: float = 20.8
 
     # Chokepoints: the tier below the market, founded on bridgeheads and passes that carry
     # real traffic. Which road counts as real. A bridge on a farm track is a plank, not a
@@ -1569,7 +1578,6 @@ class WorldConfig:
             "travel_ascent_per_hex",
             # Divisors, both of them. At zero these did not degrade — they crashed the
             # run mid-pipeline with a bare ZeroDivisionError from deep inside a stage.
-            "market_kernel_decay",
             "crossing_relief_m",
         ):
             if getattr(self, name) <= 0:
@@ -1867,6 +1875,11 @@ _RETIRED_FIELDS: dict[str, str] = {
     "road_escarpment_cost": (
         "steepness is charged per edge by its actual grade now, so a per-hex surcharge "
         "billed the same climb twice; tune road_delta_elevation_per_hex instead"
+    ),
+    "market_kernel_decay": (
+        "market siting scores the ground a catchment actually walks now, each hex at its "
+        "usable_fraction haulage weight over market_day_radius, so there is no separate "
+        "depletion kernel to shape"
     ),
     "habitability_hill_bonus_flat": (
         "the overlooking bonus is scaled by measured relief now; use "
