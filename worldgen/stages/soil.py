@@ -16,7 +16,10 @@ terraces, no wheels", and `terrain_escarpment_gradient_m` is a break of slope.
 dry-farming limit nothing is grown at all; between that and the arable band you get steppe,
 where grass grows and a crop will not, which is grazing. Above the arable band the ground is
 leached and waterlogged — that is poor arable, not pasture, so the wet arm lands on MARGINAL
-and calling a rainforest "grazing" was the tell that one symmetric rule would not do.
+and calling a rainforest "grazing" was the tell that one symmetric rule would not do. And
+each arm reads its own season: drought is a dry-season failure and leaching a wet-season
+one, so the same annual rain farms worse the more it is bunched into one half of the year
+(`rainfall_soil`, `WorldConfig.wet_season_share`).
 
 **Position in the drainage.** Alluvium is the best ground there is, and a river deposits it
 where it can spread: gentle ground beside a channel with a real catchment behind it. This
@@ -54,15 +57,40 @@ def slope_soil(gradient_m: float, cfg) -> SoilQuality:
     return SoilQuality.ARABLE
 
 
-def rainfall_soil(precip_mm: float, cfg) -> SoilQuality:
-    """What the rainfall alone allows. Asymmetric: dry fails differently from wet."""
-    if precip_mm < cfg.soil_dry_farming_min_precip_mm:
+def rainfall_soil(wet_season_mm: float, dry_season_mm: float, cfg) -> SoilQuality:
+    """What the rainfall alone allows. Asymmetric: dry fails differently from wet.
+
+    And each failure has its season. A crop fails for want of water in the season it grows
+    in, and ground is leached and waterlogged by the wet half of the year, so the dry arm
+    reads the growing season and the wet arm the wet one, each against half of the annual
+    bands. The growing season is the dry half in the Mediterranean, where the drought falls
+    on the summer, and the wet half under a monsoon or in the taiga, where the dry half is
+    a fallow winter (`crops_grow_in_wet_season`). Half,
+    because the bands are a year's rain and a season is half a year: in a year without
+    seasons both halves are half the year's rain and this reads the annual bands exactly,
+    which is what keeps soil and BiomeStage on the one pair of figures.
+
+    So the same annual rain farms worse the more it bunches. 480 mm falling evenly is
+    arable; 480 mm with three quarters of it in winter leaves a half-year's steppe even
+    after the ground has carried some of the winter over (`soil_water_carryover`), and it
+    is grazing — the Mediterranean's summer drought, which is what made it a country of
+    flocks and transhumance on rainfall that would plough in Kent.
+    """
+    # The ground carries some of the wet season's water into the dry one: what it held at
+    # the end of the rains is what a crop draws on after them.
+    # A crop that grows in the rains already has that water, so where the growing season
+    # is the wet one the dry arm reads the wet season as it fell.
+    carried = cfg.soil_water_carryover * max(0.0, wet_season_mm - dry_season_mm)
+    growing = wet_season_mm if cfg.crops_grow_in_wet_season else dry_season_mm + carried
+    dry = 2.0 * growing
+    wet = 2.0 * (wet_season_mm - carried)
+    if dry < cfg.soil_dry_farming_min_precip_mm:
         return SoilQuality.UNUSABLE
-    if precip_mm < cfg.biome_dry_precip_mm:
+    if dry < cfg.biome_dry_precip_mm:
         return SoilQuality.GRAZING
-    if precip_mm <= cfg.biome_wet_precip_mm:
+    if wet <= cfg.biome_wet_precip_mm:
         return SoilQuality.ARABLE
-    if precip_mm < cfg.food_drowned_precip_mm:
+    if wet < cfg.food_drowned_precip_mm:
         return SoilQuality.MARGINAL
     return SoilQuality.UNUSABLE
 
@@ -105,7 +133,7 @@ class SoilStage(GeneratorStage):
             else:
                 soil = _worse(
                     slope_soil(hx.slope, cfg),
-                    rainfall_soil(hx.moisture, cfg),
+                    rainfall_soil(hx.wet_season_precip_mm, hx.dry_season_precip_mm, cfg),
                 )
 
             # The cold cap is applied last, so it binds alluvium too. A flood meadow on the

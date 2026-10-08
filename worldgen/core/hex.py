@@ -226,6 +226,11 @@ class Hex:
     coord: HexCoord
     elevation: float = 0.0
     moisture: float = 0.0
+    # `moisture` is the year's rain in millimetres; these split it between the wetter and
+    # the drier half-year, by the region's `wet_season_share`, and sum to it. Soil reads
+    # them: a crop fails in the dry season, ground is leached in the wet one.
+    wet_season_precip_mm: float = 0.0
+    dry_season_precip_mm: float = 0.0
     temperature: float = 0.0
     biome: Biome | None = None
     # How much water passes, twice over. `river_flow` is normalised against the largest

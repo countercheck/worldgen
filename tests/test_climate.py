@@ -49,6 +49,74 @@ def test_standing_water_is_not_short_of_rain(climate_state):
             ), f"water hex has {h.moisture:.0f} mm — it should not read as the driest ground"
 
 
+def test_the_two_seasons_are_the_year(climate_state):
+    """The split says when the rain falls, never how much: the halves sum to the year, the
+    wet half is the wetter, and every hex divides by the region's share."""
+    share = climate_state.metadata["config"]["wet_season_share"]
+    for h in climate_state.hexes.values():
+        assert h.wet_season_precip_mm + h.dry_season_precip_mm == pytest.approx(h.moisture)
+        assert h.wet_season_precip_mm >= h.dry_season_precip_mm
+        assert h.wet_season_precip_mm == pytest.approx(h.moisture * share)
+
+
+def test_each_climate_has_its_own_seasons():
+    """Summer drought is what makes the Mediterranean pastoral on rainfall that would
+    plough in Kent, so its year must be the more bunched of the two."""
+    from worldgen.core.config import CLIMATE_CONTEXTS
+
+    for name in CLIMATE_CONTEXTS:
+        assert 0.5 <= WorldConfig(regional_climate=name).wet_season_share <= 1.0
+    assert (
+        WorldConfig(regional_climate="mediterranean").wet_season_share
+        > WorldConfig(regional_climate="temperate").wet_season_share
+    )
+    with pytest.raises(ValueError, match="wet_season_share"):
+        WorldConfig(wet_season_share=0.4)
+
+
+def test_a_shore_takes_no_rain_from_the_sea_beside_it(monkeypatch):
+    """A lee shore is not wetter than its windward shore because of the sea behind it.
+
+    The orographic sweep leaves open water holding its *carrier* value — saturated air, not
+    rainfall — and the smear used to blend that into every coast, windward and lee alike
+    (tech-debt #123). Change what the water holds, then, and no land hex's rain may move:
+    the smear reads land only.
+    """
+    import copy
+
+    import worldgen.stages.climate as climate_module
+    from worldgen.stages.precipitation import orographic_pattern
+
+    cfg = WorldConfig(width=32, height=32)
+    p = GeneratorPipeline(42, cfg)
+    for stage in (ElevationStage, ErosionStage, TerrainClassificationStage, HydrologyStage):
+        p.add_stage(stage)
+    before = p.run()
+    water = (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
+    coast = [c for c, h in before.hexes.items() if h.terrain_class is TerrainClass.COAST]
+    assert coast, "the map has no shore to test"
+
+    def run_with_sea_holding(value):
+        def pattern(state, config):
+            out = orographic_pattern(state, config)
+            for c, h in state.hexes.items():
+                if h.terrain_class in water:
+                    out[c] = value
+            return out
+
+        monkeypatch.setattr(climate_module, "orographic_pattern", pattern)
+        return ClimateStage(cfg, None).run(copy.deepcopy(before))
+
+    saturated, dry = run_with_sea_holding(1.0), run_with_sea_holding(0.0)
+    for c, h in saturated.hexes.items():
+        if h.terrain_class not in water:
+            assert h.moisture == pytest.approx(dry.hexes[c].moisture), (
+                f"{c} ({h.terrain_class.value}) gets {h.moisture:.0f} mm beside a saturated "
+                f"sea and {dry.hexes[c].moisture:.0f} mm beside a dry one: the smear is "
+                "reading the water"
+            )
+
+
 def test_mountains_colder_than_flat(climate_state):
     # Sample mountain and flat hexes at similar latitudes; mountains must be colder on average.
     height = climate_state.height
@@ -296,6 +364,15 @@ def test_erosion_dose_does_not_wash_the_rain_shadow_away():
     on the right side of that, so raising it for flatter country cannot silently cost the
     map its dry country.
 
+    Pinned as the coupling rather than an absolute: the default's shadow must be at least
+    half as large again as the heavy dose's. On this 48x48 map it is 10.5% against 5.6%.
+    It used to be asserted as above 15%, measured at 28% against 14% — but most of that
+    28% was not shadow. The climate smear blended the sea's carrier value into the coasts
+    (tech-debt #123), and the exposed side, which takes the windward shore and most of the
+    land near open water, read that as rain. Over land only, the exposed side drops from
+    920 mm to 859 and the sheltered side rises from 659 to 769, and the gap between the
+    two doses is what is left to measure.
+
     With `elevation_profile` off: the profile puts the land back on its heights after
     erosion, so under it the dose no longer lowers the high ground at all, and the
     coupling this pins only exists in the noise's own relief.
@@ -334,11 +411,10 @@ def test_erosion_dose_does_not_wash_the_rain_shadow_away():
         return (wet - dry) / wet if wet > 0 else 0.0
 
     at_default = shadow(WorldConfig().erosion_droplets_per_hex)
-    assert at_default > 0.15, (
-        f"the default erosion dose leaves the sheltered side only {at_default:.0%} drier "
-        "than the exposed one; the rain shadow has been eroded away"
-    )
-    assert at_default > shadow(8.0), (
-        "a heavier dose should weaken the shadow — if it does not, this test is no "
-        "longer exercising the coupling it was written for"
+    at_heavy = shadow(8.0)
+    assert at_default > 0.0, "the default map has no rain shadow at all"
+    assert at_default > 1.5 * at_heavy, (
+        f"the default erosion dose leaves the sheltered side {at_default:.0%} drier than "
+        f"the exposed one, against {at_heavy:.0%} at eight droplets a hex: the default is "
+        "no longer clearly on the side of the coupling that keeps its dry country"
     )

@@ -73,10 +73,23 @@ class ClimateStage(GeneratorStage):
         # only on the hex that did the lifting.
         # Indexed by grid column/row, like the temperature smear above: `state.coord_at`
         # is what makes the field the same rectangle whichever layout the grid uses.
+        #
+        # Over land only, as a normalised convolution: smear the land's values and divide
+        # by the smeared land mask, so each hex is a weighted mean of the land around it and
+        # the sea contributes nothing (tech-debt #123). Water holds the orographic sweep's
+        # *carrier* value of 1.0 at this point — the air's moisture, not rain — and smeared
+        # in with the land it wetted every shore from the sea beside it, windward and lee
+        # alike, which is the very effect the orographic pass exists to prevent.
         width, height = state.width, state.height
         coords = [[state.coord_at(col, row) for row in range(height)] for col in range(width)]
         arr = np.array([[state.hexes[c].moisture for c in column] for column in coords])
-        arr = gaussian_filter(arr, sigma=2.0)
+        land = np.array(
+            [[state.hexes[c].terrain_class not in water for c in column] for column in coords],
+            dtype=float,
+        )
+        weight = gaussian_filter(land, sigma=2.0)
+        smeared = gaussian_filter(arr * land, sigma=2.0)
+        arr = np.where(land > 0.0, smeared / np.maximum(weight, 1e-12), arr)
         for col in range(width):
             for row in range(height):
                 state.hexes[coords[col][row]].moisture = float(arr[col, row])
@@ -134,6 +147,15 @@ class ClimateStage(GeneratorStage):
         for h in state.hexes.values():
             if h.terrain_class in water:
                 h.moisture = self.config.mean_precip_mm
+
+        # Then say when it falls. The year's rain is what the pattern above decides; the
+        # region's climate decides how it divides between a wet and a dry half-year, and
+        # every hex divides the same way — the orographic pattern says where rain falls,
+        # not in which months. Last, so the two halves always sum to the year.
+        share = self.config.wet_season_share
+        for h in state.hexes.values():
+            h.wet_season_precip_mm = h.moisture * share
+            h.dry_season_precip_mm = h.moisture - h.wet_season_precip_mm
 
 
 def _near_rivers(state: WorldState) -> dict[HexCoord, list[tuple[float, float]]]:

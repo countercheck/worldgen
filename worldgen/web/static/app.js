@@ -539,6 +539,8 @@ const FORMAT = {
   elevation: (v) => `${v.toFixed(0)} m`,
   temperature: (v) => `${v.toFixed(1)} °C`,
   moisture: (v) => `${v.toFixed(0)} mm`,
+  wet_season_precip_mm: (v) => `${v.toFixed(0)} mm`,
+  dry_season_precip_mm: (v) => `${v.toFixed(0)} mm`,
   slope: (v) => `${v.toFixed(1)} m`,
   relief: (v) => `${v.toFixed(0)} m`,
   catchment_km2: (v) => `${v.toFixed(0)} km²`,
@@ -548,7 +550,7 @@ const FORMAT = {
 // Shown first, in this order; everything else the hex carries follows.
 const ORDER = [
   "coord", "terrain_class", "biome", "elevation", "slope", "relief", "temperature",
-  "moisture", "rivers", "river_flow", "catchment_km2", "land_cover", "soil", "land_use",
+  "moisture", "wet_season_precip_mm", "dry_season_precip_mm", "rivers", "river_flow", "catchment_km2", "land_cover", "soil", "land_use",
   "cultivated", "rural_population", "territory_of", "roads", "tags",
 ];
 

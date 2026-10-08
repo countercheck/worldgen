@@ -214,6 +214,7 @@ Convenience accessors: `all_land()`, `all_open_water()`, `all_inland_water()`,
 | `coord` | `HexCoord` (`(q, r)`) | — | construction |
 | `elevation` | `float` | `[0.0, 1.0]` after normalization | Elevation, Erosion, Hydrology (lake fill) |
 | `moisture` | `float` | `[0.0, 1.0]` | Climate |
+| `wet_season_precip_mm`, `dry_season_precip_mm` | `float` | mm; sum to `moisture` | Climate (`wet_season_share`) |
 | `temperature` | `float` | `[0.0, 1.0]` (clamped) | Climate |
 | `terrain_class` | `TerrainClass` | enum | Terrain Class, Water Bodies, Hydrology |
 | `biome` | `Biome \| None` | enum | Biome |
@@ -889,11 +890,12 @@ It has to run before `HabitabilityStage`, which reads `navigable` to score harbo
 sub-passes, run sequentially.
 
 **Reads:** `hex.elevation`, `hex.terrain_class`, `state.river_sides`.
-**Writes:** `hex.temperature`, `hex.moisture`.
+**Writes:** `hex.temperature`, `hex.moisture`, `hex.wet_season_precip_mm`,
+`hex.dry_season_precip_mm`.
 
 **Config:** `regional_climate`, `mean_temperature_c`, `latitude_temp_range_c`,
 `lapse_rate_c_per_km`, `wind_direction`, `orographic_strength`,
-`moisture_resupply_per_hex`, `mean_precip_mm`, `base_precip_mm`,
+`moisture_resupply_per_hex`, `mean_precip_mm`, `base_precip_mm`, `wet_season_share`,
 `moisture_bleed_passes`, `moisture_bleed_strength`, `max_elevation_m`.
 
 **The map is a region, not a world.** 500 km at 1 hex = 1 km is about 4.5° of latitude,
@@ -954,8 +956,18 @@ negligible; raise it only for a continent-scale map.
    hexside, and the ground it waters is the four hexes at that side's two corners: the
    two banks and the hex at either end.
 
-3. **Gaussian smear** at `sigma=2.0`. Weather systems are wide, and rain falls either
-   side of the ridge that lifted it rather than only on the hex that did the lifting.
+3. **Gaussian smear** at `sigma=2.0`, over land only. Weather systems are wide, and rain
+   falls either side of the ridge that lifted it rather than only on the hex that did the
+   lifting. It is a normalised convolution — the land's values smeared, divided by the
+   smeared land mask — so each land hex is a weighted mean of the land around it:
+   ```
+   moisture = gaussian(moisture * land) / gaussian(land)        # on land hexes
+   ```
+   Water holds the sweep's carrier value of 1.0 here — saturated air, not rain — and the
+   plain smear used to blend it into every shore, lee and windward alike, so a lee coast
+   drew rain from the sea behind it (tech-debt #123). On a 64×64 mediterranean map that put
+   the lee coast at 1420 mm against an interior of 411; over land only it is 616 against
+   510, and the windward coast stays the wetter at 951.
 
 4. **Into millimetres a year.** The orographic pass produces a *relative* pattern —
    which slopes catch the rain and which sit in a shadow — and says nothing about whether
@@ -979,8 +991,28 @@ negligible; raise it only for a continent-scale map.
    is millimetres now, and a valley that receives more rain than the ridge above it is
    simply a wetter valley.
 
-**Ocean and lake hexes** keep `moisture = 1.0`, a sentinel rather than a rainfall figure;
-nothing downstream reads rainfall on water.
+6. **Wet and dry seasons.** Last, so the halves always sum to the year:
+   ```
+   wet_season_precip_mm = moisture * wet_season_share
+   dry_season_precip_mm = moisture - wet_season_precip_mm
+   ```
+   The orographic pattern says *where* rain falls; the region's climate says *when*, and
+   every hex divides the same way. `wet_season_share` is the wetter six months' share of
+   the year in the long-run normals of the places each climate is named after:
+
+   | climate | share | crops grow in | the year |
+   |---|---|---|---|
+   | temperate | 0.55 | dry half | Atlantic Europe: rain every month, a mild autumn-winter peak |
+   | mediterranean | 0.75 | dry half | winter wet, summer dry (Athens, Seville ~0.8; Rome ~0.65) |
+   | arid | 0.8 | dry half | the winter-rain desert of the Maghreb, Egypt and the Levant; set `crops_grow_in_wet_season` for a Sahel |
+   | tropical | 0.8 | wet half | savanna and monsoon: the kharif crop is sown into the rains |
+   | boreal | 0.65 | wet half | summer rain, and the winter's snow lies until it melts into the spring sowing |
+
+   `crops_grow_in_wet_season` says which half the crops grow in. Soil reads the two halves (§ [3.7a](#37a-soil)). Nothing else does: biomes and land
+   cover still read the year's rain.
+
+**Ocean and lake hexes** are set to `mean_precip_mm` at the end, so they do not read as the
+driest ground where moisture is drawn; nothing downstream reads rainfall on water.
 
 ---
 
@@ -1101,8 +1133,8 @@ desert is a playa, not a swamp.
 
 **Purpose:** Say what the ground could support, before anything is done with it.
 
-**Reads:** `hex.terrain_class`, `hex.elevation` (through the gradient), `hex.moisture`,
-`hex.temperature`, `hex.biome`, `hex.tags`, `hex.catchment_km2`.
+**Reads:** `hex.terrain_class`, `hex.elevation` (through the gradient),
+`hex.wet_season_precip_mm`, `hex.dry_season_precip_mm`, `hex.temperature`, `hex.biome`, `hex.tags`, `hex.catchment_km2`.
 **Writes:** `hex.soil`.
 
 **Config:** § [4.8](#48-soil-food-and-habitability--37a-soil-39-habitability).
@@ -1127,15 +1159,49 @@ otherwise the worse of two arms:
   slope    >= terrain_escarpment_gradient_m → UNUSABLE
            >= terrain_steep_gradient_m      → GRAZING
            otherwise                        → ARABLE
-  rainfall <  soil_dry_farming_min_precip_mm → UNUSABLE
-           <  biome_dry_precip_mm            → GRAZING
-           <= biome_wet_precip_mm            → ARABLE
-           <  food_drowned_precip_mm         → MARGINAL
-           otherwise                         → UNUSABLE
+  rainfall, a season at a time (below):
+    2 × growing <  soil_dry_farming_min_precip_mm → UNUSABLE
+                <  biome_dry_precip_mm            → GRAZING
+    2 × wet     <= biome_wet_precip_mm            → ARABLE
+            <  food_drowned_precip_mm         → MARGINAL
+            otherwise                         → UNUSABLE
 
 then, last of all:
   temperature < biome_cold_temp_c            → capped at MARGINAL
 ```
+
+**Each failure has its season.** A crop fails for want of water in the season it grows in,
+and ground is leached and waterlogged by the wet half of the year, so the dry arm reads the
+growing season and the wet arm the wet one, each against half the annual bands (`2 ×` the
+season is the same comparison). In a year without seasons both halves are half the year's
+rain, and the rule reads exactly the annual bands — which is what keeps soil and biomes on
+the one pair of figures. Before the halves are read, the ground carries
+`soil_water_carryover` of the wet season's surplus over the dry across into the drought:
+
+```
+carried = soil_water_carryover × max(0, wet − dry)
+growing = wet                  if crops_grow_in_wet_season
+          dry + carried        otherwise
+wet    −= carried
+```
+
+Where crops grow in the rains (monsoon, taiga) the dry season is a fallow winter — in the
+taiga a snowpack that melts into the spring sowing — and its drought costs no crop. Reading
+the dry half there took a 128×128 subarctic map from 6 markets to 2; reading the growing
+season gives it 15.
+
+A loam holds 100–200 mm a crop can draw; the winter rains fill it and the crop ripens on it
+after they stop, which is what the Mediterranean's bare fallow was for. At the default 0.3 a
+mediterranean year (0.75) reads as 0.6, a temperate one (0.55) as 0.52.
+
+So the same annual rain farms worse the more it bunches. 480 mm falling evenly ploughs; 480
+mm with three quarters of it in winter is grazing. That is the Mediterranean's summer
+drought, and it is what makes the region pastoral — winter cereal on a thin fallow, the
+flocks walked to the hills for summer grass — on rainfall that would plough in Kent. Until
+tech-debt #123 the region came out pastoral for the wrong reason: the climate smear blended
+the sea into the coasts, which widened every climate's rainfall spread, and the bands had
+been calibrated against the widened spread. Remove that and a mediterranean map's rain sits
+inside the arable band: 50% arable to temperate's 50% on the 96×96 test map.
 
 **Rainfall fails differently at each end.** Under the dry-farming limit nothing is grown at
 all. Between that and the arable band you get steppe, where grass grows and a crop will not,
@@ -1156,16 +1222,18 @@ Kent is; and without the cap at all, a boreal map comes out 13% arable and 42% r
 limit; every other figure is a setting that already existed and already meant the right
 thing. `ford_max_catchment_km2` is the neatest of the reuses — it is the same question asked
 from the other side, since a river you cannot wade is one that floods and lays down silt.
+The seasons add no threshold: `soil_water_carryover` is a share, not a rainfall figure, and
+each season is read against the bands that were already there.
 
 **Result at 128×128, seed 42:**
 
 | climate | unusable | grazing | marginal | arable | prime |
 |---|---|---|---|---|---|
-| temperate | 10.6% | 28.1% | 24.0% | **33.6%** | 3.7% |
-| mediterranean | 12.3% | **68.2%** | 8.6% | 10.2% | 0.7% |
-| arid | **84.8%** | 6.3% | 0.9% | 7.4% | 0.7% |
-| boreal | 57.4% | 20.0% | 19.7% | **0.0%** | 2.9% |
-| tropical | 19.1% | 24.1% | **48.8%** | 4.3% | 3.7% |
+| temperate | 18.1% | 17.7% | 11.2% | **48.3%** | 4.6% |
+| mediterranean | 9.5% | **50.4%** | 3.6% | 25.8% | 10.7% |
+| arid | **89.6%** | 5.2% | 0.0% | 0.1% | 5.1% |
+| boreal | 28.0% | 18.7% | 53.3% | **0.0%** | 0.0% |
+| tropical | 35.9% | 13.7% | **47.6%** | 0.0% | 2.7% |
 
 Mediterranean comes out pastoral, arid is desert with its life on the rivers, the taiga
 grows no wheat at all, and the tropics are leached. One rule set; the region decides.
@@ -2552,6 +2620,8 @@ hex's food on the map.
 | `regional_climate` | `str` | `'temperate'` | `boreal`, `temperate`, `mediterranean`, `arid`, `tropical` | Sets the region's mean temperature and rainfall, and the palette of biomes it can produce — so an arid region runs desert to steppe to alpine with altitude but never grows a jungle three valleys over |
 | `mean_temperature_c` | `float \| None` | `None` → from climate | `-30..40` | Mean annual temperature at sea level. Blank takes it from `regional_climate` (boreal 1, temperate 10, mediterranean 16, arid 21, tropical 26). Pinning it while also naming a climate is rarely what you want |
 | `mean_precip_mm` | `float \| None` | `None` → from climate | `(0, 12000]` | Mean annual rainfall over land. Blank takes it from `regional_climate` (boreal 450, temperate 800, mediterranean 550, arid 200, tropical 2000) |
+| `wet_season_share` | `float \| None` | `None` → from climate | `[0.5, 1]` | The wetter half-year's share of the year's rain. Blank takes it from `regional_climate` (boreal 0.65, temperate 0.55, mediterranean 0.75, arid 0.8, tropical 0.8). Soil reads the dry half for drought and the wet half for leaching, so the same rain farms worse the more it bunches; 0.5 reads exactly as annual rain. See § [3.6](#36-climate) step 6 for the figures behind each climate |
+| `crops_grow_in_wet_season` | `bool \| None` | `None` → from climate | — | Whether the crops grow in the wet half-year or the dry one; soil's dry arm reads that season. Blank takes it from `regional_climate` (true for boreal and tropical; false for temperate, mediterranean and arid). The Mediterranean grows through its summer drought; the monsoon sows into the rains; the taiga's winter is snow stored to spring. Set true for a Sahel-type desert |
 | `lapse_rate_c_per_km` | `float` | `6.5` | `≥ 0` | How fast air cools with height. 6.5 is the standard environmental lapse rate — a real rate, applied to height above the waterline |
 | `latitude_temp_range_c` | `float` | `0.0` | `≥ 0` | Degrees between the map's pole-ward and equator-ward edges. Negligible across a region; raise only for a continental map |
 | `wind_direction` | `(float, float)` | `(1.0, 0.0)` | — | Prevailing wind vector driving orographic precipitation and moisture transport. Magnitude is normalised; only direction matters |
@@ -2590,6 +2660,7 @@ are always `0`.
 | `food_wetland_value` | `float` | `0.15` | ≥ 0 | `BOG`, `MARSH` — valued on cover, not soil, because a fen is not ploughland. Deliberately below water: neither good fishing nor good ploughing |
 | `food_water_value` | `float` | `0.4` | ≥ 0 | `OPEN_WATER` — fishing, and valued on cover for the same reason. Non-zero so a coastal site is not penalised for having sea in its catchment |
 | `soil_dry_farming_min_precip_mm` | `float` | `250.0` | ≥ 0 | The dry-farming limit: annual rainfall below which no crop is grown without irrigation, whatever the ground is like. **The only new threshold the soil rules need** — everything else reuses `terrain_rolling_gradient_m`, `terrain_steep_gradient_m`, `terrain_escarpment_gradient_m`, `biome_dry_precip_mm`, `biome_wet_precip_mm`, `food_drowned_precip_mm`, `biome_cold_temp_c` and `ford_max_catchment_km2`, each of which already means the right thing. At `250` an arid map is 85% unusable with its life on the rivers; at `400` it is 87% and mediterranean loses a fifth of its grazing |
+| `soil_water_carryover` | `float` | `0.3` | `[0, 0.5]` | Share of the wet season's surplus over the dry that the ground banks and gives back in the drought, before soil reads each season against half the annual bands. 0 reads each season bare — a mediterranean map then has no arable at all, since a crop would see only the summer's rain; 0.5 evens every year out. On the 96×96 test map 0.2 / 0.3 / 0.4 put mediterranean farmland at 27% / 40% / 52% against temperate's 51–54% |
 | `yield_arable` | `float` | `1.0` | ≥ 0 | What cleared ground under the plough yields, as a fraction of its soil's potential |
 | `yield_pasture` | `float` | `0.55` | ≥ 0 | What grazed ground yields |
 | `yield_wood` | `float` | `0.30` | ≥ 0 | What ground still under trees yields. The gap between this and `yield_arable` is what gives clearing economic weight — a settlement grows by assarting its hinterland, not merely by sitting in it |
