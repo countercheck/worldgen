@@ -80,13 +80,22 @@ def _world(**over):
     )
 
 
+# The villages `ResourceStage` founds before the roads: on ore, in the woods, and on a toll
+# nobody collected. None of them is this tier's.
+_FOUNDED = (
+    SettlementRole.MINING,
+    SettlementRole.LUMBER,
+    SettlementRole.BRIDGE,
+    SettlementRole.PORTAGE,
+    SettlementRole.CARAVANSARY,
+)
+_TOLLED = (SettlementRole.BRIDGE, SettlementRole.PORTAGE, SettlementRole.CARAVANSARY)
+
+
 def _villages(state):
-    """The chokepoint villages: not the mining and lumber villages `ResourceStage` founds."""
+    """The chokepoint villages: not the villages `ResourceStage` founds."""
     return [
-        s
-        for s in state.settlements
-        if s.tier is SettlementTier.VILLAGE
-        and s.role not in (SettlementRole.MINING, SettlementRole.LUMBER)
+        s for s in state.settlements if s.tier is SettlementTier.VILLAGE and s.role not in _FOUNDED
     ]
 
 
@@ -294,7 +303,7 @@ def test_a_stricter_gate_founds_fewer():
     )
 
 
-def test_thin_country_grows_few_villages_and_only_on_its_good_ground():
+def test_thin_country_grows_villages_on_unusable_ground_only_where_tolls_pay_for_them():
     """A desert is mostly empty, and what lives in it lives on the exceptions.
 
     This used to assert an arid map grew no villages at all, and before soil existed that
@@ -312,6 +321,11 @@ def test_thin_country_grows_few_villages_and_only_on_its_good_ground():
     desert must never do is out-village the well-watered country, and what its villages
     must never do is stand on sand — and the arid world does grow one here, on a pass on
     arable ground, so the soil assertion finally has a subject.
+
+    With one exception, which tolls brought (tech-debt #142): a village on ground that feeds
+    nobody may stand where a bridge or a portage pays it a living — a caravansary — but only
+    one `ResourceStage` founded on a toll, and only if the toll clears `toll_min_draw`.
+    Every other village, the chokepoint tier above all, still stands on arable ground.
     """
 
     # Seed 8 rather than the suite's seed 1. Once freight began wearing the roads, seed 1's
@@ -345,6 +359,20 @@ def test_thin_country_grows_few_villages_and_only_on_its_good_ground():
         assert SOIL_RANK[soil] >= SOIL_RANK[SoilQuality.ARABLE], (
             f"village at {v.coord} stands on {soil.value} ground in a desert"
         )
+    cfg = WorldConfig(**{**_CHOKE_DEFAULTS, "regional_climate": "arid"})
+    floor = cfg.toll_min_draw * cfg.people_per_food
+    for state in (arid, temperate):
+        for v in state.settlements:
+            if v.tier is not SettlementTier.VILLAGE:
+                continue
+            if state.hexes[v.coord].soil is not SoilQuality.UNUSABLE:
+                continue
+            if v.role in (SettlementRole.MINING, SettlementRole.LUMBER):
+                continue  # fed from beyond, like a city: they stand on the ore and the wood
+            assert v.role in _TOLLED, f"village at {v.coord} on unusable ground lives on nothing"
+            assert v.population >= floor, (
+                f"{v.role.value} at {v.coord} has {v.population} people, under the toll floor"
+            )
 
 
 # --- what it takes from the tier above ---------------------------------------

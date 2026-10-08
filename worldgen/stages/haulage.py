@@ -172,6 +172,11 @@ def make_bulk_cost(hexes, cfg, rivers: Rivers | None = None):
         raise ValueError("bulk haulage needs the world's rivers: pass river_index(state, cfg)")
     node_cost, edge_cost = make_travel_cost(hexes, cfg, rivers)
     mult = cfg.haulage_range_water_mult
+    # A toll on a bridge is a cost of carriage like any other, and a cargo loses value
+    # linearly to nothing at `haulage_range_land` (`usable_fraction`): so a toll of a share
+    # *s* weighs exactly what *s* times that range of haul does, and a carter with a ford
+    # nearer than that goes round.
+    toll_cost = cfg.toll_bridge_share * cfg.haulage_range_land
 
     def landing(hx) -> float:
         # A sea-going ship wants a harbour; a barge ties up at a bank, and a lake boat is
@@ -195,6 +200,8 @@ def make_bulk_cost(hexes, cfg, rivers: Rivers | None = None):
                 return 0.0  # already afloat: no ascent, and a navigable river is a road
             # Afloat on both but not on the same water: ashore and afloat again.
             return landing(from_hx) + edge_cost(from_hx, to_hx) + landing(to_hx)
+        if toll_cost and frozenset((from_hx.coord, to_hx.coord)) in rivers.bridged:
+            return edge_cost(from_hx, to_hx) + toll_cost  # over a tolled bridge
         return edge_cost(from_hx, to_hx)
 
     return bulk_node, bulk_edge

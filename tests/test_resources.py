@@ -88,7 +88,12 @@ def test_ports_stand_on_land():
 
 
 def test_every_knob_at_zero_founds_nothing():
-    off = _resourced(port_min_population=0, ore_deposits_per_1000_km2=0.0, lumber_min_score=0.0)
+    off = _resourced(
+        port_min_population=0,
+        ore_deposits_per_1000_km2=0.0,
+        lumber_min_score=0.0,
+        toll_min_draw=0.0,
+    )
     before = build_world(until="CityPromotionStage", **_KW)
     assert len(off.settlements) == len(before.settlements)
 

@@ -5,12 +5,11 @@ manufactures between cities mostly take routes that avoid the falls. Neither car
 trade the historical portage towns lived on: Aswan, Louisville, the fall-line towns of the
 American east coast stood where the long trade *down* a river system had to land and load
 again. So every town or city on a navigable reach and off the coast sends a share of its
-worth downriver to the coast, and pays its way at every quay it changes mode at — the
-portages above all.
+worth downriver to the coast, and pays its way at every quay it changes mode at and every
+portage it is carried round (tech-debt #142).
 
-The routing is pure and kept apart from `CityPromotionStage`, which applies it, so that a
-later stage charging a toll at a chokepoint (a portage, a bridge, a desert passage) can ask
-exactly which flows pass it: every `RiverFlow` carries its whole path.
+The routing is pure and kept apart from `CityPromotionStage`, which applies it and charges
+each flow the quays and tolls on its path: every `RiverFlow` carries its whole path.
 """
 
 from dataclasses import dataclass

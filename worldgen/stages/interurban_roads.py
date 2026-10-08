@@ -29,6 +29,18 @@ _ROAD_FOR_TIER = {
 }
 
 
+# The village roles `ResourceStage` founds before the roads, which the roads must reach.
+_FOUNDED = frozenset(
+    {
+        SettlementRole.MINING,
+        SettlementRole.LUMBER,
+        SettlementRole.BRIDGE,
+        SettlementRole.PORTAGE,
+        SettlementRole.CARAVANSARY,
+    }
+)
+
+
 class InterurbanRoadStage(GeneratorStage):
     """Builds PRIMARY and SECONDARY roads between cities and towns only.
 
@@ -40,13 +52,13 @@ class InterurbanRoadStage(GeneratorStage):
         hexes = state.hexes
         cfg = self.config
         # Cities and towns, and the villages `ResourceStage` founds: a mine or a lumber camp
-        # has to be reached by road or its ore and timber go nowhere. Other villages are
-        # placed after this stage and joined by stages of their own.
+        # has to be reached by road or its ore and timber go nowhere, and a toll village
+        # lives on the traffic going past it. Other villages are placed after this stage
+        # and joined by stages of their own.
         settlements = [
             s
             for s in state.settlements
-            if s.tier in (SettlementTier.CITY, SettlementTier.TOWN)
-            or s.role in (SettlementRole.MINING, SettlementRole.LUMBER)
+            if s.tier in (SettlementTier.CITY, SettlementTier.TOWN) or s.role in _FOUNDED
         ]
         if not settlements:
             return state

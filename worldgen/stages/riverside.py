@@ -96,6 +96,8 @@ class Rivers:
     *   **portage** — the hexes beside a cataract.  Nothing afloat passes them, so a cargo
         coming down the river lands above the falls and loads again below.
     *   **floats** — hexes beside a river carrying enough to drive logs.
+    *   **bridged** — the hex pairs either side of a river `CrossingStage` bridged: water
+        too big to wade, crossed only where somebody built over it, and tolled there.
 
     And for the stages that read what a place is like:
 
@@ -122,6 +124,7 @@ class Rivers:
     confluence: frozenset[HexCoord] = frozenset()
     features: dict[HexCoord, frozenset[str]] = field(default_factory=dict)
     side_catchment: dict[frozenset[HexCoord], float] = field(default_factory=dict)
+    bridged: frozenset[frozenset[HexCoord]] = frozenset()
 
     def afloat(self, hx) -> bool:
         """True where a boat can be: open water, a lake, or the bank of a navigable reach."""
@@ -157,6 +160,7 @@ def river_index(state, cfg) -> Rivers:
     near: dict[HexCoord, float] = {}
     features: dict[HexCoord, set[str]] = defaultdict(set)
     side_catchment: dict[frozenset[HexCoord], float] = {}
+    bridged: set[frozenset[HexCoord]] = set()
     for side, rs in sorted(state.river_sides.items()):
         pair = frozenset(side_hexes(side))
         side_catchment[pair] = rs.catchment_km2
@@ -172,6 +176,8 @@ def river_index(state, cfg) -> Rivers:
             hx = state.hexes.get(h)
             if hx is not None and hx.terrain_class not in WATER and hx.elevation <= top + 1e-6:
                 near[h] = max(near.get(h, 0.0), rs.catchment_km2)
+        if "bridge" in rs.tags and "ford" not in rs.tags:
+            bridged.add(pair)
         if rs.tags & {"ford", "bridge"}:
             crossing[pair] = cfg.crossing_use_cost
         else:
@@ -236,6 +242,7 @@ def river_index(state, cfg) -> Rivers:
         confluence=frozenset(confluence),
         features={h: frozenset(v) for h, v in features.items() if v},
         side_catchment=side_catchment,
+        bridged=frozenset(bridged),
     )
 
 

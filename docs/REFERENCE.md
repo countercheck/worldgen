@@ -862,8 +862,10 @@ any single side comes in lumps. Three things follow:
 - **A barrier.** `navigable` is false on a cataract, so a cargo afloat must land above it
   and load again below. The tag goes out in the world file for anything else — a campaign
   movement rule — that cares whether a boat can pass.
-- **A portage.** Landing and reloading is a change of mode, so `CityPromotionStage` pays
-  the quays either side (§ [3.10d](#310d-resource-settlements--organic)). Provisioning
+- **A portage.** Landing and reloading is a change of mode, and the walk round the falls
+  pays `toll_portage_share` once, at the portage, to the settlement within `toll_radius` —
+  in place of the two quays either side, which is what it pays at `toll_portage_share` 0
+  (§ [3.10d](#310d-resource-settlements--organic), § [3.10e](#310e-city-provisioning-trade-and-freight--organic)). Provisioning
   through a portage is small: two quay charges and a land hop are a large share of
   `haulage_range_land`, so the markets above a cataract mostly stop sending to the city
   below it. What the great portage towns lived on was the long trade down the river, and
@@ -1816,10 +1818,20 @@ map's total population is unchanged by this stage.
   city kept for them. Quays within `transship_radius` of each other are pooled onto the
   busiest; where that share reaches `port_min_population` a port is founded and paid it.
   A port past `city_min_population` is a city.
+- **Toll towns** (role `bridge`, `portage` or `caravansary`). `CityPromotionStage` also
+  records the tolls (`toll_bridge_share`, `toll_portage_share`) that no settlement stood
+  within `toll_radius` of, in `metadata["unhandled_tolls"]` as `[q, r, seat q, r, food,
+  people, kind]`. Toll points within `toll_radius` of each other are one crossing, pooled
+  onto the busiest. If a settlement founded above now stands within `toll_radius`, it
+  collects; otherwise one is founded where the toll brings at least `toll_min_draw` food
+  — a town at `port_min_population` people, a village below it, a city on a port's terms.
+  It is named for the kind that paid most, and a bridge town on unusable soil is a
+  caravansary. Toll villages are joined by `InterurbanRoadStage` like mines and camps, and
+  a portage town is an outlet for ore as a port is.
 - **Mines** (VILLAGE, role `mining`). Deposits are drawn at random over ground with at least
   `ore_min_relief_m` of relief, weighted towards the higher, at `ore_deposits_per_1000_km2`
   of that ground and `ore_min_separation` apart. A deposit is worked only if its metal can
-  reach an outlet (a city, or a port-role settlement) by bulk haulage within
+  reach an outlet (a city, or a port- or portage-role settlement) by bulk haulage within
   `haulage_range_land` × `ore_haul_range_mult`; smelted ore is worth more per ton than grain,
   so it goes further, but not without limit. On temperate 128x128 maps every deposit has an
   outlet in reach — port-role markets stand every 10-15 km — so the rule binds only where
@@ -1833,8 +1845,8 @@ map's total population is unchanged by this stage.
   `lumber_min_score`, employing `lumber_people_per_wood_hex` per wooded hex.
 
 A village that the food within reach cannot bring to `resource_min_population` is not
-founded. `InterurbanRoadStage` routes to mining and lumber villages as well as to cities
-and towns. On seeds 42/7/3 at 128x128 this gives 5-9 ports, 2-6 mines and a handful of
+founded. `InterurbanRoadStage` routes to mining, lumber and toll villages as well as to
+cities and towns. On seeds 42/7/3 at 128x128 this gives 5-9 ports, 2-6 mines and a handful of
 camps.
 
 ---
@@ -1865,14 +1877,29 @@ cities.
   `river_trade_range_mult` — downstream only: afloat on one water, round a cataract on its
   portage, across a lake to its outlet, along the sea to the quay, and never to a bank
   draining less than the one before (`river_trade.downstream_rank`). It pays
-  `transship_share` at every quay on the way, the landing and loading again at each portage
-  among them, drawn half from each end; quays nobody stands at are left for a port, which
+  `transship_share` at every quay on the way and the portage toll at every cataract, drawn
+  half from each end; charges nobody collects are left for a port or a portage town, which
   is how a cataract with no town at it gets one. This is the trade Aswan, Louisville and
   the fall-line towns lived on, which provisioning is too short-haul to carry. Each flow is
   kept with its whole path in `metadata["river_trade"]` as `[origin q, r, destination q,
   r, people it feeds, [[q, r], …]]`, so anything charged where a cargo passes — a quay, a
   portage, a toll — can read which flows pass it. A river that leaves the map carries no
   trade: its coast is off the map.
+- **Tolls at chokepoints** (tech-debt #142). Every flow above — provisioning, manufactures
+  and the river trade — is charged at each point on its route (`CityPromotionStage._charges`,
+  a list of `(site, kind, share)`): a **quay** at every change of mode (`transship_share`),
+  a **portage** once for the walk round a cataract (`toll_portage_share`, replacing the
+  landings either side of it), and a **bridge** over water too big to wade
+  (`toll_bridge_share`, at the bank with the better soil). Each goes to the settlement
+  nearest the site within `transship_radius` (quays) or `toll_radius` (tolls), and is
+  taken off what the flow moves — off the city's gain for provisioning, half from each end
+  for trade — so population is conserved. Neither end of a flow pays itself: a market
+  tolling its own grain over its own bridge would only be keeping what it had, and a toll
+  town is one that grows on traffic it does not produce. What each settlement collected is
+  in `metadata["tolls"]` as `[site q, r, kind, collector q, r, food, people]`; tolls nobody
+  collected found toll towns (§ [3.10d](#310d-resource-settlements--organic)). Passes,
+  desert crossings and straits are not tolled yet: each would be another kind in
+  `_charges` with its own share.
 - **Freight wears the roads.** Every flow — provisioning, manufactures, river trade, and ore
   from the mines, which goes to the best-paying city by the same pull — is recorded in
   `metadata["freight"]` as `[origin q, r, destination q, r, people it feeds, kind]`.
@@ -2761,12 +2788,16 @@ the surplus it draws on is depleted, and the scan repeats until nothing clears t
 | `city_draw_share` | `float` | `0.7` | Share of its marketable surplus a market ships to the cities, split between them by pull (`city_pull_sharpness`). Also caps how much a candidate counts towards promotion, nearest markets first, which is what stops the first city promoted from claiming half the map. Validated in (0, 1] |
 | `city_pull_sharpness` | `float` | `1.25` | How hard the best-paying city pulls a market's grain from the others. A city's pull is its size times the share of the cargo that survives the haul; a market splits its shipment in proportion to pull to this power. Very high sends everything to the best-paying city; 0 splits it evenly. 1.25 puts the largest city at 1.8-2.3x the second on seeds 42 and 7 |
 | `city_pull_rounds` | `int` | `4` | Rounds of that split, each pulling with the sizes the last produced: pull follows size and size follows pull, which is how a capital comes to dominate. 1 pulls with founding sizes, when every candidate is a market of a few hundred and distance decides everything |
-| `manufactured_trade_share` | `float` | `0.1` | Share of each city's people's worth put into manufactured trade with the other cities, split by size and haul. The shipments pay `transship_share` at every quay and portage on the way, drawn half from each city. 0 turns city-to-city trade off |
+| `manufactured_trade_share` | `float` | `0.1` | Share of each city's people's worth put into manufactured trade with the other cities, split by size and haul. The shipments pay `transship_share` at every quay and `toll_portage_share` at every portage on the way, drawn half from each city. 0 turns city-to-city trade off |
 | `manufactured_range_mult` | `float` | `3.0` | How many times `haulage_range_land` manufactures travel: worth more per ton than grain, so carried further |
-| `river_trade_share` | `float` | `0.2` | Long-haul trade down the rivers: each town or city on a navigable reach and off the coast ships this share of its people's worth downstream to the coastal town it reaches most cheaply, paying `transship_share` at every quay and portage on the way, drawn half from each end. The trade the portage towns lived on — Aswan, Louisville, the fall-line towns. On eight test worlds 0.2 grows the towns at portages by about 8% (matched town for town) while other towns lose about 1%; 0.1 gives +4.5% and 0.3 +12.5%. 0 turns it off and leaves the world exactly as it was. Validated `>= 0` |
+| `river_trade_share` | `float` | `0.2` | Long-haul trade down the rivers: each town or city on a navigable reach and off the coast ships this share of its people's worth downstream to the coastal town it reaches most cheaply, paying `transship_share` at every quay and `toll_portage_share` at every portage on the way, drawn half from each end. The trade the portage towns lived on — Aswan, Louisville, the fall-line towns. On eight test worlds 0.2 grows the towns at portages by about 8% (matched town for town) while other towns lose about 1%; 0.1 gives +4.5% and 0.3 +12.5%. 0 turns it off and leaves the world exactly as it was. Validated `>= 0` |
 | `river_trade_range_mult` | `float` | `6.0` | How many times `haulage_range_land` the river trade reaches: a boat going down rides the current, and the cargo is a region's staple export — Ohio flatboats ran 2,000 km to New Orleans. Twice manufactures' reach. Validated `>= 0` |
 | `transship_share` | `float` | `0.2` | Transshipment: every change in how a city's cargo travels on its way — cart to boat, boat to cart, barge to ship at a river mouth — leaves this share of the people it feeds with the settlement handling that quay (the nearest within `transship_radius`), off the city's gain. Conserved; only the places between the source market and the city are paid, since loading and unloading are already part of those two. 0.2 turns a quay town with next to no hinterland into a trade town of 3-5k on seeds 42/7/3. Handled cargo per settlement is written to `metadata["transshipment"]` as `[q, r, food]`. Validated in [0, 0.5] |
 | `transship_radius` | `int` | `2` | How far from a quay, in hexes, its handling settlement may stand. Validated `>= 0` |
+| `toll_bridge_share` | `float` | `0.1` | Tolls at chokepoints (§ [3.10e](#310e-city-provisioning-trade-and-freight--organic)): every cargo — provisioning, manufactures, river trade — stepping over a bridge across water too big to wade (a side `CrossingStage` bridged) leaves this share of the people it feeds with the settlement nearest the bridge within `toll_radius`; neither end of the flow pays itself. A share of what the cargo feeds, not of its price: a toll proper was small — the Sound Dues ran about 1–5% of a cargo's value, a pontage pennies a cart — but a bridge town lived on everything the traffic needed as well. The bulk haul over a tolled bridge also costs `toll_bridge_share` × `haulage_range_land` extra, the haul that loses a cargo the same share, so a carter with a ford nearer than that goes round. Bridge traffic in the bulk model is small (on seven test worlds 0–1.9% of the cargo through quays), because a cargo that reaches a big river boards it rather than crossing. 0 turns bridge tolls off. Validated in [0, 0.5] |
+| `toll_portage_share` | `float` | `0.4` | A cargo walked round a cataract pays this share once, at the portage, to the settlement within `toll_radius` of it, in place of the landing above the falls and the loading below them — one charge rather than two quays at `transship_share`. Aswan at the First Cataract, Louisville at the Falls of the Ohio, the fall-line towns of the American east coast. 0.4 is the two landings' combined share; against keeping the landings as two quays, on the four test worlds with portages it makes the median portage town larger on two (by about half), level on a third and smaller on the fourth. 0 makes the landings ordinary quays again, and with `toll_bridge_share` also 0 the world is exactly as it was without tolls. Validated in [0, 0.5] |
+| `toll_radius` | `int` | `2` | How far from a bridge or a portage, in hexes, the settlement that collects its toll may stand. At 4 an existing market collects at more portages instead of a portage town being founded. Validated `>= 0` |
+| `toll_min_draw` | `float` | `1.0` | The least toll income, in food units like `chokepoint_min_draw` (× `people_per_food` for people: 1.0 is 80), that founds a settlement at a toll point nobody holds — a town if it brings `port_min_population` people, a village if fewer, a city on the same terms as a port. Bridge towns founded on unusable soil are **caravansaries**: ground that feeds nobody, where the toll is the only living. 0 founds none. Validated `>= 0` |
 | `city_min_population` | `int` | `5000` | A town that grows past this becomes a city whatever it draws — the entrepôt, which handles a hinterland's trade rather than eating its food. 0 turns it off. Validated `>= 0` |
 | `port_min_population` | `int` | `250` | A port is founded at an unattended quay (or waterfront of quays within `transship_radius`) whose trade share reaches this many people. 0 turns ports off. § [3.10d](#310d-resource-settlements--organic) |
 | `port_city_min_separation` | `int` | `12` | A port whose trade alone reaches `city_min_population` is a city only if no other city stands within this many hexes, and … |

@@ -145,6 +145,8 @@ _ROLE_GENERIC = {
     SettlementRole.MINING: "mine",
     SettlementRole.LUMBER: "clearing",
     SettlementRole.MARKET: "market",
+    SettlementRole.BRIDGE: "bridge",
+    SettlementRole.PORTAGE: "falls",
 }
 
 # What any place of a tier can be called, whatever its site. Several heads per tier, as
