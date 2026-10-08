@@ -215,7 +215,7 @@ def _regions(hexes, n, homes=None):
         np.random.default_rng(0),
         climb_m=150.0,
         river_cost=8.0,
-        great_river_km2=1000.0,
+        great_rivers=frozenset(),
         water_cost=2.0,
         homes=homes,
     )

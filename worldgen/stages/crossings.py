@@ -26,79 +26,30 @@ market catchment instead of being invisible to it.
 """
 
 from ..core.hex import TerrainClass
-from ..core.hex_grid import hex_range, neighbors
+from ..core.hex_grid import Side, hex_range, side_hexes
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
 from .habitability import potential_food
-from .road_cost import is_river
+from .haulage import catchment_carries_a_barge
+from .riverside import side_gradients, side_span
 
 FORD = "ford"
 BRIDGE = "bridge"
 
 
-def channel_drop_m(hx, hexes, cfg) -> float:
-    """How far the water falls over this reach, in metres per kilometre of channel.
-
-    Measured *along* the channel — the drop to the lowest neighbouring river hex — because
-    that is what sets the velocity, and velocity is what decides whether a reach can be
-    waded.  Slack water spreads and braids into shallows; the same discharge running fast
-    will take your feet from under you at half the depth.
-
-    Deliberately not the spread of the surrounding ground.  An earlier version measured
-    highest neighbour against lowest, which sounds like the same question and is not: a
-    river runs in a valley, so that figure reports how tall the valley sides are.  It came
-    out at a median of 255 m on a 64x64 map and called all but two reaches unfordable —
-    but a river winding down a broad vale with hills either side is perfectly wadeable at
-    the water's edge.  What the crossing cares about is the channel, not the skyline.
-    """
-    lowest = hx.elevation
-    for n in neighbors(hx.coord):
-        n_hx = hexes.get(n)
-        if n_hx is not None and is_river(n_hx):
-            lowest = min(lowest, n_hx.elevation)
-    return max(0.0, hx.elevation - lowest)
+def crossing_pressure(side: Side, surplus: dict, radius: int) -> float:
+    """How much there is on either side worth connecting: the surplus within *radius* of
+    either bank."""
+    around = {c for bank in side_hexes(side) for c in hex_range(bank, radius)}
+    return sum(surplus.get(c, 0.0) for c in around)
 
 
-def river_span(hx, hexes, cfg) -> float:
-    """How hard this reach is to get across, in multiples of the easiest wadeable one.
-
-    Two things make it hard, and they multiply rather than compete.
-
-    **How much water.**  Catchment area is the physical input, and width goes as the
-    square root of discharge by hydraulic geometry — the same exponent the river renderer
-    uses (`river_width_exponent: 0.5`), so the two agree about what a big river looks like.
-    Deliberately not `river_flow`: that is normalised against the largest accumulation on
-    the map, so it is a rank rather than a quantity, and a threshold on it meant different
-    things at different map sizes.
-
-    **How fast it runs.**  A slack reach spreads and braids into shallows you can wade;
-    the same discharge falling steeply concentrates into water that will take your feet
-    from under you at half the depth.  A steep reach is also an incised one, and at a
-    kilometre to the hex what defeats a bridge is rarely the span but the approaches,
-    which then have to be cut.  So gradient makes a reach behave like a bigger river for
-    both purposes, which is why one number serves fording, bridging, and the cost of
-    getting across where there is no crossing at all.
-    """
-    if cfg.ford_max_catchment_km2 <= 0:
-        return 0.0
-    width = (hx.catchment_km2 / cfg.ford_max_catchment_km2) ** 0.5
-    drop = channel_drop_m(hx, hexes, cfg)
-    return width * (1.0 + drop / cfg.crossing_relief_m)
-
-
-def crossing_pressure(coord, surplus: dict, radius: int) -> float:
-    """How much there is on either side worth connecting.
-
-    Summed over the whole neighbourhood rather than split into banks: telling one bank
-    from the other on a hex grid needs the river's local direction, and a river running
-    through good country has good country on both sides of it.  The simplification costs
-    little and keeps this a single cheap pass.
-    """
-    return sum(surplus.get(c, 0.0) for c in hex_range(coord, radius))
+def _near(side: Side, radius: int) -> set:
+    return {c for bank in side_hexes(side) for c in hex_range(bank, radius)}
 
 
 class CrossingStage(GeneratorStage):
-    """Tags every river hex that can be crossed, as a ford or as a bridge."""
+    """Tags every river side that can be crossed, as a ford or as a bridge."""
 
     def run(self, state: WorldState) -> WorldState:
         hexes = state.hexes
@@ -112,40 +63,80 @@ class CrossingStage(GeneratorStage):
 
         # sorted() throughout: which of two equally good sites gets the bridge decides
         # where a market later grows, so it must not depend on dict ordering.
-        river = sorted(c for c, hx in hexes.items() if is_river(hx))
-        if not river:
+        sides = state.river_sides
+        if not sides:
             return state
+        gradient = side_gradients(state)
+        span = {
+            s: side_span(rs.catchment_km2, gradient.get(s, 0.0), cfg) for s, rs in sides.items()
+        }
+        river = sorted(sides)
 
         # A ford is any reach no harder to cross than the limit case: a stream at the
         # wading size on level ground. Steep water of the same size does not qualify.
-        fords = [c for c in river if river_span(hexes[c], hexes, cfg) <= 1.0]
-        for coord in fords:
-            hexes[coord].tags.add(FORD)
+        fords = [s for s in river if span[s] <= 1.0]
+
+        # Past that size a river is too big to wade, almost everywhere. Almost: a big
+        # river spreading slack and shallow over a gravel bed can be got across on foot,
+        # and those few places are the fords armies were marched to. So the slackest
+        # reaches a little past the wading size are fords too — the easiest first, and
+        # never two within `rare_ford_separation` of each other, which is what keeps them
+        # rare. Only a major river — one that floats a barge — qualifies: anything smaller
+        # is waded wherever it is not steep, and a small stream too steep to wade is a
+        # gorge, with no slack reach to find. Roads add more fords later, where they cross
+        # (`tag_river_crossings`).
+        rare = sorted(
+            (span[s], s)
+            for s in river
+            if 1.0 < span[s] <= cfg.rare_ford_max_span
+            and catchment_carries_a_barge(sides[s].catchment_km2, cfg)
+        )
+        near_rare: set = set()
+        for _, side in rare:
+            if any(b in near_rare for b in side_hexes(side)):
+                continue
+            fords.append(side)
+            near_rare |= _near(side, cfg.rare_ford_separation)
+
+        for side in fords:
+            sides[side].tags.add(FORD)
 
         # Bridges: only where the water cannot be waded, and only where enough lies on
-        # either side to be worth the capital. The threshold scales with discharge —
+        # either bank to be worth the capital. The threshold scales with discharge —
         # a wider river is a dearer structure and needs more traffic to justify it.
-        taken = set()
-        for coord in fords:
-            taken |= set(hex_range(coord, cfg.crossing_min_separation))
+        #
+        # A ford nearby makes a bridge needless only over water of its own size. A brook
+        # forded beside a trunk river gets nobody across the trunk; counting it would
+        # leave a well-watered map, fords on every brook, with hardly a bridge on it.
+        sep = cfg.crossing_min_separation
+        forded: dict = {}  # hex -> the largest catchment forded within `sep` of it
+        for side in fords:
+            km2 = sides[side].catchment_km2
+            for c in _near(side, sep):
+                forded[c] = max(forded.get(c, 0.0), km2)
+        taken: set = set()
+
+        def served(side) -> bool:
+            km2 = sides[side].catchment_km2 * cfg.ford_serves_bridge_fraction
+            return any(b in taken or forded.get(b, 0.0) >= km2 for b in side_hexes(side))
 
         candidates = []
-        for coord in river:
-            if coord in taken or FORD in hexes[coord].tags:
+        for side in river:
+            if FORD in sides[side].tags or served(side):
                 continue
-            needed = cfg.bridge_pressure_per_span * river_span(hexes[coord], hexes, cfg)
-            pressure = crossing_pressure(coord, surplus, cfg.crossing_pressure_radius)
+            needed = cfg.bridge_pressure_per_span * span[side]
+            pressure = crossing_pressure(side, surplus, cfg.crossing_pressure_radius)
             if pressure >= needed:
-                candidates.append((pressure - needed, coord))
+                candidates.append((pressure - needed, side))
 
         # Best-served site first, then suppress its neighbours: nobody builds two bridges
         # within sight of each other, and the surplus that justified one is the same
         # surplus that would have justified the next.
         candidates.sort(key=lambda x: (-x[0], x[1]))
-        for _, coord in candidates:
-            if coord in taken:
+        for _, side in candidates:
+            if served(side):
                 continue
-            hexes[coord].tags.add(BRIDGE)
-            taken |= set(hex_range(coord, cfg.crossing_min_separation))
+            sides[side].tags.add(BRIDGE)
+            taken |= _near(side, sep)
 
         return state

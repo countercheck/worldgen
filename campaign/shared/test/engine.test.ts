@@ -23,7 +23,7 @@ import {
   type Command,
 } from '../src/engine.js';
 import type { Faction, LoggedEvent, WorldRef } from '../src/events.js';
-import { key, type Hex } from '../src/hex.js';
+import { key, neighbors, sideBetween, sideId, type Hex } from '../src/hex.js';
 import { DEFAULT_CONFIG } from '../src/config.js';
 import { roadHoursWithin } from '../src/movement.js';
 import { makeRng, rngFor } from '../src/rng.js';
@@ -1777,6 +1777,33 @@ describe('declare_battle', () => {
       'strict',
     ).state;
     expect(ended.battle.has(key(LAND))).toBe(false);
+  });
+
+  it('will not have forces fight across a river nobody can cross, only observe', () => {
+    const state = setUp();
+    const across = neighbors(LAND).find((n) => {
+      const t = world.hexes.get(key(n))?.terrainClass;
+      return t !== undefined && t !== 'open_water' && t !== 'inland_water';
+    })!;
+    const side = sideBetween(LAND, across);
+    const river = (catchmentKm2: number, tags: string[] = []): World => ({
+      ...world,
+      roadEdges: new Map(),
+      riverSides: new Map([
+        [sideId(side), { side, catchmentKm2, flow: 0.5, dropM: 0, tags: new Set(tags) }],
+      ]),
+      config: { ...world.config, navigableMinDischarge: 60000, runoffMm: 800 },
+    });
+    const declare = { kind: 'declare_battle', coords: [LAND, across] } as const;
+
+    const refused = check(declare, state, river(1000), 'strict');
+    expect(refused).toContainEqual(expect.objectContaining({ code: CODES.RIVER_BETWEEN_FORCES }));
+    expect(refused.every((v) => v.severity === 'soft')).toBe(true);
+
+    // A bridge, a ford, or a river that can be waded is ground a battle can be fought on.
+    for (const w of [river(1000, ['bridge']), river(1000, ['ford']), river(10)]) {
+      expect(check(declare, state, w, 'strict')).toEqual([]);
+    }
   });
 
   it('refuses a battle nowhere, and a battle off the map', () => {

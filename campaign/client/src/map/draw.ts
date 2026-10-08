@@ -15,12 +15,18 @@
 
 import {
   axialToPixel,
+  cornerId,
+  cornerToPixel,
   DEFAULT_THEME,
   hexAt,
   key,
   riverClass,
+  sideCorners,
+  sideId,
+  sideJoining,
   TAG_BRIDGE,
   TAG_FORD,
+  type Corner,
   type Hex,
   type HexKey,
   type River,
@@ -62,6 +68,16 @@ export const toScreen = (h: Hex, view: View): { x: number; y: number } => {
   const p = axialToPixel(h, view.size);
   return { x: p.x + view.offsetX, y: p.y + view.offsetY };
 };
+
+/** A point given at a hex size of 1 — a corner, a side's middle — placed on screen. */
+const pointToScreen = (p: { x: number; y: number }, view: View): { x: number; y: number } => ({
+  x: p.x * view.size + view.offsetX,
+  y: p.y * view.size + view.offsetY,
+});
+
+/** A corner on screen. */
+const cornerToScreen = (c: Corner, view: View): { x: number; y: number } =>
+  pointToScreen(cornerToPixel(c, 1), view);
 
 /**
  * Add one hexagon to a path that is already open.
@@ -256,14 +272,14 @@ export function drawTerrain(
   }
   if (layers.crossings) {
     for (const c of crossingMarks(world)) {
-      const p = toScreen(c.coord, view);
+      const p = pointToScreen(c.at, view);
       drawCrossing(ctx, c.kind, p.x, p.y, c.bearing, view.size);
     }
   }
   // Over the roads and the crossings, so a spring or white water on a forded reach still
   // shows.
   for (const mark of layers.rivers ? riverMarks(world) : []) {
-    const p = toScreen(mark.coord, view);
+    const p = pointToScreen(mark.at, view);
     drawRiverMark(
       ctx,
       mark.kind,
@@ -286,71 +302,103 @@ export function drawTerrain(
 
 /** A river mark: where one rises, where it ends, or where it runs white. */
 export interface RiverMark {
-  readonly coord: Hex;
+  /** Where it sits, at a hex size of 1: a corner, or the middle of a side. */
+  readonly at: { readonly x: number; readonly y: number };
   readonly kind: RiverMarkKind;
-  /** The river's bearing through the hex, downstream, in radians on the flat-top layout. */
+  /** The river's bearing there, downstream, in radians on the flat-top layout. */
   readonly bearing: number;
 }
 
-/**
- * Every river mark, read off the tags the generator sets (`river_source`, `river_end`,
- * `cataract`, `rapids`), each turned along its river. Mirrors `legend.river_marks` in the
- * Python, so the campaign marks the same places the exported map does.
- */
-export function riverMarks(world: World): RiverMark[] {
-  const bearing = riverBearings(world);
-  const out: RiverMark[] = [];
-  for (const hex of world.hexes.values()) {
-    const b = bearing.get(key(hex.coord)) ?? 0;
-    if (hex.tags.has('river_source')) out.push({ coord: hex.coord, kind: 'source', bearing: b });
-    if (hex.tags.has('river_end')) out.push({ coord: hex.coord, kind: 'end', bearing: b });
-    if (hex.tags.has('cataract') || hex.tags.has('rapids')) {
-      out.push({ coord: hex.coord, kind: 'rapids', bearing: b });
-    }
-  }
-  return out;
-}
-
-/**
- * The bearing of the river through each hex on a river's path, downstream, in radians:
- * from the hex before it to the hex after. Mirrors `legend._bearings` in the Python.
- */
-function riverBearings(world: World): Map<string, number> {
+/** The river's bearing along each side it runs, downstream, in radians. */
+function sideBearings(world: World): Map<string, number> {
   const bearing = new Map<string, number>();
   for (const river of world.rivers) {
-    river.hexes.forEach((c, i) => {
-      const before = river.hexes[i - 1] ?? c;
-      const after = river.hexes[i + 1] ?? c;
-      if (before.q === after.q && before.r === after.r) return;
-      const a = axialToPixel(before, 1);
-      const b = axialToPixel(after, 1);
-      bearing.set(key(c), Math.atan2(b.y - a.y, b.x - a.x));
+    river.corners.forEach((c, i) => {
+      const next = river.corners[i + 1];
+      if (next === undefined) return;
+      const a = cornerToPixel(c, 1);
+      const b = cornerToPixel(next, 1);
+      bearing.set(sideId(sideJoining(c, next)), Math.atan2(b.y - a.y, b.x - a.x));
     });
   }
   return bearing;
 }
 
+/** The middle of a side, at a hex size of 1. */
+function sideMiddle(side: Parameters<typeof sideCorners>[0]): { x: number; y: number } {
+  const [a, b] = sideCorners(side).map((c) => cornerToPixel(c, 1));
+  return { x: (a!.x + b!.x) / 2, y: (a!.y + b!.y) / 2 };
+}
+
+/**
+ * Every river mark, read off what the generator tags: a source or an end on the corner a
+ * course starts or stops at (`river_source`, `river_end`), white water at the middle of
+ * its side (`cataract`, `rapids`), each turned along its river. Mirrors
+ * `legend.river_marks` in the Python, so the campaign marks the same places the exported
+ * map does.
+ */
+export function riverMarks(world: World): RiverMark[] {
+  const bearing = sideBearings(world);
+  const out: RiverMark[] = [];
+  for (const river of world.rivers) {
+    const n = river.corners.length;
+    if (n < 2) continue;
+    const first = river.corners[0]!;
+    const last = river.corners[n - 1]!;
+    const head = bearing.get(sideId(sideJoining(first, river.corners[1]!))) ?? 0;
+    const tail = bearing.get(sideId(sideJoining(river.corners[n - 2]!, last))) ?? 0;
+    if (world.riverCorners.get(cornerId(first))?.has('river_source')) {
+      out.push({ at: cornerToPixel(first, 1), kind: 'source', bearing: head });
+    }
+    if (world.riverCorners.get(cornerId(last))?.has('river_end')) {
+      out.push({ at: cornerToPixel(last, 1), kind: 'end', bearing: tail });
+    }
+  }
+  for (const rs of world.riverSides.values()) {
+    if (rs.tags.has('cataract') || rs.tags.has('rapids')) {
+      out.push({
+        at: sideMiddle(rs.side),
+        kind: 'rapids',
+        bearing: bearing.get(sideId(rs.side)) ?? 0,
+      });
+    }
+  }
+  return out;
+}
+
 /** A ford or a bridge, and the bearing of the river it crosses. */
 export interface CrossingMark {
-  readonly coord: Hex;
+  /** The middle of the river side it crosses, at a hex size of 1. */
+  readonly at: { readonly x: number; readonly y: number };
+  readonly side: string;
   readonly kind: 'ford' | 'bridge';
   /** The river's bearing, in radians. The mark is laid square across it. */
   readonly bearing: number;
 }
 
 /**
- * Every tagged ford and bridge, in stable order. Mirrors `legend.crossings` in the Python,
- * so the campaign marks the crossings the exported atlas does — and the ones the movement
- * rules read, since both come off the same tags.
+ * Every ford and bridge, in stable order, at the middle of the river side it crosses.
+ * Mirrors `legend.crossings` in the Python, so the campaign marks the crossings the
+ * exported atlas does — and the ones the movement rules read, since both come off the
+ * same side tags.
  */
 export function crossingMarks(world: World): CrossingMark[] {
-  const bearing = riverBearings(world);
+  const bearing = sideBearings(world);
   const out: CrossingMark[] = [];
-  for (const hex of world.hexes.values()) {
-    const kind = hex.tags.has(TAG_BRIDGE) ? 'bridge' : hex.tags.has(TAG_FORD) ? 'ford' : null;
-    if (kind !== null) out.push({ coord: hex.coord, kind, bearing: bearing.get(key(hex.coord)) ?? 0 });
+  for (const [id, rs] of world.riverSides) {
+    // A minor river is waded almost anywhere, so a ford on one marks nothing worth a
+    // symbol; only a major river's fords are. As `legend.crossings` in the Python.
+    const ford = rs.tags.has(TAG_FORD) && riverClass(rs, world) === 'major';
+    const kind = rs.tags.has(TAG_BRIDGE) ? 'bridge' : ford ? 'ford' : null;
+    if (kind === null) continue;
+    out.push({
+      at: sideMiddle(rs.side),
+      side: id,
+      kind,
+      bearing: bearing.get(id) ?? 0,
+    });
   }
-  return out.sort((a, b) => a.coord.q - b.coord.q || a.coord.r - b.coord.r);
+  return out.sort((a, b) => a.at.x - b.at.x || a.at.y - b.at.y);
 }
 
 /**
@@ -492,37 +540,26 @@ function drawLabels(
 /** A stretch of one river drawn in one style. */
 export interface RiverRun {
   readonly cls: 'major' | 'minor';
-  readonly hexes: readonly Hex[];
+  readonly corners: readonly Corner[];
 }
 
 /**
- * Split a river into stretches by the rules' Major/Minor class.
+ * Split a river into stretches by the rules' Major/Minor class, side by side.
  *
- * A segment takes the class of its upstream end. Rivers run source to mouth, so a minor
- * tributary stays thin right up to the major river it joins instead of ending in a stub
- * of wide channel. Where the upstream end is no river at all — a lake the river passes
- * through, or a hex the mask has blanked — the segment takes its downstream end's class
- * instead, so a major outflow leaves its lake wide. A segment with no class at either end
- * counts as minor: the generator drew a watercourse there, so something is drawn.
+ * A side the masked world has no record of — the fog cut it — counts as minor: the
+ * generator drew a watercourse there, so something is drawn.
  */
 export function riverRuns(river: River, world: World): RiverRun[] {
-  const classOf = (c: Hex): 'major' | 'minor' | 'none' => {
-    const hex = hexAt(world, c);
-    return hex === undefined ? 'none' : riverClass(hex, world);
-  };
-
-  const runs: { cls: 'major' | 'minor'; hexes: Hex[] }[] = [];
-  let prev: { c: Hex; cls: 'major' | 'minor' | 'none' } | undefined;
-  for (const c of river.hexes) {
-    const here = classOf(c);
-    if (prev !== undefined) {
-      const cls = (prev.cls === 'none' ? here : prev.cls) === 'major' ? 'major' : 'minor';
-      const last = runs.at(-1);
-      if (last !== undefined && last.cls === cls) last.hexes.push(c);
-      else runs.push({ cls, hexes: [prev.c, c] });
-    }
-    prev = { c, cls: here };
-  }
+  const runs: { cls: 'major' | 'minor'; corners: Corner[] }[] = [];
+  river.corners.forEach((c, i) => {
+    const next = river.corners[i + 1];
+    if (next === undefined) return;
+    const side = world.riverSides.get(sideId(sideJoining(c, next)));
+    const cls = riverClass(side, world) === 'major' ? 'major' : 'minor';
+    const last = runs.at(-1);
+    if (last !== undefined && last.cls === cls) last.corners.push(next);
+    else runs.push({ cls, corners: [c, next] });
+  });
   return runs;
 }
 
@@ -535,8 +572,8 @@ function drawRivers(ctx: CanvasRenderingContext2D, world: World, view: View, the
       ctx.strokeStyle = style.color;
       ctx.lineWidth = Math.max(run.cls === 'major' ? 2.5 : 1, view.size * style.width);
       ctx.beginPath();
-      run.hexes.forEach((c, i) => {
-        const p = toScreen(c, view);
+      run.corners.forEach((c, i) => {
+        const p = cornerToScreen(c, view);
         if (i === 0) ctx.moveTo(p.x, p.y);
         else ctx.lineTo(p.x, p.y);
       });

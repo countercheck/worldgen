@@ -219,6 +219,7 @@ alluvium_quantile: 0.98       # Depth treated as full, for the droplet term only
 # accumulation — which gave desert and rainforest alike 5.6% of their land under channel.
 channel_min_discharge: 6000.0    # Catchment km2 x runoff mm needed to cut a channel — also the dial that decides whether the network branches at all: a basin shows only as many stream orders as its area divides into channel-sized pieces. 6000 is 12.5 km2, a channel ~7 m across and knee deep. Default: 6000
 river_wander_exponent: 1.0      # How water picks its way downhill: a lower neighbour drawn at random, weighted by (drop / largest drop) ^ k. 0 = any downhill neighbour alike, 1 = in proportion to the drop, 8+ = nearly always the steepest. Steepest descent alone drew straight parallel rivers on level ground. Default: 1.0
+corner_floor_blend: 0.25       # How high a corner (where rivers run) stands between its three hexes: the lowest of them, plus this share of the way to their mean. 0 leaves a level lane a hex out from every river that tributaries run down beside the trunk; 0.25 tilts valley floors toward their river. Default: 0.25
 navigable_min_discharge: 60000.0 # ...and to float a boat. Default: 150000
 cataract_min_drop_m: 20.0 # Metres a barge-sized river falls through one hex before it is a cataract: no boat passes, cargo portages round it, and the fall drives mills. 20 m/km is a 2% gradient, strong rapids at a kilometre to the hex. 0 turns cataracts off. Default: 20.0
 rapids_min_drop_m: 10.0  # White water on a smaller river: a river draining at least rapids_min_catchment_km2 that falls this far through one hex is drawn as rapids. Drawing only. 0 turns rapids off. Default: 10
@@ -506,7 +507,10 @@ crossing_relief_m: 60.0      # Local relief, in metres, that doubles how hard a 
 bridge_pressure_per_span: 3.0 # Surplus needed within reach per multiple of the widest wadeable span, before a bridge is worth building. A river twice that width needs twice the traffic. Nobody bridges to nowhere. Default: 3.0
 crossing_pressure_radius: 6   # How far either bank is searched for that surplus. Default: 6
 crossing_min_separation: 4    # Nobody builds two bridges within sight of each other. Default: 4
-crossing_use_cost: 0.5        # Cost of using an existing ford or bridge. Default: 0.5
+ford_serves_bridge_fraction: 0.5 # A ford makes a nearby bridge needless only over water at least this fraction of its own catchment: a brook's ford gets nobody across the trunk river beside it. Default: 0.5
+rare_ford_max_span: 1.6       # A river too big to wade can still be forded at a rare slack, shallow reach. Sides up to this span (1.0 = the wading limit) become fords, easiest first, spaced by rare_ford_separation. 1.0 turns them off. Default: 1.6
+rare_ford_separation: 15      # Hexes between two such rare fords, which is what keeps them rare. Default: 15
+crossing_use_cost: 1.0        # Cost of using an existing ford or bridge, charged once per crossing. Default: 1.0
 
 # ---------------------------------------------------------------------------
 # Haulage economics — § used by `--model organic`
@@ -537,7 +541,7 @@ haulage_range_water_mult: 15.0 # How much further the same cargo goes by water. 
 marketable_surplus_fraction: 0.40 # What leaves the farm: not only what the household sells but the rent, the tithe and the dues, all of which end up feeding somebody in a town. It is the one number setting the ratio between town and countryside — rural/town = (1 - s) / (s x mean haulage weight) — so 0.40, with yield_multiplier 1.7, puts 25% of the people in market towns of any size, against 27.5% in towns over 5,000 in England's 1801 census (Wrigley). 0.32 is England c. 1300. It also plants markets, since siting counts surplus: ~104 at 0.40 against ~85 at 0.32. See the era table. Default: 0.40
 people_per_food: 145.0     # People fed per unit of food, and the one scale factor for the whole population of the map — settlements and countryside alike, which is what makes the two reconcile by construction. Set from the rural side because that is where there is a figure to hit: 145 puts a temperate 128x128 map at 61 people per km2 at the default yield_multiplier of 1.7, against England's 59 in the 1801 census, and at 38-39 at 1.0 (England c. 1300 was 30-40). It was 180 until elevation_hypsometry_exponent laid most land low: flat ground farms better, and density rose by a quarter. At the old 400 the countryside came out at 88 per km2, which is Belgium in 1900. Default: 145
 travel_ascent_per_hex: 125.0 # Naismith's rule: metres of ascent that cost as much as one hex of level ground. Catchments are walked, not engineered, so they use this rather than road_delta_elevation_per_hex, which prices a graded road and is about five times stricter than a walker has reason to be. Default: 125
-travel_ford_cost: 8.0      # Getting across away from a crossing, per multiple of the wadeable span, charged on each land–river edge. Deliberately has no fixed term, unlike road_river_crossing_base: that base is the capital of building a bridge, and somebody walking to market pays no capital — what stops them is how much water is in the way. Default: 8.0
+travel_ford_cost: 16.0     # Getting across away from a crossing, per multiple of the wadeable span, charged once per river side crossed. Deliberately has no fixed term, unlike road_river_crossing_base: that base is the capital of building a bridge, and somebody walking to market pays no capital — what stops them is how much water is in the way. Default: 16.0
 
 # ---------------------------------------------------------------------------
 # Market centres — § used by `--model organic`
@@ -633,14 +637,10 @@ road_embark_cost: 20.0    # Overridden: raised so routes take to the water only 
 road_disembark_cost: 20.0 # Overridden to match. Default: 8.0
 
 # ---------------------------------------------------------------------------
-# Roads: river crossings (charged on each land↔river edge, scales with flow)
+# Roads: river crossings (charged once per step across a river side, scales with flow)
 # ---------------------------------------------------------------------------
-# A perpendicular crossing of a 1-hex-wide river is charged twice
-# (entering and leaving), so total ≈ 2 × (base + flow × max_river_flow).
-road_river_crossing_base: 4.0  # Base cost added on each land↔river edge. Default: 4.0
-road_river_crossing_flow: 12.0 # Additional cost × max(river_flow); biggest river adds the full amount. Default: 12.0
-road_river_hex_cost: 16.0      # Cost of standing a road *on* a river hex. Prices out threading a meander or braid, while leaving a genuine crossing affordable. Raised from 12 with road_delta_elevation_per_hex: pricing the climb made the valley floor more attractive, and roads began taking the channel as often as it occurs rather than declining it. Default: 16.0
-road_ferry_max_hop: 4          # Longest boat hop used to join a component a river mesh cuts off. Beyond this, routing raises RoutingError. Default: 4
+road_river_crossing_base: 8.0  # Fixed cost of crossing a river. Default: 8.0
+road_river_crossing_flow: 24.0 # Additional cost × the river's flow; the biggest river adds the full amount. Default: 24.0
 
 # Slope-based cost: grade % = (elevation_delta_m / hex_size_m) * 100
 road_delta_elevation_per_hex: 25.0 # Metres of elevation change costing as much as one hex of level going — the switchback, priced. At 1 hex = 1 km a road climbing 200 m is not a straight ramp but several km of zigzag folded inside that hex, and this is the exchange rate that says so. Anchored on travel_ascent_per_hex (125, Naismith for a walker) divided by about five, a laden cart being far more gradient-sensitive than a man on foot. Symmetric in up and down: a road is cut-and-fill, and a steep descent needs braking. Default: 25.0

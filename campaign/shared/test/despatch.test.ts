@@ -27,7 +27,7 @@ import {
 } from '../src/despatch.js';
 import { DEFAULT_CONFIG } from '../src/config.js';
 import { EMPTY_STATE, type CampaignState } from '../src/state.js';
-import { key, type Hex, type HexKey } from '../src/hex.js';
+import { key, sideBetween, sideId, type Hex, type HexKey } from '../src/hex.js';
 import { reportOf, type Unit } from '../src/unit.js';
 import { edgeKey, type World, type WorldHex } from '../src/world.js';
 
@@ -55,19 +55,22 @@ function flatWorld(size = 20): World {
     }
   }
   return {
-    schemaVersion: '1.8',
+    schemaVersion: '2.0',
     seed: 1,
     width: size,
     height: size,
     layout: 'axial',
     hexes,
     rivers: [],
+    riverSides: new Map(),
+    riverCorners: new Map(),
     settlements: [],
     roadEdges: new Map(),
     seaEdges: new Map(),
     ferries: [],
     config: {
       navigableMinDischarge: 60000,
+      runoffMm: 800,
       fordMaxCatchmentKm2: 60,
       crossingReliefM: 60,
       meanPrecipMm: 800,
@@ -361,51 +364,6 @@ describe('riding', () => {
   });
 });
 
-describe('a courier at a river', () => {
-  // Column q=1 is the river; a rider steps onto it from dry ground at q=0.
-  const MINOR = 10; // 10 km2 x 800 mm = 8,000, well under the 60,000 threshold
-  const MAJOR = 200; // 200 x 800 = 160,000, well over
-  const from: Hex = { q: 0, r: 0 };
-  const to: Hex = { q: 1, r: 0 };
-
-  function riverWorld(catchmentKm2: number, tags: string[] = []): World {
-    const w = flatWorld(4);
-    for (const [k, hex] of w.hexes) {
-      if (hex.coord.q === 1) {
-        w.hexes.set(k, { ...hex, catchmentKm2, tags: new Set(['river', ...tags]) });
-      }
-    }
-    return w;
-  }
-
-  const dry = courierStepHours(flatWorld(4), cfg, from, to);
-
-  it('fords a minor river at the ford hours', () => {
-    expect(courierStepHours(riverWorld(MINOR), cfg, from, to)).toBeCloseTo(dry + cfg.fordHours);
-  });
-
-  it('gets over a major river, at a cost, where a division could not', () => {
-    const hours = courierStepHours(riverWorld(MAJOR), cfg, from, to);
-    expect(hours).toBeCloseTo(dry + cfg.courierMajorCrossingHours);
-    expect(Number.isFinite(hours)).toBe(true);
-  });
-
-  it('crosses free at a bridge', () => {
-    expect(courierStepHours(riverWorld(MAJOR, ['bridge']), cfg, from, to)).toBeCloseTo(dry);
-  });
-
-  it('treats a road across the channel as a bridge', () => {
-    const w = riverWorld(MAJOR);
-    w.roadEdges.set(edgeKey(from, to), { a: from, b: to, tier: 'track', deltaElevationM: 0 });
-    expect(courierStepHours(w, cfg, from, to)).toBeLessThan(dry);
-  });
-
-  it('pays nothing riding along the channel', () => {
-    const along = courierStepHours(riverWorld(MAJOR), cfg, { q: 1, r: 0 }, { q: 1, r: 1 });
-    expect(along).toBeCloseTo(dry);
-  });
-});
-
 describe('formations touching', () => {
   it('counts a column, not a marker', () => {
     // A big division is several kilometres of road. Its tail touches what its head
@@ -427,5 +385,74 @@ describe('formations touching', () => {
     const a = unit('a', 'red', [{ q: 5, r: 5 }]);
     const b = unit('b', 'red', [{ q: 6, r: 5 }]);
     expect(formationsTouch(a, b)).toBe(formationsTouch(b, a));
+  });
+});
+
+describe('a rider at a river', () => {
+  const from = { q: 2, r: 2 };
+  const to = { q: 3, r: 2 };
+  /** A minor river along the side between `from` and `to`, with the tags given. */
+  const minorRiver = (tags: string[]): World => {
+    const side = sideBetween(from, to);
+    const riverSides = new Map([
+      [sideId(side), { side, catchmentKm2: 10, flow: 0.5, dropM: 0, tags: new Set(tags) }],
+    ]);
+    return { ...world, riverSides };
+  };
+  const extra = (w: World) =>
+    courierStepHours(w, DEFAULT_CONFIG, from, to) - courierStepHours(world, DEFAULT_CONFIG, from, to);
+
+  it('wades a minor river at a ford’s hour', () => {
+    expect(extra(minorRiver([]))).toBeCloseTo(DEFAULT_CONFIG.fordHours);
+  });
+
+  // Ported from #90, which pinned these before rivers moved onto hexsides.
+  const majorRiver = (tags: string[] = []): World => {
+    const side = sideBetween(from, to);
+    const riverSides = new Map([
+      [sideId(side), { side, catchmentKm2: 1000, flow: 0.5, dropM: 0, tags: new Set(tags) }],
+    ]);
+    return { ...world, riverSides };
+  };
+
+  it('gets over a major river, at a cost, where a division could not', () => {
+    expect(extra(majorRiver())).toBeCloseTo(DEFAULT_CONFIG.courierMajorCrossingHours);
+  });
+
+  it('crosses free at a bridge', () => {
+    expect(extra(majorRiver(['bridge']))).toBeCloseTo(0);
+  });
+
+  it('treats a road across the river as a bridge', () => {
+    const w = majorRiver();
+    const roadEdges = new Map(w.roadEdges);
+    roadEdges.set(edgeKey(from, to), { a: from, b: to, tier: 'track', deltaElevationM: 0 });
+    expect(extra({ ...w, roadEdges })).toBeLessThan(0.0001);
+  });
+
+  it('pays nothing riding along a river rather than across it', () => {
+    // A river along the side between `from` and `to`; a ride from `from` to (2, 3) does
+    // not cross it.
+    const along = { q: 2, r: 3 };
+    expect(courierStepHours(majorRiver(), DEFAULT_CONFIG, from, along)).toBeCloseTo(
+      courierStepHours(world, DEFAULT_CONFIG, from, along),
+    );
+  });
+
+  it('fords a major river at a ford’s hour', () => {
+    const side = sideBetween(from, to);
+    const w = {
+      ...world,
+      riverSides: new Map([
+        [sideId(side), { side, catchmentKm2: 1000, flow: 0.5, dropM: 0, tags: new Set(['ford']) }],
+      ]),
+    };
+    expect(extra(w)).toBeCloseTo(DEFAULT_CONFIG.fordHours);
+  });
+
+  it('pays a major river’s price where the minor one runs white', () => {
+    for (const tag of ['rapids', 'cataract']) {
+      expect(extra(minorRiver([tag])), tag).toBeCloseTo(DEFAULT_CONFIG.courierMajorCrossingHours);
+    }
   });
 });

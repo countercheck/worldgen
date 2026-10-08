@@ -47,12 +47,3 @@ export function isPassable(world: World, c: Hex): boolean {
   const hex = hexAt(world, c);
   return hex !== undefined && !isWater(hex);
 }
-
-/**
- * Whether a hex carries a river.
- *
- * The generator tags river hexes and gives them an upstream catchment; either alone would
- * do, but a hex with a catchment and no tag is a drainage artefact rather than a
- * watercourse, so both are required.
- */
-export const isRiver = (hex: WorldHex): boolean => hex.tags.has('river') && hex.catchmentKm2 > 0;

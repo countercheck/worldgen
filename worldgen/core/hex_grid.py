@@ -108,6 +108,148 @@ def pixel_to_axial(x: float, y: float, hex_size: float) -> HexCoord:
     return round_axial((q, r))
 
 
+# ── Corners and sides ────────────────────────────────────────────────────────────────────
+#
+# Rivers run along hexsides, so the grid needs names for the corners and sides between
+# hexes as well as for the hexes themselves.
+#
+# Corner k of a flat-top hex sits at 60·k degrees from its centre (y down the screen, so
+# rising k runs clockwise), and side i joins corner i to corner i + 1.  Side i faces the
+# neighbour in `_SIDE_DIRECTIONS[i]`.
+#
+# Every corner is shared by three hexes and every side by two, so each needs one name.
+# A hex *owns* its corners 0 and 1 and its sides 0, 1 and 2; every other corner or side
+# of it is owned by a neighbour.  Corners 0, 2, 4 of any hex are the same kind of corner
+# as each other (each is some hex's corner 0), as are 1, 3, 5, which is what makes two
+# owned corners per hex exactly enough.
+#
+#   Corner = (q, r, k)  k in {0, 1}
+#   Side   = (q, r, s)  s in {0, 1, 2}
+#
+# Integers, not pixel positions, so they sort, hash and serialise exactly.
+
+Corner = tuple[int, int, int]
+Side = tuple[int, int, int]
+
+# The neighbour across each side, in side order.  Not the same order as `neighbors`.
+_SIDE_DIRECTIONS = [(1, 0), (0, 1), (-1, 1), (-1, 0), (0, -1), (1, -1)]
+
+# Corner k of hex (q, r) as an offset to its owner and the owner's corner index.
+_CORNER_OWNERS = [(0, 0, 0), (0, 0, 1), (-1, 1, 0), (-1, 0, 1), (-1, 0, 0), (0, -1, 1)]
+
+
+def corner_of(coord: HexCoord, k: int) -> Corner:
+    """The name of corner *k* (0–5) of a hex."""
+    dq, dr, owned = _CORNER_OWNERS[k % 6]
+    return (coord[0] + dq, coord[1] + dr, owned)
+
+
+def side_of(coord: HexCoord, i: int) -> Side:
+    """The name of side *i* (0–5) of a hex — the side it shares with that neighbour."""
+    i %= 6
+    if i < 3:
+        return (coord[0], coord[1], i)
+    dq, dr = _SIDE_DIRECTIONS[i]
+    return (coord[0] + dq, coord[1] + dr, i - 3)
+
+
+def hex_corner_keys(coord: HexCoord) -> list[Corner]:
+    """A hex's six corners, in corner order."""
+    return [corner_of(coord, k) for k in range(6)]
+
+
+def hex_side_keys(coord: HexCoord) -> list[Side]:
+    """A hex's six sides, in side order."""
+    return [side_of(coord, i) for i in range(6)]
+
+
+def corner_hexes(corner: Corner) -> list[HexCoord]:
+    """The three hexes meeting at a corner: its owner first."""
+    q, r, k = corner
+    if k == 0:
+        return [(q, r), (q + 1, r), (q + 1, r - 1)]
+    return [(q, r), (q + 1, r), (q, r + 1)]
+
+
+def corner_neighbors(corner: Corner) -> list[Corner]:
+    """The three corners one side away.
+
+    Each is reached along the side `corner_sides` lists at the same index.
+    """
+    q, r, k = corner
+    if k == 0:
+        return [(q, r, 1), (q, r - 1, 1), (q + 1, r - 1, 1)]
+    return [(q, r, 0), (q - 1, r + 1, 0), (q, r + 1, 0)]
+
+
+def side_between(a: HexCoord, b: HexCoord) -> Side:
+    """The side two neighbouring hexes share; the same whichever is named first."""
+    d = (b[0] - a[0], b[1] - a[1])
+    if d not in _SIDE_DIRECTIONS:
+        raise ValueError(f"{a} and {b} are not neighbours")
+    return side_of(a, _SIDE_DIRECTIONS.index(d))
+
+
+def side_hexes(side: Side) -> list[HexCoord]:
+    """The two hexes either side of a side: its owner first."""
+    q, r, s = side
+    dq, dr = _SIDE_DIRECTIONS[s]
+    return [(q, r), (q + dq, r + dr)]
+
+
+def side_corners(side: Side) -> list[Corner]:
+    """A side's two end corners, in the owner's clockwise order."""
+    q, r, s = side
+    return [corner_of((q, r), s), corner_of((q, r), s + 1)]
+
+
+def corner_sides(corner: Corner) -> list[Side]:
+    """The three sides meeting at a corner, in step with `corner_neighbors`."""
+    return [side_joining(corner, n) for n in corner_neighbors(corner)]
+
+
+def side_joining(a: Corner, b: Corner) -> Side:
+    """The side running from corner *a* to neighbouring corner *b*."""
+    # Two neighbouring corners share exactly two hexes, and the side between those two
+    # hexes is the one that joins the corners.
+    shared = [h for h in corner_hexes(a) if h in corner_hexes(b)]
+    if len(shared) != 2:
+        raise ValueError(f"{a} and {b} are not neighbouring corners")
+    return side_between(shared[0], shared[1])
+
+
+def corner_to_pixel(corner: Corner, hex_size: float) -> tuple[float, float]:
+    """Pixel position of a corner (flat-top layout)."""
+    q, r, k = corner
+    cx, cy = axial_to_pixel((q, r), hex_size)
+    angle = math.radians(60 * k)
+    return cx + hex_size * math.cos(angle), cy + hex_size * math.sin(angle)
+
+
+def corner_id(corner: Corner) -> str:
+    """A corner as a string key, for JSON and for campaign events: ``"q,r,k"``."""
+    return f"{corner[0]},{corner[1]},{corner[2]}"
+
+
+def side_id(side: Side) -> str:
+    """A side as a string key, for JSON and for campaign events: ``"q,r,s"``."""
+    return f"{side[0]},{side[1]},{side[2]}"
+
+
+def parse_corner(text: str) -> Corner:
+    q, r, k = (int(x) for x in text.split(","))
+    if k not in (0, 1):
+        raise ValueError(f"not a corner: {text!r}")
+    return (q, r, k)
+
+
+def parse_side(text: str) -> Side:
+    q, r, s = (int(x) for x in text.split(","))
+    if s not in (0, 1, 2):
+        raise ValueError(f"not a side: {text!r}")
+    return (q, r, s)
+
+
 def round_axial(coord: tuple[float, float]) -> HexCoord:
     """Round fractional axial coordinates to nearest hex."""
     q, r = coord

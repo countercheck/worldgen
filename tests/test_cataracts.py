@@ -6,9 +6,9 @@ from tests.worlds import build_world
 from worldgen.core.config import WorldConfig
 from worldgen.core.hex import Hex, TerrainClass
 from worldgen.stages.cataracts import CataractStage
-from worldgen.stages.crossings import channel_drop_m
 from worldgen.stages.habitability import site_bonus
-from worldgen.stages.haulage import bulk_routes, carries_a_barge, navigable
+from worldgen.stages.haulage import bulk_routes, catchment_carries_a_barge, navigable
+from worldgen.stages.riverside import side_gradients
 
 # The 96x96 temperate world the city tests use: the 64x64 default has no river big and
 # steep enough to make a cataract, and a test asserting over no cataracts asserts nothing.
@@ -30,18 +30,24 @@ def _world(**over):
 def test_a_cataract_is_a_barge_river_falling_fast():
     state = _world()
     cfg = WorldConfig(**state.metadata["config"])
-    for hx in state.hexes.values():
-        if "cataract" in hx.tags:
-            assert "river" in hx.tags and carries_a_barge(hx, cfg)
-            assert channel_drop_m(hx, state.hexes, cfg) >= cfg.cataract_min_drop_m
+    gradient = side_gradients(state)
+    falls = [s for s, rs in state.river_sides.items() if "cataract" in rs.tags]
+    assert falls
+    for side in falls:
+        assert catchment_carries_a_barge(state.river_sides[side].catchment_km2, cfg)
+        assert gradient[side] >= cfg.cataract_min_drop_m
 
 
 def test_no_boat_passes_a_cataract():
     state = _world()
     cfg = WorldConfig(**state.metadata["config"])
-    falls = [hx for hx in state.hexes.values() if "cataract" in hx.tags]
+    from worldgen.core.hex_grid import side_hexes
+    from worldgen.stages.riverside import river_index
+
+    rivers = river_index(state, cfg)
+    falls = [s for s, rs in state.river_sides.items() if "cataract" in rs.tags]
     assert falls, "the fixture map has no cataract, so the tests above assert over nothing"
-    assert all(not navigable(hx, cfg) for hx in falls)
+    assert all(not navigable(state.hexes[h], cfg, rivers) for s in falls for h in side_hexes(s))
 
 
 def test_zero_turns_cataracts_off():
@@ -55,7 +61,6 @@ def _river(drops):
     height = sum(drops) + 10.0
     for q in range(len(drops) + 1):
         hx = Hex(coord=(q, 0), terrain_class=TerrainClass.LAND, elevation=height)
-        hx.tags.add("river")
         hx.catchment_km2 = 1e6
         hexes[(q, 0)] = hx
         if q < len(drops):
@@ -64,45 +69,67 @@ def _river(drops):
 
 
 def test_the_stage_marks_only_the_steep_reach():
+    """A fall of 40 m over one side marks it and the sides either side — the gradient is
+    read over three sides — and nothing further off."""
+    from tests.worlds import lay_river
     from worldgen.core.world_state import WorldState
 
     cfg = WorldConfig(cataract_min_drop_m=20.0)
-    state = WorldState.empty(1, 8, 1, cfg.grid_layout)
-    state.hexes = _river([1.0, 1.0, 40.0, 1.0, 1.0])
+    state = WorldState.empty(1, 10, 3, cfg.grid_layout)
+    river = lay_river(state, [(q, 1) for q in range(9)])
+    sides = river.sides()
+    steep = len(sides) // 2
+    for i, side in enumerate(sides):
+        state.river_sides[side].catchment_km2 = 1e6
+        state.river_sides[side].drop_m = 40.0 if i == steep else 1.0
     CataractStage(cfg, np.random.default_rng(0)).run(state)
-    assert [q for (q, _), hx in state.hexes.items() if "cataract" in hx.tags] == [2]
+    marked = [i for i, s in enumerate(sides) if "cataract" in state.river_sides[s].tags]
+    assert marked == [steep - 1, steep, steep + 1]
 
 
 def test_a_cataract_forces_a_portage():
     """Hauling past the falls costs a landing and a loading more than hauling past a slack
     reach of the same river, which is what makes the portage a quay. River landings, since
     both sides of the falls are river."""
+    from tests.worlds import river_to_sea
+    from worldgen.stages.riverside import river_index
+
     cfg = WorldConfig()
-    slack, falls = _river([1.0] * 6), _river([1.0] * 6)
-    falls[(3, 0)].tags.add("cataract")
-    cost_slack, _ = bulk_routes(slack, [(6, 0)], cfg)
-    cost_falls, _ = bulk_routes(falls, [(6, 0)], cfg)
-    assert cost_falls[(0, 0)] >= cost_slack[(0, 0)] + 2 * cfg.haulage_river_transship_cost
+    slack, _ = river_to_sea()
+    falls, _ = river_to_sea(cataract_at=2)
+    seat, start = (3, 1), (1, 1)
+    cost_slack, _ = bulk_routes(slack.hexes, [seat], cfg, rivers=river_index(slack, cfg))
+    cost_falls, _ = bulk_routes(falls.hexes, [seat], cfg, rivers=river_index(falls, cfg))
+    assert cost_falls[start] >= cost_slack[start] + 2 * cfg.haulage_river_transship_cost
 
 
 def test_a_site_beside_the_falls_has_water_power():
+    from tests.worlds import river_to_sea
+    from worldgen.core.hex_grid import side_hexes
+    from worldgen.stages.riverside import river_index
+
     cfg = WorldConfig()
-    hexes = _river([1.0] * 4)
-    before = site_bonus((1, 0), hexes[(1, 0)], hexes, cfg)
-    hexes[(2, 0)].tags.add("cataract")
-    after = site_bonus((1, 0), hexes[(1, 0)], hexes, cfg)
+    slack, river = river_to_sea()
+    falls, _ = river_to_sea(cataract_at=2)
+    bank = side_hexes(river.sides()[2])[0]
+    before = site_bonus(bank, slack.hexes[bank], slack.hexes, cfg, river_index(slack, cfg))
+    after = site_bonus(bank, falls.hexes[bank], falls.hexes, cfg, river_index(falls, cfg))
+    # The falls stop barges at the bank, but it is still a step from the navigable reach
+    # either side, so it keeps its harbour and gains the mill.
     assert after == before + cfg.habitability_mill_bonus
 
 
 def test_a_river_landing_is_cheaper_than_a_harbour():
     """A barge ties up at a bank; a sea-going ship wants a harbour."""
+    from tests.worlds import river_to_sea
     from worldgen.stages.haulage import make_bulk_cost
+    from worldgen.stages.riverside import river_index
 
     cfg = WorldConfig()
-    land = Hex(coord=(0, 0), terrain_class=TerrainClass.LAND)
-    river = _river([1.0])[(1, 0)]
-    sea = Hex(coord=(1, 0), terrain_class=TerrainClass.OPEN_WATER)
-    _, edge = make_bulk_cost({}, cfg)
-    assert edge(land, river) == cfg.haulage_river_transship_cost
-    assert edge(land, sea) == cfg.haulage_transship_cost
+    ws, _ = river_to_sea()
+    _, edge = make_bulk_cost(ws.hexes, cfg, river_index(ws, cfg))
+    field, bank = ws.hexes[(1, 2)], ws.hexes[(1, 1)]
+    shore, sea = ws.hexes[(5, 0)], ws.hexes[(5, 1)]
+    assert edge(field, bank) == cfg.haulage_river_transship_cost
+    assert edge(shore, sea) == cfg.haulage_transship_cost
     assert cfg.haulage_river_transship_cost < cfg.haulage_transship_cost

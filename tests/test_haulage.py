@@ -8,17 +8,16 @@ import pytest
 
 from worldgen.core.config import WorldConfig
 from worldgen.core.hex import Hex, LandCover, TerrainClass
-from worldgen.stages.crossings import river_span
 from worldgen.stages.haulage import (
     allocate_catchments,
     fishery_rim,
-    ford_cost,
     gather,
     haulage_range,
     navigable,
     settleable,
     usable_fraction,
 )
+from worldgen.stages.riverside import Rivers, river_index
 
 
 def _hex(coord, terrain=TerrainClass.LAND, **kw):
@@ -32,7 +31,6 @@ def _strip(length, terrain=TerrainClass.LAND):
 
 def _river(hx, catchment_km2):
     hx.catchment_km2 = catchment_km2
-    hx.tags.add("river")
     return hx
 
 
@@ -79,23 +77,31 @@ def test_zero_range_carries_nothing():
 def test_open_water_is_navigable():
     cfg = WorldConfig()
     for terrain in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER):
-        assert navigable(_hex((0, 0), terrain), cfg)
+        assert navigable(_hex((0, 0), terrain), cfg, Rivers())
+
+
+def _bank_on(catchment_km2, cfg):
+    from tests.worlds import river_to_sea
+
+    ws, _ = river_to_sea(catchment_km2=catchment_km2)
+    return ws, river_index(ws, cfg)
 
 
 def test_a_big_river_floats_a_boat_and_a_headwater_does_not():
     cfg = WorldConfig()
-    big = _river(_hex((0, 0)), _catchment_for(cfg, cfg.navigable_min_discharge * 2))
-    trickle = _river(_hex((1, 0)), _catchment_for(cfg, cfg.navigable_min_discharge * 0.5))
-    assert navigable(big, cfg)
-    assert not navigable(trickle, cfg)
+    ws, rivers = _bank_on(_catchment_for(cfg, cfg.navigable_min_discharge * 2), cfg)
+    assert navigable(ws.hexes[(1, 1)], cfg, rivers)
+    ws, rivers = _bank_on(_catchment_for(cfg, cfg.navigable_min_discharge * 0.5), cfg)
+    assert not navigable(ws.hexes[(1, 1)], cfg, rivers)
 
 
-def test_catchment_without_the_river_tag_is_not_a_channel():
-    """Every hex drains something; only the tag says a channel runs through it."""
+def test_a_hex_away_from_the_river_is_not_afloat_however_much_drains_it():
+    """Every hex drains something; only a river side beside it says a boat can be there."""
     cfg = WorldConfig()
-    hx = _hex((0, 0))
-    hx.catchment_km2 = 1e6
-    assert not navigable(hx, cfg)
+    ws, rivers = _bank_on(1e6, cfg)
+    field = ws.hexes[(1, 4)]
+    field.catchment_km2 = 1e6
+    assert not navigable(field, cfg, rivers)
 
 
 def test_a_dry_region_cannot_float_a_boat_on_the_same_river():
@@ -107,9 +113,9 @@ def test_a_dry_region_cannot_float_a_boat_on_the_same_river():
     """
     wet = WorldConfig(regional_climate="tropical")
     dry = WorldConfig(regional_climate="arid")
-    hx = _river(_hex((0, 0)), _catchment_for(wet, wet.navigable_min_discharge * 1.5))
-    assert navigable(hx, wet)
-    assert not navigable(hx, dry)
+    ws, wet_rivers = _bank_on(_catchment_for(wet, wet.navigable_min_discharge * 1.5), wet)
+    assert navigable(ws.hexes[(1, 1)], wet, wet_rivers)
+    assert not navigable(ws.hexes[(1, 1)], dry, river_index(ws, dry))
 
 
 def test_water_multiplies_reach():
@@ -119,8 +125,8 @@ def test_water_multiplies_reach():
     gap between a river city and an inland one follows from this one multiplier.
     """
     cfg = WorldConfig()
-    inland = haulage_range(_hex((0, 0)), cfg)
-    port = haulage_range(_hex((1, 0), TerrainClass.OPEN_WATER), cfg)
+    inland = haulage_range(_hex((0, 0)), cfg, Rivers())
+    port = haulage_range(_hex((1, 0), TerrainClass.OPEN_WATER), cfg, Rivers())
     assert inland == cfg.haulage_range_land
     assert port == pytest.approx(inland * cfg.haulage_range_water_mult)
     assert port > inland
@@ -320,37 +326,102 @@ def test_settleable_excludes_water_mountain_and_bog():
     assert settleable(hexes, WorldConfig()) == {(0, 0), (5, 0)}
 
 
-# ── ford_cost: what a walker pays to get across a river ─────────────────────────────────
+# ── Rivers: the river sides, read for movement ────────────────────────────────────────
 
 
-def _bank_and_channel(catchment_km2, *tags):
-    bank = _hex((0, 0))
-    channel = _river(_hex((1, 0)), catchment_km2)
-    channel.tags.update(tags)
-    return bank, channel, {bank.coord: bank, channel.coord: channel}
+def test_walking_across_a_river_is_charged_once_on_its_side():
+    from tests.worlds import river_to_sea
+    from worldgen.core.hex_grid import side_hexes
+    from worldgen.stages.haulage import ford_cost
+    from worldgen.stages.riverside import river_index
 
-
-def test_ford_cost_is_nothing_off_the_river_and_along_it():
     cfg = WorldConfig()
-    a, b = _hex((0, 0)), _hex((1, 0))
-    assert ford_cost(a, b, {}, cfg) == 0.0
-    c, d = _river(_hex((0, 0)), 500), _river(_hex((1, 0)), 500)
-    assert ford_cost(c, d, {}, cfg) == 0.0
+    ws, river = river_to_sea(catchment_km2=cfg.ford_max_catchment_km2 * 4)
+    rivers = river_index(ws, cfg)
+    side = river.sides()[1]
+    a, b = (ws.hexes[h] for h in side_hexes(side))
+    across = ford_cost(a, b, rivers)
+    assert across == ford_cost(b, a, rivers) > 0.0
+    # A step that crosses no river side costs nothing to get across.
+    assert ford_cost(ws.hexes[(5, 0)], ws.hexes[(6, 0)], rivers) == 0.0
+    ws.river_sides[side].tags.add("ford")
+    assert ford_cost(a, b, river_index(ws, cfg)) == cfg.crossing_use_cost
 
 
 @pytest.mark.parametrize("tag", ["ford", "bridge"])
-def test_ford_cost_at_a_crossing_is_the_use_cost_either_way(tag):
+def test_a_crossing_costs_its_use_whichever_kind_it_is(tag):
+    """Ported from #90, which pinned this before rivers moved onto hexsides."""
+    from tests.worlds import river_to_sea
+    from worldgen.core.hex_grid import side_hexes
+    from worldgen.stages.haulage import ford_cost
+    from worldgen.stages.riverside import river_index
+
     cfg = WorldConfig()
-    bank, channel, hexes = _bank_and_channel(500, tag)
-    assert ford_cost(bank, channel, hexes, cfg) == cfg.crossing_use_cost
-    assert ford_cost(channel, bank, hexes, cfg) == cfg.crossing_use_cost
+    ws, river = river_to_sea(catchment_km2=cfg.ford_max_catchment_km2 * 4)
+    side = river.sides()[1]
+    ws.river_sides[side].tags.add(tag)
+    a, b = (ws.hexes[h] for h in side_hexes(side))
+    rivers = river_index(ws, cfg)
+    assert ford_cost(a, b, rivers) == ford_cost(b, a, rivers) == cfg.crossing_use_cost
 
 
-def test_ford_cost_without_a_crossing_scales_with_the_span():
+def test_wading_where_there_is_no_crossing_costs_more_the_bigger_the_river():
+    """Ported from #90: the cost of getting across is the river's span, times the toll."""
+    from tests.worlds import river_to_sea
+    from worldgen.core.hex_grid import side_hexes
+    from worldgen.stages.haulage import ford_cost
+    from worldgen.stages.riverside import river_index, side_gradients, side_span
+
     cfg = WorldConfig()
-    bank, channel, hexes = _bank_and_channel(500)
-    cost = ford_cost(bank, channel, hexes, cfg)
-    assert cost == pytest.approx(cfg.travel_ford_cost * river_span(channel, hexes, cfg))
-    assert ford_cost(channel, bank, hexes, cfg) == cost
-    _, small, small_hexes = _bank_and_channel(5)
-    assert 0.0 < ford_cost(bank, small, small_hexes, cfg) < cost
+
+    def across(catchment_km2):
+        ws, river = river_to_sea(catchment_km2=catchment_km2)
+        side = river.sides()[1]
+        a, b = (ws.hexes[h] for h in side_hexes(side))
+        span = side_span(ws.river_sides[side].catchment_km2, side_gradients(ws).get(side, 0.0), cfg)
+        return ford_cost(a, b, river_index(ws, cfg)), span
+
+    big, big_span = across(cfg.ford_max_catchment_km2 * 8)
+    small, _ = across(cfg.ford_max_catchment_km2 * 2)
+    assert big == pytest.approx(cfg.travel_ford_cost * big_span)
+    assert 0.0 < small < big
+
+
+def test_a_cataract_cuts_the_river_into_two_reaches_with_a_portage_between():
+    from tests.worlds import river_to_sea
+    from worldgen.core.hex_grid import side_hexes
+    from worldgen.stages.riverside import river_index
+
+    cfg = WorldConfig()
+    ws, river = river_to_sea(cataract_at=2)
+    rivers = river_index(ws, cfg)
+    falls = set(side_hexes(river.sides()[2]))
+    assert falls <= rivers.portage
+    assert not falls & set(rivers.reaches)
+    above, below = ws.hexes[(1, 1)], ws.hexes[(3, 1)]
+    assert rivers.reaches[above.coord] != rivers.reaches[below.coord]
+
+
+def test_a_barge_reaches_the_sea_only_at_the_river_mouth():
+    from tests.worlds import river_to_sea
+    from worldgen.stages.riverside import river_index
+
+    cfg = WorldConfig()
+    ws, _ = river_to_sea()
+    rivers = river_index(ws, cfg)
+    assert rivers.joined(ws.hexes[(3, 1)], ws.hexes[(4, 1)]), "the mouth"
+    assert rivers.joined(ws.hexes[(1, 1)], ws.hexes[(2, 1)]), "along the reach"
+    # A field beside the river is not afloat: a cart has to bring the cargo to the bank.
+    assert not rivers.afloat(ws.hexes[(1, 2)])
+
+
+def test_a_brook_floats_no_barge_and_a_trunk_floats_timber():
+    from tests.worlds import river_to_sea
+    from worldgen.stages.riverside import river_index
+
+    cfg = WorldConfig()
+    brook, _ = river_to_sea(catchment_km2=1.0)
+    assert not river_index(brook, cfg).reaches
+    assert not river_index(brook, cfg).floats
+    trunk, _ = river_to_sea()
+    assert (1, 1) in river_index(trunk, cfg).floats

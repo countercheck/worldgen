@@ -1,6 +1,6 @@
 import pytest
 
-from tests.worlds import lay_road
+from tests.worlds import lay_river, lay_road
 from worldgen.core.hex import (
     Biome,
     LandCover,
@@ -9,7 +9,7 @@ from worldgen.core.hex import (
     SettlementTier,
     TerrainClass,
 )
-from worldgen.core.world_state import Ferry, River, RoadTier, WorldState
+from worldgen.core.world_state import Ferry, RoadTier, WorldState
 from worldgen.export.svg_export import SVGConfig, render, save
 from worldgen.render import glyphs
 
@@ -43,7 +43,7 @@ def _small_world() -> WorldState:
             name="Millbrook",
         ),
     ]
-    ws.rivers = [River(hexes=[(0, 0), (1, 0), (2, 0)], flow_volume=1.5)]
+    lay_river(ws, [(0, 0), (1, 0), (2, 0)], flow_volume=1.5)
     lay_road(ws, [(1, 1), (2, 1), (3, 1)], RoadTier.PRIMARY)
     return ws
 
@@ -272,7 +272,7 @@ def _terrain_boxes(svg: str) -> list[tuple[float, float, float, float]]:
 def _sheared_world() -> WorldState:
     """A world wide enough that the axial shear opens up real corner space."""
     ws = WorldState.empty(seed=7, width=32, height=32)
-    ws.rivers = [River(hexes=[(0, 0), (1, 0), (2, 0)], flow_volume=1.5)]
+    lay_river(ws, [(0, 0), (1, 0), (2, 0)], flow_volume=1.5)
     lay_road(ws, [(1, 1), (2, 1), (3, 1)], RoadTier.PRIMARY)
     ws.settlements = [
         Settlement(
@@ -593,15 +593,21 @@ def test_ferry_puts_an_anchorage_row_in_the_legend():
 # --- fords and bridges -------------------------------------------------------
 
 
+# Enough catchment to float a barge under the default climate: a major river.
+_MAJOR_KM2 = 1e6
+
+
 def _crossing_world() -> WorldState:
-    """A river with a road crossing it: one hex tagged ford, one tagged bridge."""
+    """A river with a road crossing it: one side a ford, one a bridge."""
     ws = WorldState.empty(seed=5, width=5, height=5)
-    ws.rivers = [River(hexes=[(2, 0), (2, 1), (2, 2), (2, 3)], flow_volume=1.0)]
-    for r in range(4):
-        ws.hexes[(2, r)].river_flow = 0.8
-        ws.hexes[(2, r)].tags.add("river")
-    ws.hexes[(2, 1)].tags.add("ford")
-    ws.hexes[(2, 2)].tags.add("bridge")
+    river = lay_river(
+        ws, [(2, 0), (2, 1), (2, 2), (2, 3)], flow_volume=1.0, flow={(2, r): 0.8 for r in range(4)}
+    )
+    ford, bridge = river.sides()[1], river.sides()[2]
+    for rs in ws.river_sides.values():
+        rs.catchment_km2 = _MAJOR_KM2  # a minor river's fords go unmarked
+    ws.river_sides[ford].tags.add("ford")
+    ws.river_sides[bridge].tags.add("bridge")
     lay_road(ws, [(1, 1), (2, 1), (3, 1)], RoadTier.PRIMARY)
     return ws
 
@@ -610,7 +616,7 @@ def _crossings_group(svg: str) -> str:
     return svg.split('<g id="layer-crossings">')[1].split("\n  </g>")[0]
 
 
-def test_crossings_layer_draws_a_symbol_per_tagged_hex():
+def test_crossings_layer_draws_a_symbol_per_tagged_side():
     svg = render(_crossing_world())
     assert 'id="layer-crossings"' in svg
     group = _crossings_group(svg)
@@ -632,11 +638,15 @@ def test_crossings_are_rotated_square_to_the_river():
     """A span drawn along the current would read as a second river."""
     import re
 
-    group = _crossings_group(render(_crossing_world()))
-    angles = [float(a) for a in re.findall(r"rotate\(([-\d.]+)", group)]
+    from worldgen.export import legend
+
+    ws = _crossing_world()
+    group = _crossings_group(render(ws))
+    angles = sorted(float(a) % 180 for a in re.findall(r"rotate\(([-\d.]+)", group))
     assert angles, "crossing symbols are not rotated at all"
-    # River runs down a column here; the span must not be parallel to it.
-    assert all(abs((a % 180) - 90.0) > 1.0 for a in angles), angles
+    # Each span is turned square to the river along the side it crosses.
+    expected = sorted((angle + 90.0) % 180 for *_, angle in legend.crossings(ws, 12.0))
+    assert angles == pytest.approx(expected, abs=0.1)
 
 
 def test_crossings_layer_can_be_disabled():
@@ -654,10 +664,23 @@ def test_legend_lists_ford_and_bridge():
     assert ">Bridge</text>" in body
 
 
+def test_a_minor_rivers_fords_go_unmarked():
+    """A minor river can be waded almost anywhere; marking its fords marks nothing."""
+    ws = _crossing_world()
+    for rs in ws.river_sides.values():
+        rs.catchment_km2 = 1.0
+    svg = render(ws)
+    group = _crossings_group(svg)
+    assert "stroke-dasharray" not in group, "a minor river's ford is drawn"
+    assert group.count("<line") == 4, "the bridge should still be drawn"
+    assert ">Ford</text>" not in svg.split('<g id="layer-legend">')[1]
+
+
 def test_legend_omits_crossings_not_present():
     """Only the kinds the map actually contains earn a row."""
     ws = _crossing_world()
-    ws.hexes[(2, 2)].tags.discard("bridge")
+    for rs in ws.river_sides.values():
+        rs.tags.discard("bridge")
     body = render(ws).split('<g id="layer-legend">')[1]
     assert ">Ford</text>" in body
     assert ">Bridge</text>" not in body
@@ -695,7 +718,7 @@ def _flowing_river_world() -> WorldState:
     path = [(q, 1) for q in range(6)]
     for i, c in enumerate(path):
         ws.hexes[c].river_flow = 0.05 + i * 0.19
-    ws.rivers = [River(hexes=path, flow_volume=1.0)]
+    lay_river(ws, path, flow_volume=1.0, flow={c: ws.hexes[c].river_flow for c in path})
     return ws
 
 
@@ -734,7 +757,7 @@ def test_bigger_river_is_drawn_wider_than_a_smaller_one():
     trickle = [(q, 0) for q in range(4)]
     for c in trickle:
         ws.hexes[c].river_flow = 0.05
-    ws.rivers.append(River(hexes=trickle, flow_volume=0.05))
+    lay_river(ws, trickle, flow_volume=0.05, flow=dict.fromkeys(trickle, 0.05))
     widths = _river_widths(render(ws))
     assert max(widths) > min(widths)
 

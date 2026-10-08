@@ -21,6 +21,7 @@
 
 import { type Commander, ridersOf, wouldCycle } from './commander.js';
 import { DEFAULT_CONFIG, type CampaignConfig } from './config.js';
+import { riverBetween } from './crossing.js';
 import { mayWriteTo, planRide, type DespatchBody } from './despatch.js';
 import { planMarch, roadHoursEnding } from './movement.js';
 import { advance, despatchNow } from './scheduler.js';
@@ -455,6 +456,22 @@ export function check(
         v.push(hard(CODES.MALFORMED, 'a battle has to be somewhere'));
       }
       requireOnMap(cmd.coords, 'hex');
+      if (cmd.kind === 'declare_battle') {
+        // Forces that cannot cross to each other cannot engage: across a major river
+        // with no bridge or ford, or white water, they observe and nothing more. Soft —
+        // a referee with a boat bridge in mind, or two fights to declare at once, says so.
+        const across = riverBetween(world, cmd.coords.filter((c) => onMap(world, c)));
+        if (across.length > 0) {
+          const [a, b] = across[0]!;
+          v.push(
+            soft(
+              CODES.RIVER_BETWEEN_FORCES,
+              `a river nobody can cross runs between ${key(a)} and ${key(b)}; forces ` +
+                'either side of it can observe each other but not engage',
+            ),
+          );
+        }
+      }
       break;
 
     case 'set_daylight':

@@ -89,27 +89,29 @@ def actual_food(hx, cfg) -> float:
     }.get(hx.land_use, 0.0)
 
 
-def site_bonus(coord, hx, hexes, cfg) -> float:
+def site_bonus(coord, hx, hexes, cfg, rivers) -> float:
     """What the hex itself is worth as a site, independent of the land around it.
 
     A river to carry goods and drive a mill, a coast to land a boat, a rise to see and be
     seen from, a confluence where two routes must meet.  These are facts about the point,
     not about its catchment, so every scorer that ranks sites should read the same
     function — a second copy would drift from this one the first time a bonus changed.
+
+    *rivers* is `riverside.river_index` of the world.  A river runs along a hexside, so a
+    site is on it when it is one of the two hexes beside it — either bank.
     """
+    from .riverside import waterside
+
     nbrs = [hexes[n] for n in neighbors(coord) if n in hexes]
     bonus = 0.0
 
-    if "river" in hx.tags or any("river" in n.tags for n in nbrs):
+    if coord in rivers.beside:
         bonus += cfg.habitability_river_bonus
 
     # Water that floats a barge, which is a different question from a pleasant shore: a
     # navigable river twenty miles inland is a port, and a rocky coast on a dead-end bay is
-    # not. Imported here rather than at module scope because `haulage` reads this module's
-    # `food_value`; the cycle is only a problem at import time.
-    from .haulage import navigable
-
-    if navigable(hx, cfg) or any(navigable(n, cfg) for n in nbrs):
+    # not.
+    if waterside(coord, hx, hexes, rivers):
         bonus += cfg.habitability_harbour_bonus
 
     if hx.terrain_class == TerrainClass.COAST or any(
@@ -126,11 +128,11 @@ def site_bonus(coord, hx, hexes, cfg) -> float:
     if hx.relief > 0.0:
         bonus += cfg.habitability_hill_bonus * min(1.0, hx.relief / cfg.habitability_hill_relief_m)
 
-    if "confluence" in hx.tags:
+    if coord in rivers.confluence:
         bonus += cfg.habitability_confluence_bonus
 
     # Water power: a mill wants a great fall of water, and the greatest are at a cataract.
-    if "cataract" in hx.tags or any("cataract" in n.tags for n in nbrs):
+    if coord in rivers.portage:
         bonus += cfg.habitability_mill_bonus
 
     return bonus
@@ -191,6 +193,9 @@ class HabitabilityStage(GeneratorStage):
         }
         means = catchment_means(hexes.keys(), food, list(radii.values()))
 
+        from .riverside import river_index
+
+        rivers = river_index(state, cfg)
         raw: dict[str, dict] = {tier: {} for tier in radii}
         for coord, hx in hexes.items():
             if (
@@ -204,7 +209,7 @@ class HabitabilityStage(GeneratorStage):
 
             # Site bonuses describe the hex itself and so are identical across tiers;
             # only the catchment term changes with reach.
-            bonus = site_bonus(coord, hx, hexes, cfg)
+            bonus = site_bonus(coord, hx, hexes, cfg, rivers)
 
             for tier, radius in radii.items():
                 raw[tier][coord] = cfg.habitability_agri_weight * means[radius][coord] + bonus

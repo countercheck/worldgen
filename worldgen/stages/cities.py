@@ -24,16 +24,16 @@ from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
 from .habitability import actual_food
 from .haulage import bulk_routes, gather, navigable, usable_fraction
+from .riverside import WATER, river_index
 
-# How a cargo travels on a hex, ranked so the quay of a change is the lower-ranked side:
-# the land hex where a cart meets a boat, or the river hex where a barge meets a ship.
+# How a cargo travels on a hex: by cart, by barge on a river or a lake, or by ship.
 _LAND, _INLAND_WATER, _SEA = 0, 1, 2
 
 
-def _mode(hx, cfg) -> int:
+def _mode(hx, cfg, rivers) -> int:
     if hx.terrain_class is TerrainClass.OPEN_WATER:
         return _SEA
-    return _INLAND_WATER if navigable(hx, cfg) else _LAND
+    return _INLAND_WATER if navigable(hx, cfg, rivers) else _LAND
 
 
 class CityPromotionStage(GeneratorStage):
@@ -48,7 +48,8 @@ class CityPromotionStage(GeneratorStage):
             return state
 
         draw = self._market_draw(hexes, cfg)
-        routes = {s.coord: self._bulk_routes(hexes, s.coord, cfg) for s in markets}
+        rivers = river_index(state, cfg)
+        routes = {s.coord: self._bulk_routes(hexes, s.coord, cfg, rivers) for s in markets}
         reach = {coord: cost for coord, (cost, _) in routes.items()}
 
         promoted, _ = self._promote(markets, draw, reach, cfg)
@@ -93,24 +94,27 @@ class CityPromotionStage(GeneratorStage):
     # -- how far bulk can come ------------------------------------------------
 
     @staticmethod
-    def _bulk_reach(hexes, seat, cfg) -> dict:
+    def _bulk_reach(hexes, seat, cfg, rivers) -> dict:
         """Cost of hauling bulk to *seat* from anywhere within `haulage_range_land`."""
-        return CityPromotionStage._bulk_routes(hexes, seat, cfg)[0]
+        return CityPromotionStage._bulk_routes(hexes, seat, cfg, rivers)[0]
 
     @staticmethod
-    def _bulk_routes(hexes, seat, cfg) -> tuple[dict, dict]:
+    def _bulk_routes(hexes, seat, cfg, rivers) -> tuple[dict, dict]:
         """`bulk_routes` to one seat: the cost of hauling bulk there, and the way."""
-        return bulk_routes(hexes, [seat], cfg)
+        return bulk_routes(hexes, [seat], cfg, rivers=rivers)
 
     # -- transshipment --------------------------------------------------------
 
     @staticmethod
-    def _break_points(source, seat, toward, hexes, cfg) -> list:
+    def _break_points(source, seat, toward, hexes, cfg, rivers) -> list:
         """The quays a cargo from *source* to *seat* crosses: every change in how it travels.
 
         Cart to boat, boat to cart, and barge to ship where a navigable river meets the sea.
-        The quay is the lower-ranked side of the change — the land hex, or the river hex at
-        the mouth — because that is where the warehouses and the porters stand.
+        The quay is where the warehouses and the porters stand, which is dry land: a river
+        runs along a hexside, so a barge ties up at the bank hex beside it, and that bank is
+        the quay whether the cargo arrived by cart or leaves by ship.  A lake or the sea is
+        met at the land hex beside it.  Two banks that are not the same water — two rivers
+        side by side — mean landing and loading again, and both are quays.
         """
         quays = []
         here = source
@@ -118,9 +122,18 @@ class CityPromotionStage(GeneratorStage):
             nxt = toward.get(here)
             if nxt is None:
                 break
-            a, b = _mode(hexes[here], cfg), _mode(hexes[nxt], cfg)
+            a_hx, b_hx = hexes[here], hexes[nxt]
+            a, b = _mode(a_hx, cfg, rivers), _mode(b_hx, cfg, rivers)
             if a != b:
-                quays.append(here if a < b else nxt)
+                a_wet, b_wet = a_hx.terrain_class in WATER, b_hx.terrain_class in WATER
+                if a_wet and b_wet:
+                    quays.append(here if a < b else nxt)
+                elif a_wet or b_wet:
+                    quays.append(nxt if a_wet else here)
+                else:
+                    quays.append(here if a > b else nxt)  # the bank, not the field
+            elif a == _INLAND_WATER and not rivers.joined(a_hx, b_hx):
+                quays += [here, nxt]
             here = nxt
         return quays
 
@@ -291,6 +304,7 @@ class CityPromotionStage(GeneratorStage):
         eat out of the cargo they handle — so an entrepôt grows on trade that feeds somebody
         else, which is how a river mouth can outgrow the hinterland it stands in.
         """
+        rivers = river_index(state, cfg)
         by_coord = {s.coord: s for s in markets}
         start = {coord: s.population for coord, s in by_coord.items()}
 
@@ -323,7 +337,7 @@ class CityPromotionStage(GeneratorStage):
                 if share <= 0.0:
                     continue
                 paid = 0.0
-                for quay in self._break_points(other, seat, toward[seat], state.hexes, cfg):
+                for quay in self._break_points(other, seat, toward[seat], state.hexes, cfg, rivers):
                     handler = self._handler(quay, by_coord, cfg.transship_radius)
                     # Loading at its own market is part of what the market already is, and
                     # unloading at the city is part of the city: only the places between
@@ -389,7 +403,8 @@ class CityPromotionStage(GeneratorStage):
         by_coord = {s.coord: s for s in state.settlements}
         pop = {c: by_coord[c].population for c in cities}
         budget = cfg.haulage_range_land * cfg.manufactured_range_mult
-        routes = {c: bulk_routes(hexes, [c], cfg, budget=budget) for c in cities}
+        rivers = river_index(state, cfg)
+        routes = {c: bulk_routes(hexes, [c], cfg, budget=budget, rivers=rivers) for c in cities}
 
         handled = {(q, r): f for q, r, f in state.metadata.get("transshipment", [])}
         unhandled: dict = {}
@@ -414,7 +429,7 @@ class CityPromotionStage(GeneratorStage):
                 freight.append([*origin, *dest, round(volume, 3), "goods"])
                 food = volume / cfg.people_per_food
                 paid = 0.0
-                quays = self._break_points(origin, dest, routes[dest][1], hexes, cfg)
+                quays = self._break_points(origin, dest, routes[dest][1], hexes, cfg, rivers)
                 for quay in quays:
                     handler = self._handler(quay, by_coord, cfg.transship_radius)
                     if handler in (origin, dest):

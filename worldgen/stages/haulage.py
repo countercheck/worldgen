@@ -22,8 +22,7 @@ import heapq
 
 from ..core.hex import TerrainClass
 from ..core.hex_grid import neighbors
-from .crossings import river_span
-from .road_cost import WATER, is_river
+from .riverside import WATER, Rivers
 
 
 def usable_fraction(cost: float, range_limit: float) -> float:
@@ -43,75 +42,58 @@ def usable_fraction(cost: float, range_limit: float) -> float:
     return 1.0 - cost / range_limit
 
 
-def navigable(hx, cfg) -> bool:
-    """True where a boat can carry bulk: open water, or a river big enough to float one.
+def navigable(hx, cfg, rivers: Rivers) -> bool:
+    """True where a boat can carry bulk: open water, or the bank of a river big enough to
+    float one (`Rivers.afloat`).
 
-    Judged on discharge — catchment area times runoff depth — rather than on `river_flow`,
+    Judged on discharge — catchment area times runoff depth — rather than on the flow rank,
     which is normalised against the largest accumulation on the map and so says only how
-    this river compares with its neighbours.  On the old test every map had a navigable
-    trunk by construction, however small its rivers really were.  Discharge means the same
-    thing everywhere: an arid region's biggest watercourse can now simply fail to float a
-    boat, which is the point.
+    this river compares with its neighbours.  On a rank every map had a navigable trunk by
+    construction, however small its rivers really were.  Discharge means the same thing
+    everywhere: an arid region's biggest watercourse can simply fail to float a boat, which
+    is the point.
     """
-    if hx.terrain_class in WATER:
-        return True
-    if not is_river(hx) or "cataract" in hx.tags:
-        return False
-    return carries_a_barge(hx, cfg)
+    return rivers.afloat(hx)
 
 
-def carries_a_barge(hx, cfg) -> bool:
+def catchment_carries_a_barge(catchment_km2: float, cfg) -> bool:
     """Enough water to float a barge, whatever the reach is doing.
 
-    `navigable` less the cataract test, because `CataractStage` has to ask this of a reach
-    to decide whether it is a cataract — a small steep river is only a brook.
+    The navigability test less the cataract, because `CataractStage` has to ask this of a
+    reach to decide whether it is a cataract — a small steep river is only a brook.
     """
-    discharge = hx.catchment_km2 * cfg.runoff_mm(cfg.mean_precip_mm)
+    discharge = catchment_km2 * cfg.runoff_mm(cfg.mean_precip_mm)
     return discharge >= cfg.navigable_min_discharge
 
 
-def floatable(hx, cfg) -> bool:
-    """True where timber can be floated: open water, or a river carrying enough to drive logs.
+def floatable(hx, cfg, rivers: Rivers) -> bool:
+    """True where timber can be floated: open water, or beside a river carrying enough to
+    drive logs.
 
     A lower bar than `navigable`. Logs were driven and rafted down rivers far too small for
     a barge, but not down a brook: `timber_float_min_discharge` is that bar, in the same
     km2 x mm of discharge.
     """
-    if hx.terrain_class in WATER:
-        return True
-    if not is_river(hx):
-        return False
-    discharge = hx.catchment_km2 * cfg.runoff_mm(cfg.mean_precip_mm)
-    return discharge >= cfg.timber_float_min_discharge
+    return hx.terrain_class in WATER or hx.coord in rivers.floats
 
 
-def haulage_range(hx, cfg) -> float:
+def haulage_range(hx, cfg, rivers: Rivers) -> float:
     """The distance bulk goods can travel from *hx* before they are worth nothing.
 
     Water multiplies it.  Diocletian's Price Edict prices land carriage at 28-56x sea and
     6-11x river for the same tonne-kilometre, so the multiplier — not the absolute land
     range — is the well-attested half of this pair.
     """
-    if navigable(hx, cfg):
+    if navigable(hx, cfg, rivers):
         return cfg.haulage_range_land * cfg.haulage_range_water_mult
     return cfg.haulage_range_land
 
 
-def make_travel_cost(hexes, cfg):
+def make_travel_cost(hexes, cfg, rivers: Rivers | None = None):
     """Node and edge cost closures for people and goods moving over the ground.
 
-    Terrain and slope only.  Every river term in `road_cost.py` is deliberately left out,
-    because they answer a question about *roads* rather than about travel:
-
-    - `river_hex_cost` (12.0) prices a road out of threading a channel.  It is larger than
-      the whole 10.0 market-day budget, so including it made a single river hex an
-      absolute barrier and catchments came out covering a quarter of the map.
-    - The channel exclusion in `make_road_edge_cost` prices river-to-river edges at
-      infinity for the same reason.  Applied to a catchment it severs one along every
-      watercourse — the exact inverse of the truth, since a river valley is the best land
-      and the thing that holds a district together.
-    - `river_hex_cost` keeps roads off the channel so the side a road runs on stays
-      readable.  Nothing to do with how far a farmer walks.
+    Terrain and slope only: the river term in `road_cost.py` is deliberately left out,
+    because it answers a question about *roads* rather than about travel.
 
     River crossings are charged, but by `ford_cost` below rather than by
     `river_crossing_edge_cost`.  Those are the same idea weighted differently, and the
@@ -155,12 +137,12 @@ def make_travel_cost(hexes, cfg):
     def edge_cost(from_hx, to_hx) -> float:
         if to_hx.terrain_class in WATER or from_hx.terrain_class in WATER:
             return float("inf")
-        return ascent_cost(from_hx, to_hx, cfg) + ford_cost(from_hx, to_hx, hexes, cfg)
+        return ascent_cost(from_hx, to_hx, cfg) + ford_cost(from_hx, to_hx, rivers)
 
     return node_cost, edge_cost
 
 
-def make_bulk_cost(hexes, cfg):
+def make_bulk_cost(hexes, cfg, rivers: Rivers | None = None):
     """Node and edge cost closures for *bulk goods*, which travel by water where they can.
 
     The counterpart to `make_travel_cost`, and the difference between them is the whole of
@@ -180,33 +162,47 @@ def make_bulk_cost(hexes, cfg):
     other, which flattens the tier it is supposed to create.  A quay is real capital, and
     charging it is what makes a short hop not worth the trouble while a long haul plainly
     is.
+
+    Rivers run along hexsides, so a barge is "on" a hex when it lies beside a navigable
+    reach (`Rivers`).  Two such hexes are one voyage only if they share the reach: two
+    rivers side by side, or one river either side of a cataract, mean landing and loading
+    again, and are charged both.
     """
-    node_cost, edge_cost = make_travel_cost(hexes, cfg)
+    if rivers is None:
+        raise ValueError("bulk haulage needs the world's rivers: pass river_index(state, cfg)")
+    node_cost, edge_cost = make_travel_cost(hexes, cfg, rivers)
     mult = cfg.haulage_range_water_mult
 
+    def landing(hx) -> float:
+        # A sea-going ship wants a harbour; a barge ties up at a bank, and a lake boat is
+        # the same inland craft, so a river or lake landing costs the river rate.
+        if hx.terrain_class is TerrainClass.OPEN_WATER:
+            return cfg.haulage_transship_cost
+        return cfg.haulage_river_transship_cost
+
     def bulk_node(hx) -> float:
-        if navigable(hx, cfg):
+        if rivers.afloat(hx):
             return cfg.road_flat_cost / mult
         return node_cost(hx)
 
     def bulk_edge(from_hx, to_hx) -> float:
-        afloat_from, afloat_to = navigable(from_hx, cfg), navigable(to_hx, cfg)
+        afloat_from, afloat_to = rivers.afloat(from_hx), rivers.afloat(to_hx)
         if afloat_from != afloat_to:
-            # Over the quay, one way or the other, priced by the water it meets. A sea-going
-            # ship wants a harbour; a barge ties up at a bank, and a lake boat is the same
-            # inland craft, so a river or lake landing costs `haulage_river_transship_cost`.
-            water = from_hx if afloat_from else to_hx
-            if water.terrain_class is TerrainClass.OPEN_WATER:
-                return cfg.haulage_transship_cost
-            return cfg.haulage_river_transship_cost
+            # Over the quay, one way or the other, priced by the water it meets.
+            return landing(from_hx if afloat_from else to_hx)
         if afloat_from:
-            return 0.0  # already afloat: no ascent, and a navigable river is a road
+            if rivers.joined(from_hx, to_hx):
+                return 0.0  # already afloat: no ascent, and a navigable river is a road
+            # Afloat on both but not on the same water: ashore and afloat again.
+            return landing(from_hx) + edge_cost(from_hx, to_hx) + landing(to_hx)
         return edge_cost(from_hx, to_hx)
 
     return bulk_node, bulk_edge
 
 
-def bulk_routes(hexes, seats, cfg, budget: float | None = None) -> tuple[dict, dict]:
+def bulk_routes(
+    hexes, seats, cfg, budget: float | None = None, rivers: Rivers | None = None
+) -> tuple[dict, dict]:
     """Cost of hauling bulk to the nearest of *seats* from anywhere within `haulage_range_land`.
 
     A Dijkstra over `make_bulk_cost` rather than `make_travel_cost`. That distinction is the
@@ -221,7 +217,7 @@ def bulk_routes(hexes, seats, cfg, budget: float | None = None) -> tuple[dict, d
     defaults to `haulage_range_land`, the range of grain; a cargo worth more per ton, like
     smelted ore, is worth carrying further.
     """
-    node_cost, edge_cost = make_bulk_cost(hexes, cfg)
+    node_cost, edge_cost = make_bulk_cost(hexes, cfg, rivers)
     if budget is None:
         budget = cfg.haulage_range_land
 
@@ -254,25 +250,20 @@ def bulk_routes(hexes, seats, cfg, budget: float | None = None) -> tuple[dict, d
     return cost, toward
 
 
-def ford_cost(from_hx, to_hx, hexes, cfg) -> float:
+def ford_cost(from_hx, to_hx, rivers: Rivers | None) -> float:
     """What it costs to get across a watercourse on foot.
 
-    Charged on each land-river edge, so a perpendicular crossing pays twice — the same
-    shape as `river_crossing_edge_cost`, and for the same reason.
-
-    Where `CrossingStage` has already put a ford or a bridge, this is nearly nothing: the
-    crossing exists and you walk over it.  Everywhere else it scales with `river_span` and
-    has no fixed term, because somebody walking to market pays no capital — a slack
-    headwater is a step across and barely registers, a big or fast-running reach is most of
-    a day each way.  That is what makes a river bound a catchment along its length while
-    the district still reaches across at the one place it can.
+    Rivers run along hexsides, so this is charged once, on the step across the side.
+    Where `CrossingStage` or a road has put a ford or a bridge there, it is nearly nothing:
+    the crossing exists and you walk over it.  Everywhere else it scales with the reach's
+    span (`crossings.side_span`) and has no fixed term, because somebody walking to market
+    pays no capital — a slack headwater is a step across and barely registers, a big or
+    fast-running reach is most of a day.  That is what makes a river bound a catchment
+    along its length while the district still reaches across at the one place it can.
     """
-    if is_river(from_hx) == is_river(to_hx):
+    if rivers is None:
         return 0.0
-    channel = from_hx if is_river(from_hx) else to_hx
-    if "ford" in channel.tags or "bridge" in channel.tags:
-        return cfg.crossing_use_cost
-    return cfg.travel_ford_cost * river_span(channel, hexes, cfg)
+    return rivers.crossing.get(frozenset((from_hx.coord, to_hx.coord)), 0.0)
 
 
 def ascent_cost(from_hx, to_hx, cfg) -> float:
@@ -288,7 +279,7 @@ def ascent_cost(from_hx, to_hx, cfg) -> float:
     return climb / cfg.travel_ascent_per_hex
 
 
-def allocate_catchments(hexes, seats, budget: float, cfg):
+def allocate_catchments(hexes, seats, budget: float, cfg, rivers: Rivers | None = None):
     """Assign each land hex to the seat that can reach it most cheaply.
 
     One multi-source Dijkstra over the travel-cost field, stopping at *budget*.  Scales
@@ -305,7 +296,7 @@ def allocate_catchments(hexes, seats, budget: float, cfg):
     if not seats or budget <= 0.0:
         return {}, {}
 
-    node_cost, edge_cost = make_travel_cost(hexes, cfg)
+    node_cost, edge_cost = make_travel_cost(hexes, cfg, rivers)
 
     owner: dict = {}
     cost: dict = {}

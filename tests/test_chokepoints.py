@@ -19,9 +19,10 @@ from worldgen.core.hex import (
     SettlementTier,
     SoilQuality,
 )
-from worldgen.core.hex_grid import neighbors
+from worldgen.core.hex_grid import neighbors, side_between, side_hexes
 from worldgen.core.world_state import (
     ROAD_TIER_RANK,
+    RiverSide,
     RoadEdge,
     RoadTier,
     WorldState,
@@ -49,7 +50,14 @@ from worldgen.stages.chokepoints import (
 # reason to cross them. So the village tier is thinner everywhere by design, and a fixture
 # has to be somewhere with enough genuine crossings for the rules to have a subject. The
 # residual surplus is untouched by any of this: 511 before, 520 after.
-_CHOKE_SEED = 1
+#
+# Moved again when rivers moved onto hexsides: seed 1's world kept four bridgehead
+# candidates and founded none of them. Seed 3 grows two villages both with roads crossing
+# rivers on sides and once walking costs followed (seed 5, briefly used, emptied then).
+# And to seed 7 when valley floors were tilted toward their rivers (`corner_floor_blend`):
+# seed 3 founded none. Seed 7 grows four, the largest 280 people against a median town of
+# 1,195; seeds 4 and 8 also grow some, and 1, 2, 3 and 6 none.
+_CHOKE_SEED = 7
 _CHOKE_SIZE = 112
 # Axial, the grid these worlds were chosen on; offset became the default afterwards, and
 # the seeds below are picked for what they grow on this grid.
@@ -160,22 +168,19 @@ def test_a_pass_is_walled_by_ground_the_terrain_bands_call_impassable():
 def test_every_village_holds_a_chokepoint(choke_world):
     """The first half of the gate. No village is founded on ordinary ground.
 
-    A bridge only counts if the drawn network actually goes over it — at least two road
-    edges, one onto each bank. `CrossingStage` tags candidate sites before any road
-    exists, and a tag nothing crosses holds nothing.
+    A bridge only counts if the drawn network actually goes over it — a road edge between
+    the two hexes either side of the bridged side. `CrossingStage` tags candidate sites
+    before any road exists, and a tag nothing crosses holds nothing.
     """
-    degree: dict = {}
-    for a, b in choke_world.road_edges:
-        degree[a] = degree.get(a, 0) + 1
-        degree[b] = degree.get(b, 0) + 1
-
-    def crossed(coord):
-        return BRIDGE in choke_world.hexes[coord].tags and degree.get(coord, 0) >= 2
+    bridgeheads = set()
+    for side, rs in choke_world.river_sides.items():
+        ends = side_hexes(side)
+        if BRIDGE in rs.tags and road_edge_key(*ends) in choke_world.road_edges:
+            bridgeheads.update(ends)
 
     for s in _villages(choke_world):
         hx = choke_world.hexes[s.coord]
-        beside_bridge = any(crossed(n) for n in neighbors(s.coord) if n in choke_world.hexes)
-        assert PASS in hx.tags or crossed(s.coord) or beside_bridge, (
+        assert PASS in hx.tags or s.coord in bridgeheads, (
             f"village at {s.coord} holds no crossed bridge and no pass"
         )
 
@@ -218,8 +223,8 @@ def test_a_spur_that_joins_no_settlements_is_not_a_chokepoint():
     for a, b in zip(through, through[1:], strict=False):
         state.road_edges[road_edge_key(a, b)] = RoadEdge(RoadTier.SECONDARY, 0.0)
     state.road_edges[road_edge_key(*spur)] = RoadEdge(RoadTier.SECONDARY, 0.0)
-    for coord in (through[1], spur[0]):
-        state.hexes[coord].tags.add(BRIDGE)
+    for a, b in ((through[0], through[1]), tuple(spur)):
+        state.river_sides[side_between(a, b)] = RiverSide(100.0, 0.5, tags={BRIDGE})
 
     for coord in (through[0], through[2]):
         s = Settlement(
@@ -274,12 +279,13 @@ def test_thin_country_grows_few_villages_and_only_on_its_good_ground():
     # Seed 8 rather than the suite's seed 1. Once freight began wearing the roads, seed 1's
     # arid world lost its one crossing village and this test had no subject, so it moved to
     # seed 2, then to 4 when `elevation_profile` emptied that, and to 8 when pasture margins
-    # moved the clearing. Seed 8's arid world grows one village, on arable ground, and its
-    # temperate world two. Each map grows a handful at most, so any change to the land
-    # moves the count; comparing two single maps is the fragile part of this test.
+    # moved the clearing, and to 11 when rivers moved onto hexsides. Seed 11's arid world
+    # grows one village, on arable ground, and its temperate world four. Each map grows a
+    # handful at most, so any change to the land moves the count; comparing two single
+    # maps is the fragile part of this test.
     def world(climate):
         return build_world(
-            seed=8,
+            seed=11,
             width=_CHOKE_SIZE,
             height=_CHOKE_SIZE,
             model="organic",
@@ -412,9 +418,9 @@ def test_a_bridge_no_road_crosses_founds_nothing():
     for a, b in zip(road, road[1:], strict=False):
         state.road_edges[road_edge_key(a, b)] = RoadEdge(RoadTier.SECONDARY, 0.0)
 
-    # One bridge the road runs over, and one tagged beside the road that nothing crosses.
-    state.hexes[(2, 1)].tags.add(BRIDGE)  # two road edges: crossed
-    state.hexes[(4, 2)].tags.add(BRIDGE)  # neighbours (4, 1); no road edge at all
+    # One bridge the road runs over, and one beside the road that nothing crosses.
+    state.river_sides[side_between((2, 1), (3, 1))] = RiverSide(100.0, 0.5, tags={BRIDGE})
+    state.river_sides[side_between((4, 2), (4, 3))] = RiverSide(100.0, 0.5, tags={BRIDGE})
 
     for coord in (road[0], road[-1]):
         s = Settlement(
@@ -430,8 +436,8 @@ def test_a_bridge_no_road_crosses_founds_nothing():
     stage = ChokepointStage(cfg, np.random.default_rng(0))
     candidates = stage._candidates(state, cfg)
 
-    assert (2, 1) in candidates, "the bridge the road crosses is the chokepoint"
-    assert (3, 1) in candidates, "the bank beside a crossed bridge is a bridgehead"
+    assert (2, 1) in candidates, "a crossed bridge holds the bank on one side"
+    assert (3, 1) in candidates, "and the bank on the other"
     assert (4, 1) not in candidates, (
         "a road hex beside a bridge nothing crosses was accepted as a bridgehead"
     )

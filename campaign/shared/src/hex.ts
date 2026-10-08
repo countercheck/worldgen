@@ -181,6 +181,158 @@ export function roundAxial(q: number, r: number): Hex {
   return { q: nz(rq), r: nz(rr) };
 }
 
+// ---- corners and sides --------------------------------------------------
+//
+// A port of the corner and side names in `hex_grid.py`; see there for the scheme. In
+// short: corner k of a flat-top hex sits at 60·k degrees (y down), side i joins corner i
+// to corner i + 1, and a hex owns its corners 0 and 1 and its sides 0, 1 and 2, so every
+// corner and every side has exactly one name.
+
+/** A corner where three hexes meet: corner `k` (0 or 1) of the hex that owns it. */
+export interface Corner {
+  readonly q: number;
+  readonly r: number;
+  readonly k: number;
+}
+
+/** A side between two hexes: side `s` (0, 1 or 2) of the hex that owns it. */
+export interface Side {
+  readonly q: number;
+  readonly r: number;
+  readonly s: number;
+}
+
+/** `"q,r,k"` — the same string the Python writes, so events and JSON can name a corner. */
+export const cornerId = (c: Corner): string => `${c.q},${c.r},${c.k}`;
+
+/** `"q,r,s"` — the same string the Python writes, so events and JSON can name a side. */
+export const sideId = (s: Side): string => `${s.q},${s.r},${s.s}`;
+
+/** The neighbour across each side, in side order. Not the same order as `DIRECTIONS`. */
+const SIDE_DIRECTIONS: readonly Hex[] = [
+  { q: 1, r: 0 },
+  { q: 0, r: 1 },
+  { q: -1, r: 1 },
+  { q: -1, r: 0 },
+  { q: 0, r: -1 },
+  { q: 1, r: -1 },
+];
+
+/** Corner k of a hex as an offset to its owner, and the owner's corner index. */
+const CORNER_OWNERS: readonly [number, number, number][] = [
+  [0, 0, 0],
+  [0, 0, 1],
+  [-1, 1, 0],
+  [-1, 0, 1],
+  [-1, 0, 0],
+  [0, -1, 1],
+];
+
+const mod6 = (i: number): number => ((i % 6) + 6) % 6;
+
+/** The name of corner `k` (0–5) of a hex. */
+export function cornerOf(h: Hex, k: number): Corner {
+  const [dq, dr, owned] = CORNER_OWNERS[mod6(k)]!;
+  return { q: h.q + dq, r: h.r + dr, k: owned };
+}
+
+/** The name of side `i` (0–5) of a hex — the side it shares with that neighbour. */
+export function sideOf(h: Hex, i: number): Side {
+  const j = mod6(i);
+  if (j < 3) return { q: h.q, r: h.r, s: j };
+  const d = SIDE_DIRECTIONS[j]!;
+  return { q: h.q + d.q, r: h.r + d.r, s: j - 3 };
+}
+
+/** A hex's six corners, in corner order. */
+export const hexCorners = (h: Hex): Corner[] => [0, 1, 2, 3, 4, 5].map((k) => cornerOf(h, k));
+
+/** A hex's six sides, in side order. */
+export const hexSides = (h: Hex): Side[] => [0, 1, 2, 3, 4, 5].map((i) => sideOf(h, i));
+
+/** The three hexes meeting at a corner: its owner first. */
+export function cornerHexes(c: Corner): Hex[] {
+  return c.k === 0
+    ? [
+        { q: c.q, r: c.r },
+        { q: c.q + 1, r: c.r },
+        { q: c.q + 1, r: c.r - 1 },
+      ]
+    : [
+        { q: c.q, r: c.r },
+        { q: c.q + 1, r: c.r },
+        { q: c.q, r: c.r + 1 },
+      ];
+}
+
+/** The three corners one side away, in step with `cornerSides`. */
+export function cornerNeighbors(c: Corner): Corner[] {
+  return c.k === 0
+    ? [
+        { q: c.q, r: c.r, k: 1 },
+        { q: c.q, r: c.r - 1, k: 1 },
+        { q: c.q + 1, r: c.r - 1, k: 1 },
+      ]
+    : [
+        { q: c.q, r: c.r, k: 0 },
+        { q: c.q - 1, r: c.r + 1, k: 0 },
+        { q: c.q, r: c.r + 1, k: 0 },
+      ];
+}
+
+/** The side two neighbouring hexes share; the same whichever is named first. */
+export function sideBetween(a: Hex, b: Hex): Side {
+  const dq = b.q - a.q;
+  const dr = b.r - a.r;
+  const i = SIDE_DIRECTIONS.findIndex((d) => d.q === dq && d.r === dr);
+  if (i < 0) throw new Error(`${key(a)} and ${key(b)} are not neighbours`);
+  return sideOf(a, i);
+}
+
+/** The two hexes either side of a side: its owner first. */
+export function sideHexes(s: Side): Hex[] {
+  const d = SIDE_DIRECTIONS[s.s]!;
+  return [
+    { q: s.q, r: s.r },
+    { q: s.q + d.q, r: s.r + d.r },
+  ];
+}
+
+/** A side's two end corners, in the owner's clockwise order. */
+export function sideCorners(s: Side): Corner[] {
+  const owner = { q: s.q, r: s.r };
+  return [cornerOf(owner, s.s), cornerOf(owner, s.s + 1)];
+}
+
+/** The three sides meeting at a corner, in step with `cornerNeighbors`. */
+export function cornerSides(c: Corner): Side[] {
+  const mine = cornerHexes(c);
+  return cornerNeighbors(c).map((n) => {
+    // Two neighbouring corners share exactly two hexes; the side between them joins the
+    // two corners.
+    const theirs = new Set(cornerHexes(n).map(key));
+    const [a, b] = mine.filter((h) => theirs.has(key(h)));
+    return sideBetween(a!, b!);
+  });
+}
+
+/** The side running from corner `a` to neighbouring corner `b`. */
+export function sideJoining(a: Corner, b: Corner): Side {
+  // Two neighbouring corners share exactly two hexes; the side between them joins the
+  // two corners.
+  const theirs = new Set(cornerHexes(b).map(key));
+  const shared = cornerHexes(a).filter((h) => theirs.has(key(h)));
+  if (shared.length !== 2) throw new Error(`${cornerId(a)} and ${cornerId(b)} are not neighbouring corners`);
+  return sideBetween(shared[0]!, shared[1]!);
+}
+
+/** Pixel position of a corner (flat-top layout). */
+export function cornerToPixel(c: Corner, hexSize: number): { x: number; y: number } {
+  const { x, y } = axialToPixel({ q: c.q, r: c.r }, hexSize);
+  const angle = (Math.PI / 3) * c.k;
+  return { x: x + hexSize * Math.cos(angle), y: y + hexSize * Math.sin(angle) };
+}
+
 /**
  * A binary heap ordered the way Python's `heapq` orders `(f, coord)` tuples: by score,
  * then by q, then by r.

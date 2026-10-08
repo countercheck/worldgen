@@ -11,7 +11,7 @@ import pytest
 
 from worldgen.core.config import WorldConfig
 from worldgen.core.hex import TerrainClass
-from worldgen.core.hex_grid import neighbors
+from worldgen.core.hex_grid import neighbors, side_hexes
 from worldgen.core.pipeline import GeneratorPipeline
 from worldgen.core.world_state import WorldState
 from worldgen.stages import default_stages
@@ -44,8 +44,9 @@ def _land(state: WorldState) -> dict:
 
 
 def _distance_to_river(state: WorldState, land: dict) -> dict:
-    """Hops across land from each hex to the nearest river hex."""
-    dist = {c: 0 for c in land if "river" in state.hexes[c].tags}
+    """Hops across land from each hex to the nearest river bank."""
+    banks = {h for s in state.river_sides for h in side_hexes(s)}
+    dist = {c: 0 for c in land if c in banks}
     queue = deque(dist)
     while queue:
         c = queue.popleft()
@@ -229,18 +230,6 @@ def test_alluvium_survives_a_round_trip(tmp_path):
     back = load(str(path))
     for coord, h in state.hexes.items():
         assert back.hexes[coord].alluvium == h.alluvium, f"alluvium lost at {coord}"
-
-
-def test_older_files_load_without_alluvium():
-    """A pre-1.5 file never measured it, and 0.0 is the honest answer — unlike slope it
-    cannot be recovered from the elevations."""
-    state = _eroded(size=12)
-    data = state.to_dict()
-    data["version"] = "1.4"
-    for hd in data["hexes"]:
-        hd.pop("alluvium")
-    back = WorldState.from_dict(data)
-    assert all(h.alluvium == 0.0 for h in back.hexes.values())
 
 
 def test_config_validation():

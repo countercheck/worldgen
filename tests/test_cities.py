@@ -46,8 +46,11 @@ def _on_water(state, cfg, coord):
     ground, and a market two kilometres from a river quay can then gather a city's worth
     by water — which is bulk haulage deciding, as the claim requires.
     """
+    from worldgen.stages.riverside import river_index
+
+    rivers = river_index(state, cfg)
     return any(
-        navigable(state.hexes[c], cfg)
+        navigable(state.hexes[c], cfg, rivers)
         for c in hex_range(coord, cfg.transship_radius)
         if c in state.hexes
     )
@@ -340,12 +343,13 @@ def test_bulk_reach_prices_the_haul_toward_the_seat():
     """
     from worldgen.core.hex import Hex
     from worldgen.stages.cities import CityPromotionStage
+    from worldgen.stages.riverside import Rivers
 
     cfg = WorldConfig()
     hexes = {(q, 0): Hex(coord=(q, 0), elevation=q * 60.0) for q in range(10)}
 
-    to_valley = CityPromotionStage._bulk_reach(hexes, (0, 0), cfg)
-    to_hilltop = CityPromotionStage._bulk_reach(hexes, (9, 0), cfg)
+    to_valley = CityPromotionStage._bulk_reach(hexes, (0, 0), cfg, Rivers())
+    to_hilltop = CityPromotionStage._bulk_reach(hexes, (9, 0), cfg, Rivers())
 
     assert to_hilltop[(0, 0)] > to_valley[(9, 0)], (
         "hauling 540 m uphill must cost more than hauling the same road down"
@@ -505,7 +509,6 @@ def _row(kinds):
         else:
             hx = Hex(coord=(q, 0), terrain_class=TerrainClass.LAND)
             if kind == "r":
-                hx.tags.add("river")
                 hx.catchment_km2 = 1e6
             hexes[(q, 0)] = hx
     return hexes
@@ -518,18 +521,32 @@ def _eastward(n):
 
 def test_a_cargo_changes_hands_where_it_changes_mode():
     """Cart to boat and boat to cart, each at its land-side quay."""
+    from worldgen.stages.riverside import Rivers
+
     hexes = _row("llsssll")
-    quays = CityPromotionStage._break_points((0, 0), (6, 0), _eastward(7), hexes, WorldConfig())
+    quays = CityPromotionStage._break_points(
+        (0, 0), (6, 0), _eastward(7), hexes, WorldConfig(), Rivers()
+    )
     assert quays == [(1, 0), (5, 0)]
 
 
 def test_a_river_mouth_is_a_quay_of_its_own():
-    """Barge to ship where a navigable river meets the sea, at the river hex."""
-    hexes = _row("lrss")
+    """Cart to barge at the bank, and barge to ship at the bank beside the mouth.
+
+    A river runs along a hexside, so a barge ties up at the bank hex beside it; that hex is
+    dry land, and it is the quay whether the cargo came by cart or leaves by ship.
+    """
+    from tests.worlds import river_to_sea
+    from worldgen.stages.riverside import river_index
+
+    ws, _ = river_to_sea()
     cfg = WorldConfig()
-    assert navigable(hexes[(1, 0)], cfg)
-    quays = CityPromotionStage._break_points((0, 0), (3, 0), _eastward(4), hexes, cfg)
-    assert quays == [(0, 0), (1, 0)]
+    rivers = river_index(ws, cfg)
+    toward = {(1, 2): (1, 1), (1, 1): (2, 1), (2, 1): (3, 1), (3, 1): (4, 1)}
+    assert not navigable(ws.hexes[(1, 2)], cfg, rivers)
+    assert navigable(ws.hexes[(1, 1)], cfg, rivers)
+    quays = CityPromotionStage._break_points((1, 2), (4, 1), toward, ws.hexes, cfg, rivers)
+    assert quays == [(1, 1), (3, 1)]
 
 
 def test_a_quay_is_handled_by_the_nearest_settlement_in_reach():

@@ -43,6 +43,7 @@ from ..core.world_state import WorldState
 from .city_town import _assign_role
 from .habitability import actual_food, potential_food
 from .haulage import gather, usable_fraction
+from .riverside import river_index
 
 _WATER = (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
 
@@ -159,11 +160,11 @@ class LandUseStage(GeneratorStage):
                 for coord, hx in hexes.items()
             }
             draw = gather(surplus, owner, cost, cfg.market_day_radius)
-            state.settlements.extend(self._found(seats, draw, hexes, cfg))
+            state.settlements.extend(self._found(seats, draw, hexes, cfg, river_index(state, cfg)))
 
         return state
 
-    def _found(self, seats, draw, hexes, cfg) -> list:
+    def _found(self, seats, draw, hexes, cfg, rivers) -> list:
         """Turn planted seats into settlements sized by the surplus they gather.
 
         Population is what the catchment can actually send, not a random draw — so a market
@@ -182,7 +183,7 @@ class LandUseStage(GeneratorStage):
             s = Settlement(
                 coord=coord,
                 tier=SettlementTier.TOWN,
-                role=_assign_role(coord, hx, hexes, cfg),
+                role=_assign_role(coord, hx, hexes, cfg, rivers),
                 population=population,
                 name=f"{hx.biome.name.lower()}_market_{i}",
             )

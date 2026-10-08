@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest';
 
 import world32 from './fixtures/world-32x32.json' with { type: 'json' };
 
-import { key, type HexKey } from '../src/hex.js';
+import { cornerHexes, key, sideHexes, sideJoining, type HexKey } from '../src/hex.js';
 import { FOG_TAG, isFog, keysOf, maskWorld, REMEMBERED_TAG } from '../src/mask.js';
 import { parseWorld } from '../src/world.js';
 
@@ -147,28 +147,29 @@ describe('what is hidden', () => {
 });
 
 describe('rivers', () => {
+  /** The two hexes either side of the side running from corner `a` to corner `b`. */
+  const banksOf = (a: number[], b: number[]) =>
+    sideHexes(
+      sideJoining({ q: a[0]!, r: a[1]!, k: a[2]! }, { q: b[0]!, r: b[1]!, k: b[2]! }),
+    );
+
   it('splits a river into the runs actually seen', () => {
-    // Keeping only the known hexes of a chain would leave a renderer drawing a straight
-    // line between two banks either side of unseen country.
+    // Keeping only the seen sides of a course would leave a renderer drawing a straight
+    // line across unseen country.
     const masked = mask();
+    expect((masked.rivers as Doc[]).length).toBeGreaterThan(0);
     for (const river of masked.rivers as Doc[]) {
-      const hexes = river.hexes as number[][];
-      expect(hexes.length).toBeGreaterThanOrEqual(2);
-      for (const c of hexes) {
-        expect(seen.has(key({ q: c[0]!, r: c[1]! }))).toBe(true);
-      }
-      // Each run is contiguous.
-      for (let i = 1; i < hexes.length; i++) {
-        const a = hexes[i - 1]!;
-        const b = hexes[i]!;
-        const d = (Math.abs(a[0]! - b[0]!) + Math.abs(a[1]! - b[1]!) +
-          Math.abs(a[0]! + a[1]! - b[0]! - b[1]!)) / 2;
-        expect(d).toBe(1);
+      const corners = river.corners as number[][];
+      expect(corners.length).toBeGreaterThanOrEqual(2);
+      for (let i = 1; i < corners.length; i++) {
+        // Each step is one side, and each side was seen from one bank or the other.
+        const banks = banksOf(corners[i - 1]!, corners[i]!);
+        expect(banks.some((h) => seen.has(key(h)))).toBe(true);
       }
     }
   });
 
-  it('drops a lone hex of river, which is a dot rather than a watercourse', () => {
+  it('drops a course seen nowhere, and keeps no run shorter than a side', () => {
     const oneHex = new Set([key({ q: 16, r: 16 })]);
     const masked = maskWorld(doc, {
       seen: oneHex,
@@ -177,7 +178,38 @@ describe('rivers', () => {
       clockHours: 0,
     });
     for (const river of masked.rivers as Doc[]) {
-      expect((river.hexes as number[][]).length).toBeGreaterThanOrEqual(2);
+      expect((river.corners as number[][]).length).toBeGreaterThanOrEqual(2);
+    }
+  });
+});
+
+describe('river sides and corners', () => {
+  // (16,16) is known and (40,40) is far off the map of anything seen.
+  const sides = [
+    { side: [16, 16, 0], catchment_km2: 9, flow: 0.1, drop_m: 0, tags: [] }, // (16,16)|(17,16)
+    { side: [40, 40, 0], catchment_km2: 9, flow: 0.1, drop_m: 0, tags: [] },
+  ];
+  const corners = [
+    { corner: [15, 16, 0], tags: ['confluence'] }, // touches (16,16)
+    { corner: [40, 40, 1], tags: ['river_end'] },
+  ];
+  const withRivers: Doc = { ...doc, river_sides: sides, river_corners: corners };
+  const masked = maskWorld(withRivers, { seen, visible, faction: 'red', clockHours: 24 });
+
+  it('keeps a side seen from either bank, and drops one seen from neither', () => {
+    expect((masked.river_sides as Doc[]).map((d) => d.side)).toEqual([[16, 16, 0]]);
+  });
+
+  it('keeps a corner seen from any of its three hexes', () => {
+    expect((masked.river_corners as Doc[]).map((d) => d.corner)).toEqual([[15, 16, 0]]);
+  });
+
+  it('keeps the corner course only where it was seen', () => {
+    for (const r of masked.rivers as Doc[]) {
+      for (const c of r.corners as number[][]) {
+        const around = cornerHexes({ q: c[0]!, r: c[1]!, k: c[2]! });
+        expect(around.some((h) => seen.has(key(h)))).toBe(true);
+      }
     }
   });
 });

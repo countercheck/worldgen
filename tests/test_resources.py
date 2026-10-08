@@ -63,13 +63,16 @@ def test_a_mining_village_stands_on_the_ore():
 
 
 def test_a_lumber_camp_stands_in_the_woods_on_water_that_floats_timber():
+    from worldgen.stages.riverside import river_index
+
     cfg = WorldConfig(**_DEFAULTS)
     state = _resourced()
+    rivers = river_index(state, cfg)
     for s in _founded(state, SettlementRole.LUMBER):
         hx = state.hexes[s.coord]
         assert hx.land_use is LandUse.WOOD
-        assert floatable(hx, cfg) or any(
-            floatable(state.hexes[n], cfg) for n in _neighbours(s.coord) if n in state.hexes
+        assert floatable(hx, cfg, rivers) or any(
+            floatable(state.hexes[n], cfg, rivers) for n in _neighbours(s.coord) if n in state.hexes
         )
 
 

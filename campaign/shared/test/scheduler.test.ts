@@ -13,7 +13,7 @@ import type { Commander } from '../src/commander.js';
 import { DEFAULT_CONFIG, type CampaignConfig } from '../src/config.js';
 import type { Despatch } from '../src/despatch.js';
 import type { EventPayload } from '../src/events.js';
-import { key, type Hex, type HexKey } from '../src/hex.js';
+import { key, sideBetween, sideId, type Hex, type HexKey } from '../src/hex.js';
 import { makeRng, type Rng } from '../src/rng.js';
 import { marchFatigueAt } from '../src/fatigue.js';
 import { columnHexes, columnLengthKm, occupied } from '../src/column.js';
@@ -22,7 +22,7 @@ import { advance, despatchNow } from '../src/scheduler.js';
 import { EMPTY_STATE, reduce, type CampaignState } from '../src/state.js';
 import { contestants, contestedHex, type Task } from '../src/task.js';
 import { presentUnderArms, type Trait, type Unit, type UnitKind } from '../src/unit.js';
-import type { World, WorldHex } from '../src/world.js';
+import type { RiverSide, World, WorldHex } from '../src/world.js';
 import { marched as onRoadFor } from './fixtures/road.js';
 
 const cfg = DEFAULT_CONFIG;
@@ -49,19 +49,22 @@ function flatWorld(size = 40): World {
     }
   }
   return {
-    schemaVersion: '1.8',
+    schemaVersion: '2.0',
     seed: 1,
     width: size,
     height: size,
     layout: 'axial',
     hexes,
     rivers: [],
+    riverSides: new Map(),
+    riverCorners: new Map(),
     settlements: [],
     roadEdges: new Map(),
     seaEdges: new Map(),
     ferries: [],
     config: {
       navigableMinDischarge: 60000,
+      runoffMm: 800,
       fordMaxCatchmentKm2: 60,
       crossingReliefM: 60,
       meanPrecipMm: 800,
@@ -1909,15 +1912,21 @@ describe('the clock runs in whole hours', () => {
     // A crossing costs an hour on top of the march, so it cannot fit in the hour that
     // reaches the bank. The column walks at the ford and finishes the next hour.
     const red = unit('red-1', 'red', { q: 5, r: 5 });
-    const w = flatWorld();
-    for (const r of [4, 5, 6]) {
-      const hex = w.hexes.get(key({ q: 7, r }))!;
-      w.hexes.set(key({ q: 7, r }), {
-        ...hex,
-        catchmentKm2: 10,
-        tags: new Set(['river', 'ford']),
-      });
+    // A small river along every side between columns 6 and 7, forded wherever it is met.
+    const riverSides = new Map<string, RiverSide>();
+    for (let r = 2; r <= 8; r++) {
+      for (const across of [{ q: 7, r }, { q: 7, r: r - 1 }]) {
+        const side = sideBetween({ q: 6, r }, across);
+        riverSides.set(sideId(side), {
+          side,
+          catchmentKm2: 10,
+          flow: 0.1,
+          dropM: 0,
+          tags: new Set(['ford']),
+        });
+      }
     }
+    const w: World = { ...flatWorld(), riverSides };
 
     const state = stateFrom({
       units: [red],

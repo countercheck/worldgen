@@ -1,5 +1,6 @@
 import pytest
 
+from tests.worlds import lay_river
 from worldgen.core.hex import (
     Biome,
     LandCover,
@@ -12,7 +13,7 @@ from worldgen.core.hex import (
 )
 from worldgen.core.world_state import (
     Ferry,
-    River,
+    RiverSide,
     RoadEdge,
     RoadTier,
     WorldState,
@@ -50,7 +51,7 @@ def _small_world() -> WorldState:
     ]
     ws.hexes[(1, 1)].settlement = ws.settlements[0]
     ws.hexes[(1, 1)].road_connections = {(2, 1)}
-    ws.rivers = [River(hexes=[(0, 0), (1, 0), (2, 0)], flow_volume=1.5)]
+    lay_river(ws, [(0, 0), (1, 0), (2, 0)], flow_volume=1.5)
     ws.road_edges = {
         road_edge_key((1, 1), (2, 1)): RoadEdge(RoadTier.PRIMARY, 12.5),
         road_edge_key((2, 1), (3, 1)): RoadEdge(RoadTier.PRIMARY, -4.0),
@@ -98,32 +99,6 @@ def test_hex_fields_preserved(tmp_path):
     assert s2.population == 5000
 
 
-def _downgrade_to_v1_0(path):
-    """Rewrite a saved world as the pre-split 1.0 schema."""
-    import json
-
-    data = json.loads(path.read_text())
-    data["version"] = "1.0"
-    for hd in data["hexes"]:
-        for key in ("habitability_city", "habitability_town", "habitability_village"):
-            hd.pop(key, None)
-        hd["habitability"] = 0.6
-    path.write_text(json.dumps(data))
-
-
-def test_pre_split_habitability_still_loads(tmp_path):
-    """Worlds saved before habitability was split per tier must still open."""
-    ws = _small_world()
-    path = tmp_path / "world.json"
-    json_export.save(ws, path)
-    _downgrade_to_v1_0(path)
-
-    h = json_export.load(path).hexes[(0, 0)]
-    assert h.habitability_city == 0.6
-    assert h.habitability_town == 0.6
-    assert h.habitability_village == 0.6
-
-
 def test_sea_edges_and_catchment_round_trip(tmp_path):
     """The two fields the losslessness invariant had no witness for.
 
@@ -163,33 +138,13 @@ def test_unclaimed_territory_round_trips_as_none(tmp_path):
     assert json_export.load(path).hexes[(0, 0)].territory is None
 
 
-def test_pre_territory_worlds_still_load(tmp_path):
-    """A 1.1 file has no catchments recorded; it must open, not fail."""
-    import json
-
-    ws = _small_world()
-    path = tmp_path / "world.json"
-    json_export.save(ws, path)
-
-    data = json.loads(path.read_text())
-    data["version"] = "1.1"
-    for hd in data["hexes"]:
-        hd.pop("territory", None)
-        hd.pop("territory_cost", None)
-    path.write_text(json.dumps(data))
-
-    h = json_export.load(path).hexes[(0, 0)]
-    assert h.territory is None
-    assert h.territory_cost == 0.0
-
-
 def test_new_saves_carry_the_bumped_version(tmp_path):
-    """The schema changed shape, so it must not keep claiming to be 1.0."""
+    """Rivers moved onto hexsides at 2.0; a reader must be able to tell."""
     import json
 
     path = tmp_path / "world.json"
     json_export.save(_small_world(), path)
-    assert json.loads(path.read_text())["version"] == "1.10"
+    assert json.loads(path.read_text())["version"] == "2.0"
 
 
 def test_an_unknown_version_is_rejected_by_name(tmp_path):
@@ -200,11 +155,37 @@ def test_an_unknown_version_is_rejected_by_name(tmp_path):
     path = tmp_path / "world.json"
     json_export.save(_small_world(), path)
     data = json.loads(path.read_text())
-    data["version"] = "2.0"
+    data["version"] = "3.0"
     path.write_text(json.dumps(data))
 
-    with pytest.raises(ValueError, match="Supported: 1.0, 1.1, 1.2"):
+    with pytest.raises(ValueError, match="Supported: 2.0"):
         json_export.load(path)
+
+
+@pytest.mark.parametrize("version", ["1.10", "1.2", None])
+def test_a_world_from_before_hexside_rivers_says_to_regenerate(version):
+    data = _small_world().to_dict()
+    if version is None:
+        del data["version"]
+    else:
+        data["version"] = version
+    with pytest.raises(ValueError, match="regenerate"):
+        WorldState.from_dict(data)
+
+
+def test_river_sides_and_corners_round_trip(tmp_path):
+    ws = _small_world()
+    ws.river_sides = {
+        (0, 0, 0): RiverSide(catchment_km2=42.0, flow=0.3, drop_m=1.5, tags={"ford"}),
+        (-1, 1, 1): RiverSide(catchment_km2=7.0, flow=0.05),
+    }
+    ws.river_corners = {(0, 0, 0): {"river_source"}, (-1, 1, 0): {"confluence", "river_end"}}
+    path = tmp_path / "world.json"
+    json_export.save(ws, path)
+    back = json_export.load(path)
+    assert all(isinstance(c, tuple) for c in back.rivers[0].corners)
+    assert back.river_sides == ws.river_sides
+    assert back.river_corners == ws.river_corners
 
 
 def test_settlement_linked_on_hex(tmp_path):
@@ -231,7 +212,8 @@ def test_river_preserved(tmp_path):
     ws2 = json_export.load(path)
     assert len(ws2.rivers) == 1
     assert ws2.rivers[0].flow_volume == pytest.approx(1.5)
-    assert ws2.rivers[0].hexes[0] == (0, 0)
+    assert ws2.rivers[0].corners == ws.rivers[0].corners
+    assert ws2.river_sides == ws.river_sides
 
 
 def test_delta_elevation_round_trips(tmp_path):
@@ -247,46 +229,12 @@ def test_delta_elevation_round_trips(tmp_path):
     assert deltas[road_edge_key((2, 1), (3, 1))] == pytest.approx(-4.0)
 
 
-def test_an_edge_saved_before_deltas_loads_as_level(tmp_path):
-    """A 1.4 file has no delta recorded; it must open rather than fail."""
-    import json
-
-    ws = _small_world()
-    path = tmp_path / "world.json"
-    json_export.save(ws, path)
-    data = json.loads(path.read_text())
-    data["version"] = "1.4"
-    for ed in data["road_edges"]:
-        ed.pop("delta_elevation_m", None)
-    path.write_text(json.dumps(data))
-
-    for edge in json_export.load(path).road_edges.values():
-        assert edge.delta_elevation_m == 0.0
-
-
 def test_road_tier_preserved(tmp_path):
     ws = _small_world()
     path = tmp_path / "world.json"
     json_export.save(ws, path)
     ws2 = json_export.load(path)
     assert {e.tier for e in ws2.road_edges.values()} == {RoadTier.PRIMARY}
-
-
-def test_a_schema_1_2_file_loads_its_journeys_as_a_network():
-    """1.2 stored a path per journey; overlapping journeys collapse onto shared edges,
-    the higher tier winning — which is what the renderer did at draw time anyway."""
-    data = _small_world().to_dict()
-    del data["road_edges"]
-    data["version"] = "1.2"
-    data["roads"] = [
-        {"path": [[1, 1], [2, 1], [3, 1]], "tier": "track"},
-        {"path": [[2, 1], [3, 1]], "tier": "primary"},
-    ]
-    ws = WorldState.from_dict(data)
-    assert {k: e.tier for k, e in ws.road_edges.items()} == {
-        road_edge_key((1, 1), (2, 1)): RoadTier.TRACK,
-        road_edge_key((2, 1), (3, 1)): RoadTier.PRIMARY,
-    }
 
 
 def test_empty_world(tmp_path):
@@ -335,50 +283,3 @@ def test_ferries_round_trip(tmp_path):
     assert len(ws2.ferries) == 1
     assert ws2.ferries[0].a == (0, 0)
     assert ws2.ferries[0].b == (2, 2)
-
-
-def test_worlds_without_ferries_still_load(tmp_path):
-    """Worlds saved before ferries existed have no such key and must still load."""
-    import json
-
-    ws = WorldState.empty(seed=5, width=3, height=3)
-    path = tmp_path / "legacy.json"
-    json_export.save(ws, str(path))
-    data = json.loads(path.read_text())
-    del data["ferries"]
-    path.write_text(json.dumps(data))
-    assert json_export.load(str(path)).ferries == []
-
-
-def test_an_older_world_translates_its_terrain_names(tmp_path):
-    """Files written before 1.4 name water for a chemistry the generator never tracked.
-
-    "ocean" and "lake" meant, and only ever meant, whether the water reaches the map edge.
-    The steepness bands alongside them were thresholds on a slope those files do not
-    record — so the class translates and the slope comes back 0.0, rather than being
-    invented from the band the hex once fell in.
-    """
-    import json as _json
-
-    ws = _small_world()
-    path = tmp_path / "legacy.json"
-    json_export.save(ws, str(path))
-
-    raw = _json.loads(path.read_text())
-    raw["version"] = "1.2"
-    for hd in raw["hexes"]:
-        hd.pop("slope", None)
-        hd.pop("relief", None)
-    raw["hexes"][0]["terrain_class"] = "ocean"
-    raw["hexes"][1]["terrain_class"] = "lake"
-    raw["hexes"][2]["terrain_class"] = "mountain"
-    raw["hexes"][3]["terrain_class"] = "hill"
-    path.write_text(_json.dumps(raw))
-
-    back = json_export.load(str(path))
-    by_coord = [back.hexes[(hd["q"], hd["r"])] for hd in raw["hexes"][:4]]
-    assert by_coord[0].terrain_class is TerrainClass.OPEN_WATER
-    assert by_coord[1].terrain_class is TerrainClass.INLAND_WATER
-    assert by_coord[2].terrain_class is TerrainClass.LAND
-    assert by_coord[3].terrain_class is TerrainClass.LAND
-    assert all(h.slope == 0.0 for h in by_coord)

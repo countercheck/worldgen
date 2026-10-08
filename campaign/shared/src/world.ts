@@ -12,17 +12,29 @@
  * the door.
  */
 
-import { AXIAL, key, OFFSET, type Hex, type HexKey, type Layout } from './hex.js';
+import {
+  AXIAL,
+  cornerId,
+  key,
+  OFFSET,
+  sideBetween,
+  sideId,
+  type Corner,
+  type Hex,
+  type HexKey,
+  type Layout,
+  type Side,
+} from './hex.js';
 
 /**
  * Schema versions this parser accepts.
  *
- * Mirrors `SUPPORTED_SCHEMA_VERSIONS` in `worldgen/core/world_state.py`. The generator
- * migrates older files on load, so it accepts a wider range than we do — we only ever
- * see what it wrote most recently. Widen this deliberately, having checked that the
- * fields below actually survive the older shape.
+ * Mirrors `SUPPORTED_SCHEMA_VERSIONS` in `worldgen/core/world_state.py`. 2.0 moved rivers
+ * off the hexes and onto the sides between them, which changes what every river rule
+ * here means, so nothing older is read: a world from before it is regenerated, and a
+ * campaign made on one cannot be opened by this build.
  */
-export const SUPPORTED_SCHEMA_VERSIONS = new Set(['1.8', '1.9', '1.10']);
+export const SUPPORTED_SCHEMA_VERSIONS = new Set(['2.0']);
 
 export type TerrainClass = 'open_water' | 'inland_water' | 'coast' | 'land';
 
@@ -48,10 +60,11 @@ export const ROAD_TIER_RANK: Readonly<Record<RoadTier, number>> = {
   primary: 2,
 };
 
-/** Hex tags the campaign rules care about. The generator writes others; these we read. */
+/** River side tags the campaign rules care about. The generator writes others. */
 export const TAG_FORD = 'ford';
 export const TAG_BRIDGE = 'bridge';
-export const TAG_RIVER = 'river';
+export const TAG_RAPIDS = 'rapids';
+export const TAG_CATARACT = 'cataract';
 
 export interface WorldHex {
   readonly coord: Hex;
@@ -77,11 +90,27 @@ export interface RoadEdge {
   readonly deltaElevationM: number;
 }
 
+/**
+ * One course of the river network. Rivers run along hexsides, so a course is a chain of
+ * corners, each one side from the next, from upstream to downstream.
+ */
 export interface River {
-  readonly hexes: readonly Hex[];
+  readonly corners: readonly Corner[];
   readonly flowVolume: number;
-  /** Empty for a river too small to have been named, or from a world before 1.10. */
+  /** Empty for a river too small to have been named. */
   readonly name: string;
+}
+
+/** A hexside a river runs along, and what is true of that stretch of it. */
+export interface RiverSide {
+  readonly side: Side;
+  /** Physical upstream area: the river-size measure the rules read. */
+  readonly catchmentKm2: number;
+  /** The same as a rank against the map's largest river, for drawing. */
+  readonly flow: number;
+  readonly dropM: number;
+  /** `ford`, `bridge`, `cataract`, `rapids`. */
+  readonly tags: ReadonlySet<string>;
 }
 
 export interface Settlement {
@@ -111,6 +140,8 @@ export interface Ferry {
 export interface WorldConfigSubset {
   /** Discharge at which a watercourse floats a barge — the Major/Minor river line. */
   readonly navigableMinDischarge: number;
+  /** What a square kilometre sheds in a year, in mm: catchment times this is discharge. */
+  readonly runoffMm: number;
   readonly fordMaxCatchmentKm2: number;
   readonly crossingReliefM: number;
   readonly meanPrecipMm: number;
@@ -125,6 +156,10 @@ export interface World {
   readonly layout: Layout;
   readonly hexes: ReadonlyMap<HexKey, WorldHex>;
   readonly rivers: readonly River[];
+  /** Every side a river runs along, keyed by `sideId`. */
+  readonly riverSides: ReadonlyMap<string, RiverSide>;
+  /** Tags on the corners of the network — source, end, mouth, confluence — by `cornerId`. */
+  readonly riverCorners: ReadonlyMap<string, ReadonlySet<string>>;
   readonly settlements: readonly Settlement[];
   /** Keyed by `edgeKey(a, b)`, so a lookup does not care which way a unit is moving. */
   readonly roadEdges: ReadonlyMap<string, RoadEdge>;
@@ -172,6 +207,14 @@ function coord(v: unknown, where: string): Hex {
   }
   const arr = v as unknown[];
   return { q: num(arr[0], `${where}.q`), r: num(arr[1], `${where}.r`) };
+}
+
+function triple(v: unknown, where: string): [number, number, number] {
+  if (!Array.isArray(v) || v.length !== 3) {
+    fail(`${where}: expected a [q, r, k] triple, got ${JSON.stringify(v)}`);
+  }
+  const arr = v as unknown[];
+  return [num(arr[0], `${where}[0]`), num(arr[1], `${where}[1]`), num(arr[2], `${where}[2]`)];
 }
 
 function oneOf<T extends string>(v: unknown, allowed: readonly T[], where: string): T {
@@ -350,13 +393,44 @@ export function parseWorld(raw: unknown): World {
 
   const rivers: River[] = Array.isArray(d.rivers)
     ? (d.rivers as Record<string, unknown>[]).map((r, i) => ({
-        hexes: Array.isArray(r.hexes)
-          ? (r.hexes as unknown[]).map((h, j) => coord(h, `rivers[${i}].hexes[${j}]`))
+        corners: Array.isArray(r.corners)
+          ? (r.corners as unknown[]).map((c, j) => {
+              const [q, r2, k] = triple(c, `rivers[${i}].corners[${j}]`);
+              return { q, r: r2, k };
+            })
           : [],
         flowVolume: num(r.flow_volume ?? 0, `rivers[${i}].flow_volume`),
         name: str(r.name ?? '', `rivers[${i}].name`),
       }))
     : [];
+
+  const riverSides = new Map<string, RiverSide>();
+  for (const [i, sd] of (Array.isArray(d.river_sides)
+    ? (d.river_sides as Record<string, unknown>[])
+    : []
+  ).entries()) {
+    const [q, r, s] = triple(sd.side, `river_sides[${i}].side`);
+    const side = { q, r, s };
+    riverSides.set(sideId(side), {
+      side,
+      catchmentKm2: num(sd.catchment_km2, `river_sides[${i}].catchment_km2`),
+      flow: num(sd.flow ?? 0, `river_sides[${i}].flow`),
+      dropM: num(sd.drop_m ?? 0, `river_sides[${i}].drop_m`),
+      tags: new Set(Array.isArray(sd.tags) ? (sd.tags as unknown[]).map(String) : []),
+    });
+  }
+
+  const riverCorners = new Map<string, ReadonlySet<string>>();
+  for (const [i, cd] of (Array.isArray(d.river_corners)
+    ? (d.river_corners as Record<string, unknown>[])
+    : []
+  ).entries()) {
+    const [q, r, k] = triple(cd.corner, `river_corners[${i}].corner`);
+    riverCorners.set(
+      cornerId({ q, r, k }),
+      new Set(Array.isArray(cd.tags) ? (cd.tags as unknown[]).map(String) : []),
+    );
+  }
 
   const ferries: Ferry[] = Array.isArray(d.ferries)
     ? (d.ferries as Record<string, unknown>[]).map((f, i) => ({
@@ -376,6 +450,8 @@ export function parseWorld(raw: unknown): World {
     layout,
     hexes,
     rivers,
+    riverSides,
+    riverCorners,
     settlements,
     roadEdges: parseEdges(d.road_edges, 'road_edges'),
     seaEdges: parseEdges(d.sea_edges, 'sea_edges'),
@@ -387,6 +463,13 @@ export function parseWorld(raw: unknown): World {
       navigableMinDischarge: typeof cfg.navigable_min_discharge === 'number'
         ? cfg.navigable_min_discharge
         : 60000,
+      // Written by the generator's hydrology. A world built without it falls back to the
+      // rainfall itself, which overstates discharge — rain is not all runoff.
+      runoffMm: typeof meta.runoff_mm === 'number'
+        ? meta.runoff_mm
+        : typeof cfg.mean_precip_mm === 'number'
+          ? cfg.mean_precip_mm
+          : 800,
       fordMaxCatchmentKm2: typeof cfg.ford_max_catchment_km2 === 'number'
         ? cfg.ford_max_catchment_km2
         : 60,
@@ -407,3 +490,15 @@ export const isWater = (h: WorldHex): boolean =>
 /** The road edge joining two hexes, if the generator built one. */
 export const roadBetween = (w: World, a: Hex, b: Hex): RoadEdge | undefined =>
   w.roadEdges.get(edgeKey(a, b));
+
+/**
+ * The river running between two neighbouring hexes, if one does: the side a step from
+ * `a` to `b` would cross. Undefined for hexes that are not neighbours.
+ */
+export function riverSideBetween(w: World, a: Hex, b: Hex): RiverSide | undefined {
+  try {
+    return w.riverSides.get(sideId(sideBetween(a, b)));
+  } catch {
+    return undefined;
+  }
+}

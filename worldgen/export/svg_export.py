@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..core.hex import DEFAULT_TERRAIN_BANDS, SettlementTier, terrain_bands, terrain_label
-from ..core.hex_grid import axial_to_pixel, neighbors, road_polylines
+from ..core.hex_grid import axial_to_pixel, corner_to_pixel, neighbors, road_polylines
 from ..core.world_state import RoadTier, WorldState
 from ..render import glyphs
 from ..render.debug_viewer import (
@@ -556,15 +556,15 @@ def render(ws: WorldState, config: SVGConfig | None = None) -> str:
             # at one width taken from its mouth.
             for run, sw in rivers.width_bands(
                 river,
-                ws.hexes,
+                ws.river_sides,
                 config.river_min_width,
                 config.river_max_width,
                 config.river_width_steps,
                 config.river_width_exponent,
             ):
                 pts = []
-                for coord in run:
-                    px, py = axial_to_pixel(coord, size)
+                for corner in run:
+                    px, py = corner_to_pixel(corner, size)
                     pts.append((px + ox, py + oy))
                 bands.append((pts, sw * line_scale))
 
@@ -638,11 +638,10 @@ def render(ws: WorldState, config: SVGConfig | None = None) -> str:
         out.append("  </g>")
 
     if "crossings" in layers:
-        marks = legend.crossings(ws, axial_to_pixel, size)
+        marks = legend.crossings(ws, size)
         if marks:
             out.append('  <g id="layer-crossings">')
-            for coord, kind, angle in marks:
-                px, py = axial_to_pixel(coord, size)
+            for px, py, kind, angle in marks:
                 out.append(
                     f"    {_crossing_marker(kind, px + ox, py + oy, angle, scale=size / 12.0)}"
                 )
@@ -651,11 +650,10 @@ def render(ws: WorldState, config: SVGConfig | None = None) -> str:
     # Over the rivers and the crossings, so a spring or white water on a forded reach
     # still shows.
     if "rivers" in layers:
-        marks = legend.river_marks(ws, axial_to_pixel, size)
+        marks = legend.river_marks(ws, size)
         if marks:
             out.append('  <g id="layer-river-marks">')
-            for coord, kind, bearing in marks:
-                px, py = axial_to_pixel(coord, size)
+            for px, py, kind, bearing in marks:
                 mark = _river_mark(kind, px + ox, py + oy, bearing, size / 12.0, config.river_color)
                 out.append(f"    {mark}")
             out.append("  </g>")

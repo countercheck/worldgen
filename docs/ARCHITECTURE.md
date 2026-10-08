@@ -27,9 +27,9 @@ flowchart TB
     subgraph CORE["core/ — types + orchestration, no I/O"]
         CFG[config.py<br/>WorldConfig · ClimateContext]
         PIPE[pipeline.py<br/>GeneratorStage · GeneratorPipeline]
-        WS[world_state.py<br/>WorldState · River · Road · Ferry<br/>schema v1.5]
+        WS[world_state.py<br/>WorldState · River · RiverSide · Road<br/>river_sides · river_corners<br/>schema v2.0]
         HEX[hex.py<br/>Hex · TerrainClass · Settlement<br/>TerrainLabel · terrain_label]
-        GRID[hex_grid.py<br/>axial / offset layouts]
+        GRID[hex_grid.py<br/>axial / offset layouts<br/>corners · sides]
         ERR[errors.py]
     end
 
@@ -38,6 +38,8 @@ flowchart TB
         SEQ[15 stage classes]
         PRE[precipitation.py<br/>shared: Climate + Hydrology]
         RC[road_cost.py<br/>shared: roads + settlement siting]
+        CD[corner_drainage.py<br/>shared: Erosion + Hydrology]
+        RS[riverside.py<br/>shared: every river reader]
     end
 
     subgraph EXPORT["export/ — all file I/O"]
@@ -91,6 +93,8 @@ flowchart TB
     PIPE --> WS
     SEQ --- PRE
     SEQ --- RC
+    SEQ --- CD
+    SEQ --- RS
     SEQ -->|NamingStage| SITE
     SEQ -->|NamingStage| LANG
     SEQ -->|NamingStage| CREG
@@ -149,7 +153,7 @@ flowchart LR
     O --> P[SettledGround]
     P --> Q[Naming]
 
-    A -.-> S(["WorldState<br/>hexes · rivers · roads<br/>settlements · ferries"])
+    A -.-> S(["WorldState<br/>hexes · rivers · river sides + corners<br/>roads · settlements"])
     Q -.-> S
 ```
 
@@ -165,8 +169,9 @@ computes. The short version:
 | `slope`, `relief` | TerrainClassification | measured, never banded |
 | `terrain_class` | TerrainClassification, WaterBodies | four values, all categorical |
 | rain pattern | `precipitation.py` | shared, runs inside both Climate and Hydrology |
-| `river_flow`, rivers, lakes | Hydrology | the authoritative drainage network |
-| `moisture`, `temperature` | Climate | *after* hydrology — it reads river tags |
+| rivers, `river_sides`, `river_corners`, lakes | Hydrology | the authoritative drainage network, on hexsides; `Hex.river_flow` is a copy onto both banks |
+| ford, bridge, cataract, rapids side tags | Crossing, Cataract, roads | see [River model](#river-model) |
+| `moisture`, `temperature` | Climate | *after* hydrology — it reads which hexes sit beside a river |
 | `biome`, `land_cover` | Biome, LandCover; then LandUse and SettledGround | cover is the wild country; clearing opens it for ploughland, pasture and the ground under settlements |
 | settlements, roads | CityTown onward | |
 | settlement and river names, `culture`, `etymology` | Naming | last in both models; placeholders until then |
@@ -194,7 +199,7 @@ computes. The short version:
 lives in `stages/precipitation.py` rather than on `ClimateStage`, because `HydrologyStage`
 needs it too — a rain shadow should raise smaller rivers, not just drier biomes. It works
 because that pass reads elevation, terrain class and the wind and *nothing else*. Only the
-moisture bonuses layered on afterwards read river tags, which is what forces Climate to
+moisture bonuses layered on afterwards read the river sides, which is what forces Climate to
 run after Hydrology. Add a river dependency to the shared function and the pipeline
 becomes circular.
 
@@ -236,7 +241,8 @@ channel, not the widest on the map: a small river's floodplain is narrow, not st
 
 `ErosionStage` carves valley floors outward from its channels, so it needs to know where
 the water runs — but `HydrologyStage`, which owns that answer, is three stages later. So
-erosion runs its own sink fill and flow accumulation over its elevation array. This is
+erosion drains its own elevation array, on the same corner graph (`corner_drainage.py`)
+hydrology uses, with its own sink fill and flow accumulation. This is
 deliberate duplication, not an oversight: the two must agree, and the way they agree is by
 measuring the same quantity rather than by one calling the other across a stage boundary
 it cannot reach. Carving also runs as a short convergence loop, because widening a valley
@@ -247,3 +253,54 @@ The alluvium record rides along on the same convergence loop for the same reason
 is what makes the field testable: silt is laid down against erosion's channels and can
 then be measured against hydrology's rivers three stages later. It thins monotonically
 away from them, which is the check that the two networks really do agree.
+
+## River model
+
+Rivers run **along hexsides**, not through hexes. A river is the line between two banks,
+so putting it on the side lets both banks exist: a road can stand on one bank and not the
+other, a crossing is a step from one hex to the next, and a town is beside the water
+rather than in it. When rivers occupied hexes, a channel hex had no bank, roads had to be
+kept out of it, and a delta or a braid sealed land off so that ferries were needed to join
+it again.
+
+**Geometry** (`core/hex_grid.py`, mirrored in `campaign/shared/src/hex.ts`). Every hex
+owns two of its six corners and three of its six sides, so each corner and side has one
+name:
+
+- a **corner** is `(q, r, k)` with `k` in {0, 1}, written `"q,r,k"`; it touches three hexes
+  (`corner_hexes`) and three other corners (`corner_neighbors`).
+- a **side** is `(q, r, s)` with `s` in {0, 1, 2}, written `"q,r,s"`; it lies between two
+  hexes (`side_between`, `side_hexes`) and joins two corners (`side_corners`,
+  `side_joining`).
+
+**Data** (`core/world_state.py`, schema 2.0). `River.corners` is a course from upstream to
+downstream. What is true of a stretch of river lives on the side in `river_sides`
+(catchment in km², flow as a 0–1 rank, the drop in metres, and the tags `ford`, `bridge`,
+`cataract`, `rapids`); what is true of a point lives on the corner in `river_corners`
+(`river_source`, `river_source_offmap`, `river_end`, `river_mouth`, `confluence`). No
+river feature is a hex tag. `Hex.river_flow` and `Hex.catchment_km2` remain, written onto
+both banks, for the viewer and for erosion. An older `world.json` is refused with a
+message to regenerate: what "on a river" means changed for every reader, so there is
+nothing honest to migrate. `ferries` stays in the schema but nothing fills it now.
+
+```mermaid
+flowchart LR
+    ER[Erosion<br/>corner routing<br/>incises both banks] --> HY[Hydrology<br/>hex lakes, then<br/>corner drainage]
+    HY -->|river_sides<br/>river_corners| CA[Cataract<br/>cataract · rapids]
+    CA --> RD[riverside.py<br/>span · reaches · banks]
+    RD --> CR[Crossing<br/>fords · bridge sites]
+    CR --> RO[Roads<br/>tag_river_crossings]
+    RD -.-> CON[Climate · Soil · Biome<br/>Habitability · ports · Naming]
+    RO -.-> EX([export<br/>corner polylines,<br/>crossings at side midpoints])
+```
+
+**Flow.** `corner_drainage.py` builds the corner graph: a corner's height is the lowest of
+its land hexes, lifted `corner_floor_blend` of the way to their mean so a valley floor
+tilts toward its middle; water runs only along sides with land on both hands; corners
+touching sea, a closed lake or the map edge are terminals; each open lake is one node.
+Priority flood, flow direction, accumulation and stream tracing then work as they did on
+hexes. Hydrology keeps its hex lake model and hands the result to this graph; erosion uses
+the same graph on its own surface. `riverside.py` is the one place later stages ask about
+rivers — how hard a side is to cross (`side_span`), where barges float and portage, which
+hexes are beside or near a bank — so habitability, soil, climate, biomes, ports, naming,
+roads and haulage all read the river the same way.

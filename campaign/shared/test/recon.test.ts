@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { DEFAULT_CONFIG } from '../src/config.js';
-import { key, type Hex, type HexKey } from '../src/hex.js';
+import { key, sideBetween, sideId, type Hex, type HexKey } from '../src/hex.js';
 import {
   contactFrom,
   detectionDice,
@@ -46,19 +46,22 @@ function flatWorld(size = 40): World {
     }
   }
   return {
-    schemaVersion: '1.8',
+    schemaVersion: '2.0',
     seed: 1,
     width: size,
     height: size,
     layout: 'axial',
     hexes,
     rivers: [],
+    riverSides: new Map(),
+    riverCorners: new Map(),
     settlements: [],
     roadEdges: new Map(),
     seaEdges: new Map(),
     ferries: [],
     config: {
       navigableMinDischarge: 60000,
+      runoffMm: 800,
       fordMaxCatchmentKm2: 60,
       crossingReliefM: 60,
       meanPrecipMm: 800,
@@ -443,5 +446,48 @@ describe('spottedUnder', () => {
       unit('b1', 'blue', [{ q: 25, r: 25 }]),
     );
     expect(spottedUnder(state, world, cfg, 'c-r1').size).toBe(0);
+  });
+});
+
+describe('a river nobody can cross', () => {
+  /** A river between columns q = 10 and q = 11, the whole height of the map. */
+  function riverAlongQ10(catchmentKm2: number, tags: string[] = []): World {
+    const riverSides = new Map(world.riverSides);
+    for (let r = 0; r < 40; r++) {
+      for (const across of [{ q: 11, r }, { q: 11, r: r - 1 }]) {
+        const side = sideBetween({ q: 10, r }, across);
+        riverSides.set(sideId(side), { side, catchmentKm2, flow: 0.5, dropM: 0, tags: new Set(tags) });
+      }
+    }
+    return { ...world, riverSides };
+  }
+  const MAJOR = 1000; // 1,000 km2 x 800 mm, well over the navigable line
+  const scout = unit('s', 'red', [{ q: 10, r: 10 }], ['scout'], 'cavalry');
+
+  it('is watched across, but scouts cannot get over to look further', () => {
+    const zone = reconZone(riverAlongQ10(MAJOR), cfg, scout);
+    // The far bank, right across the water, is seen.
+    expect(zone.has(key({ q: 11, r: 10 }))).toBe(true);
+    expect(zone.has(key({ q: 11, r: 9 }))).toBe(true);
+    // A hex beyond it is not, though it is within the Scout's two.
+    expect(zone.has(key({ q: 12, r: 9 }))).toBe(false);
+    expect(reconZone(world, cfg, scout).has(key({ q: 12, r: 9 }))).toBe(true);
+    // On its own bank the Scout still sees two hexes out.
+    expect(zone.has(key({ q: 8, r: 10 }))).toBe(true);
+  });
+
+  it('does not stop scouts at a river they can wade, or one they can bridge or ford', () => {
+    for (const w of [
+      riverAlongQ10(10),
+      riverAlongQ10(MAJOR, ['bridge']),
+      riverAlongQ10(MAJOR, ['ford']),
+    ]) {
+      expect(reconZone(w, cfg, scout).has(key({ q: 12, r: 9 }))).toBe(true);
+    }
+  });
+
+  it('stops them at white water on a minor river', () => {
+    const zone = reconZone(riverAlongQ10(10, ['rapids']), cfg, scout);
+    expect(zone.has(key({ q: 12, r: 9 }))).toBe(false);
   });
 });

@@ -22,13 +22,14 @@ takes it. A pass settlement therefore appears only where the ground leaves no wa
 which on 1500 m of relief is a couple of places on a map and on flat country is none.
 """
 
-from ..core.hex import Settlement, SettlementTier
-from ..core.hex_grid import distance, hex_range, neighbors
+from ..core.hex import SOIL_RANK, Settlement, SettlementTier
+from ..core.hex_grid import distance, hex_range, neighbors, side_hexes
 from ..core.pipeline import GeneratorStage
-from ..core.world_state import ROAD_TIER_RANK, RoadTier, WorldState
+from ..core.world_state import ROAD_TIER_RANK, RoadTier, WorldState, road_edge_key
 from .city_town import _assign_role
 from .habitability import actual_food
 from .haulage import allocate_catchments, gather, settleable, usable_fraction
+from .riverside import river_index
 
 PASS = "pass"
 BRIDGE = "bridge"
@@ -134,19 +135,19 @@ class ChokepointStage(GeneratorStage):
         # draw off its real catchment, and the two differ by however rough the ground is.
         # The second pass re-partitions among the survivors, so a village is not left
         # holding the smaller catchment it had while a rejected neighbour was still in.
-        draw = self._draw(hexes, seats, residual, cfg)
+        draw = self._draw(hexes, seats, residual, cfg, river_index(state, cfg))
         seats = [s for s in seats if draw.get(s, 0.0) >= cfg.chokepoint_min_draw]
         if not seats:
             return state
-        draw = self._draw(hexes, seats, residual, cfg)
+        draw = self._draw(hexes, seats, residual, cfg, river_index(state, cfg))
 
-        state.settlements.extend(self._found(seats, draw, hexes, cfg))
+        state.settlements.extend(self._found(seats, draw, hexes, cfg, river_index(state, cfg)))
         return state
 
     @staticmethod
-    def _draw(hexes, seats, residual, cfg) -> dict:
+    def _draw(hexes, seats, residual, cfg, rivers) -> dict:
         """What each seat can actually fetch off its own fields."""
-        owner, cost = allocate_catchments(hexes, seats, cfg.rural_field_radius, cfg)
+        owner, cost = allocate_catchments(hexes, seats, cfg.rural_field_radius, cfg, rivers)
         return gather(residual, owner, cost, cfg.rural_field_radius)
 
     # -- what may be one -------------------------------------------------------
@@ -176,18 +177,21 @@ class ChokepointStage(GeneratorStage):
 
         # A bridge only holds anything if a road actually goes over it. `CrossingStage`
         # tags its bridges before any road exists — they are candidate sites, and most of
-        # them are never built at. Judged by the drawn network: a crossed bridge carries
-        # at least two road edges, one onto each bank; a tagged hex with one edge is a
-        # road that ends at the water, and one with none is a proposal nobody took up.
+        # them are never built at. A river runs along a hexside, so a road goes over a
+        # bridge exactly when it steps between the two hexes either side of a bridged side,
+        # and both of those are bridgeheads: the town stands at one end or the other.
         # Without this test the tier founded villages beside phantom crossings — on one
         # 96x96 fixture, six of seven stood at bridges no road touched.
-        degree: dict = {}
-        for a, b in state.road_edges:
-            degree[a] = degree.get(a, 0) + 1
-            degree[b] = degree.get(b, 0) + 1
-
-        def crossed(coord) -> bool:
-            return degree.get(coord, 0) >= 2
+        #
+        # Of the two ends, the town grows on the one with the farmland: a bridge over a
+        # desert river has its village on the irrigated bank, not on the sand opposite.
+        # Both ends count where the ground is as good on either.
+        bridgeheads = set()
+        for side, rs in state.river_sides.items():
+            ends = [h for h in side_hexes(side) if h in hexes]
+            if BRIDGE in rs.tags and road_edge_key(*side_hexes(side)) in state.road_edges:
+                rank = {h: SOIL_RANK.get(hexes[h].soil, 0) for h in ends}
+                bridgeheads.update(h for h in ends if rank[h] == max(rank.values()))
 
         occupied = {s.coord for s in state.settlements}
         held = set()
@@ -195,12 +199,8 @@ class ChokepointStage(GeneratorStage):
             hx = hexes.get(coord)
             if hx is None:
                 continue
-            if PASS in hx.tags or (BRIDGE in hx.tags and crossed(coord)):
+            if PASS in hx.tags or coord in bridgeheads:
                 held.add(coord)
-            elif any(
-                BRIDGE in hexes[n].tags and crossed(n) for n in neighbors(coord) if n in hexes
-            ):
-                held.add(coord)  # the bridgehead, which is where the town stands
 
         return sorted(held & settleable(hexes, cfg) - occupied)
 
@@ -291,7 +291,7 @@ class ChokepointStage(GeneratorStage):
 
     # -- founding --------------------------------------------------------------
 
-    def _found(self, seats, draw, hexes, cfg) -> list:
+    def _found(self, seats, draw, hexes, cfg, rivers) -> list:
         """Sized by the fields it can work, the same arithmetic as every other tier.
 
         What differs is only the range: `rural_field_radius`, the daily walk out to the
@@ -307,7 +307,7 @@ class ChokepointStage(GeneratorStage):
             s = Settlement(
                 coord=coord,
                 tier=SettlementTier.VILLAGE,
-                role=_assign_role(coord, hx, hexes, cfg),
+                role=_assign_role(coord, hx, hexes, cfg, rivers),
                 population=population,
                 name=f"{hx.biome.name.lower()}_{kind}_{i}",
             )

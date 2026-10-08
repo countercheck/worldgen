@@ -142,8 +142,8 @@ flowchart TD
         Eros[ErosionStage<br/><i>carves channels in hex.elevation</i>]
         Tcls[TerrainClassificationStage<br/><i>hex.terrain_class</i>]
         Wbod[WaterBodiesStage<br/><i>splits OCEAN vs LAKE; fixes COAST</i>]
-        Hydr[HydrologyStage<br/><i>state.rivers, hex.river_flow, river tags</i>]
-        Cata[CataractStage<br/><i>cataract tags</i>]
+        Hydr[HydrologyStage<br/><i>state.rivers, river_sides, river_corners</i>]
+        Cata[CataractStage<br/><i>cataract / rapids side tags</i>]
         Elev --> Eros --> Tcls --> Wbod --> Hydr --> Cata
     end
 
@@ -184,7 +184,10 @@ flowchart TD
 
 ## 2. Data Model
 
-### `WorldState` — [worldgen/core/world_state.py:25–34](../worldgen/core/world_state.py#L25)
+### `WorldState` — [worldgen/core/world_state.py](../worldgen/core/world_state.py)
+
+Schema version 2.0. A `world.json` from before rivers moved onto hexsides is refused with
+a message to regenerate it from its seed; there is no migration.
 
 | Field | Type | Notes |
 |---|---|---|
@@ -192,9 +195,13 @@ flowchart TD
 | `width`, `height` | `int` | Grid dimensions in hexes |
 | `layout` | `str` | `"axial"` or `"offset"` — how `width`/`height` map onto hex coordinates |
 | `hexes` | `dict[HexCoord, Hex]` | Every cell, keyed by axial `(q, r)` in either layout |
-| `rivers` | `list[River]` | Source-to-confluence (or source-to-sea) paths |
+| `rivers` | `list[River]` | Courses along hexsides: `River.corners` from upstream to downstream, plus `flow_volume` and `name`. A tributary's last corner is a corner of its trunk |
+| `river_sides` | `dict[Side, RiverSide]` | Every hexside a river runs along: `catchment_km2`, `flow` (a 0–1 rank against the largest river), `drop_m`, and `tags` ⊂ {`ford`, `bridge`, `cataract`, `rapids`} |
+| `river_corners` | `dict[Corner, set[str]]` | Tags on the points of the network: `river_source`, `river_source_offmap`, `river_end`, `river_mouth`, `confluence` |
 | `settlements` | `list[Settlement]` | Cities, towns, and villages combined |
-| `roads` | `list[Road]` | PRIMARY / SECONDARY / TRACK paths |
+| `road_edges` | `dict[(HexCoord, HexCoord), RoadEdge]` | The road network, one tier (PRIMARY / SECONDARY / TRACK) per undirected land edge |
+| `sea_edges` | `dict[(HexCoord, HexCoord), RoadEdge]` | The water legs of the same network, kept apart from the roads |
+| `ferries` | `list[Ferry]` | Kept in the schema, but nothing fills it since rivers moved onto hexsides: no land is sealed off by a river any more |
 | `metadata` | `dict` | `{"seed": ..., "config": ...}` snapshot |
 
 Convenience accessors: `all_land()`, `all_open_water()`, `all_inland_water()`,
@@ -211,7 +218,7 @@ Convenience accessors: `all_land()`, `all_open_water()`, `all_inland_water()`,
 | `terrain_class` | `TerrainClass` | enum | Terrain Class, Water Bodies, Hydrology |
 | `biome` | `Biome \| None` | enum | Biome |
 | `land_cover` | `LandCover \| None` | enum | Land Cover |
-| `river_flow` | `float` | `[0.0, 1.0]`, normalized to map max | Hydrology |
+| `river_flow` | `float` | `[0.0, 1.0]`, normalized to map max; written on *both* banks of every river side | Hydrology |
 | `habitability_city` | `float` | `[0.0, 1.0]` | Habitability (catchment radius 8) |
 | `habitability_town` | `float` | `[0.0, 1.0]` | Habitability (catchment radius 4) |
 | `habitability_village` | `float` | `[0.0, 1.0]` | Habitability (catchment radius 2), Roads (+0.2 near roads) |
@@ -241,29 +248,41 @@ Convenience accessors: `all_land()`, `all_open_water()`, `all_inland_water()`,
 
 | Tag | Meaning | Set by |
 |---|---|---|
-| `"river"` | Hex carries a river path | Hydrology |
-| `"headwater"` | River hex with no upstream river neighbour | Hydrology `_tag_hexes` |
-| `"confluence"` | River hex with ≥2 upstream river neighbours | Hydrology |
-| `"river_mouth"` | River hex on map border or adjacent to ocean/lake | Hydrology |
-| `"ford"` | First road crossing of a river hex | `tag_river_crossings` |
-| `"bridge"` | Second road to cross the same river hex (upgrades a ford) | `tag_river_crossings` |
 | `"prominent_site"` | ROLLING hex that is a local-max `habitability_town` within 3-hex range, no settlement | City/Town (`classic`) |
 | `"pass"` | A col: a saddle whose flanks both rise at least `terrain_steep_gradient_m` | Chokepoints (`organic`) |
-| `"confluence_town"` | TOWN settled on a hex already tagged `"confluence"` | City/Town |
-| `"river_source"` | First hex of a drawn river (two or more land hexes) that rises on the map — a headwater, not water arriving from off it | Hydrology |
-| `"river_end"` | Last land hex of a drawn river that stops without joining another: into the sea or a lake, off the map, or into the ground | Hydrology |
-| `"rapids"` | White water on a river too small for a cataract: see `rapids_min_drop_m` | Cataracts |
+| `"confluence_town"` | TOWN settled on a hex at a `confluence` corner | City/Town |
 | `"hollow"` | Land in a closed hollow too small or shallow for a lake, or a small island in a lake; waterlogs to wetland | Water bodies |
 
-Roads may cross a river but never travel along one: the hexsides a river is drawn
-along are excluded from road pathfinding outright (`make_road_edge_cost`), and
-`road_river_hex_cost` prices out the meander and braid cases the edge rule cannot
-see. Settlement hexes are exempt only far enough to be *reached*: the hexside opens
-when the town's counterpart is dry land, never when it is another river hex, so a
-town on the water cannot be used to carry on down the channel. Where a river mesh
-seals a component off entirely, the network is joined by a `Ferry` (drawn as a pair
-of anchorages) rather than a road in the channel; if the gap is wider than
-`road_ferry_max_hop`, routing raises `RoutingError` instead of degrading quietly.
+No river feature is a hex tag. Rivers run along hexsides (see
+[ARCHITECTURE.md](ARCHITECTURE.md#river-model)), so what is true of a stretch of river is
+tagged on its side and what is true of a point on its corner.
+
+**Side tags** (`RiverSide.tags`, in `state.river_sides`):
+
+| Tag | Meaning | Set by |
+|---|---|---|
+| `"ford"` | The river can be waded here: every side with span ≤ 1, plus rare fords on barge rivers (§3.10a) | Crossing (`organic`), `tag_river_crossings` |
+| `"bridge"` | A bridge, and always one a road crosses: Crossing marks candidate sites, and `tag_river_crossings` keeps those a road uses and adds one wherever a road crosses water too big to wade | Crossing, `tag_river_crossings` |
+| `"cataract"` | A barge river falling too steeply to navigate; breaks a reach, so cargo portages | Cataracts |
+| `"rapids"` | White water on a river too small for a cataract: see `rapids_min_drop_m` | Cataracts |
+
+**Corner tags** (`state.river_corners`):
+
+| Tag | Meaning |
+|---|---|
+| `"river_source"` | First corner of a drawn river that rises on the map — a spring, not water arriving from off it |
+| `"river_source_offmap"` | First corner of a river that enters across the map edge |
+| `"river_end"` | Last corner of a river that stops without joining another: into the sea or a lake, off the map, or into the ground |
+| `"river_mouth"` | A `river_end` where the water runs into the sea or a lake |
+| `"confluence"` | Where a tributary joins its trunk. Inland only: two rivers reaching the sea at one corner have not met |
+
+All are set by Hydrology. A hex is "at" a corner feature if it is one of the corner's
+three land hexes, which is how `riverside.river_index` hands them to habitability, city
+roles and naming.
+
+A road never stands in a river: it runs beside one on a bank, and crosses it by stepping
+across a side, which costs `road_river_crossing_base + road_river_crossing_flow × flow`
+once. `tag_river_crossings` then tags each side a road crosses (§3.11).
 
 ---
 
@@ -668,74 +687,68 @@ closed hollows on land, and fix COAST hexes that ended up adjacent only to a lak
 
 ### 3.5 Hydrology
 
-[stages/hydrology.py](../worldgen/stages/hydrology.py)
+[stages/hydrology.py](../worldgen/stages/hydrology.py),
+[stages/corner_drainage.py](../worldgen/stages/corner_drainage.py)
 
-The biggest stage in the pipeline (~780 lines). It builds the river
-network from the eroded heightmap.
+The biggest stage in the pipeline. It settles the water on the eroded heightmap — which
+hollows hold lakes, at what level, which of them overflow — and then routes the rivers
+along the sides between hexes.
 
 **Reads:** `hex.elevation`, `hex.terrain_class`.
-**Writes:** `hex.river_flow`, `hex.tags` (river/headwater/confluence/
-river_mouth), `state.rivers`. May also raise lake water-levels and
-convert land hexes to LAKE/OCEAN if a basin needs to expand to its
+**Writes:** `state.rivers`, `state.river_sides`, `state.river_corners`,
+`state.metadata["runoff_mm"]`, `hex.catchment_km2` and `hex.river_flow` (on both banks of
+every river), `hex.tags` (`endorheic`, `endorheic_shore`). May also raise lake
+water-levels and convert land hexes to LAKE/OCEAN if a basin needs to expand to its
 spillway.
 
 **Config:** `channel_min_discharge`, `navigable_min_discharge`,
 `evapotranspiration_base_mm`, `evapotranspiration_per_c_mm`, `min_runoff_mm`,
-`river_flow_continuous`, `lake_chaining`, `endorheic_marsh_radius`,
-`endorheic_marsh_min_precip_mm`.
+`river_wander_exponent`, `corner_floor_blend`, `river_flow_continuous`, `lake_chaining`,
+`endorheic_marsh_radius`, `endorheic_marsh_min_precip_mm`, and the `river_inflow_*` keys.
 
-**Algorithm**
+**Why two models.** Rivers run along hexsides, so the network the water finally runs
+through is the hexes' *corners*. But whether a lake overflows, and through which shore, is
+a question about whole basins and their water balance, and the hex model already answered
+it well. So the stage keeps the hex model for the ground (parts A–C below) and drains the
+corner graph over the ground it has settled (part D). The hex model's own courses are
+never drawn.
 
-Nine steps, top to bottom in
-[hydrology.py:11–124](../worldgen/stages/hydrology.py#L11):
+**A — Settling the ground on hexes**
 
-1. **Priority-Flood** sink-fills closed depressions on land, using a
-   min-heap seeded with ocean and border land hexes (Barnes et al. 2014,
-   [hydrology.py:153–186](../worldgen/stages/hydrology.py#L153)). After
-   this pass, every land hex has a non-decreasing path of `filled[...]`
-   values to the sea.
+1. **Priority-Flood** sink-fills closed depressions on land, using a min-heap seeded with
+   ocean and border land hexes (Barnes et al. 2014). After this pass every land hex has a
+   non-decreasing path of `filled[...]` values to the sea.
 
-2. **Epsilon tilt** adds tiny perturbations to break ties on plateaus
-   ([hydrology.py:35–40](../worldgen/stages/hydrology.py#L35)):
+2. **Epsilon tilt** breaks ties on plateaus:
    ```
-   filled[c] += 1e-6 * dist_from_water[c]/max_dist
+   filled[c] += 1e-6 * drain_dist[c]/max_dist
               + 1e-6 * 1e-4 * (q + r) / (w + h)
    ```
-   The first term gives plateaus a gradient *away from* water (so they
-   drain consistently); the second is a coordinate-based tiebreaker that
-   makes the result reproducible regardless of dict iteration order.
+   The first term gives a plateau a gradient toward the point it drains from, measured
+   across that plateau only; the second is a coordinate tie-break that makes the result
+   independent of dict iteration order.
 
-3. **Flow direction** — for each land hex, point at a lower neighbour on the
-   filled surface, drawn at random with weight (drop / largest drop)^`river_wander_exponent`,
-   so rivers on level ground wander into each other rather than running as parallel
-   straight lines. Erosion's valley carving routes by the same rule, with one fixed draw
-   per cell across its passes ([hydrology.py:188–235](../worldgen/stages/hydrology.py#L188)).
-   Two subtleties:
-   - For ocean/lake neighbours, use **raw** elevation, not filled, so a
-     priority-flood-raised lake never appears higher than the actual
-     terrain around it.
-   - If both `from` and `to` sit on the map border, terminate flow at
-     `from` rather than letting the river creep along the edge.
+3. **Flow direction** — each land hex points at a lower neighbour on the filled surface,
+   drawn at random with weight (drop / largest drop)^`river_wander_exponent`, so rivers on
+   level ground wander into each other rather than running as parallel straight lines.
 
-4. **Flow accumulation** — Kahn's topological sort, then accumulate
-   ([hydrology.py:237–265](../worldgen/stages/hydrology.py#L237)):
-   ```
-   acc[c] = 1 + sum(acc[upstream])
-   ```
-   Each hex contributes 1 unit; downstream hexes accumulate the sum of
-   their upstream tributaries. **At 1 hex = 1 km, `acc` is catchment area in square
-   kilometres** — a physical quantity, comparable between one map and another. It is
-   written to `hex.catchment_km2` and read by the crossing and haulage models.
+4. **Flow accumulation** — Kahn's topological sort, then
+   `acc[c] = rain[c] + sum(acc[upstream])`. Rain is the shared precipitation field
+   (`precipitation.py`), averaging 1.0 per land hex, so at 1 hex = 1 km `acc` is
+   catchment in square kilometres, and a rain shadow raises smaller rivers.
 
-5. **River extraction** — a channel forms where enough water passes to keep one open:
+5. **The channel threshold** — a channel forms where enough water passes to keep one open:
    ```
    PET          = evapotranspiration_base_mm
                   + evapotranspiration_per_c_mm * max(0, temp_c)
    runoff_mm    = max(min_runoff_mm,
                       precip_mm - precip_mm / sqrt(1 + (precip_mm / PET)^2))
    min_catchment = channel_min_discharge / runoff_mm
-   river_set     = {c for c, area in acc.items() if area >= min_catchment}
    ```
+   `runoff_mm` is recorded in `state.metadata["runoff_mm"]`, so anything reading the world
+   — the campaign's major/minor river line — turns a catchment into discharge exactly as
+   the generator does.
+
    **Discharge, not rank.** The old `river_flow_threshold` was documented as a flow
    minimum and implemented as "take the top 5% of land by accumulation", so every
    climate — desert and rainforest alike — got 5.6% of its land under channel. Runoff
@@ -746,75 +759,96 @@ Nine steps, top to bottom in
    (200 mm) both fell to the floor and drew identical rivers. Because the demand rises
    with temperature, cold country still sheds nearly everything it receives.
 
-   `hex.river_flow` remains a normalised `[0, 1]` rank, retained for river *rendering*
-   width. Anything making a decision about a river reads `catchment_km2` instead.
+**B — Lakes**
 
-6. **Build River objects** — for each headwater (river hex with no
-   upstream river hex), trace `flow_dir` to its mouth
-   ([hydrology.py:296–394](../worldgen/stages/hydrology.py#L296)). If a
-   trace stalls before reaching water, three fallbacks try in order:
-   - **Stage 1:** elevation-guided Dijkstra avoiding already-traced hexes.
-     Uphill cost = `1.0 + 1000 * Δelev`
-     ([hydrology.py:435–436](../worldgen/stages/hydrology.py#L435)) so the
-     path stays in valleys.
-   - **Stage 2:** same Dijkstra without the avoid set.
-   - **Stage 3:** plain BFS (always succeeds on a finite grid).
+6. **Hex courses** — the hexes over the threshold are traced to the sea, with
+   elevation-guided Dijkstra and then BFS as fallbacks where a trace stalls. These courses
+   exist only to feed lake drainage.
 
-   Fallback hexes are inserted into `river_set` and `flow_dir` is updated
-   so subsequent tagging stays consistent.
+7. **Lake drainage** — each lake finds its natural **spillway** (the lowest land hex on
+   its perimeter), rises to it, and floods any land below the new level. A lake that
+   reaches the map edge becomes OCEAN. Otherwise its outflow is routed toward the sea or
+   the border. With `lake_chaining`, a lake may spill into another lake — including a
+   closed one, as the Jordan runs into the Dead Sea.
 
-7. **Tagging** ([hydrology.py:267–294](../worldgen/stages/hydrology.py#L267)):
-   - `headwater`: river hex with 0 upstream river neighbours.
-   - `confluence`: river hex with ≥2 upstream river neighbours.
-   - `river_mouth`: river hex on the map border, or with an ocean/lake
-     neighbour.
+8. **Endorheic basins** — a bowl ringed by higher ground with no lower lake to spill into
+   keeps no outlet: forcing a river out of it would be a lie about the terrain. Its water
+   leaves by evaporation, so its hexes are tagged `endorheic` and the land within
+   `endorheic_marsh_radius` `endorheic_shore`, for `BiomeStage` to turn into wetland.
 
-8. **Lake drainage** ([hydrology.py:481–711](../worldgen/stages/hydrology.py#L481))
-   guarantees every lake has a visible outflow river:
-   - Find each lake's natural **spillway** (lowest land hex on its
-     perimeter, by raw elevation).
-   - Raise the lake's surface to that elevation; flood-fill any land
-     below the new water-level, converting it to LAKE.
-   - If the expanded lake reaches the map edge, promote the whole
-     component to OCEAN (it has touched the sea).
-   - Otherwise, run elevation-guided Dijkstra from the spillway toward
-     the nearest border or ocean neighbour. Append the result as a new
-     `River` and merge it with any existing river network on the way out.
+**C — Rivers from off the map.** Inlets on the border, chosen by the `river_inflow_*`
+keys (§ [4.5](#rivers-from-off-the-map)), are seeded with a catchment they did not gather
+here, so they enter already wide.
 
-9. **Confluence splitting** ([hydrology.py:714–758](../worldgen/stages/hydrology.py#L714)):
-   the source-to-sea paths produced in step 6 overlap whenever
-   tributaries merge. Rivers are sorted by descending `flow_volume` and
-   each one claims its hexes; later (lower-flow) rivers are trimmed at
-   the first already-claimed hex. The result: every `River` object in
-   `state.rivers` is a single source-to-confluence (or source-to-sea)
-   segment with no duplicate trunk drawing.
+**D — The rivers, on corners** (`_route_on_corners`, using `corner_drainage.py`)
 
-10. **Splitting at water** (`_split_at_water`): a river ends where it meets a lake, as
-    it does the sea — the piece keeps the first water hex as its last — and what leaves
-    the lake is a river of its own, starting from the water hex it leaves by. Nothing is
-    drawn across open water.
+9. **The corner graph.** Every corner touches three hexes and three other corners.
+   - A corner is a node if any of its hexes is land. Its height is the **lowest** of its
+     land hexes, lifted `corner_floor_blend` of the way toward their **mean**. A corner is
+     where valley sides meet, so it belongs at the floor; but at a blend of 0 all six
+     corners of a valley-floor hex stand at the same height, which leaves a level lane a
+     hex out from every river, and tributaries ran down it beside their trunk for miles
+     instead of joining it — 20% ran more than 5 km within 2 km of their trunk. At 0.25 a
+     corner against the valley side stands above one in the middle of the floor, the floor
+     tilts toward its river, and that falls to about 12%, mostly the parallel drainage of
+     broad plains, which is real.
+   - Water runs only along a side with **land on both hands**. A side with water on one
+     hand is a shoreline, and one with the map edge on one hand is the frame; a river
+     along either would be a line drawn beside the water, not a watercourse.
+   - A corner touching the sea, a closed lake or the map edge is a **terminal**: water
+     reaching it leaves the network.
+   - Each open lake is a single **super-node**, named `(q, r, 2)` after its least hex so it
+     sorts with the corners without colliding with one. It sits at its water level, joins
+     every corner of its shore, and spills wherever the fill first reached it from below.
 
-11. **Marks** for the map's symbols: `river_source` on the first hex of each drawn river
-    (two or more land hexes) that rises on the map, and `river_end` on the last land hex of
-    each that stops without joining another — into the sea or a lake, off the map, or into
-    the ground. `CataractStage` adds `rapids` (see `rapids_min_drop_m`). Every exporter and
-    the campaign map draw a source as a ring, an end as an arrowhead pointing downstream,
-    and a cataract or rapids as white bars across the river.
+10. **Fill and direction.** A priority flood from the terminals fills every depression;
+    the heap is broken by insertion order, so on a flat the fill spreads outward from the
+    drain one step at a time and the order nodes leave the heap is downhill everywhere.
+    Each corner then picks one earlier (lower) neighbour, with the same wander weighting
+    as the hex model, so the network never loops. A corner beside the water runs into it.
 
-**Output**
+11. **Rain and accumulation.** Each land hex drains whole into its lowest corner (the
+    earliest in the fill), each open lake gathers the rain on its own hexes, and inflow
+    inlets add their imported catchment. Accumulating down the flow gives every corner its
+    catchment in km².
 
-- If `river_flow_continuous=False` (default): `hex.river_flow = acc[c] / max_acc`
-  for every river hex, and `0.0` for everything else.
-- If `True`: every draining land hex gets a normalised flow value (handy
-  if you want to render the underlying drainage gradient).
+12. **Courses** (`trace_streams`). A corner is channel where at least `min_catchment`
+    passes it; everything downstream of a lake's outlet is channel however little
+    spills. Each course runs from where a channel begins — a spring, a lake outlet, an
+    inflow — until it leaves the network or meets a bigger river. At a confluence the
+    larger branch carries on and the smaller ends on the junction corner, so a
+    tributary's last corner is a corner of its trunk and nothing is drawn twice. A course
+    reaching an open lake ends on the shore; what leaves the lake is a course of its own.
+    If nothing reaches the threshold, the map keeps its single largest drainage line.
+
+13. **Recording.** Each course becomes a `River` (`corners`, `flow_volume`). Each side
+    it runs along becomes a `RiverSide` with `catchment_km2`, `flow` (the catchment as a
+    share of the largest) and `drop_m`. Its corners are tagged in `river_corners`:
+    `river_source` (rises on the map), `river_source_offmap` (an inflow), `river_end`
+    (stops without joining another river), `river_mouth` (a `river_end` into the sea or a
+    lake), and `confluence` where two or more courses meet — inland only, since two
+    rivers reaching one stretch of shore have arrived, not met. Every exporter and the
+    campaign map draw a source as a ring, an end as an arrowhead pointing downstream, and
+    a cataract or rapids as white bars across the river.
+
+14. **Hex catchments.** For the viewer and for erosion, each land hex records in
+    `catchment_km2` what drains to its own lowest corner or, on a bank, the largest river
+    it touches; `river_flow` is that as a share of the largest on the map, written on
+    *both* banks of every river side and zero elsewhere. With
+    `river_flow_continuous=True`, every draining land hex gets a value — a diagnostic for
+    inspecting the drainage field. Nothing deciding anything about a river reads
+    `river_flow`; it reads the river sides.
 
 ---
 
 ### 3.5a Cataracts
 
 [cataracts.py](../worldgen/stages/cataracts.py), both models, straight after hydrology. A
-river hex that carries a barge (`navigable_min_discharge`) and falls at least
-`cataract_min_drop_m` through the hex is tagged `cataract`. Three things follow:
+river side whose catchment carries a barge (`navigable_min_discharge`) and whose water
+falls at least `cataract_min_drop_m` per km is tagged `cataract`. The fall is measured
+along the river's own course, over the side and the sides either side of it
+(`riverside.side_gradients`), because a corner stands at its lowest hex and the fall over
+any single side comes in lumps. Three things follow:
 
 - **A barrier.** `navigable` is false on a cataract, so a cargo afloat must land above it
   and load again below. The tag goes out in the world file for anything else — a campaign
@@ -828,9 +862,14 @@ river hex that carries a barge (`navigable_min_discharge`) and falls at least
 - **A mill site.** `site_bonus` pays a site on or beside a cataract
   `habitability_mill_bonus`.
 
-It has to run before `HabitabilityStage`, which reads `navigable` to score harbours. At
-20 m/km a temperate 128x128 map carries 14-65 cataract hexes in 6-28 stretches, about 15% of
-barge-sized river hexes once `elevation_profile` has laid most of the land low.
+A cataract side breaks a navigable **reach**: a barge goes from one bank hex to the next
+only along a run of navigable sides joined corner to corner, and the hexes beside a
+cataract are its **portage**. A smaller river falling at least `rapids_min_drop_m` per km
+over a catchment of `rapids_min_catchment_km2` or more is tagged `rapids` instead; that is
+drawn as white water and, in the campaign, has to be bridged or pontooned rather than
+waded. It changes nothing else in the generator.
+
+It has to run before `HabitabilityStage`, which reads `navigable` to score harbours.
 
 ---
 
@@ -841,8 +880,7 @@ barge-sized river hexes once `elevation_profile` has laid most of the land low.
 **Purpose:** Compute temperature and moisture fields. Two independent
 sub-passes, run sequentially.
 
-**Reads:** `hex.elevation`, `hex.terrain_class`, `hex.tags` (`"river"`),
-`hex.river_flow`.
+**Reads:** `hex.elevation`, `hex.terrain_class`, `state.river_sides`.
 **Writes:** `hex.temperature`, `hex.moisture`.
 
 **Config:** `regional_climate`, `mean_temperature_c`, `latitude_temp_range_c`,
@@ -902,9 +940,11 @@ negligible; raise it only for a continent-scale map.
    a rain shadow is a local feature tens of kilometres deep rather than everything
    downwind of the first hill.
 
-2. **River and coastal bonuses.** For every land hex: `+0.15` if any neighbour carries
-   the `"river"` tag (only when `moisture_bleed_passes == 0`), and `+0.1` if any
-   neighbour is OCEAN or LAKE. Cumulative, so a coastal river-adjacent hex gets `+0.25`.
+2. **River and coastal bonuses.** For every land hex: `+0.15` if it is *near a river*
+   (only when `moisture_bleed_passes == 0`), and `+0.1` if any neighbour is OCEAN or
+   LAKE. Cumulative, so a coastal hex near a river gets `+0.25`. A river runs along a
+   hexside, and the ground it waters is the four hexes at that side's two corners: the
+   two banks and the hex at either end.
 
 3. **Gaussian smear** at `sigma=2.0`. Weather systems are wide, and rain falls either
    side of the ridge that lifted it rather than only on the hex that did the lifting.
@@ -925,8 +965,8 @@ negligible; raise it only for a continent-scale map.
 
 5. **Optional moisture bleed.** When `moisture_bleed_passes > 0`, the flat `+0.15` river
    bonus is replaced by an iterative diffusion: each pass a hex gains
-   `moisture_bleed_strength × max(neighbour.river_flow)` from any river-tagged neighbour
-   at or above its own elevation. This builds a wider moisture corridor along big rivers,
+   `moisture_bleed_strength × mean_precip_mm × flow` from the largest river near it whose
+   water — the lower of its two banks — stands at or above the hex. This builds a wider moisture corridor along big rivers,
    especially in valleys, but never uphill. There is no ceiling on the result — moisture
    is millimetres now, and a valley that receives more rain than the ridge above it is
    simply a wetter valley.
@@ -1008,8 +1048,9 @@ climate's map changes by a single hex — none of them has land below -2 °C.
 **Wetland overrides**, applied afterwards:
 
 ```
-# Riverside waterlogging
-if terrain_class in (FLAT, COAST) and "river" in tags
+# Riverside waterlogging — on the lower bank of each river side, since the higher
+# bank sheds its water back into the river
+if terrain_class in (FLAT, COAST) and hex is the lower bank of a river side
    and runoff_mm(precip, temp) > wetland_min_runoff_mm
    and temperature_c >= biome_treeline_temp_c:
     biome = WETLAND
@@ -1222,10 +1263,10 @@ if terrain_class in (OCEAN, LAKE, STEEP, ESCARPMENT) or biome == WETLAND:
     every score = 0.0
 
 # Site bonuses, identical across tiers
-bonus  = habitability_river_bonus      if hex or neighbour has "river"
+bonus  = habitability_river_bonus      if a river runs along one of the hex's sides
        + habitability_coast_bonus      if hex or neighbour is COAST
        + habitability_hill_bonus       if a rise with a level neighbour
-       + habitability_confluence_bonus if "confluence" in hex.tags
+       + habitability_confluence_bonus if the hex touches a `confluence` corner
 
 # One score per tier, each normalised against its own map-max
 raw[tier] = habitability_agri_weight * mean(food value within radius[tier]) + bonus
@@ -1307,13 +1348,13 @@ role from `_assign_role` (below).
 2. Find local maxima of that score (hexes whose score beats all 6
    neighbours).
 3. Greedy placement with `town_min_separation` (default 8). Population
-   uniform random in `[1_000, 10_000]`. Towns on `"confluence"` hexes
-   also get the `"confluence_town"` tag.
+   uniform random in `[1_000, 10_000]`. Towns on a hex touching a
+   `confluence` corner also get the `"confluence_town"` tag.
 
 **Role assignment** ([city_town.py:8–33](../worldgen/stages/city_town.py#L8)):
 
 ```
-PORT         if navigable(hx) or any neighbour is navigable
+PORT         if waterside(hx): a bank of a navigable reach, next to one, or a shore
 AGRICULTURAL elif >= 3 neighbours are GRASSLAND or TEMPERATE_FOREST
 MARKET       otherwise
 ```
@@ -1332,7 +1373,9 @@ villages, and organic markets — so the roles mean the same thing whichever mod
 > rewards it. So a port test that fired on any water would be nearly constant. The rule
 > used to read "any `river` tag or COAST hex within one step", which **43%** of all land
 > satisfies against **22%** for navigable water; on the seed-42 reference only 20 of 105
-> river hexes float a boat. A hamlet on a headwater brook was labelled the same as a
+> river hexes floated a boat (measured when rivers still occupied hexes). It now asks
+> `riverside.waterside`: the hex is a bank of a navigable reach, or next to one, or on a
+> shore. A hamlet on a headwater brook was labelled the same as a
 > coastal harbour. On that map the change takes 127 ports down to 86, and the classic
 > temperate maps now spread across all three roles instead of piling into one.
 >
@@ -1375,11 +1418,13 @@ placement, deliberately: a bridging point is the cheapest ground in a district t
 from both banks, so it should be a *reason* a market grows there rather than something
 noticed afterwards.
 
-**Reads:** `hex.catchment_km2`, `hex.elevation`, `hex.tags`.
-**Writes:** `hex.tags` (`"ford"`, `"bridge"`).
+**Reads:** `state.river_sides` (catchment, drop), the food surface.
+**Writes:** `RiverSide.tags` (`"ford"`, `"bridge"`) — a crossing is a river side, the step
+from one bank to the other.
 
 **Config:** `ford_max_catchment_km2`, `crossing_relief_m`, `bridge_pressure_per_span`,
-`crossing_pressure_radius`, `crossing_min_separation`.
+`crossing_pressure_radius`, `crossing_min_separation`, `ford_serves_bridge_fraction`,
+`rare_ford_max_span`, `rare_ford_separation`.
 
 **The distinction the stage rests on:** a **ford is terrain and is free** — shallow
 braided water anyone can wade, needing nobody's permission. A **bridge is capital**, and
@@ -1389,10 +1434,30 @@ appears only where enough traffic will use it. Nobody bridges to nowhere.
 span      = effective width, in multiples of the wadeable catchment,
             inflated by local relief / crossing_relief_m
 ford      if span <= 1                      # you can wade it
+ford      if the river floats a barge and span <= rare_ford_max_span,
+             easiest first, none within rare_ford_separation of another
+                                            # the rare slack reach of a big river
 bridge    if surplus within crossing_pressure_radius
              >= bridge_pressure_per_span * span
-           and no other crossing within crossing_min_separation
+           and no bridge within crossing_min_separation
+           and no ford there over water >= ford_serves_bridge_fraction of its own
 ```
+
+**A big river's fords are rare.** Nothing that floats a barge is wadeable by size alone,
+so without the second rule a major river is forded only where a road later crosses it.
+The slackest reaches a little past the wading span are fords as well, spaced far apart:
+on a 200×200 map, about one major-river side in eighty. They are the places a column is
+marched to.
+
+**A bridge here is a candidate site, not yet a bridge.** The roads decide which are built:
+`tag_river_crossings` (§ [3.11](#311-interurban-roads)) keeps a bridge only where a road crosses
+it, and adds one wherever a road crosses water too big to wade. So every bridge on a
+finished map carries a road. Fords stay whether or not a road uses them, because a ford is
+terrain.
+
+**A brook's ford is no reason not to bridge the trunk.** A ford stands in for a bridge
+only over water of its own size; otherwise a map with a ford on every brook would bridge
+almost nothing.
 
 **Relief, not just discharge.** Fast water takes your feet from under you whatever its
 depth, and at a kilometre to the hex it is the approaches rather than the span that defeat
@@ -1416,7 +1481,7 @@ between high sides is easy to cross; the valley's depth is not the crossing's pr
 return, and size them from what they actually gather. Replaces `CityTownStage`.
 
 **Reads:** the food surface, `hex.terrain_class`, `hex.elevation`, `hex.tags`,
-crossings.
+the river sides and their crossings.
 **Writes:** `state.settlements`, `hex.settlement`, `hex.territory`,
 `hex.territory_cost`.
 
@@ -1493,7 +1558,7 @@ is the distance at which the team has eaten the load. One constant sets reach an
 together.
 
 **The travel-cost field is not the road-cost field**, and this was got wrong once. Reusing
-`river_hex_cost` (12.0) exceeded the 10.0 day budget outright, and `terrain_base_cost`'s
+the road model's river charge (then `river_hex_cost`, 12.0 per river hex) exceeded the 10.0 day budget outright, and `terrain_base_cost`'s
 3×/10× bands made the median step 3.0, so markets reached 3 hexes instead of 10. Both are
 excluded. Ascent uses **Naismith's rule** (`travel_ascent_per_hex`) rather than
 `road_slope_cost`, because a catchment is walked, not engineered — the road curve prices
@@ -1502,6 +1567,20 @@ catchment to a third of its proper reach.
 
 Catchments are terrain-shaped, not round: measured disc-fill is 0.43 at the median, and
 they visibly stop at ridges and stretch down valleys.
+
+**Rivers in the travel-cost field** are read through `riverside.river_index`, once, so
+every haulage question asks them the same way:
+
+- **Crossing on foot** is charged once per river side crossed (`ford_cost`):
+  `travel_ford_cost × span` away from a crossing, or `crossing_use_cost` at a ford or
+  bridge. A trunk river therefore bounds a market's catchment instead of being invisible
+  to it.
+- **By barge**, cargo moves between riverside hexes only along a navigable **reach** — a
+  run of sides whose discharge clears `navigable_min_discharge`, joined corner to corner —
+  so two hexes are joined by water when both are banks of the same reach, or a bank and
+  the open water its reach runs into. A cataract side breaks a reach, and the hexes beside
+  it are a **portage**: the cargo lands above the falls and loads again below.
+- **Timber** floats from any bank of a river past `timber_float_min_discharge`.
 
 ---
 
@@ -1629,8 +1708,9 @@ map's total population is unchanged by this stage.
   water is scarce. A workforce drawn lognormally around `mine_workforce` goes to the town
   within `resource_attach_radius` if there is one, and otherwise founds a village.
 - **Lumber camps** (VILLAGE, role `lumber`). On a WOOD hex on or beside water that floats
-  timber — open water, or a river past `timber_float_min_discharge`, a lower bar than a
-  barge needs (about half of all river hexes against 15% navigable); worth the woodland within `lumber_radius`, discounted by the bulk haul to the
+  timber — open water, or a bank of a river past `timber_float_min_discharge`, a lower bar
+  than a barge needs (when rivers occupied hexes, about half of them against 15%
+  navigable); worth the woodland within `lumber_radius`, discounted by the bulk haul to the
   nearest city. Placed best-first, `lumber_min_separation` apart, while that worth reaches
   `lumber_min_score`, employing `lumber_people_per_wood_hex` per wooded hex.
 
@@ -1679,16 +1759,16 @@ cities.
 tiers). Uses gravity-model traveller simulation over A*-pathed routes,
 with self-reinforcing pheromone trails.
 
-**Reads:** `hex.terrain_class`, `hex.elevation`, `hex.river_flow`,
+**Reads:** `hex.terrain_class`, `hex.elevation`, `state.river_sides`,
 `hex.coord`, `state.settlements` (CITY and TOWN tiers only).
-**Writes:** `state.roads`, `hex.road_connections`, `hex.tags`
-(`"ford"` / `"bridge"`), `hex.habitability_village` (+0.2 boost).
+**Writes:** `state.road_edges`, `state.sea_edges`, `hex.road_connections`,
+`RiverSide.tags` (`"ford"` / `"bridge"`), `hex.tags` (`"switchback"`),
+`hex.habitability_village` (+0.2 boost).
 
 **Config:** `road_travellers_per_pop`, `road_travellers_max`,
 `road_gravity_exponent`, `road_pheromone_factor`,
 `road_flat_cost`, `road_water_cost`, `road_embark_cost`, `road_disembark_cost`,
 `road_river_crossing_base`, `road_river_crossing_flow`,
-`road_river_hex_cost`, `road_ferry_max_hop`,
 `road_slope_cost`, `road_slope_free_pct`, `road_slope_cap_pct`,
 `road_slope_cap_mult`, `road_min_traffic`, `road_river_traffic_min`,
 `road_primary_pct`, `road_secondary_pct`, `hex_size_m`.
@@ -1712,11 +1792,9 @@ base_cost = match terrain_class:
 # two hexes; a per-hex surcharge on top billed the same ascent twice, and
 # billed it wrongly wherever the band and the grade disagreed.
 
-river_hex_cost = road_river_hex_cost if on a river else 0
-
 pheromone = road_pheromone_factor * traffic_so_far[hex]
 
-node_cost = max(0, base + river_hex_cost - pheromone)
+node_cost = max(0, base - pheromone)
 ```
 
 Roads follow river valleys — Roman "river roads" — but **nothing pays them to**.
@@ -1730,11 +1808,23 @@ occurs in the dry land. With the discount removed that falls to **2.52×** — n
 the effect survives the term that was supposed to cause it. What the discount bought was
 not worth two config knobs and a paragraph of tuning.
 
-`river_hex_cost` is the term that does earn its place, and it pulls the other way: it
-keeps roads *off* the channel, so which side of a river a road — and anything standing on
-it — is on stays readable. Travelling along the channel is excluded outright by
-`make_road_edge_cost`; `river_hex_cost` covers the meander and braid cases that hexside
-rule cannot see.
+Rivers run along hexsides, so a road beside one is simply on one bank and which side of
+the river it — and anything standing on it — is on is always readable; nothing has to keep
+it off the water.
+
+**Crossing a river is an edge cost, charged once** (`river_crossing_edge_cost`). A step
+from one hex to the next across a river side costs
+
+```
+road_river_crossing_base + road_river_crossing_flow * flow      # flow: the side's 0–1 rank
+```
+
+on top of the ordinary edge. The base is the crossing itself — a ford's approaches or a
+bridge's abutments — and the flow term the span. When rivers occupied hexes a road paid a
+per-hex charge (`road_river_hex_cost`) to enter one and was banned from running along the
+channel, so the bank it was on stayed readable; a delta or a braid could then seal land
+off, and ferries (`road_ferry_max_hop`) had to join it. All of that is retired: there is no
+channel to run down, a crossing is one step, and no land is cut off by a river.
 
 #### Traveller simulation — [interurban_roads.py:44–91](../worldgen/stages/interurban_roads.py#L44)
 
@@ -1825,9 +1915,9 @@ connectivity.
 
 After that, two passes tidy the network. `route_through_settlements` bends
 any road skirting a settlement so it passes through instead (§ 4.19), and
-`prune_orphan_roads` drops any component reaching neither a settlement nor a
-ferry landing — `road_river_traffic_min` admits a riverbank edge on a single
-traveller, so a stretch of towpath can qualify while joining nothing. The
+`prune_orphan_roads` drops any component reaching no settlement —
+`road_river_traffic_min` admits a riverbank edge on a single traveller, so a
+stretch of towpath can qualify while joining nothing. The
 connectivity guarantee then runs over **every** settlement, not just the
 cities: it used to require two or more cities, so the organic model had
 nothing watching it, and the map stayed connected only because stitching made
@@ -1837,8 +1927,10 @@ most routes concatenations of the same few legs.
 
 After all travellers are processed, hexes are filtered:
 ```
-eligible = edges where traffic >= road_min_traffic                   (default 3)
-        OR "river" in hex.tags and traffic >= road_river_traffic_min (default 1)
+eligible = edges where traffic >= road_min_traffic                     (default 3)
+        OR the edge runs along a riverbank and traffic >= road_river_traffic_min (default 1)
+# along a bank: both hexes beside the same river, and not across it — a step across
+# is a crossing, and earns no towpath
 ```
 Sort by traffic descending, then:
 - top `road_primary_pct` (10 %) → PRIMARY
@@ -1871,10 +1963,17 @@ component, and inserts those paths as PRIMARY roads. Bounded to
 
 #### Side effects
 
-- **River-crossing tags**: `tag_river_crossings` walks each road; the
-  first time it enters a river hex (from a non-river hex) it adds
-  `"ford"`. A second visit upgrades that tag to `"bridge"`
-  ([road_cost.py:95–116](../worldgen/stages/road_cost.py#L95)).
+- **River-crossing tags**: `tag_river_crossings(road_edges, state, cfg)` tags each
+  river side a road crosses, from what the water is rather than how busy the road is,
+  so the result does not depend on the order routes were built in:
+  - over water too big to wade (`side_span` > 1) → `"bridge"`, whatever the road's
+    tier: a track over a navigable river is not a track through it;
+  - over wadeable water → the ford (`"ford"`), unless the road is PRIMARY, which is
+    worth a bridge anyway;
+  - a side already bridged is left alone, and a bridge site no road crosses is
+    untagged — `CrossingStage` marks where traffic would justify one, and a site the
+    network never reached was never built. So **every bridge on a finished map carries
+    a road.** Fords stay either way: they are terrain.
 - **Habitability boost** (+0.2, capped at 1.0) applied to every land hex
   adjacent to a road
   ([interurban_roads.py:140–147](../worldgen/stages/interurban_roads.py#L140)).
@@ -1891,7 +1990,7 @@ component, and inserts those paths as PRIMARY roads. Bounded to
 carry real traffic. This is the tier `organic` withholds from `VillagePlacementStage` —
 gated on holding something rather than sprinkled across the countryside.
 
-**Reads:** `state.road_edges`, `hex.tags`, `hex.elevation`, `hex.territory`,
+**Reads:** `state.road_edges`, `state.river_sides`, `hex.soil`, `hex.tags`, `hex.elevation`, `hex.territory`,
 `hex.territory_cost`, the food surface.
 **Writes:** `state.settlements`, `hex.settlement`, and a `pass` tag on every saddle that
 qualifies.
@@ -1910,9 +2009,16 @@ village is the same traffic after it exists.
 
 ```
 candidate  =  carries a road of at least chokepoint_min_road_tier
-              AND (is a bridge, is beside one, or is a pass)
+              AND (is a bridgehead, or is a pass)
               AND is settleable, and unoccupied
 ```
+
+A **bridgehead** is an end of a bridged river side that a road actually crosses — a river
+runs along a hexside, so the two hexes either side of it are the bridge's two ends. Of the
+two, the town grows on the better-soiled one: a bridge over a desert river has its village
+on the irrigated bank, not on the sand opposite; both count where the ground is as good on
+either. Without the road test the tier founded villages beside phantom crossings — on one
+96×96 fixture, six of seven stood at bridges no road touched.
 
 A bridge on a farm track is a plank, not a town; a busy road over open country is passing
 through nowhere in particular. On a 128×128 temperate map about twenty features clear
@@ -2061,9 +2167,9 @@ runs until candidates are exhausted.
 road.
 
 **Reads:** `hex.road_connections`, `state.settlements`,
-`hex.terrain_class`, `hex.elevation`, `hex.river_flow`.
-**Writes:** `state.roads` (new TRACK Roads), `hex.road_connections`,
-`hex.tags` (ford/bridge).
+`hex.terrain_class`, `hex.elevation`, `state.river_sides`.
+**Writes:** `state.road_edges` (new TRACK edges), `hex.road_connections`,
+`RiverSide.tags` (ford/bridge, by `tag_river_crossings`).
 
 **Algorithm** ([village_tracks.py:19–66](../worldgen/stages/village_tracks.py#L19)):
 
@@ -2113,12 +2219,14 @@ settlement stage, and because a stage appended at the end draws the last child s
    language is invented for the rivers.
 2. **Culture regions.** Homelands are spread by farthest-point sampling over the land, then
    every hex goes to the homeland that reaches it cheapest. A step costs one hex, plus
-   climb over `naming_region_climb_m`, plus `naming_region_river_cost` onto a river of
-   `naming_great_river_km2` or more, plus `naming_region_water_cost` per water hex — so
+   climb over `naming_region_climb_m`, plus `naming_region_river_cost` to step across a river side
+   draining `naming_great_river_km2` or more, plus `naming_region_water_cost` per water hex — so
    frontiers fall on ridges and great rivers.
 3. **Rivers**, largest catchment first, down to `naming_river_min_catchment_km2`: named in
    the substrate language, or by whoever holds the mouth.
-4. **Settlements**, cities first. `naming.site.read_site` reads the hex and its ring into
+4. **Settlements**, cities first. `naming.site.read_site` reads the hex and its ring — with
+   the river features beside it, from the sides it touches (ford, bridge, cataract,
+   rapids) and the corners it stands at (mouth, confluence, spring) — into
    weighted *heads* (ford, bridge, mouth, falls, pass, harbour, mine, clearing, hill,
    shore, and per-tier heads such as farm, hamlet, town, stronghold) and *qualifiers*
    (land cover, trees and beasts of the biome, colour, rich soil, high ground, salt, great
@@ -2276,6 +2384,12 @@ floor is tens of kilometres across, the Nile's ten to twenty, and neither was cu
 going straight down. Carving and drainage decide each other, so this runs as a short
 convergence loop rather than a single pass. Floodplains come out 79% wider.
 
+Each pass drains the working surface on the same corner graph hydrology uses
+(`corner_drainage.py`, with `corner_floor_blend`), so the valleys are cut where the rivers
+will run. Water runs along hexsides, so incision lowers a side: both banks, toward the new
+height of the corner upstream, together with that corner's own lowest hex. Valley widening still works outward
+from channel hexes, which is the shape a floodplain has.
+
 | Param | Type | Default | Range | Effect |
 |---|---|---|---|---|
 | `erosion_incision_m_per_pass` | `float` | `12.0` | `≥ 0` (validated) | Metres a reference channel lowers per carve pass — the dial for how hard rivers cut. `K` in `K·A^m·S^n` is derived from this rather than set directly, so the tunable stays in metres whatever the exponents are. `0` disables incision |
@@ -2341,15 +2455,16 @@ no navigable river at all, and tropical 12.6%.
 |---|---|---|---|---|
 | `channel_min_discharge` | `float` | `6000.0` | `> 0` | Catchment km² × runoff mm needed to cut a channel. Also the dial that decides whether the drainage *network* branches: a basin shows only as many Strahler orders as its area divides into channel-sized pieces, so basin ÷ threshold sets the branching. At the old `20000` (41.7 km²) that ratio was about five on a 64 km map — no seed reached third order and first-order streams outnumbered second by nine to one, against Horton's three to five. `6000` is 12.5 km², by the humid-temperate regional curve `W = 2.5·A^0.4` a channel ~7 m across and ~0.6 m deep — a watercourse a cart must ford — and it leaves 88% of the land dry |
 | `river_wander_exponent` | `float` | `1.0` | `≥ 0` | How water picks its way downhill, in hydrology and in erosion's valley carving alike: each hex drains to a lower neighbour drawn at random with weight (drop / largest drop)^k. 0 is any downhill neighbour alike, 1 in proportion to the drop, 8+ all but always the steepest. Pure steepest descent drew rivers on level ground as ranks of straight parallel lines. |
+| `corner_floor_blend` | `float` | `0.25` | `0–1` | How high a corner stands between its three hexes, in hydrology and in erosion: the lowest of them plus this share of the way to their mean. 0 leaves a level lane a hex out from every river, down which tributaries run beside the trunk for miles; 0.25 tilts the floor toward the river and halves that. |
 | `navigable_min_discharge` | `float` | `60000.0` | `> channel` | ...and to float a boat. Consumed by the haulage model: a navigable hex multiplies a city's supply reach |
-| `cataract_min_drop_m` | `float` | `20.0` | `>= 0` | Metres a barge-sized river falls through one hex before it is a cataract: no boat passes, cargo portages round it, and the fall drives mills (§ [3.5a](#35a-cataracts)). 20 m/km is a 2% gradient, strong rapids at a kilometre to the hex. 0 turns cataracts off |
-| `rapids_min_drop_m` | `float` | `10.0` | `>= 0` | White water on a smaller river: a river hex draining at least `rapids_min_catchment_km2` that falls this far through one hex (and is not already a cataract) is tagged `rapids` and drawn as white water on every map. Drawing only; boats and crossings are unaffected. 0 turns rapids off. |
+| `cataract_min_drop_m` | `float` | `20.0` | `>= 0` | Metres per km a barge-sized river falls, measured along its course over a side and its neighbours, before that side is a cataract: no boat passes, cargo portages round it, and the fall drives mills (§ [3.5a](#35a-cataracts)). 20 m/km is a 2% gradient, strong rapids at a kilometre to the hex. 0 turns cataracts off |
+| `rapids_min_drop_m` | `float` | `10.0` | `>= 0` | White water on a smaller river: a river side draining at least `rapids_min_catchment_km2` that falls this far per km (and is not already a cataract) is tagged `rapids` and drawn as white water on every map. Boats and the generator's crossings are unaffected; the campaign makes it a bridge-or-pontoon crossing. 0 turns rapids off. |
 | `rapids_min_catchment_km2` | `float` | `200.0` | `>= 0` | The smallest river `rapids_min_drop_m` marks. |
 | `evapotranspiration_base_mm` | `float` | `50.0` | `≥ 0` | Rain the ground and its plants take before anything runs off, even at freezing |
 | `evapotranspiration_per_c_mm` | `float` | `30.0` | `≥ 0` | ...plus this much per degree of mean temperature. Why cold country sheds nearly all its rain and the taiga is full of rivers |
 | `min_runoff_mm` | `float` | `25.0` | `≥ 0` | Floor, so even a desert drains its largest valleys |
 | `wetland_min_runoff_mm` | `float` | `300.0` | `≥ 0` | Runoff above which flat riverside ground waterlogs. Tested on runoff, not rainfall: waterlogging is not about how much rain arrives but whether the ground can shed it |
-| `river_flow_continuous` | `bool` | `False` | — | Record `hex.river_flow` on every draining land hex rather than only on channel hexes. A diagnostic for inspecting the drainage field; it does not add rivers to the map |
+| `river_flow_continuous` | `bool` | `False` | — | Record `hex.river_flow` on every draining land hex rather than only on river banks. A diagnostic for inspecting the drainage field; it does not add rivers to the map |
 | `lake_chaining` | `bool` | `True` | — | Allow a lake to spill into a strictly lower lake, not just the sea. Chains of lakes stepping down to the coast are the only outlet on a landlocked map |
 | `lake_min_hexes` | `int` | `20` | `≥ 1` | A closed hollow on land (ground water can only leave by filling it to its rim) at least this many hexes across, `lake_min_depth_m` deep at the rim, in a region shedding `lake_min_runoff_mm` a year, becomes a lake standing at its rim (`WaterBodiesStage`). Islands smaller than this inside a lake are tagged `hollow`. |
 | `lake_min_depth_m` | `float` | `5.0` | `≥ 0` | See `lake_min_hexes`. |
@@ -2448,16 +2563,16 @@ desert, too wet is `food_drowned_precip_mm`. Water and wetland ignore it.
 | Param | Type | Default | Range | Effect |
 |---|---|---|---|---|
 | `habitability_agri_weight` | `float` | `0.40` | ≥ 0 | Weight on the catchment mean |
-| `habitability_river_bonus` | `float` | `0.25` | ≥ 0 | Flat, if the hex or a neighbour carries a river |
+| `habitability_river_bonus` | `float` | `0.25` | ≥ 0 | Flat, if a river runs along one of the hex's sides — either bank |
 | `habitability_harbour_bonus` | `float` | `0.60` | Site bonus for access to water that will float a barge — sea, lake, or a river above `navigable_min_discharge`. Distinct from `habitability_coast_bonus`, which is amenity: a beach to land a boat on. This one is about **bulk**, and it is the largest site bonus there is because it is the largest thing about a site — a town on navigable water can be provisioned from fifteen times the distance, which is the whole reason cities exist in this model. It has to be this big to be visible: a harbour site loses about a fifth of its day-range catchment to sea, which scores `food_water_value` (0.4) against arable's 1.0, so on agriculture alone it is worth ~22% less than an inland site and inland sites outnumber it nine to one. Before this term **not one of 74 markets stood on navigable water**, and no city could be maritime |
 | `habitability_coast_bonus` | `float` | `0.25` | ≥ 0 | Flat, if the hex or a neighbour is `COAST` |
 | `habitability_hill_bonus` | `float` | `0.15` | ≥ 0 | For a site overlooking the ground beside it, scaled by `habitability_hill_relief_m` |
 | `habitability_hill_relief_m` | `float` | `75.0` | `> 0` (validated) | Metres of drop a site must command to be paid that bonus in full; below it the bonus scales down. It used to be paid flat to any ROLLING hex with a FLAT neighbour, which asked two band questions and got the wrong answer to both — a knoll and a bluff were worth the same, and a level floodplain beside a bluff collected the bonus for standing *under* the drop that commands it |
-| `habitability_confluence_bonus` | `float` | `0.10` | ≥ 0 | Flat, on a river junction (this hex only) |
+| `habitability_confluence_bonus` | `float` | `0.10` | ≥ 0 | Flat, on a hex at a `confluence` corner (this hex only) |
 | `habitability_mill_bonus` | `float` | `0.15` | `>= 0` | Site bonus for standing on or beside a cataract: water power for a mill |
 
-Bonuses are binary within each term: a hex with one river neighbour scores the same as one
-ringed by six, and adjacency is radius 1 only.
+Bonuses are binary within each term: a hex beside one river side scores the same as one
+with a river along three, and coastal adjacency is radius 1 only.
 
 ### 4.9 Settlements — the classic model — § [3.10](#310-city--town-placement), [3.13](#313-village-placement)
 
@@ -2496,7 +2611,7 @@ is the model's core claim and is enforced in `__post_init__`.
 | `marketable_surplus_fraction` | `float` | `0.40` | `(0, 1]` | Share of what a farming household grows that can leave for a market; it eats the rest. Sets the share of people in towns: 0.40 with `yield_multiplier` 1.7 is England c. 1800 (25% in market towns on the map, 27.5% over 5,000 in 1801); 0.32 is England c. 1300. Sizing markets off the *surplus* rather than the production is why the tier ratios come out right without target counts |
 | `people_per_food` | `float` | `145.0` | `> 0` | People fed per unit of food, and the one scale factor for the whole population of the map, settlements and countryside alike. 145 puts a temperate 128x128 map at 61 people per km² at the c. 1800 defaults, against 59 in England and Wales's 1801 census. It was 180 before `elevation_hypsometry_exponent` laid most land low, since flat ground farms better. Density is linear in it, so it is also the knob for a country thinner than the era table's rows |
 | `travel_ascent_per_hex` | `float` | `125.0` | `> 0` | Naismith's rule: metres of ascent costing as much as one hex of level ground. Catchments are *walked*, not engineered, so they use this rather than `road_slope_cost` — that curve prices grading a road and saturates at ten times base, which over eroded terrain shrinks a catchment to a third of its proper reach |
-| `travel_ford_cost` | `float` | `8.0` | `≥ 0` | Getting across away from a crossing, per multiple of the wadeable span, charged on each land–river edge. Deliberately has no fixed term, unlike `road_river_crossing_base`: that base is the capital of *building* a bridge, and somebody walking to market pays no capital |
+| `travel_ford_cost` | `float` | `16.0` | `≥ 0` | Getting across away from a crossing, per multiple of the wadeable span, charged once per river side crossed. Deliberately has no fixed term, unlike `road_river_crossing_base`: that base is the capital of *building* a bridge, and somebody walking to market pays no capital |
 
 Those set what a market can reach. The three below decide where markets are planted: a
 site is scored on the surplus it can gather inside a day's return, the best site is taken,
@@ -2554,7 +2669,10 @@ permission. A **bridge is capital** and appears only where enough traffic will u
 | `bridge_pressure_per_span` | `float` | `3.0` | `> 0` | Surplus needed within reach per multiple of the widest wadeable span before a bridge is worth building. A river twice that width needs twice the traffic. Nobody bridges to nowhere |
 | `crossing_pressure_radius` | `int` | `6` | `≥ 1` | How far either bank is searched for that surplus |
 | `crossing_min_separation` | `int` | `4` | `≥ 1` | Nobody builds two bridges within sight of each other |
-| `crossing_use_cost` | `float` | `0.5` | `≥ 0` | Cost of using an existing ford or bridge |
+| `ford_serves_bridge_fraction` | `float` | `0.5` | `≥ 0` | A ford within `crossing_min_separation` makes a bridge needless only over water at least this fraction of the bridge's catchment. 0 lets any ford stand in for any bridge |
+| `rare_ford_max_span` | `float` | `1.6` | `≥ 1` | A river that floats a barge is forded at its slackest reaches up to this span (1.0 is the wading limit). 1.0 turns these fords off |
+| `rare_ford_separation` | `int` | `15` | `≥ 1` | Hexes kept between two such fords, which is what keeps them rare |
+| `crossing_use_cost` | `float` | `1.0` | `≥ 0` | Cost of using an existing ford or bridge, charged once per crossing |
 
 ### 4.12 Cultivation Radii — § [3.12](#312-cultivation-cities--towns), [3.15](#315-village-cultivation)
 
@@ -2615,15 +2733,15 @@ Edge cost, charged once on the land↔water transition.
 
 ### 4.17 Roads — River Crossings
 
-Edge cost charged on each land↔river transition. A perpendicular crossing of a 1-hex-wide
-river hits this twice, entering and leaving the river hex.
+Edge cost charged once, on a step from one hex to the next across a river side
+(§ [3.11](#311-interurban-roads)). `road_river_hex_cost`
+and `road_ferry_max_hop` are retired: a road no longer stands in a river, so there is no
+per-hex charge and no land a river can seal off.
 
 | Param | Type | Default | Effect |
 |---|---|---|---|
-| `road_river_crossing_base` | `float` | `4.0` | Constant component (validated `≥ 0`) — the capital of building a bridge |
-| `road_river_crossing_flow` | `float` | `12.0` | Multiplied by `max(from.river_flow, to.river_flow)`. Big rivers are dramatically more expensive to bridge |
-| `road_river_hex_cost` | `float` | `16.0` | Raised from `12.0` alongside `road_delta_elevation_per_hex` — pricing the climb continuously made the valley floor more attractive, it being the flattest line there is, and roads began taking the channel as often as it occurs (3.6% of road hexes against 3.2% of the land) rather than declining it. `16.0` restores the avoidance at 3.1% and improves bank-following with it, 2.72x to 2.78x; it saturates there, and `20.0` behaves identically. Node cost for standing a road *on* a river hex (validated `≥ 0`). Prices out threading a meander or braid while leaving a genuine crossing affordable |
-| `road_ferry_max_hop` | `int` | `4` | Longest boat hop used to join a component a river mesh cuts off (validated `≥ 1`). Beyond it, routing raises `RoutingError` |
+| `road_river_crossing_base` | `float` | `8.0` | Constant component (validated `≥ 0`), charged once per crossing of a river side — the capital of building a bridge |
+| `road_river_crossing_flow` | `float` | `24.0` | Multiplied by the river's flow at the side crossed. Big rivers are dramatically more expensive to bridge |
 
 ### 4.18 Roads — Slope Penalty
 
@@ -2652,9 +2770,9 @@ placed where its only escape requires one.
 | Param | Type | Default | Effect |
 |---|---|---|---|
 | `road_settlement_skirt_cost` | `float` | `4.0` | What a road pays to pass a settlement at one hex without entering it — an edge whose two ends both neighbour the same seat. The cost-model half of the rule `route_through_settlements` applies afterwards, and the half that can actually shift a route at one hex: a *discount* on the town cannot, because the direct route and the detour both pay for the same two ring hexes, so the detour's extra cost is exactly what the town costs. Drive that to zero and the detour ties; it never wins, and ties go to heap order. Modest at `4.0`, about four hexes of level going — enough to shift a road that was indifferent, not enough to drag one over a mountain to call at a village. Validated `≥ 0` |
-| `road_settlement_detour_max_mult` | `float` | `4.0` | A road passing a settlement at one hex is bent through it instead — a road skirting a town at the width of a field is a motor-age idea. This caps what the detour may cost, as a multiple of the edge it replaces; validated `≥ 2.0`, since a detour is two legs where there was one and so costs double on even ground by construction. What it bounds is the ground *beyond* that: the town on the far bank of a river, or up an escarpment. It catches a dear crossing and a steep bank together, which a grade cap would not — the worst case measured cost 31× its bypass at a grade of 4%, having been hauled onto a river channel rather than up anything |
+| `road_settlement_detour_max_mult` | `float` | `4.0` | A road passing a settlement at one hex is bent through it instead — a road skirting a town at the width of a field is a motor-age idea. This caps what the detour may cost, as a multiple of the edge it replaces; validated `≥ 2.0`, since a detour is two legs where there was one and so costs double on even ground by construction. What it bounds is the ground *beyond* that: the town on the far bank of a river, or up an escarpment. It catches a dear crossing and a steep bank together, which a grade cap would not — the worst case measured cost 31× its bypass at a grade of 4%, having been hauled onto a river channel (when rivers still occupied hexes) rather than up anything |
 | `road_min_traffic` | `int` | `3` | Minimum traffic for a hex to count as a road at all |
-| `road_river_traffic_min` | `int` | `1` | Lower threshold for river hexes (validated `≥ 0`). Lets riverbanks become roads on light traffic |
+| `road_river_traffic_min` | `int` | `1` | Lower threshold for an edge along a riverbank — both hexes beside the same river, not across it (validated `≥ 0`). Lets towpaths and river roads become roads on light traffic |
 | `road_primary_pct` | `float` | `0.10` | Top fraction of eligible hexes, by traffic, that become PRIMARY |
 | `road_secondary_pct` | `float` | `0.30` | Next fraction, which become SECONDARY |
 | `road_track_pct` | `float` | `0.60` | Currently unused by InterurbanRoadStage — TRACK is reserved for village connectors. Kept so the three percentages sum to 1.0 |
@@ -2714,7 +2832,7 @@ shape map output. Change these by editing the source file.
 | Village road-adjacent bonus | `× 1.5` | [village_placement.py:69](../worldgen/stages/village_placement.py#L69) | |
 | Road-adjacent habitability boost | `+0.2` (cap 1.0) | [interurban_roads.py:147](../worldgen/stages/interurban_roads.py#L147) | Applied to `habitability_village` only, after road tiers are decided; feeds VillagePlacement |
 | Cultivation `RESISTANT` set | `{BOG, MARSH, BARE_ROCK, ALPINE, TUNDRA, DESERT, OPEN_WATER}` | [cultivation.py:6–16](../worldgen/stages/cultivation.py#L6) | Land covers immune to cultivation, used by both Cultivation and VillagePlacement |
-| WorldState JSON schema version | `"1.2"` | [world_state.py:27–28](../worldgen/core/world_state.py#L27) | Written by `to_dict`. `from_dict` accepts `1.0`, `1.1` and `1.2`; a `1.0` file's single `habitability` is read into all three tier scores, and `1.0`/`1.1` files get defaults for `territory` and `catchment_km2`. Anything else is rejected by name |
+| WorldState JSON schema version | `"2.0"` | [world_state.py](../worldgen/core/world_state.py) | Written by `to_dict`. `from_dict` accepts `2.0` only: 2.0 moved rivers onto hexsides, which changes what every reader means by "on a river", so an older file is rejected with a message to regenerate it from its seed rather than migrated |
 
 ---
 
@@ -2757,6 +2875,13 @@ hex sizes), see the **SVG export** section of [README.md](../README.md).
 - **Axial coordinates** — A 2-axis hex coordinate system `(q, r)` covering
   the same set of hexes as 3-axis cube coords; the third axis
   `s = -q - r` is implicit. Used throughout the codebase.
+- **Corner, side** — The points and edges between hexes, where rivers run. A corner is
+  `(q, r, k)` with `k` in {0, 1} and touches three hexes; a side is `(q, r, s)` with `s` in
+  {0, 1, 2} and lies between two. Each hex owns two corners and three sides, so every one
+  has a single name (`core/hex_grid.py`).
+- **Span** — How hard a river side is to get across, in multiples of the widest wadeable
+  stream: width from catchment, inflated by how fast the water falls
+  (`riverside.side_span`). A span of 1 or less can be waded.
 - **fBm (fractional Brownian motion)** — Sum of multiple noise octaves
   with decreasing amplitude and increasing frequency. Produces
   multi-scale terrain in one pass.

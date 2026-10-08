@@ -7,7 +7,17 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { key, type Hex, type HexKey, type RoadEdge, type World } from '@campaign/shared';
+import {
+  key,
+  sideBetween,
+  sideId,
+  type Corner,
+  type Hex,
+  type HexKey,
+  type RiverSide,
+  type RoadEdge,
+  type World,
+} from '@campaign/shared';
 
 import {
   ALL_LAYERS,
@@ -35,10 +45,13 @@ function worldOf(cells: Record<string, Cell>, rest: Partial<World> = {}): World 
   return {
     hexes,
     rivers: [],
+    riverSides: new Map(),
+    riverCorners: new Map(),
     settlements: [],
     roadEdges: new Map(),
     seaEdges: new Map(),
     ferries: [],
+    config: { navigableMinDischarge: 60000, runoffMm: 800 },
     ...rest,
   } as unknown as World;
 }
@@ -48,27 +61,67 @@ const edge = (a: Hex, b: Hex): [string, RoadEdge] => [
   { a, b, tier: 'track', deltaElevationM: 0 },
 ];
 
+/** 1,000 km² × 800 mm is well over the 60,000 navigable line: a major river. */
+const MAJOR_KM2 = 1000;
+
+/** River sides between the hex pairs given, each with the tags given. */
+function riverSides(
+  pairs: [Hex, Hex, string[]][],
+  catchmentKm2 = MAJOR_KM2,
+): Map<string, RiverSide> {
+  const out = new Map<string, RiverSide>();
+  for (const [a, b, tags] of pairs) {
+    const side = sideBetween(a, b);
+    out.set(sideId(side), { side, catchmentKm2, flow: 0.5, dropM: 0, tags: new Set(tags) });
+  }
+  return out;
+}
+
 describe('fords and bridges', () => {
-  it('marks every tagged crossing, and a bridge over a ford on the same hex', () => {
-    const world = worldOf({
-      '0,0': { tags: ['river', 'ford'] },
-      '1,0': { tags: ['river', 'ford', 'bridge'] },
-      '2,0': { tags: ['river'] },
-    });
-    expect(crossingMarks(world).map((c) => [key(c.coord), c.kind])).toEqual([
-      ['0,0', 'ford'],
-      ['1,0', 'bridge'],
+  it('marks every tagged crossing, a bridge over a ford on the same side', () => {
+    const sides = riverSides([
+      [{ q: 0, r: 0 }, { q: 1, r: 0 }, ['ford']],
+      [{ q: 1, r: 0 }, { q: 2, r: 0 }, ['ford', 'bridge']],
+      [{ q: 2, r: 0 }, { q: 3, r: 0 }, []],
+    ]);
+    const marks = crossingMarks(worldOf({}, { riverSides: sides }));
+    expect(marks.map((c) => c.kind).sort()).toEqual(['bridge', 'ford']);
+    // Each sits at the middle of its side.
+    for (const m of marks) expect([...sides.keys()]).toContain(m.side);
+  });
+
+  it('leaves a minor river’s fords unmarked, since it can be waded almost anywhere', () => {
+    const sides = riverSides(
+      [
+        [{ q: 0, r: 0 }, { q: 1, r: 0 }, ['ford']],
+        [{ q: 1, r: 0 }, { q: 2, r: 0 }, ['ford', 'bridge']],
+      ],
+      10,
+    );
+    expect(crossingMarks(worldOf({}, { riverSides: sides })).map((c) => c.kind)).toEqual([
+      'bridge',
     ]);
   });
 
-  it('takes the river’s bearing through the hex, so the mark can lie across it', () => {
+  it('takes the river’s bearing along its side, so the mark can lie across it', () => {
+    // A course down the column at q = 0, with a ford on its second side.
+    const corners: Corner[] = [0, 1, 2].map((i) => ({ q: 0, r: Math.floor(i / 2), k: i % 2 }));
+    const side = sideBetween({ q: 1, r: 0 }, { q: 0, r: 1 });
     const world = worldOf(
-      { '0,0': {}, '1,0': { tags: ['ford'] }, '2,0': {} },
-      { rivers: [{ hexes: [{ q: 0, r: 0 }, { q: 1, r: 0 }, { q: 2, r: 0 }], flowVolume: 1, name: '' }] },
+      {},
+      {
+        rivers: [{ corners, flowVolume: 1, name: '' }],
+        riverSides: new Map([
+          [
+            sideId(side),
+            { side, catchmentKm2: MAJOR_KM2, flow: 0.5, dropM: 0, tags: new Set(['ford']) },
+          ],
+        ]),
+      },
     );
     const [ford] = crossingMarks(world);
-    // Downstream along q on the flat-top layout runs to the right and a little down.
-    expect(Math.cos(ford!.bearing)).toBeGreaterThan(0);
+    // Downstream down the column is down the screen on the flat-top layout.
+    expect(Math.sin(ford!.bearing)).toBeGreaterThan(0);
   });
 });
 
@@ -153,9 +206,16 @@ describe('names', () => {
   });
 
   it('sets a river’s name along it, never upside down', () => {
-    const hexes = Array.from({ length: 7 }, (_, i): Hex => ({ q: 6 - i, r: 0 }));
-    const cells = Object.fromEntries(hexes.map((c) => [key(c), {}]));
-    const world = worldOf(cells, { rivers: [{ hexes, flowVolume: 1, name: 'Vassa' }] });
+    // A course of corners running up the column at q = 3, against the screen.
+    const corners: Corner[] = Array.from({ length: 9 }, (_, i) => ({
+      q: 3,
+      r: Math.floor((8 - i) / 2),
+      k: (8 - i) % 2,
+    }));
+    const cells = Object.fromEntries(
+      Array.from({ length: 6 }, (_, r) => [key({ q: 3, r }), {}]),
+    );
+    const world = worldOf(cells, { rivers: [{ corners, flowVolume: 1, name: 'Vassa' }] });
     const [label] = placeLabels(world, grid(30), 30);
     expect(label).toMatchObject({ text: 'Vassa', river: true, italic: true });
     // Flowing right to left, the name still reads left to right.
@@ -201,9 +261,15 @@ describe('layers', () => {
   });
 
   it('sets no river names when the rivers are off', () => {
-    const hexes = Array.from({ length: 7 }, (_, i): Hex => ({ q: i, r: 0 }));
-    const cells = Object.fromEntries(hexes.map((c) => [key(c), {}]));
-    const world = worldOf(cells, { rivers: [{ hexes, flowVolume: 1, name: 'Vassa' }] });
+    const corners: Corner[] = Array.from({ length: 9 }, (_, i) => ({
+      q: 3,
+      r: Math.floor(i / 2),
+      k: i % 2,
+    }));
+    const cells = Object.fromEntries(
+      Array.from({ length: 6 }, (_, r) => [key({ q: 3, r }), {}]),
+    );
+    const world = worldOf(cells, { rivers: [{ corners, flowVolume: 1, name: 'Vassa' }] });
     const at = (c: Hex) => ({ x: c.q * 30, y: c.r * 30 });
     expect(placeLabels(world, at, 30, estimateWidth, { rivers: false })).toEqual([]);
   });

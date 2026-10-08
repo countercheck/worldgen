@@ -5,16 +5,18 @@ import pytest
 
 from worldgen.core.config import WorldConfig
 from worldgen.core.hex import TerrainClass
-from worldgen.core.hex_grid import distance, neighbors
+from worldgen.core.hex_grid import corner_hexes, corner_neighbors, distance, side_hexes
 from worldgen.core.pipeline import GeneratorPipeline
-from worldgen.core.world_state import River, WorldState
+from worldgen.core.world_state import WorldState
 from worldgen.stages.elevation import ElevationStage
 from worldgen.stages.erosion import ErosionStage
-from worldgen.stages.hydrology import HydrologyStage, _split_at_confluences
+from worldgen.stages.hydrology import HydrologyStage
 from worldgen.stages.terrain_class import TerrainClassificationStage
 from worldgen.stages.water_bodies import WaterBodiesStage
 
 from .worlds import build_world
+
+_WATER = (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
 
 
 def _build_pipeline(seed: int = 42, width: int = 32, height: int = 32):
@@ -44,129 +46,70 @@ def test_river_flow_normalized(hydro_state):
 
 
 def test_river_paths_connected(hydro_state):
+    # A course runs along hexsides: each corner is one side from the next.
+    assert hydro_state.rivers
     for river in hydro_state.rivers:
-        assert len(river.hexes) >= 2, "River has fewer than 2 hexes"
-        for i in range(len(river.hexes) - 1):
-            a, b = river.hexes[i], river.hexes[i + 1]
-            assert b in neighbors(a), f"Non-adjacent hexes in river path: {a} -> {b}"
+        assert len(river.corners) >= 2, "a course has fewer than two corners"
+        for a, b in zip(river.corners, river.corners[1:], strict=False):
+            assert b in corner_neighbors(a), f"corners {a} -> {b} are not one side apart"
 
 
 def test_rivers_reach_ocean(hydro_state):
-    # Each river must terminate at ocean/lake, a grid border, OR a confluence with
-    # another river (tributaries end AT the confluence hex, which is also part of the
-    # higher-flow trunk, so the polylines visually connect).
-    water_set = {
-        coord
-        for coord, h in hydro_state.hexes.items()
-        if h.terrain_class in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
-    }
-    # Build a set of all hexes that appear in any river so we can detect confluences.
-    all_river_hexes: set[tuple[int, int]] = set()
+    # Every course ends where its water leaves the network — at the sea or a lake, or at
+    # the map edge — or on a corner of a larger river it joins.
+    hexes = hydro_state.hexes
+    interior = {c for river in hydro_state.rivers for c in river.corners[:-1]}
     for river in hydro_state.rivers:
-        all_river_hexes.update(river.hexes)
-
-    w, h = hydro_state.width, hydro_state.height
-    for river in hydro_state.rivers:
-        mouth = river.hexes[-1]
-        q, r = mouth
-        on_border = q == 0 or q == w - 1 or r == 0 or r == h - 1
-        reaches_water = any(n in water_set for n in neighbors(mouth)) or mouth in water_set
-        # A tributary that stopped at a confluence: its last hex is adjacent to another
-        # river's trunk hex that is either explicitly tagged as a confluence or carries
-        # at least as much downstream flow as the tributary mouth (and is not itself a
-        # headwater).
-        mouth_flow = hydro_state.hexes[mouth].river_flow if mouth in hydro_state.hexes else 0.0
-        at_confluence = any(
-            n in all_river_hexes
-            and n not in river.hexes
-            and n in hydro_state.hexes
-            and (
-                "confluence" in hydro_state.hexes[n].tags
-                or (
-                    hydro_state.hexes[n].river_flow >= mouth_flow
-                    and "headwater" not in hydro_state.hexes[n].tags
-                )
-            )
-            for n in neighbors(mouth)
-        )
-        assert reaches_water or on_border or at_confluence, (
-            f"River mouth {mouth} does not reach water body, grid border, or confluence"
-        )
+        end = river.corners[-1]
+        around = corner_hexes(end)
+        at_water = any(h in hexes and hexes[h].terrain_class in _WATER for h in around)
+        at_edge = any(h not in hexes for h in around)
+        joins = end in interior
+        assert at_water or at_edge or joins, f"course ends at {end}, nowhere water can go"
 
 
 def test_flow_accumulates_downstream(hydro_state):
-    # Flow accumulation (river_flow) must be non-decreasing along a river path —
-    # each step downstream collects more water. Checks the accumulation invariant
-    # without depending on the filled vs. actual elevation distinction.
+    # Each side downstream carries at least what the side above it did.
     for river in hydro_state.rivers:
-        river_hexes = [
-            hydro_state.hexes[c]
-            for c in river.hexes
-            if c in hydro_state.hexes and hydro_state.hexes[c].river_flow > 0
-        ]
-        for i in range(len(river_hexes) - 1):
-            flow_a = river_hexes[i].river_flow
-            flow_b = river_hexes[i + 1].river_flow
-            assert flow_b >= flow_a - 1e-9, (
-                f"River_flow decreases downstream: {flow_a:.4f} -> {flow_b:.4f}"
-            )
+        catchments = [hydro_state.river_sides[s].catchment_km2 for s in river.sides()]
+        for a, b in zip(catchments, catchments[1:], strict=False):
+            assert b >= a - 1e-9, f"catchment falls downstream: {a:.2f} -> {b:.2f}"
 
 
 def test_tags_assigned(hydro_state):
-    all_tags: set[str] = set()
-    for h in hydro_state.hexes.values():
-        all_tags.update(h.tags)
-    assert "headwater" in all_tags, "No headwater tags found"
-    assert "river_mouth" in all_tags, "No river_mouth tags found"
+    corner_tags = {t for tags in hydro_state.river_corners.values() for t in tags}
+    assert {"river_source", "river_mouth", "river_end"} <= corner_tags
+    # Sources, mouths and confluences are points on the river, not places on the map.
+    hex_tags = {t for h in hydro_state.hexes.values() for t in h.tags}
+    assert not hex_tags & {"river", "headwater", "river_mouth", "river_source", "confluence"}
 
 
-def test_river_tag_on_river_paths(hydro_state):
-    # Every hex in a River path that is a land hex must carry the "river" tag.
-    water_classes = {TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER}
-    for river in hydro_state.rivers:
-        for coord in river.hexes:
-            if coord not in hydro_state.hexes:
-                continue
-            hx = hydro_state.hexes[coord]
-            if hx.terrain_class in water_classes:
-                continue
-            assert "river" in hx.tags, f"River path hex {coord} missing 'river' tag"
+def test_both_banks_of_a_river_record_its_flow(hydro_state):
+    for side, rs in hydro_state.river_sides.items():
+        for h in side_hexes(side):
+            hx = hydro_state.hexes[h]
+            assert hx.river_flow > 0, f"bank {h} of river side {side} records no flow"
+            assert hx.catchment_km2 >= rs.catchment_km2
+
+
+def test_every_river_side_has_land_on_both_hands(hydro_state):
+    # A side with water or the map edge beside it is a shoreline or the frame; a river
+    # drawn there would run along the coast or the edge of the map.
+    for side in hydro_state.river_sides:
+        for h in side_hexes(side):
+            assert h in hydro_state.hexes, f"river side {side} runs along the map edge"
+            assert hydro_state.hexes[h].terrain_class not in _WATER, (
+                f"river side {side} runs along the shore"
+            )
 
 
 def test_flow_volume(hydro_state):
     rivers = hydro_state.rivers
     assert all(0.0 < r.flow_volume <= 1.0 for r in rivers), "flow_volume out of (0, 1]"
-    # flow_volume must reflect mouth accumulation, not headwater discharge.
-    # Each river's flow_volume (normalized accumulation at its last land hex) must be
-    # >= the river_flow of its headwater (the first hex in the path), because rivers
-    # accumulate water as they flow downstream.
+    # Measured at the mouth, so at least what the course carries at its head.
     for river in rivers:
-        head = river.hexes[0]
-        head_flow = hydro_state.hexes[head].river_flow if head in hydro_state.hexes else 0.0
-        assert (
-            river.flow_volume >= head_flow - 1e-9
-        ), (  # 1e-9 tolerance for floating-point arithmetic
-            f"flow_volume {river.flow_volume:.6f} < headwater river_flow {head_flow:.6f}; "
-            "flow_volume must represent mouth discharge, not headwater"
-        )
-
-
-def test_no_border_edge_creep(hydro_state):
-    # Rivers must not "creep" along the map edge: no river path should contain two
-    # consecutive hexes that are both on the grid border.  This validates that the
-    # border-land -> border-land flow termination in _flow_direction works correctly.
-    w, h = hydro_state.width, hydro_state.height
-
-    def on_border(coord):
-        q, r = coord
-        return q == 0 or q == w - 1 or r == 0 or r == h - 1
-
-    for river in hydro_state.rivers:
-        for i in range(len(river.hexes) - 1):
-            a, b = river.hexes[i], river.hexes[i + 1]
-            assert not (on_border(a) and on_border(b)), (
-                f"River has consecutive border hexes at positions {i} and {i + 1}: {a} -> {b}"
-            )
+        head = hydro_state.river_sides[river.sides()[0]].flow
+        assert river.flow_volume >= head - 1e-9
 
 
 def test_reproducibility():
@@ -179,12 +122,10 @@ def test_reproducibility():
         assert s1.hexes[coord].tags == s2.hexes[coord].tags, (
             f"hex tags differ at {coord} between identical seeds"
         )
-    assert len(s1.rivers) == len(s2.rivers), "river count differs between identical seeds"
-    for i, (r1, r2) in enumerate(zip(s1.rivers, s2.rivers, strict=True)):
-        assert r1.hexes == r2.hexes, f"river[{i}] path differs between identical seeds"
-        assert r1.flow_volume == r2.flow_volume, (
-            f"river[{i}] flow_volume differs between identical seeds"
-        )
+    assert [r.corners for r in s1.rivers] == [r.corners for r in s2.rivers]
+    assert [r.flow_volume for r in s1.rivers] == [r.flow_volume for r in s2.rivers]
+    assert s1.river_sides == s2.river_sides
+    assert s1.river_corners == s2.river_corners
 
 
 def test_lake_drainage_merges_without_rewiring_existing_river():
@@ -249,81 +190,18 @@ def test_lake_drainage_merges_without_rewiring_existing_river():
     assert acc[merge] == pytest.approx(expected)
 
 
-def test_no_shared_hexes_between_rivers(hydro_state):
-    # Each land hex must appear in at most one River segment, EXCEPT confluence hexes.
-    # A confluence hex is the last hex of a tributary and simultaneously an interior
-    # hex of the higher-flow trunk — it is shared by design so the two polylines
-    # visually connect.  Any shared hex that is NOT a tributary endpoint represents
-    # genuine trunk duplication and is a bug.
-    from collections import defaultdict
+def test_no_side_belongs_to_two_rivers(hydro_state):
+    # Each stretch of river is drawn once: a tributary ends on the trunk's corner and does
+    # not run on down it.  So no side is in two courses, and a corner is shared only as the
+    # last corner of a tributary.
+    from collections import Counter
 
-    hex_to_rivers: dict[tuple[int, int], list[int]] = defaultdict(list)
-    land_terrain = {
-        coord
-        for coord, hx in hydro_state.hexes.items()
-        if hx.terrain_class not in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
-    }
-    for i, river in enumerate(hydro_state.rivers):
-        for coord in river.hexes:
-            if coord in land_terrain:
-                hex_to_rivers[coord].append(i)
-
-    tributary_endpoints = {
-        river.hexes[-1] for river in hydro_state.rivers if river.hexes[-1] in land_terrain
-    }
-    shared = {k: v for k, v in hex_to_rivers.items() if len(v) > 1 and k not in tributary_endpoints}
-    assert not shared, (
-        f"{len(shared)} land hexes appear in multiple rivers outside confluence endpoints; "
-        f"first offender: {next(iter(shared))} in rivers {next(iter(shared.values()))}"
-    )
-
-
-def _confluence_fixture():
-    """A trunk and a tributary that merge at (2, 0), with hand-set accumulation.
-
-    Accumulation at the confluence (10.0) is deliberately far above the tributary's
-    own pre-merge accumulation (3.0) so the two can be told apart in flow_volume.
-    """
-    trunk = River(hexes=[(0, 0), (1, 0), (2, 0), (3, 0)], flow_volume=1.0)
-    tributary = River(hexes=[(0, 2), (1, 1), (2, 0), (3, 0)], flow_volume=0.3)
-    acc = {
-        (0, 0): 1.0,
-        (1, 0): 2.0,
-        (2, 0): 10.0,
-        (3, 0): 12.0,
-        (0, 2): 1.0,
-        (1, 1): 3.0,
-    }
-    return [trunk, tributary], set(acc), acc, 12.0
-
-
-def test_split_at_confluences_tributary_ends_on_confluence_hex():
-    """A trimmed tributary's last hex is the trunk's confluence hex, and nothing beyond."""
-    rivers, land, acc, max_acc = _confluence_fixture()
-    trunk, tributary = _split_at_confluences(rivers, land, acc, max_acc)
-
-    # Original list order is preserved, and the higher-flow trunk keeps its full path.
-    assert trunk.hexes == [(0, 0), (1, 0), (2, 0), (3, 0)]
-
-    # The tributary now reaches the confluence so the two polylines visually connect.
-    assert tributary.hexes[-1] == (2, 0)
-    assert tributary.hexes == [(0, 2), (1, 1), (2, 0)]
-
-    # ...but it must not duplicate any trunk hex downstream of the confluence.
-    downstream = set(trunk.hexes[trunk.hexes.index((2, 0)) + 1 :])
-    assert not downstream & set(tributary.hexes)
-
-
-def test_split_at_confluences_tributary_keeps_pre_merge_flow_volume():
-    """The shared confluence hex carries combined discharge; the tributary must not."""
-    rivers, land, acc, max_acc = _confluence_fixture()
-    _, tributary = _split_at_confluences(rivers, land, acc, max_acc)
-
-    # acc[(1, 1)] is the last hex the tributary owns exclusively.
-    assert tributary.flow_volume == pytest.approx(3.0 / max_acc)
-    # The confluence's own accumulation already includes the trunk — using it here would
-    # render the whole tributary at post-merge width.
-    assert tributary.flow_volume != pytest.approx(acc[(2, 0)] / max_acc)
+    sides = Counter(s for river in hydro_state.rivers for s in river.sides())
+    assert all(n == 1 for n in sides.values())
+    ends = {river.corners[-1] for river in hydro_state.rivers}
+    corners = Counter(c for river in hydro_state.rivers for c in river.corners)
+    shared = {c for c, n in corners.items() if n > 1}
+    assert shared <= ends
 
 
 # ---------------------------------------------------------------------------
@@ -347,7 +225,8 @@ def _inflow_world(**overrides):
 
 
 def _sources(state):
-    return [c for c, h in state.hexes.items() if "river_source_offmap" in h.tags]
+    """The corners rivers enter the map at."""
+    return sorted(c for c, tags in state.river_corners.items() if "river_source_offmap" in tags)
 
 
 @pytest.fixture(scope="module")
@@ -356,46 +235,42 @@ def inflow_state():
 
 
 def test_inflow_river_enters_from_the_border(inflow_state):
-    # The direct regression test for the trace loop: _build_rivers breaks on the border
-    # at the top of its loop, so without the inlet exemption an inflow river would be a
-    # single hex.
+    # An inflow course starts one side in from the map edge and heads inland.
     sources = _sources(inflow_state)
     assert sources, "expected at least one off-map river source"
+    hexes = inflow_state.hexes
 
-    entering = [r for r in inflow_state.rivers if r.hexes[0] in sources]
-    assert entering, "no river starts at an off-map source"
+    def at_edge(corner):
+        return any(h not in hexes for h in corner_hexes(corner))
+
+    entering = [r for r in inflow_state.rivers if r.corners[0] in sources]
+    assert len(entering) == len(sources)
     for river in entering:
-        assert len(river.hexes) > 1, f"off-map river at {river.hexes[0]} is a one-hex stub"
-        assert inflow_state.on_border(river.hexes[0])
-        assert not inflow_state.on_border(river.hexes[1]), (
-            "an inflow river's second hex is on the border: it is creeping along the edge "
-            "rather than heading inland"
-        )
+        first = river.corners[0]
+        assert len(river.corners) > 2, f"off-map river at {first} is a stub"
+        assert any(at_edge(n) for n in corner_neighbors(first)), "inlet is not by the edge"
+        assert not at_edge(river.corners[1]), "inflow runs along the edge, not inland"
 
 
 def test_inflow_sources_are_never_water(inflow_state):
-    # A river may not rise out of the sea or a lake.  Guarded in three places: candidates
-    # are drawn from land, an inlet's downstream hex must be land too, and the source tag
-    # is dropped if lake drainage later submerges the hex.
-    water = (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
-    for coord in _sources(inflow_state):
-        assert inflow_state.hexes[coord].terrain_class not in water
-
+    # A river may not rise out of the sea or a lake: every course starts on a side with
+    # land on both hands.
     for river in inflow_state.rivers:
-        source = river.hexes[0]
-        assert inflow_state.hexes[source].terrain_class not in water, (
-            f"river starts in water at {source}"
-        )
+        for h in side_hexes(river.sides()[0]):
+            assert inflow_state.hexes[h].terrain_class not in _WATER
 
 
 def test_inflow_respects_min_separation(inflow_state):
+    # Inlets are chosen on hexes `river_inflow_min_separation` apart, and each enters at a
+    # corner of its hex — so two inlet corners' hexes may sit up to two closer than that.
     sources = _sources(inflow_state)
     separation = _INFLOW_KW.get(
         "river_inflow_min_separation", WorldConfig().river_inflow_min_separation
     )
     for i, a in enumerate(sources):
         for b in sources[i + 1 :]:
-            assert distance(a, b) >= separation, f"inlets {a} and {b} share a valley"
+            gap = min(distance(x, y) for x in corner_hexes(a) for y in corner_hexes(b))
+            assert gap >= separation - 2, f"inlets {a} and {b} share a valley"
 
 
 def test_inflow_count_is_respected(inflow_state):
@@ -403,32 +278,19 @@ def test_inflow_count_is_respected(inflow_state):
 
 
 def test_inflow_arrives_already_large(inflow_state):
-    # The point of the feature: an off-map river is wide where it crosses the border,
-    # not a trickle that grows. A spring inside the map starts with one hex of rain, so
-    # any inlet must carry far more than the largest ordinary headwater does.
+    # The point of the feature: an off-map river is wide where it crosses the border, not
+    # a trickle that grows.  So its first side carries more than any spring's does.
     sources = set(_sources(inflow_state))
     assert sources
+    springs = {c for c, tags in inflow_state.river_corners.items() if "river_source" in tags}
+    assert springs
 
-    # Springs only.  A lake's outflow has no upstream *river* hex either, so it is tagged
-    # a headwater too, and since it carries the whole basin's discharge it is often the
-    # largest one on the map — which says nothing about whether an off-map river arrives
-    # large, the thing being measured here.
-    local_headwaters = [
-        r.hexes[0]
-        for r in inflow_state.rivers
-        if r.hexes[0] not in sources
-        and "headwater" in inflow_state.hexes[r.hexes[0]].tags
-        and not any(
-            inflow_state.hexes[n].terrain_class == TerrainClass.INLAND_WATER
-            for n in neighbors(r.hexes[0])
-            if n in inflow_state.hexes
-        )
-    ]
-    assert local_headwaters
+    def head(river):
+        return inflow_state.river_sides[river.sides()[0]].catchment_km2
 
-    weakest_inlet = min(inflow_state.hexes[c].river_flow for c in sources)
-    strongest_local_source = max(inflow_state.hexes[c].river_flow for c in local_headwaters)
-    assert weakest_inlet > strongest_local_source, (
+    weakest_inlet = min(head(r) for r in inflow_state.rivers if r.corners[0] in sources)
+    strongest_spring = max(head(r) for r in inflow_state.rivers if r.corners[0] in springs)
+    assert weakest_inlet > strongest_spring, (
         "an off-map river should cross the border already carrying its catchment"
     )
 
@@ -442,7 +304,7 @@ def test_inflow_zero_matches_the_pre_feature_world():
     # river_inflow_count = 0 must leave hydrology exactly as it was before the feature.
     a = _inflow_world(river_inflow_count=0)
     b = _inflow_world(river_inflow_count=0, river_inflow_volume=0.9)
-    assert [r.hexes for r in a.rivers] == [r.hexes for r in b.rivers]
+    assert [r.corners for r in a.rivers] == [r.corners for r in b.rivers]
 
 
 def test_inflow_is_reproducible():
@@ -456,9 +318,9 @@ def test_inflow_edges_select_the_side_water_arrives_from():
     # carry an inlet; asking for the south instead must yield none.
     north = _inflow_world(river_inflow_edges=("north",))
     assert _sources(north), "expected inlets on the north edge"
-    for coord in _sources(north):
-        _col, row = north.grid_index(coord)
-        assert row == 0, f"inlet at {coord} is not on the north edge"
+    for corner in _sources(north):
+        rows = [north.grid_index(h)[1] for h in corner_hexes(corner) if h in north.hexes]
+        assert 0 in rows, f"inlet at {corner} is not on the north edge"
 
     south = _inflow_world(river_inflow_edges=("south",))
     assert _sources(south) == [], "the south edge is all sea and cannot carry an inlet"
@@ -534,7 +396,7 @@ def test_inflow_prefers_the_longer_course():
     def course_length(state, source):
         downstream = {}
         for river in state.rivers:
-            for a, b in zip(river.hexes, river.hexes[1:], strict=False):
+            for a, b in zip(river.corners, river.corners[1:], strict=False):
                 downstream.setdefault(a, b)
         seen, current, hops = set(), source, 0
         while current is not None and current not in seen:

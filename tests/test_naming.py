@@ -44,10 +44,14 @@ def test_every_settlement_belongs_to_a_culture_the_world_records(world):
 
 def test_a_name_means_something_about_its_site(world):
     """The etymology's head is one of the heads the ground offered."""
+    from worldgen.core.config import WorldConfig
+    from worldgen.stages.riverside import river_index
+
     cfg = world.metadata["config"]
+    features = river_index(world, WorldConfig(**cfg)).features
     for s in world.settlements:
         site = read_site(
-            world.hexes, s, cfg["naming_hill_relief_m"], cfg["naming_high_elevation_m"]
+            world.hexes, s, cfg["naming_hill_relief_m"], cfg["naming_high_elevation_m"], features
         )
         heads = {GLOSS[g] for g in site.generics}
         assert s.etymology
@@ -64,14 +68,14 @@ def test_a_town_named_for_a_river_names_a_river_that_is_there(world):
         if " on the " not in s.etymology:
             continue
         river = by_name[s.etymology.rsplit(" on the ", 1)[1]]
-        assert min(distance(s.coord, c) for c in river.hexes) <= 1, (s.name, s.etymology)
+        assert min(distance(s.coord, c) for c in river.banks()) <= 1, (s.name, s.etymology)
 
 
 def test_rivers_are_named_largest_first_down_to_the_threshold(world):
     cfg = world.metadata["config"]
     hexes = world.hexes
     for r in world.rivers:
-        mouth = max(hexes[c].catchment_km2 for c in r.hexes if c in hexes)
+        mouth = max(hexes[c].catchment_km2 for c in r.banks() if c in hexes)
         if mouth < cfg["naming_river_min_catchment_km2"]:
             assert r.name == ""
 

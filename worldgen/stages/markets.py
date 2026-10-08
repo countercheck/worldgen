@@ -26,6 +26,7 @@ from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
 from .habitability import potential_food, site_bonus
 from .haulage import allocate_catchments, fishery_rim, settleable, usable_fraction
+from .riverside import river_index
 from .road_cost import grade_is_under_cap
 
 # Float slop when comparing a recomputed score against the heap's next-best.  Without it,
@@ -64,6 +65,7 @@ class MarketStage(GeneratorStage):
 
     def run(self, state: WorldState) -> WorldState:
         hexes = state.hexes
+        rivers = river_index(state, self.config)
         cfg = self.config
 
         surplus = {
@@ -71,11 +73,11 @@ class MarketStage(GeneratorStage):
             for coord, hx in hexes.items()
         }
 
-        seats = self._plant(hexes, surplus, cfg)
+        seats = self._plant(hexes, surplus, cfg, rivers)
         if not seats:
             return state
 
-        owner, cost = allocate_catchments(hexes, seats, cfg.market_day_radius, cfg)
+        owner, cost = allocate_catchments(hexes, seats, cfg.market_day_radius, cfg, rivers)
         owner, cost = fishery_rim(hexes, owner, cost)
         for coord, seat in owner.items():
             hexes[coord].territory = seat
@@ -86,7 +88,7 @@ class MarketStage(GeneratorStage):
 
     # -- planting -------------------------------------------------------------
 
-    def _plant(self, hexes, surplus, cfg) -> list:
+    def _plant(self, hexes, surplus, cfg, rivers) -> list:
         """Lazy-greedy siting against a depleting surplus surface.
 
         Depletion only ever *reduces* a site's score, so the score function is monotone
@@ -106,7 +108,7 @@ class MarketStage(GeneratorStage):
                     value = remaining.get((q + dq, r + dr))
                     if value:
                         total += value * share
-            return total * (1.0 + site_bonus(coord, hexes[coord], hexes, cfg))
+            return total * (1.0 + site_bonus(coord, hexes[coord], hexes, cfg, rivers))
 
         reach_cache: dict = {}
 

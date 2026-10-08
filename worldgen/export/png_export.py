@@ -5,7 +5,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 from ..core.hex import DEFAULT_TERRAIN_BANDS, SettlementTier, terrain_bands, terrain_label
-from ..core.hex_grid import axial_to_pixel, neighbors, road_polylines
+from ..core.hex_grid import axial_to_pixel, corner_to_pixel, neighbors, road_polylines
 from ..core.world_state import RoadTier, WorldState
 from ..render import glyphs
 from ..render.debug_viewer import (
@@ -592,15 +592,15 @@ def render(ws: WorldState, config: PNGConfig | None = None) -> Image.Image:
             # at one width taken from its mouth.
             for run, sw in rivers.width_bands(
                 river,
-                ws.hexes,
+                ws.river_sides,
                 config.river_min_width,
                 config.river_max_width,
                 config.river_width_steps,
                 config.river_width_exponent,
             ):
                 pts = []
-                for coord in run:
-                    px, py = axial_to_pixel(coord, size)
+                for corner in run:
+                    px, py = corner_to_pixel(corner, size)
                     pts.append((int(px + ox), int(py + oy)))
                 bands.append((pts, max(1, round(sw * line_scale))))
         outline = config.feature_outline * line_scale
@@ -630,15 +630,13 @@ def render(ws: WorldState, config: PNGConfig | None = None) -> Image.Image:
             draw.line(pts, fill=_ROAD_COLOR[tier], width=lw)
 
     if "crossings" in layers:
-        for coord, kind, angle in legend.crossings(ws, axial_to_pixel, size):
-            px, py = axial_to_pixel(coord, size)
+        for px, py, kind, angle in legend.crossings(ws, size):
             _draw_crossing(draw, kind, px + ox, py + oy, angle, scale=size / 12.0)
 
     # Over the rivers and the crossings, so a spring or white water on a forded reach
     # still shows.
     if "rivers" in layers:
-        for coord, kind, bearing in legend.river_marks(ws, axial_to_pixel, size):
-            px, py = axial_to_pixel(coord, size)
+        for px, py, kind, bearing in legend.river_marks(ws, size):
             _draw_river_mark(draw, kind, px + ox, py + oy, bearing, scale=size / 12.0)
 
     if "anchorages" in layers:

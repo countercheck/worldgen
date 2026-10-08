@@ -3,6 +3,7 @@ from ..core.hex_grid import distance, grade_reachable_count, neighbors
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
 from .city_town import _assign_role
+from .riverside import river_index
 from .road_cost import max_grade_cap_delta
 
 _RESISTANT = {
@@ -18,6 +19,7 @@ _RESISTANT = {
 
 class VillagePlacementStage(GeneratorStage):
     def run(self, state: WorldState) -> WorldState:
+        rivers = river_index(state, self.config)
         hexes = state.hexes
         cfg = self.config
         max_delta = max_grade_cap_delta(cfg)
@@ -90,7 +92,7 @@ class VillagePlacementStage(GeneratorStage):
                 continue
             if all(distance(coord, c) >= 3 for c in placed_coords):
                 pop = int(self.rng.integers(100, 1_001))
-                role = _assign_role(coord, hx, hexes, self.config)
+                role = _assign_role(coord, hx, hexes, self.config, rivers)
                 name = f"{hx.biome.name.lower()}_village_{village_idx}"
                 s = Settlement(
                     coord=coord,

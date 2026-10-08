@@ -1,7 +1,7 @@
 import pytest
 from PIL import Image
 
-from tests.worlds import lay_road
+from tests.worlds import lay_river, lay_road
 from worldgen.core.hex import (
     Biome,
     LandCover,
@@ -10,7 +10,7 @@ from worldgen.core.hex import (
     SettlementTier,
     TerrainClass,
 )
-from worldgen.core.world_state import Ferry, River, RoadTier, WorldState
+from worldgen.core.world_state import Ferry, RoadTier, WorldState
 from worldgen.export.png_export import _RIVER_COLOR, _ROAD_COLOR, PNGConfig, render, save
 
 
@@ -44,7 +44,7 @@ def _small_world() -> WorldState:
             name="Millbrook",
         ),
     ]
-    ws.rivers = [River(hexes=[(0, 0), (1, 0), (2, 0)], flow_volume=1.5)]
+    lay_river(ws, [(0, 0), (1, 0), (2, 0)], flow_volume=1.5)
     lay_road(ws, [(1, 1), (2, 1), (3, 1)], RoadTier.PRIMARY)
     return ws
 
@@ -163,7 +163,7 @@ def test_contours_reject_nonpositive_max_crossings():
 def _sheared_world() -> WorldState:
     """A world wide enough that the axial shear opens up real corner space."""
     ws = WorldState.empty(seed=7, width=32, height=32)
-    ws.rivers = [River(hexes=[(0, 0), (1, 0), (2, 0)], flow_volume=1.5)]
+    lay_river(ws, [(0, 0), (1, 0), (2, 0)], flow_volume=1.5)
     lay_road(ws, [(1, 1), (2, 1), (3, 1)], RoadTier.PRIMARY)
     ws.settlements = [
         Settlement(
@@ -373,15 +373,21 @@ def test_ferry_landings_draw_anchorages():
 _CROSSING_INK = (43, 33, 24)
 
 
+# Enough catchment to float a barge under the default climate: a major river.
+_MAJOR_KM2 = 1e6
+
+
 def _crossing_world() -> WorldState:
-    """A river with a road crossing it: one hex tagged ford, one tagged bridge."""
+    """A river with a road crossing it: one side a ford, one a bridge."""
     ws = WorldState.empty(seed=5, width=5, height=5)
-    ws.rivers = [River(hexes=[(2, 0), (2, 1), (2, 2), (2, 3)], flow_volume=1.0)]
-    for r in range(4):
-        ws.hexes[(2, r)].river_flow = 0.8
-        ws.hexes[(2, r)].tags.add("river")
-    ws.hexes[(2, 1)].tags.add("ford")
-    ws.hexes[(2, 2)].tags.add("bridge")
+    river = lay_river(
+        ws, [(2, 0), (2, 1), (2, 2), (2, 3)], flow_volume=1.0, flow={(2, r): 0.8 for r in range(4)}
+    )
+    ford, bridge = river.sides()[1], river.sides()[2]
+    for rs in ws.river_sides.values():
+        rs.catchment_km2 = _MAJOR_KM2  # a minor river's fords go unmarked
+    ws.river_sides[ford].tags.add("ford")
+    ws.river_sides[bridge].tags.add("bridge")
     lay_road(ws, [(1, 1), (2, 1), (3, 1)], RoadTier.PRIMARY)
     return ws
 
@@ -399,9 +405,9 @@ def test_bridge_draws_more_ink_than_a_ford():
 
     def ink(tag):
         ws = _crossing_world()
-        for c in ((2, 1), (2, 2)):
-            ws.hexes[c].tags -= {"ford", "bridge"}
-        ws.hexes[(2, 1)].tags.add(tag)
+        for rs in ws.river_sides.values():
+            rs.tags -= {"ford", "bridge"}
+        ws.river_sides[ws.rivers[0].sides()[1]].tags.add(tag)
         cfg = PNGConfig(layers={"crossings"})
         img = render(ws, cfg)
         plain = render(WorldState.empty(seed=5, width=5, height=5), cfg)
@@ -433,7 +439,7 @@ def _flowing_river_world() -> WorldState:
     path = [(q, 1) for q in range(6)]
     for i, c in enumerate(path):
         ws.hexes[c].river_flow = 0.05 + i * 0.19
-    ws.rivers = [River(hexes=path, flow_volume=1.0)]
+    lay_river(ws, path, flow_volume=1.0, flow={c: ws.hexes[c].river_flow for c in path})
     return ws
 
 

@@ -31,7 +31,7 @@
  * `metadata.fog` states it in the file itself.
  */
 
-import { key, type Hex, type HexKey } from './hex.js';
+import { cornerHexes, key, sideHexes, type Hex, type HexKey } from './hex.js';
 
 /** The tag an unseen hex carries. Nothing should hand-write this string. */
 export const FOG_TAG = 'fog';
@@ -141,10 +141,27 @@ export function maskWorld(doc: Doc, opts: MaskOptions): Doc {
     },
   );
 
+  // A river side is seen from either bank, and a corner from any of the three hexes at it.
+  const anyKnown = (hs: Hex[]): boolean => hs.some((h) => known.has(key(h)));
+  const riverSides = (Array.isArray(doc.river_sides) ? (doc.river_sides as Doc[]) : []).filter(
+    (d) => {
+      const [q, r, s] = d.side as number[];
+      return anyKnown(sideHexes({ q: q!, r: r!, s: s! }));
+    },
+  );
+  const riverCorners = (
+    Array.isArray(doc.river_corners) ? (doc.river_corners as Doc[]) : []
+  ).filter((d) => {
+    const [q, r, k] = d.corner as number[];
+    return anyKnown(cornerHexes({ q: q!, r: r!, k: k! }));
+  });
+
   return {
     ...doc,
     hexes,
     rivers: maskRivers(Array.isArray(doc.rivers) ? (doc.rivers as Doc[]) : [], known),
+    river_sides: riverSides,
+    river_corners: riverCorners,
     settlements,
     road_edges: edges('road_edges'),
     sea_edges: edges('sea_edges'),
@@ -171,26 +188,38 @@ export function maskWorld(doc: Doc, opts: MaskOptions): Doc {
 /**
  * Split each river into the runs of it the faction has actually seen.
  *
- * A river is a chain, and keeping only the known hexes of one would leave a renderer
- * drawing a straight line between two banks either side of unseen country. Runs shorter
- * than two hexes are dropped: a single hex of river is a dot, not a watercourse, and the
- * Python's own river drawing assumes a polyline.
+ * A river is a chain of corners along hexsides, and keeping only the seen sides of one
+ * would leave a renderer drawing a straight line across unseen country. So each course
+ * is cut wherever a side runs between two hexes nobody has seen, and every run that is
+ * left holds at least one side. A side is seen from either bank.
  */
 function maskRivers(rivers: Doc[], known: ReadonlySet<HexKey>): Doc[] {
   const out: Doc[] = [];
 
   for (const river of rivers) {
-    const hexes = Array.isArray(river.hexes) ? (river.hexes as number[][]) : [];
+    const corners = Array.isArray(river.corners) ? (river.corners as number[][]) : [];
     let run: number[][] = [];
 
     const flush = (): void => {
-      if (run.length >= 2) out.push({ ...river, hexes: run });
+      if (run.length >= 2) out.push({ ...river, corners: run });
       run = [];
     };
 
-    for (const c of hexes) {
-      if (known.has(coordKey(c[0], c[1]))) run.push(c);
-      else flush();
+    for (let i = 0; i + 1 < corners.length; i++) {
+      const [aq, ar, ak] = corners[i]!;
+      const [bq, br, bk] = corners[i + 1]!;
+      const a = { q: aq!, r: ar!, k: ak! };
+      const b = { q: bq!, r: br!, k: bk! };
+      // The two hexes the side between these corners runs between.
+      const banks = cornerHexes(a).filter((h) =>
+        cornerHexes(b).some((o) => o.q === h.q && o.r === h.r),
+      );
+      if (banks.some((h) => known.has(key(h)))) {
+        if (run.length === 0) run.push(corners[i]!);
+        run.push(corners[i + 1]!);
+      } else {
+        flush();
+      }
     }
     flush();
   }

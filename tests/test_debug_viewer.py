@@ -64,17 +64,11 @@ def test_debug_viewer_paints_the_primary_road_over_the_branching_track():
 
 def test_render_drainage_marks_confluences_and_scales_by_order():
     """The plate must show branching, not just wet hexes."""
-    from worldgen.core.hex import Hex
-    from worldgen.core.world_state import River, WorldState
+    from tests.test_drainage_network import _world
     from worldgen.render.debug_viewer import render_svg
 
-    state = WorldState.empty(seed=1, width=1, height=1)
-    state.hexes = {(q, r): Hex(coord=(q, r)) for q in range(-1, 4) for r in range(-2, 2)}
-    state.rivers = [
-        River(hexes=[(0, 0), (1, 0), (2, 0)], flow_volume=1.0),
-        River(hexes=[(1, -1), (2, -1), (2, 0)], flow_volume=1.0),
-        River(hexes=[(2, 0), (3, 0)], flow_volume=1.0),
-    ]
+    # Two streams meeting at (2, 0) and a trunk on below it: a Y, on corners.
+    state = _world([[(0, 0), (1, 0), (2, 0)], [(2, 2), (2, 1), (2, 0)], [(2, 0), (3, 0)]])
     svg = render_svg(state, "drainage")
     assert 'id="layer-drainage"' in svg
     assert 'fill="#d95f02"' in svg, "the confluence should be marked"

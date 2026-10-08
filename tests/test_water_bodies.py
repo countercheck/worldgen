@@ -4,7 +4,7 @@ import pytest
 
 from worldgen.core.config import WorldConfig
 from worldgen.core.hex import TerrainClass
-from worldgen.core.hex_grid import neighbors
+from worldgen.core.hex_grid import corner_hexes, neighbors
 from worldgen.core.pipeline import GeneratorPipeline
 from worldgen.stages.elevation import ElevationStage
 from worldgen.stages.erosion import ErosionStage
@@ -94,136 +94,89 @@ def test_all_water_classified(world):
             )
 
 
+def _courses_downstream(world):
+    """Corner -> the next corner downstream, over every drawn course."""
+    down = {}
+    for river in world.rivers:
+        for a, b in zip(river.corners, river.corners[1:], strict=False):
+            down.setdefault(a, b)
+    return down
+
+
+def _where_it_goes(world, start, lake_of, own):
+    """Follow the courses from *start*: "ocean", "border", "closed" (a lake with no outlet),
+    a lake index, or None."""
+    down = _courses_downstream(world)
+    seen, node = set(), start
+    while node is not None and node not in seen:
+        seen.add(node)
+        for h in corner_hexes(node):
+            if h not in world.hexes:
+                return "border"
+            hx = world.hexes[h]
+            if hx.terrain_class == TerrainClass.OPEN_WATER:
+                return "ocean"
+            if h in lake_of and lake_of[h] != own and node != start:
+                return lake_of[h]
+            if hx.terrain_class == TerrainClass.INLAND_WATER and "endorheic" in hx.tags:
+                return "closed"
+        node = down.get(node)
+    return None
+
+
+def _outlets(world, comp):
+    """Courses leaving a lake: those that start on its shore."""
+    return [
+        r.corners[0]
+        for r in world.rivers
+        if any(h in comp for h in corner_hexes(r.corners[0]))
+        and "river_source" not in world.river_corners.get(r.corners[0], set())
+    ]
+
+
+def _open_lakes(world):
+    lakes = _water_components(world, TerrainClass.INLAND_WATER)
+    return [comp for comp in lakes if not any("endorheic" in world.hexes[c].tags for c in comp)]
+
+
 def test_lake_has_outflow_river(world):
-    """Each LAKE must have an outflow: a border river hex whose connected river path
-    (without re-entering this lake) reaches ocean, border, or another lake."""
-    lake_comps = _water_components(world, TerrainClass.INLAND_WATER)
-    if not lake_comps:
-        pytest.skip("No lakes in this world — nothing to check")
-
-    w, h = world.width, world.height
-    land = {
-        c
-        for c, hx in world.hexes.items()
-        if hx.terrain_class not in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
-    }
-
-    def downstream_reaches_terminal(start, comp_set):
-        """BFS along connected river hexes from start, not through comp_set."""
-        visited = {start} | comp_set
-        queue = deque([start])
-        while queue:
-            coord = queue.popleft()
-            q, r = coord
-            if q == 0 or q == w - 1 or r == 0 or r == h - 1:
-                return True
-            for nbr in neighbors(coord):
-                if nbr not in world.hexes or nbr in visited:
-                    continue
-                nhx = world.hexes[nbr]
-                if nhx.terrain_class == TerrainClass.OPEN_WATER:
-                    return True
-                # Accept reaching a *different* lake as a valid intermediate terminal
-                if nhx.terrain_class == TerrainClass.INLAND_WATER and nbr not in comp_set:
-                    return True
-                if nbr in land and "river" in nhx.tags:
-                    visited.add(nbr)
-                    queue.append(nbr)
-        return False
-
-    for comp in lake_comps:
-        comp_set = frozenset(comp)
-        border_rivers = [
-            nbr
-            for c in comp
-            for nbr in neighbors(c)
-            if nbr in land and "river" in world.hexes[nbr].tags
-        ]
-        assert border_rivers, f"LAKE (size {len(comp)}) has no adjacent river hex at all"
-        assert any(downstream_reaches_terminal(r, comp_set) for r in border_rivers), (
-            f"LAKE component (size {len(comp)}) has no outflow: "
-            "no border river hex has a downstream path to ocean/border"
+    """Every lake that is not a closed basin has a river leaving it, and that river reaches
+    the sea, the map edge, or another lake — open, or closed like the Dead Sea at the end
+    of the Jordan."""
+    lakes = _open_lakes(world)
+    if not lakes:
+        pytest.skip("No draining lakes in this world — nothing to check")
+    lake_of = {c: i for i, comp in enumerate(lakes) for c in comp}
+    for i, comp in enumerate(lakes):
+        outlets = _outlets(world, comp)
+        assert outlets, f"LAKE (size {len(comp)}) has no river leaving it"
+        assert any(_where_it_goes(world, o, lake_of, i) is not None for o in outlets), (
+            f"LAKE (size {len(comp)})'s outflow goes nowhere"
         )
 
 
 def test_lake_chain_terminates(world):
-    """Chain rule: following lake outflow rivers must reach ocean or border without cycles.
-
-    For each lake component, BFS through river hexes (not re-entering this lake) to find
-    the next water body.  If that next body is another lake, recurse; if it is ocean or
-    border the chain terminates successfully.  Tracking visited lake indices detects cycles.
-    """
-    lake_comps = _water_components(world, TerrainClass.INLAND_WATER)
-    if not lake_comps:
-        pytest.skip("No lakes in this world — nothing to check")
-
-    w, h = world.width, world.height
-    land = {
-        c
-        for c, hx in world.hexes.items()
-        if hx.terrain_class not in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
-    }
-    hex_to_lake_idx = {c: i for i, comp in enumerate(lake_comps) for c in comp}
-
-    def follow_river_to_water(start, current_comp):
-        """BFS from *start* through river hexes toward water.
-
-        Returns ("ocean"/"border", set()) on reaching an unambiguous terminal, or
-        (None, lake_indices) with every other lake reached along the way. A hex can
-        sit right on the shore of more than one lake at once (small lakes are often
-        clustered together) — treating the first such sighting as a hard stop would
-        prematurely abandon a path that actually continues on to a real terminal, so
-        exploration keeps going instead of returning immediately on the first lake hit.
-        """
-        visited = set(current_comp) | {start}
-        queue = deque([start])
-        found_lakes: set[int] = set()
-        while queue:
-            coord = queue.popleft()
-            cq, cr = coord
-            if cq == 0 or cq == w - 1 or cr == 0 or cr == h - 1:
-                return "border", found_lakes
-            for nbr in neighbors(coord):
-                if nbr not in world.hexes or nbr in visited:
-                    continue
-                nhx = world.hexes[nbr]
-                if nhx.terrain_class == TerrainClass.OPEN_WATER:
-                    return "ocean", found_lakes
-                if nbr in hex_to_lake_idx:
-                    found_lakes.add(hex_to_lake_idx[nbr])
-                    continue
-                if nbr in land and "river" in nhx.tags:
-                    visited.add(nbr)
-                    queue.append(nbr)
-        return None, found_lakes
-
-    for start_idx, start_comp in enumerate(lake_comps):
-        visited_lakes: set[int] = {start_idx}
-        queue: deque[int] = deque([start_idx])
-        found_terminal = False
-
-        while queue and not found_terminal:
-            idx = queue.popleft()
-            comp = lake_comps[idx]
-            border_rivers = [
-                nbr
-                for c in comp
-                for nbr in neighbors(c)
-                if nbr in land and "river" in world.hexes[nbr].tags
-            ]
-            for r in border_rivers:
-                result, found_lakes = follow_river_to_water(r, comp)
-                if result in ("ocean", "border"):
-                    found_terminal = True
-                    break
-                for lake_idx in found_lakes:
-                    if lake_idx not in visited_lakes:
-                        visited_lakes.add(lake_idx)
-                        queue.append(lake_idx)
-
-        assert found_terminal, (
-            f"LAKE component {start_idx} (size {len(start_comp)}) outflow chain "
-            "does not terminate at ocean or border (possible cycle or missing drainage)"
+    """Following lake outflows from lake to lake must reach the sea, the map edge, or a
+    closed lake that the water leaves only by evaporating."""
+    lakes = _open_lakes(world)
+    if not lakes:
+        pytest.skip("No draining lakes in this world — nothing to check")
+    lake_of = {c: i for i, comp in enumerate(lakes) for c in comp}
+    for start in range(len(lakes)):
+        visited, idx, end = {start}, start, None
+        while end is None:
+            goes = [_where_it_goes(world, o, lake_of, idx) for o in _outlets(world, lakes[idx])]
+            if "ocean" in goes or "border" in goes or "closed" in goes:
+                end = "out"
+                break
+            onward = [g for g in goes if isinstance(g, int) and g not in visited]
+            if not onward:
+                break
+            idx = onward[0]
+            visited.add(idx)
+        assert end == "out", (
+            f"LAKE component {start} (size {len(lakes[start])}) outflow chain does not "
+            "reach the sea, the map edge or a closed lake"
         )
 
 

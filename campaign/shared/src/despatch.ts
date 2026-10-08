@@ -46,14 +46,14 @@
 import { FOOTPRINT, occupied, type FootprintShape } from './column.js';
 import { inChain } from './commander.js';
 import type { CampaignConfig } from './config.js';
-import { crossingAt, riverClass } from './crossing.js';
+import { bridgeAt, riverClass, whiteWater } from './crossing.js';
 import { astar, distance, key, neighbors, type Hex } from './hex.js';
 import { speedKmh } from './movement.js';
 import { publicContact, reconZone, type PublicContact, type Sighting } from './recon.js';
 import type { CampaignState } from './state.js';
-import { gradeOf, isPassable, isRiver } from './terrain.js';
+import { gradeOf, isPassable } from './terrain.js';
 import type { Formation, Unit, UnitReport } from './unit.js';
-import { hexAt, type World, type WorldHex } from './world.js';
+import { riverSideBetween, TAG_FORD, type World, type WorldHex } from './world.js';
 
 /**
  * What is written on the paper.
@@ -368,17 +368,16 @@ export const addresseesOf = (
  * swims the animal. So a major river costs them an hour rather than being impassable —
  * the rules do not say so explicitly, but a courier system in which one river ends
  * communication altogether is not the period, and the whole point of the rider is that
- * they get through or is caught trying.
+ * they get through or is caught trying. White water on a minor river is the same: no
+ * wading it, so the rider pays what a major river costs to find a way over.
  */
 function courierCrossingHours(cfg: CampaignConfig, world: World, from: Hex, to: Hex): number {
-  const target = hexAt(world, to);
-  if (target === undefined || !isRiver(target)) return 0;
-
-  const origin = hexAt(world, from);
-  if (origin !== undefined && isRiver(origin)) return 0;
-
-  if (crossingAt(world, from, to) === 'bridge') return 0;
-  return riverClass(target, world) === 'major' ? cfg.courierMajorCrossingHours : cfg.fordHours;
+  const side = riverSideBetween(world, from, to);
+  if (side === undefined || bridgeAt(world, from, to)) return 0;
+  if (riverClass(side, world) === 'major' && side.tags.has(TAG_FORD)) return cfg.fordHours;
+  return riverClass(side, world) === 'major' || whiteWater(side)
+    ? cfg.courierMajorCrossingHours
+    : cfg.fordHours;
 }
 
 /** Hours for a rider to enter one hex from an adjacent one. `Infinity` if they cannot. */

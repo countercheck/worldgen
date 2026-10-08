@@ -78,12 +78,12 @@ def test_the_world_fixture_still_exercises_what_the_typescript_tests_need(world)
     terrain = {h["terrain_class"] for h in world["hexes"]}
     assert {"land", "coast", "open_water"} <= terrain, f"missing terrain classes: got {terrain}"
 
-    tags = {t for h in world["hexes"] for t in h["tags"]}
-    assert "ford" in tags, (
-        "the fixture must carry ford tags — they only exist in the organic model, and the "
-        "river-crossing rules key on them"
+    assert world["rivers"] and world["river_sides"], "the fixture must contain a river"
+    side_tags = {t for sd in world["river_sides"] for t in sd["tags"]}
+    assert "ford" in side_tags, (
+        "the fixture must carry fords on river sides — they only exist in the organic "
+        "model, and the river-crossing rules key on them"
     )
-    assert "river" in tags, "the fixture must contain a river"
 
     assert world["settlements"], "the fixture must contain settlements"
     assert world["sea_edges"], "the fixture must contain sea edges"

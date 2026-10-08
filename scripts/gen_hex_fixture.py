@@ -36,13 +36,24 @@ from worldgen.core.hex_grid import (
     astar,
     axial_to_offset,
     axial_to_pixel,
+    corner_hexes,
+    corner_id,
+    corner_neighbors,
+    corner_sides,
+    corner_to_pixel,
     distance,
+    hex_corner_keys,
     hex_range,
+    hex_side_keys,
     neighbors,
     offset_to_axial,
     pixel_to_axial,
     ring,
     round_axial,
+    side_between,
+    side_corners,
+    side_hexes,
+    side_id,
 )
 
 FIXTURE = (
@@ -159,6 +170,52 @@ def build() -> dict:
             for row in (-3, 0, 1, 4, 7)
         ],
         "axialToOffset": [{"coord": list(c), "result": list(axial_to_offset(c))} for c in COORDS],
+        "hexCorners": [
+            {"coord": list(c), "result": [list(k) for k in hex_corner_keys(c)]} for c in COORDS
+        ],
+        "hexSides": [
+            {"coord": list(c), "result": [list(k) for k in hex_side_keys(c)]} for c in COORDS
+        ],
+        "cornerHexes": [
+            {"corner": [*c, k], "result": [list(h) for h in corner_hexes((*c, k))]}
+            for c in COORDS
+            for k in (0, 1)
+        ],
+        "cornerNeighbors": [
+            {"corner": [*c, k], "result": [list(n) for n in corner_neighbors((*c, k))]}
+            for c in COORDS
+            for k in (0, 1)
+        ],
+        "cornerSides": [
+            {"corner": [*c, k], "result": [list(n) for n in corner_sides((*c, k))]}
+            for c in COORDS
+            for k in (0, 1)
+        ],
+        "cornerToPixel": [
+            {"corner": [*c, k], "result": list(corner_to_pixel((*c, k), HEX_SIZE))}
+            for c in COORDS
+            for k in (0, 1)
+        ],
+        "sideBetween": [
+            {"a": list(c), "b": list(n), "result": list(side_between(c, n))}
+            for c in COORDS
+            for n in neighbors(c)
+        ],
+        "sideHexes": [
+            {"side": [*c, s], "result": [list(h) for h in side_hexes((*c, s))]}
+            for c in COORDS
+            for s in (0, 1, 2)
+        ],
+        "sideCorners": [
+            {"side": [*c, s], "result": [list(k) for k in side_corners((*c, s))]}
+            for c in COORDS
+            for s in (0, 1, 2)
+        ],
+        "ids": [
+            {"corner": [*c, k], "cornerId": corner_id((*c, k)), "sideId": side_id((*c, k))}
+            for c in COORDS
+            for k in (0, 1)
+        ],
     }
 
 

@@ -34,6 +34,7 @@ import {
   type Command,
   type Role,
   type Strictness,
+  WorldParseError,
 } from '@campaign/shared';
 
 import { openDb, type Db } from './db.js';
@@ -209,13 +210,29 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
 
   app.decorate('store', store);
 
+  /** The campaign, null if there is none, or why its world cannot be read. */
+  const openCampaign = (id: string): CampaignRow | null | string => {
+    try {
+      return store.campaign(id);
+    } catch (err) {
+      if (err instanceof WorldParseError) return err.message;
+      throw err;
+    }
+  };
+
   /** Resolve the campaign and the caller's role, or answer for them. */
   const authorise = (
     req: FastifyRequest,
     reply: { code: (n: number) => { send: (b: unknown) => unknown } },
   ): { campaign: CampaignRow; role: Role } | null => {
     const { id } = req.params as { id: string };
-    const campaign = store.campaign(id);
+    const opened = openCampaign(id);
+    if (typeof opened === 'string') {
+      // Gone rather than broken: the campaign exists, but on a world this build cannot read.
+      reply.code(410).send({ error: opened });
+      return null;
+    }
+    const campaign = opened;
     if (campaign === null) {
       reply.code(404).send({ error: 'no such campaign' });
       return null;
@@ -557,7 +574,13 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
   app.register(async (scoped) => {
     scoped.get('/api/campaigns/:id/stream', { websocket: true }, (socket, req) => {
       const { id } = req.params as { id: string };
-      const campaign = store.campaign(id);
+      const opened = openCampaign(id);
+      if (typeof opened === 'string') {
+        socket.send(JSON.stringify({ type: 'error', error: opened }));
+        socket.close();
+        return;
+      }
+      const campaign = opened;
       const role = campaign === null ? null : store.roleFor(id, tokenFrom(req));
 
       if (campaign === null || role === null) {

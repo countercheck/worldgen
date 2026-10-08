@@ -1,13 +1,24 @@
-import heapq
-from collections import deque
+import math
+from collections import defaultdict, deque
 
 import numpy as np
 from scipy.ndimage import gaussian_filter
 
+from ..core.hex_grid import corner_hexes, hex_corner_keys, side_hexes, side_joining
 from ..core.hex_grid import distance as hex_distance
 from ..core.hex_grid import neighbors as hex_neighbors
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
+from .corner_drainage import (
+    CornerNetwork,
+    Drainage,
+    accumulate,
+    build_network,
+    drain_corner,
+    flow_direction,
+    inlet_corner,
+    is_lake_node,
+)
 from .elevation import apply_profile
 
 try:
@@ -213,160 +224,87 @@ def _neighbour_table(state: WorldState, w: int, h: int) -> list[list[tuple[int, 
     return table
 
 
-def _fill_sinks(
-    arr: np.ndarray, sea_level: float, neighbours: list[list[tuple[int, int]]]
-) -> np.ndarray:
-    """A copy of *arr* with its depressions filled to their spill level (Barnes et al).
+def _corner_draws(state: WorldState, rng: np.random.Generator) -> dict:
+    """One fixed uniform draw per corner of the map, for the wander rule.
 
-    Accumulation needs this and the droplets guarantee it will be needed: they leave the
-    surface pitted, and without filling, drainage dies at the first depression it meets.
-    That is not a small error — it is the difference between a map of short disconnected
-    segments and one with trunk rivers, and it was most of why the channels being widened
-    coincided with only a third of the rivers hydrology later found.  Hydrology fills
-    sinks for exactly this reason before it routes anything; measuring the same quantity
-    means filling them here too.
-
-    Returns a copy: the fill decides where water *would* run, and is no reason to raise
-    the actual ground.
+    Fixed across carve passes so a corner keeps choosing the same way while its valley
+    deepens, rather than scattering cuts between passes.
     """
-    filled = arr.copy()
-    w, h = arr.shape
-    visited = np.zeros((w, h), dtype=bool)
-    heap: list[tuple[float, int, int]] = []
+    corners = sorted({c for coord in state.hexes for c in hex_corner_keys(coord)})
+    return dict(zip(corners, rng.random(len(corners)).tolist(), strict=True))
 
-    # Seed from the sea and the map edge, the two places water leaves by.
+
+def _corner_routing(
+    arr: np.ndarray,
+    sea_level: float,
+    state: WorldState,
+    draws: dict,
+    wander_exponent: float,
+    rng: np.random.Generator,
+    inflow: dict[tuple[int, int], float] | None = None,
+    floor_blend: float = 0.0,
+) -> tuple[CornerNetwork, Drainage]:
+    """Drain the working surface along hexsides, as hydrology will drain the finished one.
+
+    Valleys have to be cut where the rivers will be, and hydrology routes its rivers on
+    the corner graph (`corner_drainage`), so this drains the same graph over the field
+    being carved: every land cell's rain runs off to its lowest corner and down from
+    there, and a river entering from off the map brings the catchment it gathered beyond
+    it.  The fill inside `flow_direction` lets water cross a depression rather than vanish
+    into it, without raising the ground itself.
+    """
+    w, h = arr.shape
+    elevation = {state.coord_at(i, j): float(arr[i, j]) for i in range(w) for j in range(h)}
+    land = {c for c, z in elevation.items() if z >= sea_level}
+    net = build_network(elevation, land, set(elevation) - land, set(), [], floor_blend)
+    drainage = flow_direction(net, rng, wander_exponent, draws=draws)
+
+    sources: dict = defaultdict(float)
+    for coord in sorted(land):
+        corner = drain_corner(coord, net, drainage)
+        if corner is not None:
+            sources[corner] += 1.0
+    # A river entering from off the map brings a catchment this map never had.  Seeding it
+    # is what makes the valley match the water: widening scales its reach by discharge,
+    # so without this an imported trunk is measured as the trickle its first few on-map
+    # hexes would raise, and gets a trickle's valley.
+    for cell, volume in (inflow or {}).items():
+        coord = state.coord_at(*cell)
+        corner = inlet_corner(coord, net, drainage) if coord in land else None
+        if corner is not None:
+            sources[corner] += volume
+    drainage.acc = accumulate(drainage.flow, sources)
+    return net, drainage
+
+
+def _hex_discharge(state: WorldState, drainage: Drainage, w: int, h: int) -> np.ndarray:
+    """Per cell, the largest discharge passing any of its corners.
+
+    Widening fills an area outward from the channel cells, and a channel along a hexside
+    runs between two of them, so both banks of a river count as the channel here.
+    """
+    out = np.zeros((w, h))
     for i in range(w):
         for j in range(h):
-            if arr[i, j] < sea_level or i in (0, w - 1) or j in (0, h - 1):
-                heapq.heappush(heap, (float(filled[i, j]), i, j))
-                visited[i, j] = True
-
-    while heap:
-        elev, i, j = heapq.heappop(heap)
-        for ni, nj in neighbours[i * h + j]:
-            if visited[ni, nj]:
-                continue
-            visited[ni, nj] = True
-            filled[ni, nj] = max(filled[ni, nj], elev)
-            heapq.heappush(heap, (float(filled[ni, nj]), ni, nj))
-    return filled
+            out[i, j] = max(
+                (
+                    drainage.acc.get(c, 0.0)
+                    for c in hex_corner_keys(state.coord_at(i, j))
+                    if drainage.flow.get(c) is not None
+                ),
+                default=0.0,
+            )
+    return out
 
 
-def _grid_receivers(
-    arr: np.ndarray,
-    sea_level: float,
-    neighbours: list[list[tuple[int, int]]],
-    wander: tuple[np.ndarray, float] | None = None,
-) -> tuple[dict[tuple[int, int], tuple[int, int]], list[tuple[int, int]]]:
-    """Where each land cell sends its water, and the cells ordered high to low.
-
-    Routing runs over the sink-filled surface, not the raw one, so water crosses a
-    depression rather than disappearing into it — the same thing hydrology does, and the
-    reason the two agree about where the rivers are.  A cell with no lower neighbour is
-    absent from the mapping: it is an outlet, or it sits on a filled flat.
-
-    Split out of `_grid_flow_accumulation`, which computed both and kept neither, because
-    incision needs the same receivers and the same order and recomputing them would mean
-    a second sink fill per pass.
-
-    *wander*, if given, is `(draws, power)`: a fixed uniform draw per cell and
-    `river_wander_exponent`. Each cell then sends its water to a lower neighbour picked with
-    weight (drop / largest drop) ** power, using its own draw, rather than always to the
-    lowest — the rule hydrology routes rivers by, so the valleys cut here are the ones the
-    rivers will follow. The draws are fixed across carve passes so a cell keeps choosing
-    the same way while its valley deepens, rather than scattering cuts between passes.
-
-    Returns `(receivers, order)`.  The order is descending by routing elevation; ties are
-    left to Python's stable sort over `np.argwhere`, which is what makes a run
-    reproducible — a comparison that breaks ties differently would change every map.
-    """
-    w, h = arr.shape
-    land = arr >= sea_level
-    routing = _fill_sinks(arr, sea_level, neighbours)
-    order = [(int(i), int(j)) for i, j in np.argwhere(land)]
-    order.sort(key=lambda c: -routing[c])
-
-    receivers: dict[tuple[int, int], tuple[int, int]] = {}
-    for i, j in order:
-        here = routing[i, j]
-        lower = [
-            (here - routing[ni, nj], (ni, nj))
-            for ni, nj in neighbours[i * h + j]
-            if land[ni, nj] and routing[ni, nj] < here
-        ]
-        if not lower:
-            continue
-        if wander is None or len(lower) == 1:
-            # The lowest; the first listed wins a tie, as it always has.
-            receivers[(i, j)] = max(lower, key=lambda d: d[0])[1]
-            continue
-        draws, power = wander
-        steepest = max(d for d, _ in lower)
-        weights = np.array([(d / steepest) ** power for d, _ in lower])
-        pick = draws[i, j] * weights.sum()
-        k = min(int(np.searchsorted(np.cumsum(weights), pick)), len(lower) - 1)
-        receivers[(i, j)] = lower[k][1]
-    return receivers, order
-
-
-def _grid_flow_accumulation(
-    arr: np.ndarray,
-    sea_level: float,
-    neighbours: list[list[tuple[int, int]]],
-    inflow: dict[tuple[int, int], float] | None = None,
-) -> np.ndarray:
-    """How much land drains through each cell, by steepest descent over the hex grid.
-
-    Valleys have to be widened where the rivers will be, and the droplet affinity does not
-    answer that — it records where droplets wandered while the terrain was still being
-    cut, and only about one cell in five of the finished river network sits on it.
-    Hydrology chooses its rivers by flow accumulation, so this measures the same thing.
-
-    Cells are handled high to low, each passing its total to its lowest neighbour, so one
-    sort does the work of a traversal per cell.  Routing runs over the sink-filled
-    surface, not the raw one, so water crosses a depression rather than disappearing into
-    it — without that the network is a scatter of short segments and no trunk river ever
-    forms.
-    """
-    receivers, order = _grid_receivers(arr, sea_level, neighbours)
-    return _accumulate(arr, sea_level, receivers, order, inflow)
-
-
-def _accumulate(
-    arr: np.ndarray,
-    sea_level: float,
-    receivers: dict[tuple[int, int], tuple[int, int]],
-    order: list[tuple[int, int]],
-    inflow: dict[tuple[int, int], float] | None = None,
-) -> np.ndarray:
-    """Upstream area per cell, given a routing already worked out.
-
-    Separate from `_grid_flow_accumulation` so a carve pass can compute the receivers once
-    and then both accumulate and incise over them; doing it through the wrapper would mean
-    a second sink fill for the same answer.
-    """
-    land = arr >= sea_level
-    acc = np.where(land, 1.0, 0.0)
-    # A river entering from off the map brings a catchment this map never had.  Seeding it
-    # here is what makes the valley match the water: widening scales its reach by
-    # discharge, so without this an imported trunk is measured as the trickle its first
-    # few on-map hexes would raise, and gets a trickle's valley.
-    for cell, volume in (inflow or {}).items():
-        if land[cell]:
-            acc[cell] = max(acc[cell], volume)
-
-    for cell in order:
-        lowest = receivers.get(cell)
-        if lowest is not None:
-            acc[lowest] += acc[cell]
-    return acc
+# A hexside is a kilometre-wide hex's side: 1/sqrt(3) km long.
+_SIDE_KM = 1.0 / math.sqrt(3.0)
 
 
 def _incise_channels(
     arr: np.ndarray,
-    acc: np.ndarray,
-    receivers: dict[tuple[int, int], tuple[int, int]],
-    order: list[tuple[int, int]],
+    state: WorldState,
+    drainage: Drainage,
     sea_level: float,
     span: float,
     *,
@@ -378,48 +316,80 @@ def _incise_channels(
     min_gradient_m: float,
     max_cut_m: float,
 ) -> None:
-    """Lower each cell by K * A^m * S^n, in place.
+    """Lower each channel by K * A^m * S^n, in place.
 
     The term the droplet model has no way to express.  A droplet carries one unit of water
     however much country it drains, so it cuts a trunk and a hillslope at the same rate and
     no valley ever gets deeper than its surroundings; with an area exponent of 0.5 a
     500 km2 channel cuts about 22 times as fast as the 1 km2 ground beside it.  That
-    contrast is what makes stream capture happen: a hillslope cell next to a valley that
-    has been cut finds, when the next pass recomputes receivers, that the valley is now its
-    lowest neighbour, and its own catchment jumps.  Run over a few passes, neighbouring
-    channels stop running side by side and start joining.
+    contrast is what makes stream capture happen: ground beside a valley that has been cut
+    finds, when the next pass drains the surface again, that the valley is now the way
+    down, and its own catchment jumps.  Run over a few passes, neighbouring channels stop
+    running side by side and start joining.
 
-    Cells are taken **outlets first**, the reverse of the accumulation order, so a cell's
-    receiver has already been lowered by the time the cell is reached.  That is what lets
-    the floor at `receiver + min_gradient` permit deepening while still forbidding
-    inversion: the whole trunk migrates downward together rather than being pinned to
-    ground that has not moved.  Two things follow.  The surface stays strictly monotone
-    downstream, so no new sink appears for hydrology's priority flood to refill; and with
-    `slope_exponent` of 1 the step is linear in elevation, so that floor is an exact
+    Water runs along hexsides, so what is cut is a side: each corner's water leaves along
+    the side to its receiver, and the two hexes either side of it — both banks — are
+    lowered toward the corner's new height, together with the corner's own lowest hex,
+    whose height a corner's is.
+
+    Corners are taken **outlets first**, the fill order, so a corner's receiver has already
+    been lowered by the time the corner is reached.  That is what lets the floor at
+    `receiver + min_gradient` permit deepening while still forbidding inversion: the whole
+    trunk migrates downward together rather than being pinned to ground that has not moved.
+    With `slope_exponent` of 1 the step is linear in elevation, so that floor is an exact
     stability guard and no timestep is needed.  `max_cut_m` only catches an inherited
     cliff.
 
     Arithmetic is in metres — `arr` is the normalised field and `span` converts — because
     a stream power law with a physical exponent means nothing in units of relief fraction.
-    Unlike the rest of this module's constants, which are deliberately fractions.
     """
     if m_per_pass <= 0.0:
         return
     # K is derived rather than configured, so the dial stays in metres whatever the
-    # exponents are: at the reference area and slope, a cell lowers by exactly m_per_pass.
+    # exponents are: at the reference area and slope, a channel lowers by exactly
+    # m_per_pass.
     k = m_per_pass / (reference_km2**area_exponent * reference_slope**slope_exponent)
     min_gap = min_gradient_m / span
+    # A cell can be a bank of more than one corner, so the cap is on what it loses over the
+    # whole pass, not per cut.
+    deepest = arr - max_cut_m / span
 
-    for cell in reversed(order):
-        receiver = receivers.get(cell)
-        if receiver is None:
+    index = {coord: state.grid_index(coord) for coord in state.hexes}
+    around = {
+        corner: [index[h] for h in corner_hexes(corner) if h in index] for corner in drainage.order
+    }
+
+    def cell(coord):
+        return index[coord]
+
+    def land_cells(corner) -> list:
+        return [c for c in around.get(corner, ()) if arr[c] >= sea_level]
+
+    def height(corner) -> float:
+        cells = land_cells(corner)
+        return float(min(arr[c] for c in cells)) if cells else sea_level
+
+    for corner in sorted(drainage.order, key=drainage.order.__getitem__):
+        receiver = drainage.flow.get(corner)
+        if receiver is None or is_lake_node(receiver):
             continue  # an outlet: base level, and nothing below it to cut toward
-        drop = arr[cell] - arr[receiver]
+        here, there = height(corner), height(receiver)
+        drop = here - there
         if drop <= 0.0:
             continue  # inside a filled depression; there is no gradient to cut with
-        slope = drop * span / 1000.0  # metres of fall per kilometre-wide hex step
-        cut_m = min(k * float(acc[cell]) ** area_exponent * slope**slope_exponent, max_cut_m)
-        arr[cell] = max(arr[cell] - cut_m / span, arr[receiver] + min_gap, sea_level)
+        slope = drop * span / (1000.0 * _SIDE_KM)  # metres of fall per metre along the side
+        acc = drainage.acc.get(corner, 0.0)
+        cut_m = min(k * acc**area_exponent * slope**slope_exponent, max_cut_m)
+        floor = max(here - cut_m / span, there + min_gap, sea_level)
+        # The corner's own floor and both banks of the side the water leaves by.  None
+        # loses more than the cap, so a bank standing on a cliff above the corner is cut
+        # into rather than felled to the river in one pass.
+        cells = {cell(h) for h in side_hexes(side_joining(corner, receiver)) if h in state.hexes}
+        lowest = land_cells(corner)
+        if lowest:
+            cells.add(min(lowest, key=lambda c: (arr[c], c)))
+        for c in cells:
+            arr[c] = max(min(arr[c], floor), deepest[c])
 
 
 def _inflow_mouths(
@@ -796,20 +766,28 @@ class ErosionStage(GeneratorStage):
             # The two height knobs are quoted in metres and the field is normalised, so
             # they are divided by the same span the array was built with.
             meander = np.zeros((w, h))
-            wander = (self.rng.random((w, h)), cfg.river_wander_exponent)
+            draws = _corner_draws(state, self.rng)
             for _ in range(cfg.valley_carve_passes):
-                # Receivers once per pass, shared by both carving steps: they are the same
-                # routing, and a second sink fill for the same answer is pure cost.
-                receivers, order = _grid_receivers(arr, sea_shaped, neighbours, wander)
-                acc = _accumulate(arr, sea_shaped, receivers, order, inflow)
+                # Drained once per pass, shared by both carving steps: they are the same
+                # routing, and a second fill for the same answer is pure cost.
+                _net, drainage = _corner_routing(
+                    arr,
+                    sea_shaped,
+                    state,
+                    draws,
+                    cfg.river_wander_exponent,
+                    self.rng,
+                    inflow,
+                    cfg.corner_floor_blend,
+                )
+                acc = _hex_discharge(state, drainage, w, h)
                 # Incise first, then widen.  Incision cuts the line; widening planes the
                 # floor outward from it.  The other way round would plane a floor flat and
                 # then notch the floor it had just made.
                 _incise_channels(
                     arr,
-                    acc,
-                    receivers,
-                    order,
+                    state,
+                    drainage,
                     sea_shaped,
                     span,
                     m_per_pass=cfg.erosion_incision_m_per_pass,

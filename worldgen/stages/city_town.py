@@ -2,11 +2,11 @@ from ..core.hex import Biome, Settlement, SettlementRole, SettlementTier, Terrai
 from ..core.hex_grid import distance, grade_reachable_count, hex_range, neighbors
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
-from .haulage import navigable
+from .riverside import river_index, waterside
 from .road_cost import grade_is_under_cap
 
 
-def _assign_role(coord, hx, hexes, cfg) -> SettlementRole:
+def _assign_role(coord, hx, hexes, cfg, rivers) -> SettlementRole:
     """What a settlement at *coord* is for.
 
     `PORT` asks whether a boat can load here, not whether there is water in sight. Almost
@@ -33,7 +33,7 @@ def _assign_role(coord, hx, hexes, cfg) -> SettlementRole:
     """
     nbrs = [hexes[n] for n in neighbors(coord) if n in hexes]
 
-    if navigable(hx, cfg) or any(navigable(n, cfg) for n in nbrs):
+    if waterside(coord, hx, hexes, rivers):
         return SettlementRole.PORT
 
     fertile = sum(1 for n in nbrs if n.biome in (Biome.GRASSLAND, Biome.TEMPERATE_FOREST))
@@ -45,6 +45,7 @@ def _assign_role(coord, hx, hexes, cfg) -> SettlementRole:
 
 class CityTownStage(GeneratorStage):
     def run(self, state: WorldState) -> WorldState:
+        rivers = river_index(state, self.config)
         hexes = state.hexes
         cfg = self.config
 
@@ -86,7 +87,7 @@ class CityTownStage(GeneratorStage):
                 continue
             if all(distance(coord, c) >= cfg.city_min_separation for c in city_coords):
                 pop = int(self.rng.integers(10_000, 50_001))
-                role = _assign_role(coord, hx, hexes, self.config)
+                role = _assign_role(coord, hx, hexes, self.config, rivers)
                 name = f"{hx.biome.name.lower()}_city_{city_idx}"
                 s = Settlement(
                     coord=coord,
@@ -131,7 +132,7 @@ class CityTownStage(GeneratorStage):
                 continue
             if all(distance(coord, c) >= cfg.town_min_separation for c in town_coords):
                 pop = int(self.rng.integers(1_000, 10_001))
-                role = _assign_role(coord, hx, hexes, self.config)
+                role = _assign_role(coord, hx, hexes, self.config, rivers)
                 name = f"{hx.biome.name.lower()}_town_{town_idx}"
                 s = Settlement(
                     coord=coord,
@@ -141,7 +142,7 @@ class CityTownStage(GeneratorStage):
                     name=name,
                 )
                 hx.settlement = s
-                if "confluence" in hx.tags:
+                if coord in rivers.confluence:
                     hx.tags.add("confluence_town")
                 town_coords.append(coord)
                 settlements.append(s)

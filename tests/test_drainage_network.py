@@ -13,27 +13,59 @@ import pytest
 from tests.worlds import build_world
 from worldgen.analysis import drainage
 from worldgen.core.hex import Hex
-from worldgen.core.hex_grid import neighbors
+from worldgen.core.hex_grid import corner_neighbors, hex_corner_keys, neighbors
 from worldgen.core.world_state import River, WorldState
 
 # --- hand-built networks -----------------------------------------------------
+#
+# The networks are drawn as hex paths, which are easy to read, and laid onto corners.
+# Corner (q, r, 0) stands for hex (q, r): the six corners of that kind two sides away from
+# it are exactly the corners standing for the hex's six neighbours, so a hex step becomes
+# two sides through the corner between, and every tree keeps its shape.
+
+
+def c(hex_coord):
+    """The corner standing for a hex."""
+    return (hex_coord[0], hex_coord[1], 0)
+
+
+def mid(a, b):
+    """The corner between the corners standing for two neighbouring hexes."""
+    (q, r), (bq, br) = a, b
+    via = {
+        (-1, 1): (q, r, 1),
+        (0, 1): (q, r, 1),
+        (0, -1): (q, r - 1, 1),
+        (-1, 0): (q, r - 1, 1),
+        (1, -1): (q + 1, r - 1, 1),
+        (1, 0): (q + 1, r - 1, 1),
+    }
+    return via[(bq - q, br - r)]
+
+
+def course(path):
+    """A hex path laid onto corners."""
+    out = [c(path[0])]
+    for a, b in zip(path, path[1:], strict=False):
+        out += [mid(a, b), c(b)]
+    return out
 
 
 def _world(rivers: list[list[tuple[int, int]]]) -> WorldState:
     """A world that is all land, carrying exactly the given river paths.
 
-    Paths are given the way `_split_at_confluences` emits them: a tributary *ends on* the
-    trunk hex it joins, so the junction is the hex two paths have in common.
+    Paths are given the way hydrology emits them: a tributary *ends on* the trunk corner
+    it joins, so the junction is the one two paths have in common.
     """
-    coords = {c for path in rivers for c in path}
+    coords = {h for path in rivers for h in path}
     qs = [q for q, _ in coords]
     rs = [r for _, r in coords]
     state = WorldState.empty(seed=1, width=1, height=1)
     state.hexes = {}
-    for q in range(min(qs) - 1, max(qs) + 2):
-        for r in range(min(rs) - 1, max(rs) + 2):
+    for q in range(min(qs) - 2, max(qs) + 3):
+        for r in range(min(rs) - 2, max(rs) + 3):
             state.hexes[(q, r)] = Hex(coord=(q, r))
-    state.rivers = [River(hexes=list(path), flow_volume=1.0) for path in rivers]
+    state.rivers = [River(corners=course(path), flow_volume=1.0) for path in rivers]
     return state
 
 
@@ -48,26 +80,37 @@ def _comb(rows: int = 5, length: int = 10) -> list[list[tuple[int, int]]]:
 
 # A balanced order-3 tree: four headwaters pair into two order-2 links, which pair into
 # one trunk.  Horton's ratio over it is exactly 2, which is what makes it a fixture.
+#
+# A corner has three neighbours, each between it and two of the hex's six, so on corners
+# two streams arriving at a junction from neighbouring hexes would already have met one
+# side upstream.  Each junction here takes its two inflows and its outflow from different
+# pairs, so the three meet where the hex path says they do.
 _TREE: list[list[tuple[int, int]]] = [
-    [(-3, 3), (-2, 3), (-2, 4)],  # order 1
-    [(-3, 5), (-3, 4), (-2, 4)],  # order 1
-    [(3, 3), (2, 3), (2, 4)],  # order 1
-    [(3, 5), (3, 4), (2, 4)],  # order 1
-    [(-2, 4), (-1, 4), (-1, 5), (0, 5), (0, 6)],  # order 2
-    [(2, 4), (1, 4), (1, 5), (1, 6), (0, 6)],  # order 2
+    [(-4, 6), (-3, 6), (-2, 6)],  # order 1
+    [(-2, 8), (-2, 7), (-2, 6)],  # order 1
+    [(0, 4), (1, 4), (2, 4)],  # order 1
+    [(4, 2), (3, 3), (2, 4)],  # order 1
+    [(-2, 6), (-1, 6), (0, 6)],  # order 2
+    [(2, 4), (1, 5), (0, 6)],  # order 2
     [(0, 6), (0, 7), (0, 8)],  # order 3
 ]
 
+# A trunk along a row and a tributary arriving from below it, meeting at (2, 0).
+_Y = [[(0, 0), (1, 0), (2, 0)], [(2, 2), (2, 1), (2, 0)]]
 
-def test_the_fixtures_are_actually_hex_adjacent():
+
+def test_the_fixtures_are_actually_adjacent():
     """Guards the other fixtures: a path with a gap in it would measure nothing."""
     for path in _TREE + _comb():
         for a, b in zip(path, path[1:], strict=False):
             assert b in neighbors(a), f"{a} -> {b} is not a step"
+        laid = course(path)
+        for a, b in zip(laid, laid[1:], strict=False):
+            assert b in corner_neighbors(a), f"{a} -> {b} is not one side"
 
 
 def test_a_y_junction_is_one_confluence():
-    state = _world([[(0, 0), (1, 0), (2, 0)], [(1, -1), (2, -1), (2, 0)]])
+    state = _world(_Y)
     metrics = drainage.drainage_metrics(state)
     assert metrics.confluence_count == 1
     assert metrics.conflicts == 0
@@ -75,10 +118,9 @@ def test_a_y_junction_is_one_confluence():
 
 def test_a_tributary_ending_on_the_trunk_rebuilds_the_fork():
     """The split-river representation must put back together into one graph."""
-    state = _world([[(0, 0), (1, 0), (2, 0)], [(1, -1), (2, -1), (2, 0)]])
-    net = drainage.build_network(state)
-    assert sorted(net.upstream[(2, 0)]) == [(1, 0), (2, -1)]
-    assert net.outlets == frozenset({(2, 0)})
+    net = drainage.build_network(_world(_Y))
+    assert sorted(net.upstream[c((2, 0))]) == sorted([mid((1, 0), (2, 0)), mid((2, 1), (2, 0))])
+    assert net.outlets == frozenset({c((2, 0))})
 
 
 def test_strahler_promotes_only_when_two_equal_orders_meet():
@@ -86,15 +128,14 @@ def test_strahler_promotes_only_when_two_equal_orders_meet():
     net = drainage.build_network(
         _world(
             [
-                [(0, 0), (1, 0), (2, 0)],
-                [(1, -1), (2, -1), (2, 0)],  # 1 + 1 -> 2 at (2, 0)
+                *_Y,  # 1 + 1 -> 2 at (2, 0)
                 [(2, 0), (3, 0)],
-                [(3, -1), (3, 0)],  # a 1 joining the 2
+                [(4, -1), (3, 0)],  # a 1 joining the 2
             ]
         )
     )
-    assert net.order[(2, 0)] == 2
-    assert net.order[(3, 0)] == 2, "a lone tributary must not promote the trunk"
+    assert net.order[c((2, 0))] == 2
+    assert net.order[c((3, 0))] == 2, "a lone tributary must not promote the trunk"
 
 
 def test_a_balanced_binary_tree_has_a_bifurcation_ratio_of_two():
@@ -110,8 +151,8 @@ def test_the_bifurcation_ratio_is_undefined_below_three_orders():
     assert math.isnan(drainage.bifurcation_ratio({}))
 
 
-def test_links_are_runs_not_hexes():
-    """A long straight headwater is one first-order link, however many hexes it covers."""
+def test_links_are_runs_not_corners():
+    """A long straight headwater is one first-order link, however many sides it covers."""
     net = drainage.build_network(_world([[(q, 0) for q in range(12)]]))
     assert drainage.links_by_order(net) == {1: 1}
 
@@ -122,15 +163,18 @@ def test_links_are_runs_not_hexes():
 def test_a_comb_of_parallel_channels_scores_high():
     """The metric's control, and the reason it is not the headline.
 
-    A comb of touching channels scores about 0.63 here, but real generated maps score
-    near zero on it — their channels are sparse enough (density under 0.05) that two
+    A comb of touching channels scores 0.25 here against 0.0 for the tree, but real
+    generated maps score near zero on it — their channels are sparse enough that two
     neighbouring rivers sit several kilometres apart and never touch at all.  So this
     measures something true and rarely triggered; what the pipeline tests assert on is
     the branching family below.
+
+    A straight course along hexsides zigzags between two headings 60 degrees apart, so
+    its steps agree at most cos 30 = 0.866 on a direction, not 1.
     """
     metrics = drainage.drainage_metrics(_world(_comb()))
-    assert metrics.parallel_pair_fraction > 0.55
-    assert metrics.azimuth_concentration > 0.95
+    assert metrics.parallel_pair_fraction > 0.2
+    assert metrics.azimuth_concentration > 0.85
     assert metrics.confluence_count == 0
     assert math.isnan(metrics.bifurcation_ratio)
 
@@ -170,12 +214,15 @@ def test_contradictory_edges_are_counted_not_swallowed():
 
 
 def test_a_loop_is_refused():
-    state = _world([[(0, 0), (1, 0), (1, -1), (0, 0)]])
+    # Round the six corners of one hex and back to the first.
+    ring = hex_corner_keys((0, 0))
+    state = _world([[(0, 0)]])
+    state.rivers = [River(corners=[*ring, ring[0]], flow_volume=1.0)]
     net = drainage.build_network(state)
     assert net.conflicts == 1
     # The refused edge is the last one traced, the one that would have closed the loop,
-    # so the hex it came from is left as the end of an open chain.
-    assert net.outlets == frozenset({(1, -1)})
+    # so the corner it came from is left as the end of an open chain.
+    assert net.outlets == frozenset({ring[-1]})
 
 
 # --- the real pipeline -------------------------------------------------------
@@ -210,20 +257,16 @@ def test_strahler_order_never_decreases_downstream():
 
 
 def test_the_rebuilt_confluences_agree_with_the_hydrology_tag():
-    """Two independent routes to the same number — the split paths, and flow_dir.
+    """Two independent routes to the same number — the courses, and the corner tags.
 
-    Land only, on both sides.  Two rivers ending on the same lake hex have two upstream
+    Inland only, on both sides.  Two rivers ending on the same shore have two upstream
     neighbours in the graph but have not met: they have both arrived somewhere.  Counting
-    that as a fork would inflate every map with a lake on it.
+    that as a fork would inflate every map with a coast on it.
     """
-    from worldgen.core.hex import TerrainClass
-
     state = build_world(seed=42, width=64, height=64, until="HydrologyStage")
-    water = (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
-    land = {c for c, hx in state.hexes.items() if hx.terrain_class not in water}
-    tagged = {c for c, hx in state.hexes.items() if "confluence" in hx.tags}
+    tagged = {k for k, tags in state.river_corners.items() if "confluence" in tags}
     net = drainage.build_network(state)
-    rebuilt = {c for c in net.nodes() & land if len(net.upstream.get(c, ())) >= 2}
+    rebuilt = drainage.confluences(net, drainage.channel_corners(state, net))
     assert rebuilt == tagged
 
 
@@ -255,6 +298,18 @@ def test_touching_channels_still_join(hydro_metrics):
     here first.
     """
     assert hydro_metrics.parallel_pair_fraction <= 0.15
+
+
+def test_tributaries_join_their_trunk_rather_than_running_beside_it(hydro_metrics):
+    """Two rivers down one valley floor, a hex or two apart, that never meet.
+
+    The share of tributaries running more than 5 km within 2 km of the river they join.
+    Measured at 64x64 on seeds 42, 7 and 1234: 0.105, 0.119 and 0.297 with each corner at
+    the floor (`corner_floor_blend` 0), which left a level lane a hex out from every river;
+    0.067, 0.070 and 0.051 at the default 0.25.  What remains is mostly the parallel
+    drainage of broad plains, which real landscapes have too.
+    """
+    assert hydro_metrics.long_side_by_side_fraction <= 0.15
 
 
 def test_rivers_do_not_share_one_heading(hydro_metrics):
