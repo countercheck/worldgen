@@ -214,6 +214,24 @@ test('hands the referee a commander’s link, and the same one when asked again'
   await expect(link).toHaveText(sent ?? '');
 });
 
+test('shows one set of standing orders however many formations are picked in turn', async ({
+  page,
+}) => {
+  const sidebar = page.locator('.sidebar');
+  await page.locator('header').getByRole('button', { name: /^Order of battle/ }).click();
+  const roster = page.locator('.roster');
+  // Every formation on both sides, one after another: each pick used to leave the last
+  // one's panel behind, so the count climbed with every click.
+  for (const side of [/Armée du Nord/, /Coalition/]) {
+    await roster.getByRole('tab', { name: side }).click();
+    const rows = roster.locator('.cmd-unit');
+    for (let i = 0; i < (await rows.count()); i++) {
+      await rows.nth(i).click();
+      await expect(sidebar.getByRole('heading', { name: 'Standing orders' })).toHaveCount(1);
+    }
+  }
+});
+
 test('renames an officer and a formation from the order of battle', async ({ page }) => {
   await page.locator('header').getByRole('button', { name: /^Order of battle/ }).click();
   const roster = page.locator('.roster');

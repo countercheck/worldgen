@@ -1538,7 +1538,10 @@ function Console({
 
           {isReferee && shownUnit !== null && (
             <StandingOrdersPanel
-              key={shownUnit.id}
+              // Keyed per formation so a new selection starts a fresh form, and prefixed
+              // because `UnitEdit` below is keyed by the same id: two siblings sharing a key
+              // left React unable to tell them apart, and every selection added a panel.
+              key={`standing:${shownUnit.id}`}
               orders={view.standingOrders[shownUnit.id]}
               cfg={cfg}
               forReferee
@@ -1567,7 +1570,7 @@ function Console({
 
           {isReferee && shownUnit !== null && (
             <UnitEdit
-              key={shownUnit.id}
+              key={`edit:${shownUnit.id}`}
               unit={shownUnit}
               clockHours={view.campaign.clockHours}
               formations={[...board.units.values()].filter(
