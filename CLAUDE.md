@@ -26,7 +26,10 @@ generation pipeline in run order.
 
 - `core/` — data types and pipeline only; no rendering, no file I/O
 - `stages/` — pure transformers: `stage.run(WorldState) -> WorldState`
-- `export/` — all file I/O lives here; stages never write files
+- `export/` — all file I/O lives here; stages never write files and import nothing from
+  it except the two read-only loaders `export.heightmap_import` and `export.culture_packs`.
+  `export/__init__` loads its writers lazily, so reading through a loader never pulls in
+  matplotlib
 - `render/` — matplotlib debug viewer; never imported by stages or core
 - `analysis/` — measurements over a finished world (drainage-network shape, and whatever
   follows); imports `core/` only, does no file I/O, and is **never imported by a stage** —
