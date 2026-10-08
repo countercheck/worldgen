@@ -162,8 +162,8 @@ class ImageElevationStage(GeneratorStage):
                 "terrain is read from"
             )
 
-        # Deferred so that importing the stage does not drag in the export layer, which
-        # pulls matplotlib in through its sibling renderers.
+        # Deferred so that only a run that reads a picture loads Pillow.  One of the two
+        # read-only loaders a stage may import from export/ (see tests/test_layering.py).
         from ..export.heightmap_import import load_luminance
 
         lum, alpha = load_luminance(cfg.heightmap_path)

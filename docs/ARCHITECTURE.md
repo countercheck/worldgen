@@ -42,7 +42,7 @@ flowchart TB
         RS[riverside.py<br/>shared: every river reader]
     end
 
-    subgraph EXPORT["export/ — all file I/O"]
+    subgraph EXPORT["export/ — all file I/O; writers load lazily"]
         JS[json_export]
         SVG[svg_export]
         PNG[png_export]
