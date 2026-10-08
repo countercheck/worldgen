@@ -239,7 +239,7 @@ def test_market_count_tracks_the_surplus_on_offer():
 
 
 @pytest.mark.xfail(
-    reason="population not yet recalibrated for elevation_profile terrain; TECH_DEBT.md #30",
+    reason="population not yet recalibrated for elevation_profile terrain; tech-debt #114",
     strict=False,
 )
 def test_fertility_decides_how_many_markets_not_how_big():
