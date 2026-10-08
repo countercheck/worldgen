@@ -49,6 +49,7 @@ import {
   type FormationNode,
   type RosterLine,
 } from '../roster.js';
+import { SAMPLE_OOB_HREF, SAMPLE_OOB_NAME } from '../sample.js';
 import { AppointForm, FactionForm, RaiseForm } from './Orbat.jsx';
 
 /** The referee's order-of-battle controls. Absent for a commander, who raises nothing. */
@@ -446,6 +447,14 @@ export function Roster({
               />
               <span>{copy.oob.importButton}</span>
             </label>
+            <a
+              className="sample"
+              href={SAMPLE_OOB_HREF}
+              download={SAMPLE_OOB_NAME}
+              title={copy.oob.sampleHint}
+            >
+              {copy.oob.sampleLink}
+            </a>
           </div>
         )}
 

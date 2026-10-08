@@ -691,6 +691,11 @@ code.link {
   border-color: var(--accent);
 }
 
+.despatch-actions .sample {
+  align-self: center;
+  font-size: 12px;
+}
+
 .despatch-actions button:disabled {
   opacity: 0.5;
   cursor: default;

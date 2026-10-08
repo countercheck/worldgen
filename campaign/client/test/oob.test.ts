@@ -28,6 +28,7 @@ import {
 import worldDoc from '../../shared/test/fixtures/world-32x32.json';
 import { emptyDraft, unitFrom } from '../src/orbat.js';
 import { parseOob, rehearse } from '../src/oob.js';
+import { SAMPLE_OOB, SAMPLE_OOB_HREF } from '../src/sample.js';
 
 const cfg = DEFAULT_CONFIG;
 const world = parseWorld(worldDoc);
@@ -214,5 +215,17 @@ describe('rehearsing before a campaign exists', () => {
     // rules, at a new campaign's strictness, that turn it away.
     const out = ok(one('unit: Garde\ncommander: Ney\nstrength: 900\nat: {q: 14, r: 15}'));
     expect(rehearse(world, out)).toEqual([expect.stringMatching(/division is at least/)]);
+  });
+});
+
+describe('the sample a referee downloads', () => {
+  it('is the example file itself, which everything above proves', () => {
+    expect(SAMPLE_OOB).toBe(example);
+  });
+
+  it('downloads as exactly that text', () => {
+    const [head, body] = SAMPLE_OOB_HREF.split(',', 2) as [string, string];
+    expect(head).toBe('data:application/yaml;charset=utf-8');
+    expect(decodeURIComponent(body)).toBe(example);
   });
 });
