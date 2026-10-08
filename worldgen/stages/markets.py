@@ -20,14 +20,21 @@ glyph.  So the peasantry is present in the arithmetic and absent from the settle
 """
 
 import heapq
+import math
 
 from ..core.hex import HexCoord
-from ..core.hex_grid import grade_reachable_count, hex_range, ring
+from ..core.hex_grid import grade_reachable_count, hex_range, neighbors, ring
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
 from .habitability import potential_food, site_bonus
-from .haulage import allocate_catchments, fishery_rim, settleable, usable_fraction
-from .riverside import river_index
+from .haulage import (
+    allocate_catchments,
+    fishery_rim,
+    make_travel_cost,
+    settleable,
+    usable_fraction,
+)
+from .riverside import WATER, river_index
 from .road_cost import grade_is_under_cap
 
 # Float slop when comparing a recomputed score against the heap's next-best.  Without it,
@@ -36,18 +43,52 @@ from .road_cost import grade_is_under_cap
 _EPS = 1e-9
 
 
-def depletion_kernel(radius: float, decay: float) -> list[tuple[int, float]]:
-    """Offsets and weights for the share of surplus a market takes at each distance.
+def day_reach(
+    coord: HexCoord, hexes, radius: float, node_cost, edge_cost
+) -> list[tuple[HexCoord, float]]:
+    """`[(hex, weight)]` for every hex a catchment rooted at *coord* would draw on.
 
-    `1 / (1 + d/decay)` rather than a hard claim over a disc.  A market that took all the
-    surplus it reached would fix spacing at exactly one radius, which is `city_min_separation`
-    again wearing a different hat.  Taking a decaying *share* leaves enough at the margin
-    for a second market where the country is rich and nothing where it is poor, so spacing
-    grades with the land instead of being a constant.
-
-    Returned as `(ring_index, share)` so the caller walks precomputed ring offsets once.
+    The walk `allocate_catchments` makes from a single seat — a Dijkstra over the travel
+    cost, stopping at *radius* — then the water beside that land at its cheapest donor's
+    cost, as `fishery_rim` grants it. Each hex is weighted `usable_fraction(cost, radius)`,
+    the share of its surplus that survives the haul, and hexes worth nothing are left out.
+    *node_cost* and *edge_cost* are `make_travel_cost`'s closures, built once per world.
     """
-    return [(d, 1.0 / (1.0 + d / decay)) for d in range(int(radius) + 1)]
+    cost: dict[HexCoord, float] = {coord: 0.0}
+    heap = [(0.0, coord)]
+    done: set[HexCoord] = set()
+    while heap:
+        d, c = heapq.heappop(heap)
+        if c in done:
+            continue
+        done.add(c)
+        hx = hexes[c]
+        for n in neighbors(c):
+            if n in done:
+                continue
+            n_hx = hexes.get(n)
+            if n_hx is None:
+                continue
+            step = node_cost(n_hx) + edge_cost(hx, n_hx)
+            if step == float("inf"):
+                continue
+            nd = d + step
+            if nd < radius and nd < cost.get(n, float("inf")):
+                cost[n] = nd
+                heapq.heappush(heap, (nd, n))
+    rim: dict[HexCoord, float] = {}
+    for c in done:
+        for n in neighbors(c):
+            if n in done:
+                continue
+            n_hx = hexes.get(n)
+            if n_hx is None or n_hx.terrain_class not in WATER:
+                continue
+            if cost[c] < rim.get(n, float("inf")):
+                rim[n] = cost[c]
+    out = [(c, usable_fraction(cost[c], radius)) for c in sorted(done)]
+    out += [(n, usable_fraction(rim[n], radius)) for n in sorted(rim)]
+    return [(c, w) for c, w in out if w > 0.0]
 
 
 class MarketStage(GeneratorStage):
@@ -90,44 +131,94 @@ class MarketStage(GeneratorStage):
     # -- planting -------------------------------------------------------------
 
     def _plant(self, hexes, surplus, cfg, rivers) -> list[HexCoord]:
-        """Lazy-greedy siting against a depleting surplus surface.
+        """Lazy-greedy siting against a depleting surplus surface, scored on the day-reach.
 
-        Depletion only ever *reduces* a site's score, so the score function is monotone
-        non-increasing and lazy greedy is exact, not approximate: an entry popped off the
-        heap whose recomputed score still beats the next best is provably the true maximum.
-        Without that, siting means rescoring every candidate after every plant.
+        A candidate is scored on exactly the ground a catchment rooted there would walk:
+        a single-source Dijkstra over `make_travel_cost`, bounded by `market_day_radius` —
+        the same walk `allocate_catchments` makes — plus the fishery rim on the terms
+        `fishery_rim` grants it (each water hex beside reached land, at its cheapest
+        donor's cost). Each hex counts at its haulage weight, `usable_fraction`, which is
+        what the market will later be sized on; and planting depletes exactly what was
+        scored. So a ridge or an estuary beside a candidate lowers its score, where the
+        plain hex disc this replaced counted the far side as if it could be walked.
+
+        Depletion only ever *reduces* a site's score, so lazy greedy is exact: an entry
+        popped off the heap whose recomputed score still beats the next best is provably
+        the true maximum. The heap is seeded with the plain ring disc as an upper bound —
+        every step costs at least `road_flat_cost`, so a hex at ring d costs at least d
+        steps' worth and weighs no more than a hex at that cost; a rim water hex sits one
+        ring beyond its donor, hence one ring of slack — so the Dijkstra only runs on
+        candidates that pop.
         """
-        kernel = depletion_kernel(cfg.market_day_radius, cfg.market_kernel_decay)
-        offsets = [ring((0, 0), d) for d, _ in kernel]
+        radius = cfg.market_day_radius
+        # The cheapest a step can be: terrain charges `road_flat_cost` per hex entered,
+        # and ascent and fording only ever add to it.
+        step = cfg.road_flat_cost
+        # Land reaches no further than ring ceil(radius / step) - 1; the rim one ring more.
+        rings = math.ceil(radius / step) if step > 0.0 else 0
+        offsets = [ring((0, 0), d) for d in range(rings + 1)]
         remaining = dict(surplus)
+        node_cost, edge_cost = make_travel_cost(hexes, cfg, rivers)
+
+        def weight(c: float) -> float:
+            return usable_fraction(c, radius)
+
+        reach_cache: dict[HexCoord, list[tuple[HexCoord, float]]] = {}
+
+        def reach(coord):
+            if coord not in reach_cache:
+                reach_cache[coord] = day_reach(coord, hexes, radius, node_cost, edge_cost)
+            return reach_cache[coord]
+
+        bonus_cache: dict[HexCoord, float] = {}
+
+        def bonus(coord):
+            if coord not in bonus_cache:
+                bonus_cache[coord] = 1.0 + site_bonus(coord, hexes[coord], hexes, cfg, rivers)
+            return bonus_cache[coord]
 
         def score(coord):
+            total = 0.0
+            for c, w in reach(coord):
+                value = remaining.get(c)
+                if value:
+                    total += value * w
+            return total * bonus(coord)
+
+        def bound(coord):
+            """The ring disc at the same weights: never below `score` (see docstring)."""
+            if step <= 0.0:  # no floor on a step, so no disc bounds the reach
+                return score(coord)
             q, r = coord
             total = 0.0
-            for (_, share), ring_offsets in zip(kernel, offsets, strict=True):
+            for d, ring_offsets in enumerate(offsets):
+                w_land = weight(d * step)
+                w_water = weight(max(d - 1, 0) * step)
                 for dq, dr in ring_offsets:
-                    value = remaining.get((q + dq, r + dr))
+                    n = (q + dq, r + dr)
+                    value = remaining.get(n)
                     if value:
-                        total += value * share
-            return total * (1.0 + site_bonus(coord, hexes[coord], hexes, cfg, rivers))
+                        w = w_water if hexes[n].terrain_class in WATER else w_land
+                        total += value * w
+            return total * bonus(coord)
 
-        reach_cache: dict[HexCoord, int] = {}
+        grade_cache: dict[HexCoord, int] = {}
 
         def reachable(coord):
             """Deferred to acceptance: it is the dear test, and most candidates never pop."""
-            if coord not in reach_cache:
-                reach_cache[coord] = grade_reachable_count(
+            if coord not in grade_cache:
+                grade_cache[coord] = grade_reachable_count(
                     coord,
                     hexes,
                     lambda a, b: grade_is_under_cap(a, b, cfg),
                     cfg.settlement_min_reachable,
                 )
-            return reach_cache[coord]
+            return grade_cache[coord]
 
         # sorted() rather than dict order: heap ties break on the coord tuple, so the same
         # terrain always yields the same markets whatever order the hexes were built in.
         candidates = sorted(settleable(hexes, cfg))
-        heap = [(-score(c), c) for c in candidates]
+        heap = [(-bound(c), c) for c in candidates]
         heapq.heapify(heap)
 
         seats: list[HexCoord] = []
@@ -151,14 +242,11 @@ class MarketStage(GeneratorStage):
 
             seats.append(coord)
             suppressed |= set(hex_range(coord, cfg.market_min_separation))
-            q, r = coord
-            for (_, share), ring_offsets in zip(kernel, offsets, strict=True):
-                for dq, dr in ring_offsets:
-                    n = (q + dq, r + dr)
-                    if n in remaining:
-                        remaining[n] *= 1.0 - share
+            for c, w in reach(coord):
+                if c in remaining:
+                    remaining[c] *= 1.0 - w
 
         return seats
 
 
-__all__ = ["MarketStage", "depletion_kernel", "usable_fraction"]
+__all__ = ["MarketStage", "day_reach", "usable_fraction"]

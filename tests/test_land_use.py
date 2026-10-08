@@ -161,14 +161,16 @@ def test_the_countryside_holds_the_people_the_markets_do_not(used):
 def test_rural_density_is_pre_industrial(used):
     """England and Wales carried 59 people per km2 in 1801, the default era, and a hex is 1 km2.
 
-    A figure that came out at 90 would mean `people_per_food` had been calibrated on the
-    settlements alone and left to say something absurd about the countryside — which is
+    The ceiling is the densest pre-industrial country rather than the average one: the Low
+    Countries and Lombardy ran to about 100 around 1800, and this fixture is a fertile
+    temperate world. A figure above that would mean `people_per_food` had been calibrated on
+    the settlements alone and left to say something absurd about the countryside — which is
     exactly what it did before this stage existed.
     """
     land = _land(used)
     total = sum(h.rural_population for h in land) + sum(s.population for s in used.settlements)
     density = total / len(land)
-    assert 20.0 < density < 80.0, f"{density:.1f} people per km2"
+    assert 20.0 < density < 100.0, f"{density:.1f} people per km2"
 
 
 def test_nobody_lives_on_ground_that_feeds_nobody(used):

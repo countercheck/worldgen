@@ -1521,31 +1521,51 @@ surplus is why the tier ratios come out right with no target counts anywhere.
 #### Planting — lazy greedy, which is exact here
 
 ```
-heap = [(-score(c), c) for c in sorted(settleable_land)]
+heap = [(-bound(c), c) for c in sorted(settleable_land)]   # ring-disc upper bound
 while heap:
     _, c = heappop(heap)
     if c in suppressed:            continue    # 1. suppression
-    s = score(c)                               # 2. recompute against current remaining
+    s = score(c)                               # 2. day-reach score against what remains
     if s < -heap[0][0] - EPS:                  # 3. stale → re-push
         heappush(heap, (-s, c)); continue
     if s < market_viability_floor: break       # 4. true max below floor → done
     plant(c)
-    for d, n in kernel_of(c):
-        remaining[n] *= (1 - share(d))         # partial depletion
+    for n, w in reach(c):
+        remaining[n] *= (1 - w)                # deplete exactly what was scored
     suppressed |= hex_range(c, market_min_separation)
 ```
 
+```
+reach(c) = the hexes a catchment rooted at c would walk — a single-source Dijkstra over
+           the travel-cost field, budget market_day_radius, plus the fishery rim on the
+           terms fishery_rim grants it — each weighted usable_fraction(cost, market_day_radius)
+score(c) = (1 + site_bonus(c)) * Σ remaining[n] * w   over reach(c)
+```
+
+**Siting and the catchment read the same ground.** A candidate is scored on exactly the
+walk its catchment will make once it is planted, at exactly the weight the market will
+later be sized on, so a ridge or an estuary beside a candidate lowers its score. Until
+#117 the score summed a plain hex disc of rings with a separate `1/(1 + d/4)` kernel: the
+radius meant a *ring count* when siting and a *cost budget* when gathering, off-map and
+across-the-water counted as if it could be walked, and the planting score ran about four
+times the real gather. `market_kernel_decay` went with it.
+
 Depletion only ever *reduces* other sites' scores, so the score function is monotone
-non-increasing and a popped entry that is still fresh is provably the true maximum.
+non-increasing and a popped entry that is still fresh is provably the true maximum. The
+heap is seeded with the plain ring disc at the same weights as an **upper bound**: every
+step costs at least one unit, so a hex at ring *d* costs at least *d* and weighs no more
+than at cost *d*, and a rim water hex sits one ring beyond its donor — so the Dijkstra
+only runs on the candidates that pop, and exactness survives.
 
 **That predicate order is load-bearing** — suppression, then recompute, then staleness,
 then the floor. Testing the floor before the staleness check ends the loop on the first
 suppressed hex popped.
 
 **Partial depletion, not hard claiming.** A market takes a distance-decayed *share* of the
-surplus it reaches, so rich country supports another market 8 km away while poor country
-supports none for 30. Hard claiming would collapse spacing to one number and reinvent
-`city_min_separation` with extra steps.
+surplus it reaches — the haulage weight, 1 at the seat to 0 at the day's edge — so rich
+country supports another market 8 km away while poor country supports none for 30. Hard
+claiming would collapse spacing to one number and reinvent `city_min_separation` with
+extra steps.
 
 #### Catchments and population
 
@@ -2652,12 +2672,11 @@ the surplus it draws on is depleted, and the scan repeats until nothing clears t
 | `resource_attach_radius` | `int` | `1` | A workforce joins a settlement this close instead of founding a village beside it |
 | `resource_draw_share` | `float` | `0.25` | The most of its haulage-weighted population any settlement sends to feed a new workforce. Validated in (0, 1] |
 | `resource_min_population` | `int` | `30` | A village the food within reach cannot bring to this size is not founded |
-| `market_viability_floor` | `float` | `24.0` | `> 0` | The one density knob, replacing `target_city_count` and `target_town_count` both: stop planting once the best remaining site scores below this. Planting scores are *surplus*, so this scales with `marketable_surplus_fraction`, which the soil model moved from 0.20 to 0.32. At 24.0 a temperate map with `continent_falloff_edges: [south]` gives 76–92 markets across seeds 42/7/3/11/19, against 20 on an arid one — an absolute threshold on gathered surplus rather than a target, so density follows the land. **Lowering it raises the rural population too**, and that is a real feedback rather than rounding: more markets mean more catchments, more catchments mean more ground cleared, and cleared ground feeds more people than the wood it replaced — 38 per km² at 24.0 against 48 at 16.0 on the same terrain |
+| `market_viability_floor` | `float` | `20.8` | `> 0` | The one density knob, replacing `target_city_count` and `target_town_count` both: stop planting once the best remaining site scores below this. A site scores the surplus its day-reach delivers — the walk its catchment will make, each hex at its `usable_fraction` — so the floor is in the units of the real gather (the ring disc it replaced ran about four times that, which is why it fell from 24.0 in #117). At 20.8 a temperate 128×128 map with `continent_falloff_edges: [south]` gives 153–159 markets across seeds 42/7/3/11/19, against 36 on an arid one — an absolute threshold on gathered surplus rather than a target, so density follows the land. **Chosen mid-window, and the window is narrow:** the acceptance tests pass from 20.3 to 21.3, bounded below by rural density on the 96×96 test mainland (100.3 per km² at 20.2 against a ceiling of 100) and above by the single arid village on the thin-country chokepoint map. **Lowering it raises the rural population too**, and that is a real feedback rather than rounding: more markets mean more catchments, more catchments mean more ground cleared, and cleared ground feeds more people than the wood it replaced |
 | `chokepoint_min_road_tier` | `str` | `secondary` | `primary` \| `secondary` \| `track` | Least road tier a crossing must carry before it is worth a settlement. A bridge on a farm track is a plank, not a town. **This is what actually sets the size of the village tier**: on a 128×128 temperate map `secondary` admits about twenty candidate features, `track` admits a hundred and twenty |
 | `chokepoint_min_separation` | `int` | `2` | `>= 0` | Suppression disc, and how far a village must stand off an existing settlement. The economics would mostly do this anyway — there is no residual surplus close to a market — but a bridge on a town's own doorstep is the town's bridge whatever the arithmetic says |
 | `chokepoint_min_draw` | `float` | `0.30` | `>= 0` | The smallest village worth founding, in food units; multiply by `people_per_food` to read it as people, so `0.30` is 54 — hamlet scale, which is what a bridgehead settlement was. It also has to be: this tier lives on *residual* surplus, and the residual thinned when the soil model raised the market count from 65 to 76 on the same map, so at the hundred-person figure this used to mean, a temperate map grows exactly one village. Applied to the real catchment draw rather than to the estimate planting ranks on, which is what makes that relation exact. What is gathered is *residual* surplus — what the markets could not haul — over `rural_field_radius`, so it is not comparable with `market_viability_floor` |
 | `market_min_separation` | `int` | `5` | `≥ 1` | A suppression disc only, to stop two markets sharing a hexside. Real spacing comes from competition for surplus, which is what makes markets dense on rich ground and sparse on poor — a fixed separation cannot express that |
-| `market_kernel_decay` | `float` | `4.0` | `> 0` | `d₀` in the `1/(1 + d/d₀)` share a market takes from each hex it reaches |
 
 ### 4.11 River crossings — fords and bridges
 
