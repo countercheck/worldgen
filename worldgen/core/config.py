@@ -800,6 +800,22 @@ class WorldConfig:
     manufactured_trade_share: float = 0.1
     # Manufactures are worth more per ton than grain, so they go this many times further.
     manufactured_range_mult: float = 3.0
+    # Long-haul trade down the rivers (tech-debt #125): every town or city on a navigable
+    # reach and off the coast ships this share of its people's worth downstream to the
+    # coastal town it reaches most cheaply, paying transship_share at every quay — above
+    # all the landing and loading again at a portage. This is the trade the portage towns
+    # lived on: Egypt's grain coming down past Aswan to Alexandria, the Ohio valley's
+    # flour, pork and whiskey carried past the Falls at Louisville to New Orleans, the
+    # tobacco and wheat landed at the fall-line towns. Provisioning is too short-haul and
+    # manufactures avoid the falls, so without it the portage towns stayed small. 0 turns
+    # it off; measured on eight worlds, 0.2 grows the portage towns about a tenth and the
+    # other towns lose about one per cent.
+    river_trade_share: float = 0.2
+    # How many times haulage_range_land the downriver trade reaches. A boat going down
+    # rides the current, and the cargoes were the staples a region exported: flatboats on
+    # the Ohio and Mississippi ran 2,000 km to New Orleans and were broken up there for
+    # their timber, since taking them back up was not worth it. Twice manufactures' reach.
+    river_trade_range_mult: float = 6.0
     # Transshipment: every change in how a city's cargo travels — cart to boat, barge to
     # ship — leaves this share of the people it feeds with the settlement handling that
     # quay, the nearest within `transship_radius`. Conserved: the handlers eat out of the
@@ -1467,6 +1483,8 @@ class WorldConfig:
             "city_pull_rounds",
             "manufactured_trade_share",
             "manufactured_range_mult",
+            "river_trade_share",
+            "river_trade_range_mult",
             "road_raw_freight_per_person",
             "road_goods_freight_per_person",
             "cataract_min_drop_m",

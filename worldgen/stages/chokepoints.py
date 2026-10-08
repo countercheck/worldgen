@@ -22,7 +22,7 @@ takes it. A pass settlement therefore appears only where the ground leaves no wa
 which on 1500 m of relief is a couple of places on a map and on flat country is none.
 """
 
-from ..core.hex import SOIL_RANK, HexCoord, Settlement, SettlementTier
+from ..core.hex import SOIL_RANK, HexCoord, Settlement, SettlementTier, SoilQuality
 from ..core.hex_grid import distance, hex_range, neighbors, side_hexes
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import ROAD_TIER_RANK, RoadTier, WorldState, road_edge_key
@@ -186,9 +186,20 @@ class ChokepointStage(GeneratorStage):
         # Of the two ends, the town grows on the one with the farmland: a bridge over a
         # desert river has its village on the irrigated bank, not on the sand opposite.
         # Both ends count where the ground is as good on either.
+        #
+        # Neither counts where it is unusable. A village on ground that feeds nobody could
+        # only live on what the traffic pays it, and the model collects no tolls yet — so a
+        # bridge between two banks of sand founds nothing. When tolls exist, a site sustained
+        # by them (a caravansary) may be founded here instead.
         bridgeheads = set()
         for side, rs in state.river_sides.items():
-            ends = [h for h in side_hexes(side) if h in hexes]
+            ends = [
+                h
+                for h in side_hexes(side)
+                if h in hexes and hexes[h].soil is not SoilQuality.UNUSABLE
+            ]
+            if not ends:
+                continue
             if BRIDGE in rs.tags and road_edge_key(*side_hexes(side)) in state.road_edges:
                 rank = {h: SOIL_RANK.get(hexes[h].soil, 0) for h in ends}
                 bridgeheads.update(h for h in ends if rank[h] == max(rank.values()))

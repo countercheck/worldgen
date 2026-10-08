@@ -201,7 +201,12 @@ def make_bulk_cost(hexes, cfg, rivers: Rivers | None = None):
 
 
 def bulk_routes(
-    hexes, seats, cfg, budget: float | None = None, rivers: Rivers | None = None
+    hexes,
+    seats,
+    cfg,
+    budget: float | None = None,
+    rivers: Rivers | None = None,
+    step_allowed=None,
 ) -> tuple[dict[HexCoord, float], dict[HexCoord, HexCoord]]:
     """Cost of hauling bulk to the nearest of *seats* from anywhere within `haulage_range_land`.
 
@@ -216,6 +221,11 @@ def bulk_routes(
     seats it answers "how cheaply can a cargo from here reach any of them". *budget*
     defaults to `haulage_range_land`, the range of grain; a cargo worth more per ton, like
     smelted ore, is worth carrying further.
+
+    *step_allowed*, given, is asked of every step in the direction the cargo travels —
+    `step_allowed(from_hx, to_hx)` — and a step it refuses is not taken. That is how the
+    river trade keeps to going downstream (`river_trade.river_trade_flows`); the cost of a
+    step it allows is unchanged.
     """
     node_cost, edge_cost = make_bulk_cost(hexes, cfg, rivers)
     if budget is None:
@@ -239,6 +249,8 @@ def bulk_routes(
             # Getting the edge direction wrong does not fail loudly: slope is the only
             # asymmetric term, so it silently inflates the draw of every place the country
             # rises toward.
+            if step_allowed is not None and not step_allowed(n_hx, hx):
+                continue
             step = node_cost(n_hx) + edge_cost(n_hx, hx)
             if step == float("inf"):
                 continue

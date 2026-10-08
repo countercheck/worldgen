@@ -861,11 +861,12 @@ any single side comes in lumps. Three things follow:
   and load again below. The tag goes out in the world file for anything else — a campaign
   movement rule — that cares whether a boat can pass.
 - **A portage.** Landing and reloading is a change of mode, so `CityPromotionStage` pays
-  the quays either side (§ [3.10d](#310d-resource-settlements--organic)). In practice the
-  portage trade is small: two quay charges and a land hop are a large share of
+  the quays either side (§ [3.10d](#310d-resource-settlements--organic)). Provisioning
+  through a portage is small: two quay charges and a land hop are a large share of
   `haulage_range_land`, so the markets above a cataract mostly stop sending to the city
-  below it. A cataract cuts a river's hinterland more than it funnels trade — the great
-  portage towns lived on long-distance trade, which the model does not yet route.
+  below it. What the great portage towns lived on was the long trade down the river, and
+  that is the **river trade**: every inland river town ships `river_trade_share` of its
+  worth downstream to the coast, and pays at each portage on the way (§ [3.10e](#310e-city-provisioning-trade-and-freight--organic)).
 - **A mill site.** `site_bonus` pays a site on or beside a cataract
   `habitability_mill_bonus`.
 
@@ -1750,7 +1751,7 @@ camps.
 
 ### 3.10e City Provisioning, Trade and Freight — `organic`
 
-[cities.py](../worldgen/stages/cities.py). Promotion picks which markets become cities
+[cities.py](../worldgen/stages/cities.py), [river_trade.py](../worldgen/stages/river_trade.py). Promotion picks which markets become cities
 (§ [3.10b](#310b-market-centres--organic) for how markets are planted); what each city
 grows to is decided by where the countryside's surplus goes, and by the trade between the
 cities.
@@ -1768,12 +1769,26 @@ cities.
   `manufactured_range_mult`, split by size and haul. Every shipment pays `transship_share`
   at each change of mode on its route to whoever stands at the quay, drawn half from each
   city; quays nobody stands at are left for a port (§ [3.10d](#310d-resource-settlements--organic)).
-- **Freight wears the roads.** Every flow — provisioning, manufactures, and ore from the
-  mines, which goes to the best-paying city by the same pull — is recorded in
+- **The interior trades down its rivers.** Every town or city on a navigable reach, or a
+  step from one, and off the coast ships `river_trade_share` of its people's worth to the
+  coastal town or city it reaches most cheaply within `haulage_range_land` ×
+  `river_trade_range_mult` — downstream only: afloat on one water, round a cataract on its
+  portage, across a lake to its outlet, along the sea to the quay, and never to a bank
+  draining less than the one before (`river_trade.downstream_rank`). It pays
+  `transship_share` at every quay on the way, the landing and loading again at each portage
+  among them, drawn half from each end; quays nobody stands at are left for a port, which
+  is how a cataract with no town at it gets one. This is the trade Aswan, Louisville and
+  the fall-line towns lived on, which provisioning is too short-haul to carry. Each flow is
+  kept with its whole path in `metadata["river_trade"]` as `[origin q, r, destination q,
+  r, people it feeds, [[q, r], …]]`, so anything charged where a cargo passes — a quay, a
+  portage, a toll — can read which flows pass it. A river that leaves the map carries no
+  trade: its coast is off the map.
+- **Freight wears the roads.** Every flow — provisioning, manufactures, river trade, and ore
+  from the mines, which goes to the best-paying city by the same pull — is recorded in
   `metadata["freight"]` as `[origin q, r, destination q, r, people it feeds, kind]`.
   `InterurbanRoadStage` puts journeys on each route: `road_raw_freight_per_person` for
   provisioning and ore, `road_goods_freight_per_person` for manufactures. Timber floats and
-  wears no road. On seeds 42 and 7, 54-67% of city-to-city goods by weight goes by sea, and
+  river trade goes by boat, so neither wears a road. On seeds 42 and 7, 54-67% of city-to-city goods by weight goes by sea, and
   the land legs of those routes are all secondary or better.
 
 ---
@@ -2652,6 +2667,8 @@ the surplus it draws on is depleted, and the scan repeats until nothing clears t
 | `city_pull_rounds` | `int` | `4` | Rounds of that split, each pulling with the sizes the last produced: pull follows size and size follows pull, which is how a capital comes to dominate. 1 pulls with founding sizes, when every candidate is a market of a few hundred and distance decides everything |
 | `manufactured_trade_share` | `float` | `0.1` | Share of each city's people's worth put into manufactured trade with the other cities, split by size and haul. The shipments pay `transship_share` at every quay and portage on the way, drawn half from each city. 0 turns city-to-city trade off |
 | `manufactured_range_mult` | `float` | `3.0` | How many times `haulage_range_land` manufactures travel: worth more per ton than grain, so carried further |
+| `river_trade_share` | `float` | `0.2` | Long-haul trade down the rivers: each town or city on a navigable reach and off the coast ships this share of its people's worth downstream to the coastal town it reaches most cheaply, paying `transship_share` at every quay and portage on the way, drawn half from each end. The trade the portage towns lived on — Aswan, Louisville, the fall-line towns. On eight test worlds 0.2 grows the towns at portages by about 8% (matched town for town) while other towns lose about 1%; 0.1 gives +4.5% and 0.3 +12.5%. 0 turns it off and leaves the world exactly as it was. Validated `>= 0` |
+| `river_trade_range_mult` | `float` | `6.0` | How many times `haulage_range_land` the river trade reaches: a boat going down rides the current, and the cargo is a region's staple export — Ohio flatboats ran 2,000 km to New Orleans. Twice manufactures' reach. Validated `>= 0` |
 | `transship_share` | `float` | `0.2` | Transshipment: every change in how a city's cargo travels on its way — cart to boat, boat to cart, barge to ship at a river mouth — leaves this share of the people it feeds with the settlement handling that quay (the nearest within `transship_radius`), off the city's gain. Conserved; only the places between the source market and the city are paid, since loading and unloading are already part of those two. 0.2 turns a quay town with next to no hinterland into a trade town of 3-5k on seeds 42/7/3. Handled cargo per settlement is written to `metadata["transshipment"]` as `[q, r, food]`. Validated in [0, 0.5] |
 | `transship_radius` | `int` | `2` | How far from a quay, in hexes, its handling settlement may stand. Validated `>= 0` |
 | `city_min_population` | `int` | `5000` | A town that grows past this becomes a city whatever it draws — the entrepôt, which handles a hinterland's trade rather than eating its food. 0 turns it off. Validated `>= 0` |
