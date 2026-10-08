@@ -726,6 +726,8 @@ export const copy = {
     chosen: (file: string): string => `Order of battle: ${file}`,
     uploadHint: 'Choose this first if you have one: the campaign starts as soon as the world is chosen.',
     importButton: 'Import order of battle…',
+    sampleLink: 'Download a sample order of battle',
+    sampleHint: 'Its hexes are on the demonstration world; on your own, change each `at` to a hex on your map.',
     readingFile: 'Reading the order of battle…',
     /** The engine refused one part way through; what came before it stands. */
     stopped: (sent: number, total: number, why: string): string =>

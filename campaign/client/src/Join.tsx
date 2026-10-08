@@ -26,6 +26,7 @@ import {
 import { createCampaign, fetchView, issueSeatToken, sendAll, type Session } from './api.js';
 import { copy } from './copy.js';
 import { parseOob, rehearse } from './oob.js';
+import { SAMPLE_OOB_HREF, SAMPLE_OOB_NAME } from './sample.js';
 import { Help } from './panels/Help.jsx';
 import { campaignHash, navigate } from './route.js';
 import { forgetCampaign, joinLink, listCampaigns, type CampaignSummary, type HeldTokens } from './session.js';
@@ -260,7 +261,12 @@ export function Join({
           />
           <span>{oob === null ? copy.oob.uploadLabel : copy.oob.chosen(oob.name)}</span>
         </label>
-        <p className="muted">{copy.oob.uploadHint}</p>
+        <p className="muted">
+          {copy.oob.uploadHint}{' '}
+          <a href={SAMPLE_OOB_HREF} download={SAMPLE_OOB_NAME} title={copy.oob.sampleHint}>
+            {copy.oob.sampleLink}
+          </a>
+        </p>
         <label className="file">
           <input
             type="file"

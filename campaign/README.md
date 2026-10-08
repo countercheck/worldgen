@@ -51,7 +51,8 @@ YAML and upload it. There are two places to do that:
   campaign. A side whose name or id the campaign already has gets added to rather than
   duplicated.
 
-[`examples/order-of-battle.yaml`](examples/order-of-battle.yaml) is a working example. Its
+[`examples/order-of-battle.yaml`](examples/order-of-battle.yaml) is a working example. Both upload places
+also offer it as "Download a sample order of battle". Its
 header lists every key, every default, and every allowed trait, arm and echelon. The tree
 is the chain of command: each formation's `subordinates:` answer to its commander. Each
 position is a hex, `at: {q, r}`; hover a hex on the map to read its coordinates.
