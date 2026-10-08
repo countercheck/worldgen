@@ -8,11 +8,11 @@ down it. Three things follow from one, and they are the reason to mark it:
 above it and load again below. The river is cut into navigable reaches, and moving along
 it means leaving it.
 
-**It makes a town.** Landing and loading again is a change of mode, which is what
-`CityPromotionStage` pays a quay for. The portage at the falls is where the trade changes
-hands, and `ResourceStage` founds a port there if nobody stands at it already — Aswan at
-the First Cataract, Louisville at the Falls of the Ohio, the fall-line towns of the
-American east coast.
+**It makes a town.** Landing, carrying round and loading again is what `CityPromotionStage`
+charges a portage toll for (`toll_portage_share`; at 0, the two landings are quays). The
+portage at the falls is where the trade changes hands, and `ResourceStage` founds a portage
+town there if nobody stands at it already — Aswan at the First Cataract, Louisville at the
+Falls of the Ohio, the fall-line towns of the American east coast.
 
 **It turns a wheel.** A great fall of water is power, and mills were built at it before
 they were built anywhere else. `site_bonus` pays a site beside one

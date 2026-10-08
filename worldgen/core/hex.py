@@ -212,6 +212,11 @@ class SettlementRole(Enum):
     `MINING` came back with a purpose: `ResourceStage` founds mining villages on ore, and
     `LUMBER` camps in the woods. They were removed once, with `FORTRESS`, when the only rule
     producing them read a retired elevation axis; `FORTRESS` stays retired.
+
+    `BRIDGE`, `PORTAGE` and `CARAVANSARY` are the places `ResourceStage` founds on the toll
+    of a chokepoint nobody held (tech-debt #142): a bridge over water too big to wade, the
+    landings either side of a cataract, and either of those on ground that feeds nobody,
+    where the traffic is the only living there is.
     """
 
     AGRICULTURAL = "agricultural"
@@ -219,6 +224,9 @@ class SettlementRole(Enum):
     MARKET = "market"
     MINING = "mining"
     LUMBER = "lumber"
+    BRIDGE = "bridge"
+    PORTAGE = "portage"
+    CARAVANSARY = "caravansary"
 
 
 @dataclass

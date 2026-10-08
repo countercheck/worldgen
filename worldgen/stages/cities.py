@@ -18,9 +18,9 @@ absorbs off the markets that sent it.  The size gap between a port and an inland
 produced by one constant rather than by a rule that says ports are bigger.
 """
 
-from typing import Any
+from typing import Any, NamedTuple
 
-from ..core.hex import HexCoord, SettlementTier, TerrainClass
+from ..core.hex import SOIL_RANK, HexCoord, SettlementTier, TerrainClass
 from ..core.hex_grid import distance, hex_range
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
@@ -31,6 +31,25 @@ from .riverside import WATER, river_index
 
 # How a cargo travels on a hex: by cart, by barge on a river or a lake, or by ship.
 _LAND, _INLAND_WATER, _SEA = 0, 1, 2
+
+# What a cargo pays for on its way (tech-debt #142). A quay is a change of mode; a bridge
+# is water too big to wade with one way over it; a portage is the walk round a cataract.
+# Further kinds — a pass, a desert crossing and its watering stops, a strait — slot in as
+# another kind with its own share and its own test in `_charges`, and nothing that pays a
+# charge or founds a town on an unpaid one needs to change.
+QUAY, BRIDGE, PORTAGE = "quay", "bridge", "portage"
+
+
+class Charge(NamedTuple):
+    """One place a cargo pays on its way: *share* of it, to whoever stands within *radius*
+    of *site*. A *landing* is a quay, where the cargo is handled rather than tolled; one
+    nobody stands at is left for a port, where a toll is left for a toll town."""
+
+    site: HexCoord
+    kind: str
+    share: float
+    radius: int
+    landing: bool = False
 
 
 def _mode(hx, cfg, rivers) -> int:
@@ -112,7 +131,23 @@ class CityPromotionStage(GeneratorStage):
     # -- transshipment --------------------------------------------------------
 
     @staticmethod
-    def _break_points(source, seat, toward, hexes, cfg, rivers) -> list[HexCoord]:
+    def _step_quays(here, nxt, hexes, cfg, rivers) -> list[HexCoord]:
+        """The quays on one step of a route: where the cargo changes how it travels."""
+        a_hx, b_hx = hexes[here], hexes[nxt]
+        a, b = _mode(a_hx, cfg, rivers), _mode(b_hx, cfg, rivers)
+        if a != b:
+            a_wet, b_wet = a_hx.terrain_class in WATER, b_hx.terrain_class in WATER
+            if a_wet and b_wet:
+                return [here if a < b else nxt]
+            if a_wet or b_wet:
+                return [nxt if a_wet else here]
+            return [here if a > b else nxt]  # the bank, not the field
+        if a == _INLAND_WATER and not rivers.joined(a_hx, b_hx):
+            return [here, nxt]
+        return []
+
+    @classmethod
+    def _break_points(cls, source, seat, toward, hexes, cfg, rivers) -> list[HexCoord]:
         """The quays a cargo from *source* to *seat* crosses: every change in how it travels.
 
         Cart to boat, boat to cart, and barge to ship where a navigable river meets the sea.
@@ -128,20 +163,82 @@ class CityPromotionStage(GeneratorStage):
             nxt = toward.get(here)
             if nxt is None:
                 break
-            a_hx, b_hx = hexes[here], hexes[nxt]
-            a, b = _mode(a_hx, cfg, rivers), _mode(b_hx, cfg, rivers)
-            if a != b:
-                a_wet, b_wet = a_hx.terrain_class in WATER, b_hx.terrain_class in WATER
-                if a_wet and b_wet:
-                    quays.append(here if a < b else nxt)
-                elif a_wet or b_wet:
-                    quays.append(nxt if a_wet else here)
-                else:
-                    quays.append(here if a > b else nxt)  # the bank, not the field
-            elif a == _INLAND_WATER and not rivers.joined(a_hx, b_hx):
-                quays += [here, nxt]
+            quays += cls._step_quays(here, nxt, hexes, cfg, rivers)
             here = nxt
         return quays
+
+    @classmethod
+    def _charges(cls, source, seat, toward, hexes, cfg, rivers) -> list[Charge]:
+        """Every place a cargo from *source* to *seat* pays on its way, in order.
+
+        **Quays** (`_break_points`) pay `transship_share` to whoever stands within
+        `transship_radius`.
+
+        **Portages.** A cargo coming down past a cataract lands above it and loads again
+        below. With `toll_portage_share` above 0 the walk round the falls pays that share
+        once, at the first portage hex it sets foot on, to whoever stands within
+        `toll_radius`, and the two landings either side pay nothing: one charge, not three.
+        At 0 there is no portage toll, and the two landings are quays like any other.
+
+        **Bridges.** A step over a side `CrossingStage` bridged — water too big to wade —
+        pays `toll_bridge_share` at the bridge, to whoever stands within `toll_radius`. The
+        site is the bank with the better soil, as a bridge village grows on the farmland
+        rather than the sand; a boat passing along the river under it pays nothing.
+        """
+        quay_r, toll_r = cfg.transship_radius, cfg.toll_radius
+        single = cfg.toll_portage_share > 0.0
+        out: list[Charge] = []
+        run: list[HexCoord] = []  # the portage hexes of the falls being walked round
+        landed = False  # whether that walk began or ended with a landing
+        here = source
+        while here != seat:
+            nxt = toward.get(here)
+            if nxt is None:
+                break
+            at_falls = single and (here in rivers.portage or nxt in rivers.portage)
+            if not at_falls and run:
+                if landed:
+                    out.append(Charge(run[0], PORTAGE, cfg.toll_portage_share, toll_r))
+                run, landed = [], False
+            if at_falls:
+                run += [h for h in (here, nxt) if h in rivers.portage and h not in run]
+            for quay in cls._step_quays(here, nxt, hexes, cfg, rivers):
+                if single and at_falls:
+                    landed = True
+                else:
+                    out.append(Charge(quay, QUAY, cfg.transship_share, quay_r, True))
+            if cfg.toll_bridge_share > 0.0 and frozenset((here, nxt)) in rivers.bridged:
+                a_hx, b_hx = hexes[here], hexes[nxt]
+                if not (rivers.afloat(a_hx) and rivers.afloat(b_hx) and rivers.joined(a_hx, b_hx)):
+                    site = max(
+                        (here, nxt), key=lambda c: (SOIL_RANK.get(hexes[c].soil, 0), c == here)
+                    )
+                    out.append(Charge(site, BRIDGE, cfg.toll_bridge_share, toll_r))
+            here = nxt
+        if run and landed:
+            out.append(Charge(run[0], PORTAGE, cfg.toll_portage_share, toll_r))
+        return out
+
+    def _pay(self, charges, origin, dest, by_coord, volume):
+        """Who takes what of a cargo of *volume*: `(charge, handler, cut)` for each charge
+        somebody other than the two ends collects, or nobody does (*handler* `None`).
+
+        Neither end pays itself: loading at its own market is part of what the market
+        already is, and unloading at the city is part of the city — and a town tolling its
+        own exports over its own bridge would be keeping what it already had. Only the
+        places between earn a living off the trade. The cuts never add up to more than the
+        cargo.
+        """
+        paid = 0.0
+        out = []
+        for charge in charges:
+            handler = self._handler(charge.site, by_coord, charge.radius)
+            if handler in (origin, dest):
+                continue
+            cut = min(volume * charge.share, volume - paid)
+            paid += cut
+            out.append((charge, handler, cut))
+        return out
 
     @staticmethod
     def _handler(quay, seats, radius):
@@ -306,9 +403,10 @@ class CityPromotionStage(GeneratorStage):
         Given *toward*, each city's routes home, every cargo also pays its way through the
         ports it changes mode at on the way: `transship_share` of the people it feeds stay
         with the settlement handling each quay between its source and the city, off the
-        city's gain. Still conserved — the handlers
-        eat out of the cargo they handle — so an entrepôt grows on trade that feeds somebody
-        else, which is how a river mouth can outgrow the hinterland it stands in.
+        city's gain — and a toll at every portage and bridge it passes (`_charges`). Still
+        conserved — the handlers eat out of the cargo they handle — so an entrepôt grows on
+        trade that feeds somebody else, which is how a river mouth can outgrow the
+        hinterland it stands in.
         """
         rivers = river_index(state, cfg)
         by_coord = {s.coord: s for s in markets}
@@ -321,15 +419,13 @@ class CityPromotionStage(GeneratorStage):
                 return 0.0
             return start[source] * min(1.0, taken / total)
 
-        share = cfg.transship_share if toward is not None else 0.0
-        handled: dict[HexCoord, float] = {}
         # Every flow, as [origin q, r, destination q, r, people it feeds, kind], for the
         # road stage to carry: freight wears roads as travellers do.
         freight: list[list[int | float | str]] = []
-        # Quays nobody stands at, keyed (quay, seat): the cargo through each and the people
-        # it would support. The city keeps them for now; `ResourceStage` founds a port on
-        # the busiest and moves them there.
-        unhandled: dict[tuple[HexCoord, HexCoord], tuple[float, float]] = {}
+        # What each quay and toll point handled, and the ones nobody stands at: the city
+        # keeps those for now, and `ResourceStage` founds a port or a toll town on the
+        # busiest and moves them there.
+        books = _Books()
 
         lost: dict[HexCoord, float] = {}
         gained: dict[HexCoord, float] = {}
@@ -340,26 +436,22 @@ class CityPromotionStage(GeneratorStage):
                 gained[seat] = gained.get(seat, 0.0) + people
                 if toward is not None and people > 0.0:
                     freight.append([*other, *seat, round(people, 3), "food"])
-                if share <= 0.0:
+                if toward is None:
                     continue
-                paid = 0.0
-                for quay in self._break_points(other, seat, toward[seat], state.hexes, cfg, rivers):
-                    handler = self._handler(quay, by_coord, cfg.transship_radius)
-                    # Loading at its own market is part of what the market already is, and
-                    # unloading at the city is part of the city: only the places between
-                    # earn a living off the trade.
-                    if handler in (seat, other):
-                        continue
-                    cut = min(people * share, people - paid)
+                # A charge of nothing is no charge: with `transship_share` at 0 the cargo
+                # changes hands at no quay at all.
+                charges = [
+                    c
+                    for c in self._charges(other, seat, toward[seat], state.hexes, cfg, rivers)
+                    if c.share > 0.0
+                ]
+                for charge, handler, cut in self._pay(charges, other, seat, by_coord, people):
                     if handler is None:
-                        food, kept = unhandled.get((quay, seat), (0.0, 0.0))
-                        unhandled[(quay, seat)] = (food + taken, kept + cut)
-                        paid += cut
+                        books.unpaid(charge, seat, taken, cut)
                         continue
                     gained[handler] = gained.get(handler, 0.0) + cut
                     gained[seat] -= cut
-                    paid += cut
-                    handled[handler] = handled.get(handler, 0.0) + taken
+                    books.paid(charge, handler, taken, cut)
 
         for coord, settlement in by_coord.items():
             if coord in absorbed:
@@ -370,15 +462,7 @@ class CityPromotionStage(GeneratorStage):
                 settlement.population = max(1, round(settlement.population + delta))
 
         state.metadata["cities"] = sorted(promoted)
-        if handled:
-            state.metadata["transshipment"] = [
-                [q, r, round(food, 3)] for (q, r), food in sorted(handled.items())
-            ]
-        if unhandled:
-            state.metadata["unhandled_quays"] = [
-                [q, r, sq, sr, round(food, 3), round(people, 3)]
-                for ((q, r), (sq, sr)), (food, people) in sorted(unhandled.items())
-            ]
+        books.write(state, by_coord)
         if freight:
             state.metadata["freight"] = freight
 
@@ -395,10 +479,10 @@ class CityPromotionStage(GeneratorStage):
         haul. Manufactures are worth more per ton than grain, so they go
         `manufactured_range_mult` times as far.
 
-        Each shipment follows its bulk route and pays `transship_share` of itself at every
-        change of mode on the way, as provisioning does, to whoever stands at the quay —
-        drawn half from each of the two cities, so the books still balance. Quays nobody
-        stands at are left for `ResourceStage` to found a port on, as provisioning's are.
+        Each shipment follows its bulk route and pays every charge on it (`_charges`: the
+        quays, portages and bridges) as provisioning does, to whoever stands at each —
+        drawn half from each of the two cities, so the books still balance. Charges nobody
+        collects are left for `ResourceStage` to found a port or a toll town on.
         """
         if cfg.manufactured_trade_share <= 0.0:
             return
@@ -412,12 +496,8 @@ class CityPromotionStage(GeneratorStage):
         rivers = river_index(state, cfg)
         routes = {c: bulk_routes(hexes, [c], cfg, budget=budget, rivers=rivers) for c in cities}
 
-        handled = {(q, r): f for q, r, f in state.metadata.get("transshipment", [])}
-        unhandled: dict[tuple[HexCoord, HexCoord], tuple[float, float]] = {}
-        for q, r, sq, sr, food, people in state.metadata.get("unhandled_quays", []):
-            unhandled[((q, r), (sq, sr))] = (food, people)
+        books = _Books.read(state)
         freight = state.metadata.setdefault("freight", [])
-        delta: dict[HexCoord, float] = {}
 
         for origin in cities:
             weight = {}
@@ -433,37 +513,10 @@ class CityPromotionStage(GeneratorStage):
             for dest, w in sorted(weight.items()):
                 volume = out * w / total
                 freight.append([*origin, *dest, round(volume, 3), "goods"])
-                food = volume / cfg.people_per_food
-                paid = 0.0
-                quays = self._break_points(origin, dest, routes[dest][1], hexes, cfg, rivers)
-                for quay in quays:
-                    handler = self._handler(quay, by_coord, cfg.transship_radius)
-                    if handler in (origin, dest):
-                        continue
-                    cut = min(volume * cfg.transship_share, volume - paid)
-                    paid += cut
-                    if handler is None:
-                        for seat in (origin, dest):
-                            f, p = unhandled.get((quay, seat), (0.0, 0.0))
-                            unhandled[(quay, seat)] = (f + food / 2, p + cut / 2)
-                        continue
-                    delta[handler] = delta.get(handler, 0.0) + cut
-                    delta[origin] = delta.get(origin, 0.0) - cut / 2
-                    delta[dest] = delta.get(dest, 0.0) - cut / 2
-                    handled[handler] = handled.get(handler, 0.0) + food
+                charges = self._charges(origin, dest, routes[dest][1], hexes, cfg, rivers)
+                self._split(charges, origin, dest, volume, by_coord, books, cfg)
 
-        for coord, d in delta.items():
-            s = by_coord[coord]
-            s.population = max(1, round(s.population + d))
-        if handled:
-            state.metadata["transshipment"] = [
-                [q, r, round(f, 3)] for (q, r), f in sorted(handled.items())
-            ]
-        if unhandled:
-            state.metadata["unhandled_quays"] = [
-                [q, r, sq, sr, round(f, 3), round(p, 3)]
-                for ((q, r), (sq, sr)), (f, p) in sorted(unhandled.items())
-            ]
+        books.write(state, by_coord)
 
     # -- long-haul river trade ------------------------------------------------
 
@@ -471,13 +524,12 @@ class CityPromotionStage(GeneratorStage):
         """The interior's trade down its rivers to the coast, paying its way at every quay.
 
         `river_trade_flows` finds each inland river town's way downstream to the coastal
-        town it reaches most cheaply, and what its cargo is worth. Here each one pays
-        `transship_share` of itself at every change of mode on the way — the landing above
-        a cataract and the loading below it are two — to whoever stands at the quay, drawn
-        half from each end, exactly as `_trade` does; quays nobody stands at are left for
-        `ResourceStage` to found a port on. Recorded as freight of kind `river`, which wears
-        no road: it went by water. Each flow's whole path is kept in
-        `metadata["river_trade"]`, so a toll at a chokepoint can tell which flows pass it.
+        town it reaches most cheaply, and what its cargo is worth. Here each one pays every
+        charge on its stored path (`_charges`) — a quay at each change of mode, the toll at
+        each portage, a bridge where it crosses one ashore — to whoever stands at each,
+        drawn half from each end, exactly as `_trade` does; charges nobody collects are
+        left for `ResourceStage`. Recorded as freight of kind `river`, which wears no road:
+        it went by water. Each flow's whole path is kept in `metadata["river_trade"]`.
         """
         if cfg.river_trade_share <= 0.0:
             return
@@ -487,49 +539,110 @@ class CityPromotionStage(GeneratorStage):
             return
         hexes = state.hexes
         by_coord = {s.coord: s for s in state.settlements}
-        handled = {(q, r): f for q, r, f in state.metadata.get("transshipment", [])}
-        unhandled: dict[tuple[HexCoord, HexCoord], tuple[float, float]] = {}
-        for q, r, sq, sr, food, people in state.metadata.get("unhandled_quays", []):
-            unhandled[((q, r), (sq, sr))] = (food, people)
+        books = _Books.read(state)
         freight = state.metadata.setdefault("freight", [])
         routes: list[list[Any]] = []
-        delta: dict[HexCoord, float] = {}
 
         for flow in flows:
             origin, dest, volume = flow.origin, flow.dest, flow.people
             freight.append([*origin, *dest, round(volume, 3), "river"])
             routes.append([*origin, *dest, round(volume, 3), [list(h) for h in flow.path]])
             toward = dict(zip(flow.path, flow.path[1:], strict=False))
-            food = volume / cfg.people_per_food
-            paid = 0.0
-            for quay in self._break_points(origin, dest, toward, hexes, cfg, rivers):
-                handler = self._handler(quay, by_coord, cfg.transship_radius)
-                if handler in (origin, dest):
-                    continue
-                cut = min(volume * cfg.transship_share, volume - paid)
-                paid += cut
-                if handler is None:
-                    for seat in (origin, dest):
-                        f, p = unhandled.get((quay, seat), (0.0, 0.0))
-                        unhandled[(quay, seat)] = (f + food / 2, p + cut / 2)
-                    continue
-                delta[handler] = delta.get(handler, 0.0) + cut
-                delta[origin] = delta.get(origin, 0.0) - cut / 2
-                delta[dest] = delta.get(dest, 0.0) - cut / 2
-                handled[handler] = handled.get(handler, 0.0) + food
+            charges = self._charges(origin, dest, toward, hexes, cfg, rivers)
+            self._split(charges, origin, dest, volume, by_coord, books, cfg)
 
-        for coord, d in delta.items():
+        state.metadata["river_trade"] = routes
+        books.write(state, by_coord)
+
+    def _split(self, charges, origin, dest, volume, by_coord, books, cfg) -> None:
+        """Pay a flow between two settlements its *charges*, drawn half from each end.
+
+        Manufactures and the river trade both go this way: the shipment is the two ends'
+        business, so what the places between keep comes off both. Charges nobody collects
+        are left on the books for `ResourceStage` to found a settlement on.
+        """
+        food = volume / cfg.people_per_food
+        for charge, handler, cut in self._pay(charges, origin, dest, by_coord, volume):
+            if handler is None:
+                for seat in (origin, dest):
+                    books.unpaid(charge, seat, food / 2, cut / 2)
+                continue
+            delta = books.delta
+            delta[handler] = delta.get(handler, 0.0) + cut
+            delta[origin] = delta.get(origin, 0.0) - cut / 2
+            delta[dest] = delta.get(dest, 0.0) - cut / 2
+            books.paid(charge, handler, food, cut)
+
+
+class _Books:
+    """What the trade stages owe and have paid, read from and written back to metadata.
+
+    `transshipment` is the cargo each settlement handled at a quay or a portage;
+    `unhandled_quays` and `unhandled_tolls` are the charges nobody stood near, which
+    `ResourceStage` founds ports and toll towns on; `tolls` is what each settlement
+    collected at each toll point, as `[site q, r, kind, collector q, r, food, people]`.
+    """
+
+    def __init__(self) -> None:
+        self.handled: dict[HexCoord, float] = {}
+        self.unhandled: dict[tuple[HexCoord, HexCoord], tuple[float, float]] = {}
+        self.untolled: dict[tuple[HexCoord, HexCoord, str], tuple[float, float]] = {}
+        self.tolls: dict[tuple[HexCoord, str, HexCoord], tuple[float, float]] = {}
+        self.delta: dict[HexCoord, float] = {}
+
+    @classmethod
+    def read(cls, state) -> "_Books":
+        books = cls()
+        md = state.metadata
+        books.handled = {(q, r): f for q, r, f in md.get("transshipment", [])}
+        for q, r, sq, sr, food, people in md.get("unhandled_quays", []):
+            books.unhandled[((q, r), (sq, sr))] = (food, people)
+        for q, r, sq, sr, food, people, kind in md.get("unhandled_tolls", []):
+            books.untolled[((q, r), (sq, sr), kind)] = (food, people)
+        for q, r, kind, cq, cr, food, people in md.get("tolls", []):
+            books.tolls[((q, r), kind, (cq, cr))] = (food, people)
+        return books
+
+    def unpaid(self, charge, seat, food, people) -> None:
+        if charge.landing:
+            f, p = self.unhandled.get((charge.site, seat), (0.0, 0.0))
+            self.unhandled[(charge.site, seat)] = (f + food, p + people)
+        else:
+            key = (charge.site, seat, charge.kind)
+            f, p = self.untolled.get(key, (0.0, 0.0))
+            self.untolled[key] = (f + food, p + people)
+
+    def paid(self, charge, handler, food, people) -> None:
+        if charge.kind in (QUAY, PORTAGE):
+            self.handled[handler] = self.handled.get(handler, 0.0) + food
+        if charge.kind != QUAY:
+            key = (charge.site, charge.kind, handler)
+            f, p = self.tolls.get(key, (0.0, 0.0))
+            self.tolls[key] = (f + food, p + people)
+
+    def write(self, state, by_coord) -> None:
+        for coord, d in self.delta.items():
             s = by_coord[coord]
             s.population = max(1, round(s.population + d))
-        state.metadata["river_trade"] = routes
-        if handled:
-            state.metadata["transshipment"] = [
-                [q, r, round(f, 3)] for (q, r), f in sorted(handled.items())
+        md = state.metadata
+        if self.handled:
+            md["transshipment"] = [
+                [q, r, round(f, 3)] for (q, r), f in sorted(self.handled.items())
             ]
-        if unhandled:
-            state.metadata["unhandled_quays"] = [
+        if self.unhandled:
+            md["unhandled_quays"] = [
                 [q, r, sq, sr, round(f, 3), round(p, 3)]
-                for ((q, r), (sq, sr)), (f, p) in sorted(unhandled.items())
+                for ((q, r), (sq, sr)), (f, p) in sorted(self.unhandled.items())
+            ]
+        if self.untolled:
+            md["unhandled_tolls"] = [
+                [q, r, sq, sr, round(f, 3), round(p, 3), kind]
+                for ((q, r), (sq, sr), kind), (f, p) in sorted(self.untolled.items())
+            ]
+        if self.tolls:
+            md["tolls"] = [
+                [q, r, kind, cq, cr, round(f, 3), round(p, 3)]
+                for ((q, r), kind, (cq, cr)), (f, p) in sorted(self.tolls.items())
             ]
 
 

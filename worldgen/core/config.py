@@ -895,15 +895,15 @@ class WorldConfig:
     city_pull_rounds: int = 4
     # Manufactured goods between the cities: each puts this share of its people's worth
     # into trade, split between the cities in reach by size and haul, and the shipments pay
-    # transship_share at every quay on the way — the trade entrepôts and portage towns lived
-    # on. 0 turns it off.
+    # transship_share at every quay and toll_portage_share at every portage on the way — the
+    # trade entrepôts and portage towns lived on. 0 turns it off.
     manufactured_trade_share: float = 0.1
     # Manufactures are worth more per ton than grain, so they go this many times further.
     manufactured_range_mult: float = 3.0
     # Long-haul trade down the rivers (tech-debt #125): every town or city on a navigable
     # reach and off the coast ships this share of its people's worth downstream to the
-    # coastal town it reaches most cheaply, paying transship_share at every quay — above
-    # all the landing and loading again at a portage. This is the trade the portage towns
+    # coastal town it reaches most cheaply, paying transship_share at every quay and
+    # toll_portage_share at every portage. This is the trade the portage towns
     # lived on: Egypt's grain coming down past Aswan to Alexandria, the Ohio valley's
     # flour, pork and whiskey carried past the Falls at Louisville to New Orleans, the
     # tobacco and wheat landed at the fall-line towns. Provisioning is too short-haul and
@@ -924,6 +924,47 @@ class WorldConfig:
     # 42/7/3, one of which passes city_min_population; 0 turns it off.
     transship_share: float = 0.2
     transship_radius: int = 2
+    # Tolls at chokepoints (tech-debt #142): where a cargo has no way round, the place that
+    # holds the way takes a share of it. Every flow — provisioning, manufactures and the
+    # river trade — is charged at each point on its route, each to the settlement nearest
+    # it within `toll_radius`; neither end of the flow pays its own toll. Conserved like a
+    # quay: the share is taken off what the flow moves, never added to it. Where nobody
+    # stands, `ResourceStage` founds a bridge town, a portage town or a caravansary.
+    #
+    # The shares are of the people a cargo feeds, not of its price. A toll proper was
+    # small — the Sound Dues ran about 1-5% of a cargo's value, a medieval pontage pennies a
+    # cart — but a bridge town lived on everything the traffic needed as well: the inns,
+    # the smiths, the carters and the guard. So the share is what the crossing feeds, of
+    # which the toll itself is the least part.
+    #
+    # A bridge over water too big to wade (a side `CrossingStage` bridged rather than
+    # forded): London Bridge, Bridgnorth, Pont-Saint-Esprit. A carter goes round by a ford
+    # when the detour is cheaper than the toll, and since a cargo loses value linearly to
+    # nothing at `haulage_range_land`, a toll of this share weighs as much as this share of
+    # that range: the bulk step over a tolled bridge costs that much more, with no knob of
+    # its own. Bridge traffic is small in the bulk model — a cargo reaching a big river
+    # boards it rather than crossing — so on seven test worlds bridge tolls move a few
+    # hundred people at most. 0 turns bridge tolls off.
+    toll_bridge_share: float = 0.1
+    # A portage round a cataract pays this share once, at the portage, in place of the
+    # landing above the falls and the loading below (two quays at `transship_share`): one
+    # charge, so the walk round is not paid three times. Aswan at the First Cataract,
+    # Louisville at the Falls of the Ohio, the fall-line towns of the American east coast.
+    # 0.4 is what the two landings took together. Against keeping the two landings, on the
+    # four test worlds with portages it makes the median portage town larger on two (by
+    # half), level on a third and smaller on the fourth: one town collects what two shared. 0 makes the landings ordinary quays again, and with
+    # `toll_bridge_share` also 0 the world is exactly as it was before tolls.
+    toll_portage_share: float = 0.4
+    # How far from a toll point, in hexes, the settlement that collects it may stand: the
+    # same reach as a quay's. At 4, existing markets collect at more of the portages
+    # instead of portage towns being founded there.
+    toll_radius: int = 2
+    # The least toll income, in food units like `chokepoint_min_draw`, that founds a
+    # settlement at a toll point nobody holds. A town (`port_min_population`) if it brings
+    # that many; a village below. On ground that feeds nobody (UNUSABLE soil) this is the
+    # only thing that can found one: the caravansary, which lives on the traffic alone.
+    # 0 founds none.
+    toll_min_draw: float = 1.0
     # A town that grows past this becomes a city whatever it draws: the entrepôt, which
     # handles a hinterland's trade rather than eating its food. 0 turns it off.
     city_min_population: int = 5000
@@ -1625,7 +1666,12 @@ class WorldConfig:
             raise ValueError(f"transship_share must be in [0, 0.5], got {self.transship_share}")
         if self.transship_radius < 0:
             raise ValueError(f"transship_radius must be >= 0, got {self.transship_radius}")
+        for name in ("toll_bridge_share", "toll_portage_share"):
+            if not 0.0 <= getattr(self, name) <= 0.5:
+                raise ValueError(f"{name} must be in [0, 0.5], got {getattr(self, name)}")
         for name in (
+            "toll_radius",
+            "toll_min_draw",
             "port_min_population",
             "ore_deposits_per_1000_km2",
             "ore_min_separation",

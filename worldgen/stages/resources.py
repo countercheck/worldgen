@@ -27,7 +27,14 @@ settlements that can haul food to it — nearer ones sending more, and none more
 
 from typing import Any
 
-from ..core.hex import HexCoord, LandUse, Settlement, SettlementRole, SettlementTier
+from ..core.hex import (
+    HexCoord,
+    LandUse,
+    Settlement,
+    SettlementRole,
+    SettlementTier,
+    SoilQuality,
+)
 from ..core.hex_grid import distance, grade_reachable_count, hex_range, neighbors
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
@@ -60,6 +67,7 @@ class ResourceStage(GeneratorStage):
             return reach_cache[coord] >= cfg.settlement_min_reachable
 
         self._ports(state, reachable)
+        self._tolls(state, reachable)
         worked = self._mines(state, reachable) + self._lumber(state, reachable)
         self._ship(state, worked)
         return state
@@ -126,6 +134,93 @@ class ResourceStage(GeneratorStage):
                 state.metadata["cities"] = sorted([*state.metadata.get("cities", []), quay])
             founded += 1
 
+    # -- toll towns -------------------------------------------------------------
+
+    def _tolls(self, state, reachable) -> None:
+        """A town or village at the busiest tolls nobody collected (tech-debt #142).
+
+        Toll points within `toll_radius` of each other are one crossing, pooled onto the
+        busiest. If a settlement now stands within `toll_radius` of it — a port founded
+        just now — that settlement collects. Otherwise one is founded there, if the toll
+        brings at least `toll_min_draw` food a year: a town if that is `port_min_population`
+        people, a village if fewer. `toll_min_draw` 0 founds none. It is a bridge town or a portage town after the toll
+        it lives on, and a caravansary where the ground under it is unusable: a place that
+        could only ever have lived on the traffic.
+        """
+        cfg = self.config
+        hexes = state.hexes
+        rows = state.metadata.pop("unhandled_tolls", [])
+        if not rows or cfg.toll_min_draw <= 0.0:
+            return
+
+        by_site: dict[HexCoord, dict[str, Any]] = {}
+        for q, r, sq, sr, food, people, kind in rows:
+            entry = by_site.setdefault((q, r), {"food": 0.0, "from": {}, "kind": {}})
+            entry["food"] += food
+            entry["kind"][kind] = entry["kind"].get(kind, 0.0) + people
+            entry["from"][(sq, sr)] = entry["from"].get((sq, sr), 0.0) + people
+
+        by_coord = {s.coord: s for s in state.settlements}
+        founded = 0
+        taken: set[HexCoord] = set()
+        for site in sorted(by_site, key=lambda c: (-by_site[c]["food"], c)):
+            if site in taken:
+                continue
+            crossing = [
+                c for c in hex_range(site, cfg.toll_radius) if c in by_site and c not in taken
+            ]
+            owed: dict[HexCoord, float] = {}
+            kinds: dict[str, float] = {}
+            for c in crossing:
+                for seat, people in by_site[c]["from"].items():
+                    owed[seat] = owed.get(seat, 0.0) + people
+                for kind, people in by_site[c]["kind"].items():
+                    kinds[kind] = kinds.get(kind, 0.0) + people
+            taken.update(crossing)
+
+            near = [
+                (distance(site, c), c) for c in hex_range(site, cfg.toll_radius) if c in by_coord
+            ]
+            holder = by_coord[min(near)[1]] if near else None
+            if holder is None:
+                hx = hexes[site]
+                if hx.settlement is not None or hx.terrain_class in WATER or not reachable(site):
+                    continue
+                if sum(owed.values()) < cfg.toll_min_draw * cfg.people_per_food:
+                    continue
+            transfers = [
+                (by_coord[seat], min(round(people), by_coord[seat].population - 1))
+                for seat, people in sorted(owed.items())
+                if seat in by_coord
+            ]
+            moved = sum(n for _, n in transfers if n > 0)
+            if holder is None and moved < cfg.toll_min_draw * cfg.people_per_food:
+                continue
+            for city, n in transfers:
+                if n > 0:
+                    city.population -= n
+            if holder is not None:
+                holder.population += moved
+                continue
+            kind = max(sorted(kinds), key=lambda k: kinds[k])
+            role = SettlementRole(kind)
+            # A bridge town on ground that feeds nobody is a caravansary: the traffic is the
+            # only living there. A portage town keeps its name wherever it stands — the
+            # falls are rock as often as not, and Aswan is on granite.
+            if role is SettlementRole.BRIDGE and hexes[site].soil is SoilQuality.UNUSABLE:
+                role, kind = SettlementRole.CARAVANSARY, "caravansary"
+            big = 0 < cfg.city_min_population <= moved and self._may_be_city(state, site)
+            if big:
+                tier = SettlementTier.CITY
+                state.metadata["cities"] = sorted([*state.metadata.get("cities", []), site])
+            elif moved >= cfg.port_min_population:
+                tier = SettlementTier.TOWN
+            else:
+                tier = SettlementTier.VILLAGE
+            self._found(state, site, tier, role, moved, kind, founded)
+            by_coord[site] = state.hexes[site].settlement
+            founded += 1
+
     def _may_be_city(self, state, quay) -> bool:
         """Whether a port founded on trade alone may be a city: farmland round it, and no
         city close by. Otherwise it is a town, however much passes through it."""
@@ -163,7 +258,8 @@ class ResourceStage(GeneratorStage):
         outlets = [
             s.coord
             for s in state.settlements
-            if s.tier is SettlementTier.CITY or s.role is SettlementRole.PORT
+            if s.tier is SettlementTier.CITY
+            or s.role in (SettlementRole.PORT, SettlementRole.PORTAGE)
         ]
         if not outlets:
             return []

@@ -187,10 +187,11 @@ class ChokepointStage(GeneratorStage):
         # desert river has its village on the irrigated bank, not on the sand opposite.
         # Both ends count where the ground is as good on either.
         #
-        # Neither counts where it is unusable. A village on ground that feeds nobody could
-        # only live on what the traffic pays it, and the model collects no tolls yet — so a
-        # bridge between two banks of sand founds nothing. When tolls exist, a site sustained
-        # by them (a caravansary) may be founded here instead.
+        # Neither counts where it is unusable. A village here lives on its fields, and ground
+        # that feeds nobody has none — so a bridge between two banks of sand founds nothing
+        # in this tier. A settlement that lives on the traffic instead is founded earlier,
+        # by `ResourceStage`, on the toll the bridge collects: a caravansary where the bank
+        # is unusable, and only where the toll clears `toll_min_draw` (tech-debt #142).
         bridgeheads = set()
         for side, rs in state.river_sides.items():
             ends = [
