@@ -688,11 +688,18 @@ closed hollows on land, and fix COAST hexes that ended up adjacent only to a lak
 ### 3.5 Hydrology
 
 [stages/hydrology.py](../worldgen/stages/hydrology.py),
+[stages/hydrology_fill.py](../worldgen/stages/hydrology_fill.py),
+[stages/hydrology_rivers.py](../worldgen/stages/hydrology_rivers.py),
 [stages/corner_drainage.py](../worldgen/stages/corner_drainage.py)
 
 The biggest stage in the pipeline. It settles the water on the eroded heightmap — which
 hollows hold lakes, at what level, which of them overflow — and then routes the rivers
 along the sides between hexes.
+
+`HydrologyStage.run` in `hydrology.py` is the whole sequence in order. The steps live in
+two mixins: `hydrology_fill.py` holds sink filling, the plateau tilt, flow direction, the
+off-map inlets and flow accumulation; `hydrology_rivers.py` holds river tracing and its
+fallbacks, lake filling and drainage, the endorheic test, and the routing on corners.
 
 **Reads:** `hex.elevation`, `hex.terrain_class`.
 **Writes:** `state.rivers`, `state.river_sides`, `state.river_corners`,
@@ -2812,9 +2819,9 @@ shape map output. Change these by editing the source file.
 | `_MAX_STEPS` | `64` | [erosion.py:18](../worldgen/stages/erosion.py#L18) | Max steps per erosion particle. Larger = longer-running particles, deeper channels |
 | `_EVAPORATION` | `0.99` | [erosion.py:19](../worldgen/stages/erosion.py#L19) | Per-step water evaporation. Lower = particles die faster, less erosion downstream |
 | Erosion delta fan weights | `0.6 / 0.3 / 0.1` | [erosion.py](../worldgen/stages/erosion.py) | Radial falloff over three rings when a droplet unloads at the sea |
-| Hydrology epsilon (BFS) | `1e-6` | [hydrology.py:35](../worldgen/stages/hydrology.py#L35) | Per-step plateau tilt magnitude |
-| Hydrology epsilon (coord) | `1e-4 * eps` | [hydrology.py:38](../worldgen/stages/hydrology.py#L38) | Coordinate-based tiebreak (≈`1e-10`) |
-| Elevation Dijkstra penalty | `× 1000` | [hydrology.py:435](../worldgen/stages/hydrology.py#L435) | Cost multiplier for uphill movement during stalled-river extension |
+| Hydrology epsilon (BFS) | `1e-6` | [hydrology.py:63](../worldgen/stages/hydrology.py#L63) | Per-step plateau tilt magnitude |
+| Hydrology epsilon (coord) | `1e-4 * eps` | [hydrology.py:66](../worldgen/stages/hydrology.py#L66) | Coordinate-based tiebreak (≈`1e-10`) |
+| Elevation Dijkstra penalty | `× 1000` | [hydrology_rivers.py:283](../worldgen/stages/hydrology_rivers.py#L283) | Cost multiplier for uphill movement during stalled-river extension |
 | Erosion Gaussian sigma | `0.5` | [erosion.py:145](../worldgen/stages/erosion.py#L145) | Final smoothing pass after erosion |
 | Temperature Gaussian sigma | `1.0` | [climate.py:36](../worldgen/stages/climate.py#L36) | Smoothing pass on temperature field |
 | Flat river moisture bonus | `+0.15` | [climate.py:103](../worldgen/stages/climate.py#L103) | Used when `moisture_bleed_passes == 0` |
