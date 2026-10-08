@@ -33,6 +33,7 @@ and however much rain falls on it, which is why the boreal map grows no wheat.
 from ..core.hex import SOIL_RANK, Biome, SoilQuality, TerrainClass
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
+from .oases import place_oases
 from .riverside import river_index
 
 WATER = (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
@@ -57,7 +58,9 @@ def slope_soil(gradient_m: float, cfg) -> SoilQuality:
     return SoilQuality.ARABLE
 
 
-def rainfall_soil(wet_season_mm: float, dry_season_mm: float, cfg) -> SoilQuality:
+def rainfall_soil(
+    wet_season_mm: float, dry_season_mm: float, cfg, groundwater_mm: float = 0.0
+) -> SoilQuality:
     """What the rainfall alone allows. Asymmetric: dry fails differently from wet.
 
     And each failure has its season. A crop fails for want of water in the season it grows
@@ -82,7 +85,9 @@ def rainfall_soil(wet_season_mm: float, dry_season_mm: float, cfg) -> SoilQualit
     # is the wet one the dry arm reads the wet season as it fell.
     carried = cfg.soil_water_carryover * max(0.0, wet_season_mm - dry_season_mm)
     growing = wet_season_mm if cfg.crops_grow_in_wet_season else dry_season_mm + carried
-    dry = 2.0 * growing
+    # An oasis's groundwater (`oases`) comes up from below into the same growing season. It
+    # waters the crop and leaches nothing, so it goes on the dry arm alone.
+    dry = 2.0 * (growing + groundwater_mm)
     wet = 2.0 * (wet_season_mm - carried)
     if dry < cfg.soil_dry_farming_min_precip_mm:
         return SoilQuality.UNUSABLE
@@ -119,6 +124,9 @@ class SoilStage(GeneratorStage):
         hexes = state.hexes
         cfg = self.config
         rivers = river_index(state, cfg)
+        # Groundwater first, since the rainfall arm reads it. On this stage's own generator,
+        # which no other stage draws from, so siting oases moves nothing else on the map.
+        place_oases(state, cfg, self.rng)
 
         for coord, hx in hexes.items():
             if hx.terrain_class in WATER or hx.biome in NOT_PLOUGHLAND:
@@ -133,7 +141,12 @@ class SoilStage(GeneratorStage):
             else:
                 soil = _worse(
                     slope_soil(hx.slope, cfg),
-                    rainfall_soil(hx.wet_season_precip_mm, hx.dry_season_precip_mm, cfg),
+                    rainfall_soil(
+                        hx.wet_season_precip_mm,
+                        hx.dry_season_precip_mm,
+                        cfg,
+                        hx.groundwater_mm,
+                    ),
                 )
 
             # The cold cap is applied last, so it binds alluvium too. A flood meadow on the

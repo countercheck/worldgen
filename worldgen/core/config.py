@@ -1013,6 +1013,24 @@ class WorldConfig:
     # much as it eases drought, and the two seasons still sum to the year. 0 reads each
     # season bare; 0.5 evens any year out entirely, as if the ground were a perfect store.
     soil_water_carryover: float = 0.3
+    # Oases: groundwater surfacing in the desert. The same lever as `soil_water_carryover`
+    # — water added to what soil's dry arm reads for the growing season — but from below,
+    # on a few hexes, and from an aquifer rather than from last winter's rain. Kharga,
+    # Dakhla and Siwa in the Egyptian desert, the Fezzan, Tafilalt under the Atlas, the
+    # Ghouta at Damascus: each a spring or a line of wells where the water table meets the
+    # surface, carrying date palms, barley and a caravan town on rain that grows nothing.
+    #
+    # Sited where groundwater does surface — in depressions (a `hollow` or the rim of a
+    # closed basin first, then ground lying below its surroundings, which takes in the
+    # foot of an upland) — and only on DESERT, so a region whose palette has no desert has
+    # none. How many: `oasis_per_1000_km2` of desert, rounded; zero turns them off.
+    oasis_per_1000_km2: float = 2.0
+    # Groundwater an oasis gives the crop over its growing half-year, in millimetres. 250
+    # lifts a desert hex at 200 mm a year well into the arable band.
+    oasis_groundwater_mm: float = 250.0
+    # How far the water reaches, in hexes: 0 is a single well, 1 the spring and the six
+    # hexes round it — some 7 km², about a small oasis of the Western Desert.
+    oasis_radius: int = 1
     # What ground yields relative to its soil, by what is done with it. Cleared land under
     # the plough is the full value; wood on the same soil feeds far fewer people, which is
     # what gives clearing economic weight and makes assarting visible on the map.
@@ -1458,6 +1476,9 @@ class WorldConfig:
                 "wet_season_share is the wetter half-year's share of the rain, so must be "
                 f"in [0.5, 1], got {self.wet_season_share}"
             )
+        for name in ("oasis_per_1000_km2", "oasis_groundwater_mm", "oasis_radius"):
+            if getattr(self, name) < 0:
+                raise ValueError(f"{name} must be >= 0, got {getattr(self, name)}")
         if not (0.0 <= self.soil_water_carryover <= 0.5):
             raise ValueError(
                 "soil_water_carryover must be in [0, 0.5]: past half, the ground would "

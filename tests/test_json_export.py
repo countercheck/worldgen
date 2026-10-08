@@ -135,6 +135,19 @@ def test_the_seasons_round_trip(tmp_path):
     assert h2.dry_season_precip_mm == pytest.approx(150.0)
 
 
+def test_an_oasis_round_trips(tmp_path):
+    """Soil reads the groundwater, and a caravan route will want the spring."""
+    ws = _small_world()
+    h = ws.hexes[(0, 0)]
+    h.groundwater_mm = 250.0
+    h.tags.add("oasis")
+    path = tmp_path / "world.json"
+    json_export.save(ws, path)
+    h2 = json_export.load(path).hexes[(0, 0)]
+    assert h2.groundwater_mm == pytest.approx(250.0)
+    assert "oasis" in h2.tags
+
+
 def test_a_world_saved_before_the_seasons_loads_as_an_even_year(tmp_path):
     """Its hexes carry only the year's rain. An even split is a year without seasons, and
     it still sums to what the world said fell."""

@@ -215,6 +215,7 @@ Convenience accessors: `all_land()`, `all_open_water()`, `all_inland_water()`,
 | `elevation` | `float` | `[0.0, 1.0]` after normalization | Elevation, Erosion, Hydrology (lake fill) |
 | `moisture` | `float` | `[0.0, 1.0]` | Climate |
 | `wet_season_precip_mm`, `dry_season_precip_mm` | `float` | mm; sum to `moisture` | Climate (`wet_season_share`) |
+| `groundwater_mm` | `float` | mm over the growing season; 0 off an oasis | Soil (oases) |
 | `temperature` | `float` | `[0.0, 1.0]` (clamped) | Climate |
 | `terrain_class` | `TerrainClass` | enum | Terrain Class, Water Bodies, Hydrology |
 | `biome` | `Biome \| None` | enum | Biome |
@@ -1135,7 +1136,7 @@ desert is a playa, not a swamp.
 
 **Reads:** `hex.terrain_class`, `hex.elevation` (through the gradient),
 `hex.wet_season_precip_mm`, `hex.dry_season_precip_mm`, `hex.temperature`, `hex.biome`, `hex.tags`, `hex.catchment_km2`.
-**Writes:** `hex.soil`.
+**Writes:** `hex.soil`, and for oases `hex.groundwater_mm` and the `oasis` tag.
 
 **Config:** § [4.8](#48-soil-food-and-habitability--37a-soil-39-habitability).
 
@@ -1212,6 +1213,27 @@ rainforest "grazing" was the tell that it was wrong.
 **Alluvium skips the rainfall arm, because the Nile does not need rain.** In a desert the
 floodplain is not merely the best land, it is the only land — which is why an arid map's
 settlements string along its rivers instead of being absent altogether.
+
+**Oases are the desert's other water.** Groundwater surfaces as a spring or in reach of a
+well — Kharga, Dakhla and Siwa, the Fezzan, Tafilalt under the Atlas — and SoilStage sites a
+few before it reads the rainfall ([stages/oases.py](../worldgen/stages/oases.py)):
+
+```
+candidates = DESERT hexes in a hollow or on an endorheic shore, or lying below the mean
+             of their neighbours (a depression, or the foot of an upland)
+count      = round(oasis_per_1000_km2 × desert hexes / 1000)
+draw       = without replacement, weight ∝ rank (depressions first, then the lower the
+             hex lies against its neighbours); no two within 2 × oasis_radius + 2
+water      = groundwater_mm = oasis_groundwater_mm on every DESERT hex within oasis_radius
+```
+
+It is the same lever as the carryover: `groundwater_mm` is added to the growing season the
+dry arm reads, and leaches nothing, so it is not added to the wet arm. The draw uses
+SoilStage's own child generator, which no other stage shares, so no other stage's random
+draws move; and only DESERT takes an oasis, so only an arid region has any. The spring hex
+is tagged `oasis`, which is what desert watering stops and caravanserais (#142) should read.
+On the 64×64 arid maps six oases water 42 hexes and lift food about 5%; none is yet rich
+enough to carry a market of its own.
 
 **The cold cap is applied last, so it binds alluvium too.** A flood meadow on the Lena is
 the best ground in the taiga and still will not grow wheat. Capping before that branch let a
@@ -2661,6 +2683,9 @@ are always `0`.
 | `food_water_value` | `float` | `0.4` | ≥ 0 | `OPEN_WATER` — fishing, and valued on cover for the same reason. Non-zero so a coastal site is not penalised for having sea in its catchment |
 | `soil_dry_farming_min_precip_mm` | `float` | `250.0` | ≥ 0 | The dry-farming limit: annual rainfall below which no crop is grown without irrigation, whatever the ground is like. **The only new threshold the soil rules need** — everything else reuses `terrain_rolling_gradient_m`, `terrain_steep_gradient_m`, `terrain_escarpment_gradient_m`, `biome_dry_precip_mm`, `biome_wet_precip_mm`, `food_drowned_precip_mm`, `biome_cold_temp_c` and `ford_max_catchment_km2`, each of which already means the right thing. At `250` an arid map is 85% unusable with its life on the rivers; at `400` it is 87% and mediterranean loses a fifth of its grazing |
 | `soil_water_carryover` | `float` | `0.3` | `[0, 0.5]` | Share of the wet season's surplus over the dry that the ground banks and gives back in the drought, before soil reads each season against half the annual bands. 0 reads each season bare — a mediterranean map then has no arable at all, since a crop would see only the summer's rain; 0.5 evens every year out. On the 96×96 test map 0.2 / 0.3 / 0.4 put mediterranean farmland at 27% / 40% / 52% against temperate's 51–54% |
+| `oasis_per_1000_km2` | `float` | `2.0` | ≥ 0 | Oases per 1000 km² of DESERT, rounded; 0 turns them off. Only an arid region has desert, so only it has oases |
+| `oasis_groundwater_mm` | `float` | `250.0` | ≥ 0 | Groundwater an oasis adds to the growing season soil's dry arm reads, in mm over the half-year. 250 lifts a 200 mm desert hex into the arable band |
+| `oasis_radius` | `int` | `1` | ≥ 0 | Hexes an oasis waters around its spring: 0 a single well, 1 the spring and its six neighbours (~7 km²) |
 | `yield_arable` | `float` | `1.0` | ≥ 0 | What cleared ground under the plough yields, as a fraction of its soil's potential |
 | `yield_pasture` | `float` | `0.55` | ≥ 0 | What grazed ground yields |
 | `yield_wood` | `float` | `0.30` | ≥ 0 | What ground still under trees yields. The gap between this and `yield_arable` is what gives clearing economic weight — a settlement grows by assarting its hinterland, not merely by sitting in it |

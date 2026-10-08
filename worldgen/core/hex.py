@@ -231,6 +231,9 @@ class Hex:
     # them: a crop fails in the dry season, ground is leached in the wet one.
     wet_season_precip_mm: float = 0.0
     dry_season_precip_mm: float = 0.0
+    # Water an oasis gives the crop from below over its growing season, in millimetres;
+    # zero off an oasis. The spring itself is also tagged `oasis`.
+    groundwater_mm: float = 0.0
     temperature: float = 0.0
     biome: Biome | None = None
     # How much water passes, twice over. `river_flow` is normalised against the largest
