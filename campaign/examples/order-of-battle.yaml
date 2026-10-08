@@ -1,0 +1,102 @@
+# An order of battle for the campaign.
+#
+# Upload it beside the world on the start page, or from the referee's Roster drawer
+# ("Import order of battle…") to add to a campaign already running. Nothing is created
+# unless the whole file is valid; every problem is listed with where it is.
+#
+# The hexes below are dry land on the demonstration world (world-32x32). On your own world,
+# read coordinates off the map: hovering a hex shows its q, r.
+#
+# ---------------------------------------------------------------------------------------
+# A side
+#   name:   required. A side the campaign already has (same name or id) is added to.
+#   id:     optional; made from the name if left out.
+#   color:  optional, '#rrggbb' or '#rgb' (quoted). Picked for you if left out.
+#   army:   one formation, or a list of them. Each answers to nobody.
+#
+# A formation
+#   unit:         required. The formation's name.
+#   commander:    required. The officer riding with it; every formation has one.
+#   at:           required. Where it stands: {q: <number>, r: <number>}.
+#   kind:         optional, default infantry. One of:
+#                   infantry, cavalry, hq, artillery_reserve, garrison, convoy
+#   strength:     optional, default 5000. Paper strength, in troops.
+#                 infantry, cavalry and artillery_reserve are divisions, and the rules
+#                 want one at least 4000 strong. A strict campaign (the default) refuses
+#                 a smaller one; lenient or open lets it through.
+#   experience:   optional, default 0. One of:
+#                   -2 raw, -1 reserve, 0 regular, 1 veteran, 2 elite
+#   echelon:      optional; guessed from strength if left out. Only changes the map
+#                 marker. One of:
+#                   none, battalion, regiment, brigade, division, corps, army, army_group
+#   corps:        optional. Free text.
+#   traits:       optional, a list. Any of:
+#                   scout        wider recon zone; may field patrols without spending troops
+#                   heavy        advantage in combat
+#                   fast         marches faster
+#                   very_fast    marches faster still
+#                   slow         marches slower
+#                   very_slow    marches slower still
+#                   long_tail    a longer baggage tail (spacing ×1.3)
+#                   foraging     recovers provisions in the field
+#                   pontooneers  can build, repair and demolish bridges
+#   id:           optional; made from the unit name if left out.
+#   commanderId:  optional; made from the commander's name if left out.
+#   subordinates: optional. One formation, or a list; each answers to this commander.
+#
+# Every formation is raised fresh: no fatigue, full supply, morale at its ceiling.
+# ---------------------------------------------------------------------------------------
+
+sides:
+  - name: Armée du Nord
+    color: '#d1495b'
+    army:
+      unit: Grand Quartier Général
+      commander: Napoléon
+      kind: hq
+      strength: 2000
+      experience: 2
+      echelon: army
+      at: {q: 14, r: 15}
+      subordinates:
+        - unit: 1re Division
+          commander: Général Durutte
+          strength: 7500
+          experience: 1
+          echelon: division
+          corps: I Corps
+          traits: [long_tail]
+          at: {q: 3, r: 7}
+        - unit: Division de cavalerie légère
+          commander: Général Jacquinot
+          kind: cavalry
+          strength: 4200
+          echelon: division
+          corps: I Corps
+          traits: [scout, fast]
+          at: {q: 21, r: 27}
+
+  - name: Coalition
+    color: '#3d6fd1'
+    army:
+      unit: Army Headquarters
+      commander: Wellington
+      kind: hq
+      strength: 1500
+      experience: 1
+      at: {q: 25, r: 5}
+      subordinates:
+        - unit: 3rd Division
+          commander: Alten
+          strength: 6000
+          echelon: division
+          at: {q: 13, r: 6}
+          subordinates:
+            - unit: Engineer Train
+              commander: Captain Oldfield
+              kind: convoy
+              strength: 400
+              experience: -1
+              echelon: battalion
+              traits: [pontooneers, slow]
+              at: {q: 13, r: 6}

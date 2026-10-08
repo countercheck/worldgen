@@ -40,6 +40,27 @@ by copying it.
 Generate a world with `--model organic`: `CrossingStage` runs only in that model, so a
 classic world carries no ford or bridge tags and every major river is impassable.
 
+### Importing an order of battle
+
+Instead of raising every formation by hand, write the sides and their chain of command as
+YAML and upload it. There are two places to do that:
+
+- **Start page.** Choose the file before the world. The campaign is created with the sides
+  and formations already on the map, and with one join link per commander.
+- **Roster drawer**, as referee. Choose "Import order of battle…" to add to a running
+  campaign. A side whose name or id the campaign already has gets added to rather than
+  duplicated.
+
+[`examples/order-of-battle.yaml`](examples/order-of-battle.yaml) is a working example. Its
+header lists every key, every default, and every allowed trait, arm and echelon. The tree
+is the chain of command: each formation's `subordinates:` answer to its commander. Each
+position is a hex, `at: {q, r}`; hover a hex on the map to read its coordinates.
+
+If anything in the file is wrong, nothing is sent: every problem is listed with where it
+is (`Coalition › 3rd Division: unknown key strenght`). On the start page, the file is also
+run through the engine before the campaign is created, so a rule refusal is found before
+anything is created.
+
 ## Layout
 
 ```

@@ -33,6 +33,7 @@ import {
 import {
   addCommander,
   addFaction,
+  sendAll,
   addUnit,
   advanceClock,
   clearTask,
@@ -56,6 +57,7 @@ import {
 } from './api.js';
 import { ageLabel, boardFrom, dayHour, timeOfDay } from './board.js';
 import { copy, hexes, prettify, triggerLabel } from './copy.js';
+import { parseOob } from './oob.js';
 import {
   correspondents as correspondentsOf,
   estimateRide,
@@ -1093,6 +1095,31 @@ function Console({
                   setPostError(null);
                   void addFaction(session, faction)
                     .then((result) => setPostError(refusal(result)))
+                    .finally(() => setSending(false));
+                },
+                onImportOob: (text) => {
+                  setPostError(null);
+                  const read = parseOob(text, board.world, cfg, {
+                    factions: view.factions,
+                    unitIds: new Set(view.units.map((u) => u.id)),
+                    commanderIds: new Set(view.commanders.map((c) => c.id)),
+                  });
+                  // Nothing is sent from a file with anything wrong in it, so fixing it and
+                  // choosing it again is the whole of a retry.
+                  if (!read.ok) return setPostError(read.problems.join('\n'));
+                  const commands = [
+                    ...read.newFactions.map((faction) => ({ kind: 'add_faction' as const, faction })),
+                    ...read.commands,
+                  ];
+                  setSending(true);
+                  void sendAll(session, commands)
+                    .then((result) => {
+                      const refused = refusal(result);
+                      if (refused !== null) {
+                        setPostError(copy.oob.stopped(result.sent, commands.length, refused));
+                      }
+                    })
+                    .catch((err: unknown) => setPostError(String((err as Error).message ?? err)))
                     .finally(() => setSending(false));
                 },
                 linkFor: async (commanderId) => {

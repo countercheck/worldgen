@@ -492,6 +492,8 @@ table.grid td:first-child {
 
 .error {
   color: #d1495b;
+  /* An imported order of battle lists one problem a line. */
+  white-space: pre-line;
 }
 
 /* Join links. Shown once, so they are given room to be selected and copied whole. */
@@ -665,6 +667,27 @@ code.link {
 }
 
 .despatch-actions button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+/* A file picker dressed as the buttons beside it: the input is hidden and its label is
+   what gets clicked, which a browser does for a label wrapping its input. */
+.despatch-actions .file input {
+  display: none;
+}
+
+.despatch-actions .file span {
+  display: inline-block;
+  padding: 5px 10px;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.despatch-actions .file span:hover {
   border-color: var(--accent);
 }
 

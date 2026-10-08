@@ -719,6 +719,42 @@ export const copy = {
   },
 
   // -------------------------------------------------------------------------
+  // An order of battle uploaded as YAML. Every problem is prefixed with where in the file
+  // it was found, because a referee fixing a forty-unit file needs the line, not the rule.
+  oob: {
+    uploadLabel: 'Order of battle (YAML, optional)',
+    chosen: (file: string): string => `Order of battle: ${file}`,
+    uploadHint: 'Choose this first if you have one: the campaign starts as soon as the world is chosen.',
+    importButton: 'Import order of battle…',
+    readingFile: 'Reading the order of battle…',
+    /** The engine refused one part way through; what came before it stands. */
+    stopped: (sent: number, total: number, why: string): string =>
+      `Stopped after ${sent} of ${total} commands, which stand: ${why}`,
+    /** Joins the place in the file to what is wrong there. */
+    at: (path: string, problem: string): string => `${path}: ${problem}`,
+    sep: ' › ',
+    notYaml: (reason: string): string => `Not readable as YAML — ${reason}`,
+    needsSides: 'The file needs a `sides:` list.',
+    notAMapping: 'expected a set of `key: value` lines',
+    notAList: 'expected a list',
+    unknownKey: (k: string, allowed: readonly string[]): string =>
+      `unknown key \`${k}\` (expected one of: ${allowed.join(', ')})`,
+    needs: (k: string): string => `needs \`${k}\``,
+    notText: (k: string): string => `\`${k}\` should be text`,
+    notWhole: (k: string): string => `\`${k}\` should be a whole number of 0 or more`,
+    notOneOf: (k: string, v: string, allowed: readonly string[]): string =>
+      `\`${k}: ${v}\` is not one of ${allowed.join(', ')}`,
+    notHex: '`at` should be `{q: <number>, r: <number>}`',
+    offMap: (q: number, r: number): string => `${q}, ${r} is not on the map`,
+    notColour: (c: string): string => `${c} is not a colour like '#2b4c9b'`,
+    idTwice: (id: string): string => `the id ${id} is used twice in this file`,
+    idTaken: (id: string): string => `the campaign already has ${id}`,
+    sideTwice: (id: string): string => `the side ${id} appears twice in this file`,
+    side: (n: number): string => `side ${n}`,
+    formation: (n: number): string => `formation ${n}`,
+  },
+
+  // -------------------------------------------------------------------------
   // The sidebar panels
   // -------------------------------------------------------------------------
   unit: {

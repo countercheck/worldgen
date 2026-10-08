@@ -217,7 +217,7 @@ test('hands the referee a commander’s link, and the same one when asked again'
 test('starts an uploaded world with no sides, and takes one the referee adds', async ({ page }) => {
   await page.goto('/');
   await page
-    .locator('input[type=file]')
+    .locator('input[type=file][accept*=json]')
     .setInputFiles(fileURLToPath(new URL('../../shared/test/fixtures/world-32x32.json', import.meta.url)));
   await page.getByRole('button', { name: 'Enter as referee' }).click();
   await page.locator('.map canvas').first().waitFor();

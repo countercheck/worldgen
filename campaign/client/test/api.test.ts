@@ -10,7 +10,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { createCampaign } from '../src/api.js';
+import { createCampaign, sendAll } from '../src/api.js';
 
 const FACTIONS = [{ id: 'red', name: 'Red', color: '#c00' }];
 
@@ -73,5 +73,49 @@ describe('creating a campaign', () => {
     const headers = (calls[0]!.init.headers ?? {}) as Record<string, string>;
     expect(headers['content-encoding']).toBeUndefined();
     expect(typeof calls[0]!.init.body).toBe('string');
+  });
+});
+
+describe('sending a list of commands', () => {
+  const session = { campaignId: 'c1', token: 't' };
+  const commands = [1, 2, 3].map((n) => ({ kind: 'remove_unit' as const, unitId: `u${n}` }));
+
+  it('stops at the first refusal and says how far it got', async () => {
+    const sent: string[] = [];
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+      const { command } = JSON.parse(init.body as string) as { command: { unitId: string } };
+      sent.push(command.unitId);
+      const refused = command.unitId === 'u2';
+      return new Response(
+        JSON.stringify(
+          refused
+            ? { ok: false, violations: [{ code: 'x', message: 'no', severity: 'hard' }] }
+            : { ok: true },
+        ),
+        { status: refused ? 409 : 200, headers: { 'content-type': 'application/json' } },
+      );
+    });
+
+    const result = await sendAll(session, commands);
+    expect(result.ok).toBe(false);
+    expect(result.sent).toBe(1);
+    // Nothing after the refusal: the one after may depend on the one refused.
+    expect(sent).toEqual(['u1', 'u2']);
+  });
+
+  it('sends every one in order when nothing is refused', async () => {
+    const sent: string[] = [];
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+      sent.push((JSON.parse(init.body as string) as { command: { unitId: string } }).command.unitId);
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+    const progress: number[] = [];
+    const result = await sendAll(session, commands, (done) => progress.push(done));
+    expect(result).toEqual({ ok: true, sent: 3 });
+    expect(sent).toEqual(['u1', 'u2', 'u3']);
+    expect(progress).toEqual([1, 2, 3]);
   });
 });
