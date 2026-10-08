@@ -407,28 +407,28 @@ yield_wood: 0.30     # Still under trees; nobody has cleared it. Default: 0.30
 #
 #   Era / region                          yield  surplus  people   target                  map
 #                                         mult   fraction per_food km2 / urban             km2 / urban / cities / largest
-#   Ancient, frontier province            0.5    0.30     72       10-25 / ~10%            13-14 / 14% / 3-4 / 4-5k
+#   Ancient, frontier province            0.5    0.30     50       10-25 / ~10%            10-11 / 16% / 4-5 / 3k
 #     (Roman Britain, Gaul c. AD 150)
-#   Ancient, core (Roman Italy c. AD 14)  0.75   0.42     145      25-30 / 25-35% [a]      34-36 / 26% / 8 / 18-21k
-#   Medieval, thin (Scotland c. 1300)     0.5    0.25     48       6-13 / <10%             9 / 9% / 2 / 2-3k
-#   Medieval, typical (England, northern  1.0    0.32     145      30-40 / ~15% [b]        39-40 / 18% / 6-7 / 13-15k
+#   Ancient, core (Roman Italy c. AD 14)  0.75   0.42     80       25-30 / 25-35% [a]      27-28 / 28% / 7 / 8-11k
+#   Medieval, thin (Scotland c. 1300)     0.5    0.25     33       6-13 / <10%             6 / 9-10% / 3 / 1k
+#   Medieval, typical (England, northern  1.0    0.32     80       30-40 / ~15% [b]        32 / 19% / 6-7 / 6-10k
 #     France c. 1300)
-#   Medieval, dense (Flanders, northern   2.0    0.45     145      60-80 / 20-35% [c]      72-74 / 32% / 14 / 34-39k
+#   Medieval, dense (Flanders, northern   2.0    0.45     80       60-80 / 20-35% [c]      72 / 32% / 10-11 / 21-33k
 #     Italy c. 1300)
-#   Early modern (England c. 1700)        1.1    0.35     145      ~39 / 17% (>5k) [d]     43 / 21% / 8 / 16-19k
-#   Early modern, dense (Dutch Republic   1.5    0.55     145      55-60 / 40-45% (>2.5k)  59 / 41% / 14-15 / 40-44k
+#   Early modern (England c. 1700)        1.1    0.35     80       ~39 / 17% (>5k) [d]     36 / 21-22% / 7-8 / 10-12k
+#   Early modern, dense (Dutch Republic   1.5    0.55     80       55-60 / 40-45% (>2.5k)  56 / 42% / 12 / 22-37k
 #     c. 1650)
-#   Improved farming (England c. 1800;    1.7    0.40     145      59 / 27.5% (>5k)        60-61 / 27% / 10-11 / 23-26k
+#   Improved farming (England c. 1800;    1.7    0.40     80       59 / 27.5% (>5k)        58-59 / 27% / 9-10 / 15-21k
 #     rotation and marl, before guano
 #     and chemical fertiliser) - the defaults
-#   Improved farming, dense (Belgium      4.0    0.45     145      125-134 / ~30% (>5k)    132-134 / 33% / 34-35 / 47-70k
+#   Improved farming, dense (Belgium      4.0    0.45     80       125-134 / ~30% (>5k)    142 / 32% / 21-26 / 35-48k
 #     c. 1830)
 #
 #   [a] The low count (Beloch, Brunt: 6-7.5M). The high count (Lo Cascio: 12-14M) gives
 #       ~50/km2 and 15-20% urban. The map sits between the two.
 #   [b] England 1290 was 4.0M (Campbell 2008) to 4.75M (Broadberry et al. 2015). Older
-#       estimates of 5-6M gave 38-46/km2, which is where this row sits; people_per_food
-#       130 lands mid-range. Urban: ~10% in towns over 2,000 plus ~5% in small boroughs
+#       estimates of 5-6M gave 38-46/km2, which people_per_food 100 reaches; at 80 the
+#       row sits inside the newer range. Urban: ~10% in towns over 2,000 plus ~5% in small boroughs
 #       (Dyer). Northern France: ~40/km2 from the 1328 hearth count.
 #   [c] Flanders 33-36% (Prevenier); centre-north Italy 20-25% in towns over 5,000
 #       (Malanima).
@@ -539,7 +539,7 @@ haulage_transship_cost: 4.0 # What it costs to get a cargo onto the water and of
 haulage_river_transship_cost: 1.0 # The transship charge where the water is a navigable river or a lake rather than the open sea: a barge ties up at a bank, where a sea-going ship wants a harbour. A cataract portage is two of these. At 1.0 portage trade runs 2-6 times what it does at the sea charge on seeds 42/7/3, and the city tier holds; much lower thins it. Default: 1.0
 haulage_range_water_mult: 15.0 # How much further the same cargo goes by water. Diocletian's Price Edict prices land carriage at 28-56x sea and 6-11x river for the same tonne-kilometre (Duncan-Jones: sea 1, river 4.9, wagon 28, pack animal 56). This is why large pre-industrial cities sit on navigable water and inland ones stay small: nothing gates a city, water simply extends what can feed it. Default: 15.0
 marketable_surplus_fraction: 0.40 # What leaves the farm: not only what the household sells but the rent, the tithe and the dues, all of which end up feeding somebody in a town. It is the one number setting the ratio between town and countryside — rural/town = (1 - s) / (s x mean haulage weight) — so 0.40, with yield_multiplier 1.7, puts 25% of the people in market towns of any size, against 27.5% in towns over 5,000 in England's 1801 census (Wrigley). 0.32 is England c. 1300. It also plants markets, since siting counts surplus: ~104 at 0.40 against ~85 at 0.32. See the era table. Default: 0.40
-people_per_food: 145.0     # People fed per unit of food, and the one scale factor for the whole population of the map — settlements and countryside alike, which is what makes the two reconcile by construction. Set from the rural side because that is where there is a figure to hit: 145 puts a temperate 128x128 map at 61 people per km2 at the default yield_multiplier of 1.7, against England's 59 in the 1801 census, and at 38-39 at 1.0 (England c. 1300 was 30-40). It was 180 until elevation_hypsometry_exponent laid most land low: flat ground farms better, and density rose by a quarter. At the old 400 the countryside came out at 88 per km2, which is Belgium in 1900. Default: 145
+people_per_food: 80.0      # People fed per unit of food, and the one scale factor for the whole population of the map — settlements and countryside alike, which is what makes the two reconcile by construction. It is the density control: it moves every population in proportion and nothing else, not the market count, the clearing or the rural share. Set from the rural side because that is where there is a figure to hit: 80 puts a temperate 128x128 map at 58-59 people per km2 at the default yield_multiplier of 1.7, against England and Wales's 59 in the 1801 census, and at 32 at 1.0 (England c. 1300 was 31-36). It was 145 until market siting moved onto the day-reach (#117), which leaves markets clearing more of the land, and 180 before elevation_hypsometry_exponent laid most land low. At the old 400 the countryside came out at 88 per km2, which is Belgium in 1900. Default: 80
 travel_ascent_per_hex: 125.0 # Naismith's rule: metres of ascent that cost as much as one hex of level ground. Catchments are walked, not engineered, so they use this rather than road_delta_elevation_per_hex, which prices a graded road and is about five times stricter than a walker has reason to be. Default: 125
 travel_ford_cost: 16.0     # Getting across away from a crossing, per multiple of the wadeable span, charged once per river side crossed. Deliberately has no fixed term, unlike road_river_crossing_base: that base is the capital of building a bridge, and somebody walking to market pays no capital — what stops them is how much water is in the way. Default: 16.0
 
@@ -580,7 +580,7 @@ lumber_people_per_wood_hex: 3.0 # People a camp employs per wooded hex it works.
 resource_attach_radius: 1 # A workforce joins a settlement this close instead of founding a village beside it. Default: 1
 resource_draw_share: 0.25 # The most of its haulage-weighted population any settlement sends to feed a new workforce. Validated in (0, 1]. Default: 0.25
 resource_min_population: 30 # A village the food within reach cannot bring to this size is not founded. Default: 30
-market_viability_floor: 20.8 # The one density knob, replacing target_city_count and target_town_count both: stop planting once the best remaining site scores below this. A site scores the surplus its catchment actually reaches in a day — the same cost-bounded walk the catchment is then given, each hex at the share that survives the haul — so a ridge or an estuary beside a site lowers its score. An absolute threshold on gathered surplus rather than a target, so density follows the land: on a temperate 128x128 map with continent_falloff_edges = [south], seeds 42/7/3/11/19 give 153–159 markets, against 36 on an arid one. 20.8 is mid-window: the acceptance tests pass from 20.3 to 21.3. Lowering it raises the rural population too, and that is a real feedback rather than rounding — more markets mean more catchments, more catchments mean more ground cleared, and cleared ground feeds more people than the wood it replaced. Default: 20.8
+market_viability_floor: 20.8 # The one density knob, replacing target_city_count and target_town_count both: stop planting once the best remaining site scores below this. A site scores the surplus its catchment actually reaches in a day — the same cost-bounded walk the catchment is then given, each hex at the share that survives the haul — so a ridge or an estuary beside a site lowers its score. An absolute threshold on gathered surplus rather than a target, so density follows the land: on a temperate 128x128 map with continent_falloff_edges = [south], seeds 42/7/3/11/19 give 115–125 markets, against 30 on an arid one. The acceptance tests pass from 19.9 to 21.3, bounded below by the wood left on the 96x96 test mainland and above by the one arid village on the thin-country chokepoint map; 20.8 is the lowest value at which the five-climate reference counts markets strictly in order of food. Lowering it raises the rural population too and thins the wood, and that is a real feedback rather than rounding — more markets mean more catchments, more catchments mean more ground cleared, and cleared ground feeds more people than the wood it replaced. Default: 20.8
 
 # Chokepoints: the settlement tier below the market, founded on bridgeheads and passes
 # that carry real traffic. These are the places that exist because the road has no choice
@@ -590,10 +590,10 @@ market_viability_floor: 20.8 # The one density knob, replacing target_city_count
 # A bridge on a farm track is a plank, not a town, so `chokepoint_min_road_tier` decides
 # what counts as traffic; it is the setting that actually controls how many of these there
 # are. `chokepoint_min_draw` reads directly as people once multiplied by people_per_food:
-# 0.30 is 54, which is a hamlet at a bridge — which is what these mostly were.
+# 0.30 is 24, which is a hamlet at a bridge — which is what these mostly were.
 chokepoint_min_road_tier: secondary # Least road tier a crossing must carry to be worth a settlement: primary | secondary | track. Default: secondary
 chokepoint_min_separation: 2 # Suppression disc, and how far one must stand off an existing settlement. Default: 2
-chokepoint_min_draw: 0.30  # Smallest village worth founding, in food units; times people_per_food for the population, so 54 people. Hamlet scale, and deliberately: that is what a bridgehead settlement was, and this tier lives on residual surplus, which thinned when the soil model raised the market count. Default: 0.30
+chokepoint_min_draw: 0.30  # Smallest village worth founding, in food units; times people_per_food for the population, so 24 people. Hamlet scale, and deliberately: that is what a bridgehead settlement was, and this tier lives on residual surplus, which thinned when the soil model raised the market count. Default: 0.30
 
 # ---------------------------------------------------------------------------
 # Cultivation (farmland around settlements)

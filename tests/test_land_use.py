@@ -173,6 +173,43 @@ def test_rural_density_is_pre_industrial(used):
     assert 20.0 < density < 100.0, f"{density:.1f} people per km2"
 
 
+def test_people_per_food_sets_density_and_nothing_else(used):
+    """The density control moves the people, not the map they live on.
+
+    `market_viability_floor` moves density too, but only by planting more markets and
+    clearing more ground; it cannot set the one without the other. `people_per_food` has
+    to be the control that can, or there is no way to calibrate density against a census
+    without disturbing the market network the floor was calibrated against. So: density
+    rises with it, while the markets, the land use and the rural share stay where they are.
+    """
+    cfg = WorldConfig(**used.metadata["config"])
+    worlds = [_world(people_per_food=cfg.people_per_food * k) for k in (0.6, 1.4)]
+    worlds.insert(1, used)
+
+    def density(state):
+        land = _land(state)
+        people = sum(h.rural_population for h in land)
+        return (people + sum(s.population for s in state.settlements)) / len(land)
+
+    def rural_share(state):
+        rural = sum(h.rural_population for h in state.hexes.values())
+        return rural / (rural + sum(s.population for s in state.settlements))
+
+    densities = [density(w) for w in worlds]
+    assert densities == sorted(densities) and densities[0] < densities[-1], densities
+
+    seats = [sorted(map(tuple, w.metadata["market_seats"])) for w in worlds]
+    assert seats[0] == seats[1] == seats[2], "the market network moved with people_per_food"
+    # Not hex for hex: a settlement clears the hex it stands on, and the tiers sized in
+    # people (ports, resource villages, the entrepot city) can come and go at the margin.
+    # The clearing the markets do is what must not move.
+    for use in (LandUse.ARABLE, LandUse.WOOD):
+        shares = [sum(h.land_use is use for h in _land(w)) / len(_land(w)) for w in worlds]
+        assert max(shares) - min(shares) < 0.005, f"{use.value} share moved: {shares}"
+    shares = [rural_share(w) for w in worlds]
+    assert max(shares) - min(shares) < 0.02, f"rural share moved: {shares}"
+
+
 def test_nobody_lives_on_ground_that_feeds_nobody(used):
     for hx in _land(used):
         if hx.land_use is LandUse.WASTE:
