@@ -1144,6 +1144,21 @@ button.formation:hover {
 
 /* A formation opened in place. Two columns of label and value, tabular figures so a column
    of strengths can be compared by eye. */
+/* A formation opened by the referee: the sidebar's controls and panel, boxed and set in
+   under its row so it reads as belonging to that formation and not to the drawer. */
+.cmd-full {
+  margin: 4px 0 8px 30px;
+  padding: 4px 10px 8px;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+}
+
+.cmd-full .panel-section {
+  padding-left: 0;
+  padding-right: 0;
+}
+
 .cmd-details {
   display: grid;
   grid-template-columns: max-content 1fr;

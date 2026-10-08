@@ -232,6 +232,42 @@ test('shows one set of standing orders however many formations are picked in tur
   }
 });
 
+test('shows the referee every number on a formation in the order of battle', async ({ page }) => {
+  await page.locator('header').getByRole('button', { name: /^Order of battle/ }).click();
+  const roster = page.locator('.roster');
+  await roster.locator('.cmd-unit').first().click();
+  const full = roster.locator('.cmd-full');
+  for (const heading of ['Strength', 'Column', 'March', 'Reconnaissance']) {
+    await expect(full.getByRole('heading', { name: heading, exact: true })).toBeVisible();
+  }
+  await expect(full.getByText('Guns')).toBeVisible();
+  await expect(full.getByRole('button', { name: 'Battle · 1 h' })).toBeVisible();
+});
+
+test('marches and places a formation from the order of battle, on the map', async ({ page }) => {
+  const header = page.locator('header');
+  const roster = page.locator('.roster');
+  const orbat = header.getByRole('button', { name: /^Order of battle/ });
+
+  // March: the drawer gets out of the way and the sidebar takes the route.
+  await orbat.click();
+  await roster.locator('.cmd-unit').first().click();
+  await roster.locator('.cmd-full').getByRole('button', { name: 'March them somewhere' }).click();
+  await expect(roster).toBeHidden();
+  await expect(page.locator('.sidebar .picked-route')).toBeVisible();
+  await page.locator('.sidebar .picked-route').getByRole('button', { name: 'Cancel' }).click();
+
+  // Place: the same hand-over, and the map says what it is waiting for. The drawer opens
+  // again as it was left, with the formation still open in it.
+  await orbat.click();
+  await expect(roster.locator('.cmd-full')).toBeVisible();
+  await roster.locator('.cmd-full').getByRole('button', { name: 'Place' }).click();
+  await expect(roster).toBeHidden();
+  await expect(page.locator('.notice.picking')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.notice.picking')).toBeHidden();
+});
+
 test('renames an officer and a formation from the order of battle', async ({ page }) => {
   await page.locator('header').getByRole('button', { name: /^Order of battle/ }).click();
   const roster = page.locator('.roster');

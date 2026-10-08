@@ -59,6 +59,12 @@ export interface OrbatEditing {
   readonly onPlace: () => void;
   readonly onRaise: (unit: Unit, commander: Commander) => void;
   readonly onAppoint: (commander: Commander) => void;
+  /**
+   * Everything the referee can see and do about one formation: its orders, how it stands
+   * and every number on it. The same controls the sidebar shows for the selected unit,
+   * drawn here when a formation is opened in the tree.
+   */
+  readonly renderUnit: (unit: Unit) => ReactNode;
   /** Call an officer, or a formation, something else. */
   readonly onRenameCommander: (commanderId: string, name: string) => void;
   readonly onRenameUnit: (unitId: string, name: string) => void;
@@ -297,7 +303,14 @@ export function Roster({
           />
         )}
 
-        {expanded && <Details line={line} task={taskOf(f.unitId)} cfg={cfg} clockHours={clockHours} />}
+        {expanded &&
+          (editing !== undefined && line?.unit != null ? (
+            // The referee sees the formation itself, not a report of it, so they get the
+            // whole of it rather than the summary a commander's report can carry.
+            <div className="cmd-full">{editing.renderUnit(line.unit)}</div>
+          ) : (
+            <Details line={line} task={taskOf(f.unitId)} cfg={cfg} clockHours={clockHours} />
+          ))}
 
         {appointing && editing !== undefined && (
           <AppointForm
