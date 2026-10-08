@@ -654,20 +654,29 @@ class WorldConfig:
     # the map — settlements and countryside alike, which is what makes the two reconcile by
     # construction rather than by calibration.
     #
-    # Set from the rural side, because that is where there is a figure to hit: 145 puts a
-    # temperate 128x128 map at 61 people per km2 at the 1.7 default yield_multiplier,
-    # against 59 in the 1801 census, and at 38-39 at 1.0; England in 1290 was 31-36
-    # (Campbell 2008; Broadberry et al. 2015), or 38-46 on the older 5-6M estimates. It was
-    # 180 until `elevation_hypsometry_exponent` laid most of the land low — flat ground
-    # farms better, and density rose by a quarter — and 400 when it sized settlements alone
-    # and nothing else read it, when the countryside came out at 88 per km2, which is
-    # Belgium in 1900.
+    # Set from the rural side, because that is where there is a figure to hit: 80 puts a
+    # temperate 128x128 map at 58-59 people per km2 at the 1.7 default yield_multiplier
+    # (seeds 42 and 7), against 59 in England and Wales's 1801 census, and at 32 at 1.0;
+    # England in 1290 was 31-36 (Campbell 2008; Broadberry et al. 2015), or 38-46 on the
+    # older 5-6M estimates. The 96x96 mainland `test_land_use` builds reads 54.
     #
-    # The market towns that follow have a median near 450 and a largest around 20,000. That
-    # is a lower median than the figure this used to be tuned to, and the right one: England
-    # had some 1,750 market grants by 1300 (Letters' Gazetteer) and most were villages with
-    # a charter, at 300-1000 people. Only the top of the distribution reached the thousands.
-    people_per_food: float = 145.0
+    # It is the density control, and the only one: it moves every population in proportion
+    # and nothing else — not the market count, not the clearing, not the rural share. That
+    # is why it, and not a separate rural figure, is what was retuned when siting moved
+    # onto the day-reach (#117) and markets came to clear more of the land: a rural-only
+    # scale would have pushed the towns' share of the people past what any pre-industrial
+    # census shows, and broken the reconciliation below. It was 145 before that move, 180
+    # until `elevation_hypsometry_exponent` laid most of the land low — flat ground farms
+    # better, and density rose by a quarter — and 400 when it sized settlements alone and
+    # nothing else read it, when the countryside came out at 88 per km2, which is Belgium
+    # in 1900.
+    #
+    # The market towns that follow have a median near 1,100 and a largest of 20,000-30,000
+    # on that 128x128 map. Most English market towns were smaller: England had some 1,750
+    # market grants by 1300 (Letters' Gazetteer) and most were villages with a charter, at
+    # 300-1000 people. The map counts fewer, larger markets than that, so its median sits
+    # above theirs.
+    people_per_food: float = 80.0
 
     # Market centres. A market goes where it can gather the most surplus inside a day's
     # return — central-place logic with a real transport cost rather than an abstract one.
@@ -699,19 +708,24 @@ class WorldConfig:
     # Lowered to 20.8 when siting moved onto the day-reach (#117). A site is now scored on
     # the ground its catchment actually walks, at the weight it will be sized on, rather
     # than on a plain ring disc that ran about four times the real gather — so the number
-    # changed units. 20.8 sits mid-window: every acceptance test passes from 20.3 to 21.3,
-    # bounded below by rural density on the 96x96 mainland (100.3 per km2 at 20.2, over
-    # the ceiling) and above by the arid village on `test_chokepoints`' thin-country map.
-    # The window is narrow; a terrain change that moves either end will want it re-swept.
-    # On a temperate 128x128 map with continent_falloff_edges = ("south",) it gives
-    # 153-159 markets across seeds 42/7/3/11/19, against 36 on an arid one.
+    # changed units. Every acceptance test passes from 19.9 to 21.3. The bottom edge is
+    # `test_wood_survives_between_the_markets` on the 96x96 mainland (9.8% wooded at 19.8,
+    # against a 10% floor); the top is the arid village on `test_chokepoints`' thin-country
+    # map. 20.8 rather than the middle of that, because the five-climate reference counts
+    # boreal above tropical (4 or 3 against 2) from 19.9 to 20.65 — inside the tie tolerance
+    # `test_market_count_tracks_the_surplus_on_offer` allows, but an inversion all the same
+    # — and are strictly in order of food from 20.7 up. Rural density bounded the bottom
+    # until `people_per_food` was recalibrated from 145 to 80; it no longer binds anywhere
+    # in the window. A terrain change that moves either end will want it re-swept.
+    # On a temperate 128x128 map with continent_falloff_edges = ("south",) it plants
+    # 115-125 markets across seeds 42/7/3/11/19, against 30 on an arid one.
     #
     # One consequence worth knowing, because it is a real feedback and not a rounding
-    # effect: lowering this raises the *rural* population as well as the count. More markets
-    # mean more catchments, more catchments mean more ground cleared, and cleared ground
-    # feeds more people than the wood it replaced — 98.5 per km2 at 20.8 against 100.3 at
-    # 20.2 on the 96x96 test mainland. Settlement improves the land, which is what the assarting centuries
-    # actually did.
+    # effect: lowering this raises the *rural* population as well as the count, and thins
+    # the wood. More markets mean more catchments, more catchments mean more ground
+    # cleared, and cleared ground feeds more people than the wood it replaced — 54.4 per
+    # km2 and 11.5% wood at 20.8 against 56.2 and 9.8% at 19.8 on the 96x96 test mainland.
+    # Settlement improves the land, which is what the assarting centuries actually did.
     market_viability_floor: float = 20.8
 
     # Chokepoints: the tier below the market, founded on bridgeheads and passes that carry
@@ -726,7 +740,7 @@ class WorldConfig:
     # The smallest village worth founding, in food units — the same shape as
     # `market_viability_floor` one tier up, an absolute threshold on gathered surplus
     # rather than a target count. Multiply by `people_per_food` to read it as people: 0.30
-    # is 54, and the floor is applied to the real catchment draw so that relation holds
+    # is 24, and the floor is applied to the real catchment draw so that relation holds
     # exactly.
     #
     # That is hamlet scale rather than village scale, and deliberately, because it is what
