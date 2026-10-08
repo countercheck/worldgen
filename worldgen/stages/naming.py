@@ -18,6 +18,7 @@ stage that founds a settlement to know about languages.
 """
 
 import re
+from typing import TypeVar
 
 import numpy as np
 
@@ -63,8 +64,10 @@ _RIVER_HEADS = {
 _BARE_WEIGHT = 0.2
 _ATTEMPTS = 24
 
+_K = TypeVar("_K")
 
-def _pick(options: dict, rng: np.random.Generator):
+
+def _pick(options: dict[_K, float], rng: np.random.Generator) -> _K:
     """A key of *options* drawn in proportion to its weight. Keys are sorted first so the
     draw depends on the weights and the seed, never on dict insertion order."""
     keys = sorted(options, key=str)
@@ -139,7 +142,7 @@ class NamingStage(GeneratorStage):
                 rivers.features,
             )
 
-        def record(culture, role: str) -> dict:
+        def record(culture, role: str) -> dict[str, str | None]:
             # A pack culture records which pack, where it came from and a fingerprint of
             # its content, so a world regenerated after the pack file was edited can be
             # told apart from one named by the pack it was made with.
@@ -182,7 +185,7 @@ class NamingStage(GeneratorStage):
         keys: tuple[str, ...],
         packs: dict[str, LoadedPack],
         rng: np.random.Generator,
-    ) -> list:
+    ) -> list[Culture]:
         """One culture per region: the named packs first, invented languages for the rest.
 
         Languages are invented for every region either way and then replaced, so choosing
@@ -290,7 +293,7 @@ class NamingStage(GeneratorStage):
         anchor: HexCoord | None,
         registry: NameRegistry,
         rng: np.random.Generator,
-        river_features: dict | None = None,
+        river_features: dict[HexCoord, frozenset[str]] | None = None,
     ) -> None:
         cfg = self.config
         site = read_site(
@@ -308,7 +311,10 @@ class NamingStage(GeneratorStage):
 
         for attempt in range(_ATTEMPTS):
             generic = _pick(heads, rng)
-            options: dict = {("bare", ""): _BARE_WEIGHT, ("founder", ""): cfg.naming_founder_weight}
+            options: dict[tuple[str, str], float] = {
+                ("bare", ""): _BARE_WEIGHT,
+                ("founder", ""): cfg.naming_founder_weight,
+            }
             for key, weight in site.specifics.items():
                 options[("meaning", key)] = weight
             if river and generic in _RIVER_HEADS:

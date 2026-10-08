@@ -1,4 +1,4 @@
-from ..core.hex import Biome, Settlement, SettlementRole, SettlementTier, TerrainClass
+from ..core.hex import Biome, HexCoord, Settlement, SettlementRole, SettlementTier, TerrainClass
 from ..core.hex_grid import distance, grade_reachable_count, hex_range, neighbors
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
@@ -75,8 +75,8 @@ class CityTownStage(GeneratorStage):
         )
 
         settlements: list[Settlement] = []
-        city_coords: list = []
-        town_coords: list = []
+        city_coords: list[HexCoord] = []
+        town_coords: list[HexCoord] = []
 
         # --- Cities ---
         city_idx = 0

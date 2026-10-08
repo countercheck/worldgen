@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Any
 
 from .hex import Hex, HexCoord, Settlement
 from .hex_grid import (
@@ -186,7 +187,7 @@ class WorldState:
     river_sides: dict[Side, RiverSide] = field(default_factory=dict)
     # Tags on the corners of the river network: source, end, confluence, mouth.
     river_corners: dict[Corner, set[str]] = field(default_factory=dict)
-    metadata: dict = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
     def empty(cls, seed: int, width: int, height: int, layout: str = AXIAL) -> "WorldState":
@@ -252,7 +253,7 @@ class WorldState:
             if h.terrain_class in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
         ]
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize to a JSON-compatible dict."""
         return {
             "version": SCHEMA_VERSION,
@@ -346,7 +347,7 @@ class WorldState:
         }
 
     @classmethod
-    def from_dict(cls, data: dict) -> "WorldState":
+    def from_dict(cls, data: dict[str, Any]) -> "WorldState":
         """Reconstruct WorldState from a dict produced by to_dict()."""
         from .hex import (
             Biome,

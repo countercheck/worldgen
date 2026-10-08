@@ -1,4 +1,4 @@
-from ..core.hex import SettlementTier
+from ..core.hex import HexCoord, SettlementTier
 from ..core.hex_grid import astar
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import RoadTier, WorldState, road_edge_key
@@ -63,7 +63,7 @@ class VillageTrackStage(GeneratorStage):
 
         edge_cost = make_road_edge_cost(cfg, crossings)
 
-        new_edges: dict = {}
+        new_edges: dict[tuple[HexCoord, HexCoord], RoadTier] = {}
 
         for village in villages:
             if not targets:

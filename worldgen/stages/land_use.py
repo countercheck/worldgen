@@ -31,6 +31,7 @@ twice.
 """
 
 from ..core.hex import (
+    HexCoord,
     LandCover,
     LandUse,
     Settlement,
@@ -68,8 +69,8 @@ def rent(hx, cfg) -> float:
 
 def decide_land_use(hexes, cfg) -> None:
     """Assign `hex.land_use` over the whole map, and `cultivated` with it."""
-    best: dict = {}
-    rents: dict = {}
+    best: dict[HexCoord, float] = {}
+    rents: dict[HexCoord, float] = {}
     for coord, hx in hexes.items():
         value = rent(hx, cfg)
         rents[coord] = value
@@ -164,7 +165,7 @@ class LandUseStage(GeneratorStage):
 
         return state
 
-    def _found(self, seats, draw, hexes, cfg, rivers) -> list:
+    def _found(self, seats, draw, hexes, cfg, rivers) -> list[Settlement]:
         """Turn planted seats into settlements sized by the surplus they gather.
 
         Population is what the catchment can actually send, not a random draw — so a market

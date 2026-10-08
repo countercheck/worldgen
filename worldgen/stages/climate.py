@@ -3,7 +3,7 @@ import math
 import numpy as np
 from scipy.ndimage import gaussian_filter
 
-from ..core.hex import TerrainClass
+from ..core.hex import HexCoord, TerrainClass
 from ..core.hex_grid import corner_hexes, neighbors, side_corners, side_hexes
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
@@ -105,7 +105,7 @@ class ClimateStage(GeneratorStage):
         # Elevation-gated bleed: river moisture spreads to adjacent lower-or-equal hexes
         if self.config.moisture_bleed_passes > 0:
             for _ in range(self.config.moisture_bleed_passes):
-                additions: dict = {}
+                additions: dict[HexCoord, float] = {}
                 for coord, h in state.hexes.items():
                     if h.terrain_class in water:
                         continue
@@ -136,7 +136,7 @@ class ClimateStage(GeneratorStage):
                 h.moisture = self.config.mean_precip_mm
 
 
-def _near_rivers(state: WorldState) -> dict:
+def _near_rivers(state: WorldState) -> dict[HexCoord, list[tuple[float, float]]]:
     """Every land hex near a river, with the level and flow of each river near it.
 
     A river runs along a hexside, and the ground it waters is the four hexes at that side's
@@ -146,7 +146,7 @@ def _near_rivers(state: WorldState) -> dict:
     """
     hexes = state.hexes
     water = (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
-    out: dict = {}
+    out: dict[HexCoord, list[tuple[float, float]]] = {}
     for side, rs in state.river_sides.items():
         banks = [h for h in side_hexes(side) if h in hexes]
         if not banks:

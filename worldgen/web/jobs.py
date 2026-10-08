@@ -17,6 +17,7 @@ import traceback
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
+from typing import Any
 
 from ..core.config import WorldConfig
 from ..core.pipeline import GeneratorPipeline
@@ -32,26 +33,26 @@ class Job:
     id: str
     seed: int
     config: WorldConfig
-    events: list[dict] = field(default_factory=list)
+    events: list[dict[str, Any]] = field(default_factory=list)
     state: WorldState | None = None
     error: str | None = None
     finished: bool = False
     svgs: dict[str, str] = field(default_factory=dict)
     changed: threading.Condition = field(default_factory=threading.Condition)
 
-    def emit(self, event: dict) -> None:
+    def emit(self, event: dict[str, Any]) -> None:
         with self.changed:
             self.events.append(event)
             self.changed.notify_all()
 
-    def wait(self, seen: int, timeout: float) -> list[dict]:
+    def wait(self, seen: int, timeout: float) -> list[dict[str, Any]]:
         """Events after the first *seen*, waiting up to *timeout* seconds for one."""
         with self.changed:
             if len(self.events) <= seen and not self.finished:
                 self.changed.wait(timeout)
             return self.events[seen:]
 
-    def summary(self) -> dict:
+    def summary(self) -> dict[str, Any]:
         out = {
             "id": self.id,
             "seed": self.seed,

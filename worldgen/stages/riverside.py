@@ -112,7 +112,7 @@ class Rivers:
         anything that treats a great river as a frontier.
     """
 
-    crossing: dict[frozenset, float] = field(default_factory=dict)
+    crossing: dict[frozenset[HexCoord], float] = field(default_factory=dict)
     reaches: dict[HexCoord, frozenset[int]] = field(default_factory=dict)
     reach_corners: dict[int, frozenset[Corner]] = field(default_factory=dict)
     portage: frozenset[HexCoord] = frozenset()
@@ -121,7 +121,7 @@ class Rivers:
     near: dict[HexCoord, float] = field(default_factory=dict)
     confluence: frozenset[HexCoord] = frozenset()
     features: dict[HexCoord, frozenset[str]] = field(default_factory=dict)
-    side_catchment: dict[frozenset, float] = field(default_factory=dict)
+    side_catchment: dict[frozenset[HexCoord], float] = field(default_factory=dict)
 
     def afloat(self, hx) -> bool:
         """True where a boat can be: open water, a lake, or the bank of a navigable reach."""
@@ -149,14 +149,14 @@ def river_index(state, cfg) -> Rivers:
     """Read *state*'s river sides and corners into a `Rivers`."""
     gradient = side_gradients(state)
     runoff = cfg.runoff_mm(cfg.mean_precip_mm)
-    crossing: dict[frozenset, float] = {}
+    crossing: dict[frozenset[HexCoord], float] = {}
     navigable_sides = []
     portage: set[HexCoord] = set()
     floats: set[HexCoord] = set()
     beside: dict[HexCoord, float] = {}
     near: dict[HexCoord, float] = {}
-    features: dict = defaultdict(set)
-    side_catchment: dict[frozenset, float] = {}
+    features: dict[HexCoord, set[str]] = defaultdict(set)
+    side_catchment: dict[frozenset[HexCoord], float] = {}
     for side, rs in sorted(state.river_sides.items()):
         pair = frozenset(side_hexes(side))
         side_catchment[pair] = rs.catchment_km2
@@ -194,7 +194,7 @@ def river_index(state, cfg) -> Rivers:
             s = root[s]
         return s
 
-    at_corner: dict = defaultdict(list)
+    at_corner: dict[Corner, list[Side]] = defaultdict(list)
     for s in navigable_sides:
         for c in side_corners(s):
             at_corner[c].append(s)
@@ -205,8 +205,8 @@ def river_index(state, cfg) -> Rivers:
                 root[max(ra, rb)] = min(ra, rb)
     ids = {r: i for i, r in enumerate(sorted({find(s) for s in navigable_sides}))}
 
-    reaches: dict = defaultdict(set)
-    corners: dict = defaultdict(set)
+    reaches: dict[HexCoord, set[int]] = defaultdict(set)
+    corners: dict[int, set[Corner]] = defaultdict(set)
     for s in navigable_sides:
         r = ids[find(s)]
         corners[r] |= set(side_corners(s))

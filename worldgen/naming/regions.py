@@ -42,7 +42,12 @@ def _homelands(hexes: dict[HexCoord, Hex], count: int, rng: np.random.Generator)
 
 
 def _step_cost(
-    a: Hex, b: Hex, climb_m: float, river_cost: float, great: frozenset, water_cost: float
+    a: Hex,
+    b: Hex,
+    climb_m: float,
+    river_cost: float,
+    great: frozenset[frozenset[HexCoord]],
+    water_cost: float,
 ) -> float:
     cost = 1.0
     if climb_m > 0:
@@ -60,7 +65,7 @@ def culture_regions(
     rng: np.random.Generator,
     climb_m: float,
     river_cost: float,
-    great_rivers: frozenset,
+    great_rivers: frozenset[frozenset[HexCoord]],
     water_cost: float,
     homes: list[HexCoord] | None = None,
 ) -> dict[HexCoord, int]:

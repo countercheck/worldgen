@@ -1,7 +1,7 @@
 from collections import defaultdict, deque
 from heapq import heappop, heappush
 
-from ..core.hex import SettlementRole, SettlementTier, TerrainClass
+from ..core.hex import HexCoord, SettlementRole, SettlementTier, TerrainClass
 from ..core.hex_grid import astar_to_any, distance, neighbors
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import ROAD_TIER_RANK, RoadTier, WorldState, road_edge_key
@@ -51,16 +51,18 @@ class InterurbanRoadStage(GeneratorStage):
         if not settlements:
             return state
 
-        hex_traffic: dict = defaultdict(float)
-        edge_traffic: dict = defaultdict(float)
-        canonical_routes: dict = {}
+        hex_traffic: dict[HexCoord, float] = defaultdict(float)
+        edge_traffic: dict[tuple[HexCoord, HexCoord], float] = defaultdict(float)
+        canonical_routes: dict[tuple[HexCoord, HexCoord], list[HexCoord]] = {}
         # The network as it grows, so a route can aim at the road rather than the town.
-        net_adj: dict = defaultdict(set)
+        net_adj: dict[HexCoord, set[HexCoord]] = defaultdict(set)
         # Costing the road home means a Dijkstra over the network per route, and the
         # network barely changes once the trunks are down — so keep the answer and rebuild
         # only when an edge has actually been added since it was worked out.
         net_version = [0]
-        home_cache: dict = {}
+        home_cache: dict[
+            HexCoord, tuple[int, dict[HexCoord, HexCoord | None], dict[HexCoord, float]]
+        ] = {}
 
         # Where the rivers run between hexes: a step across one is a crossing, and pays.
         crossings = river_crossings(state.river_sides)
@@ -170,7 +172,7 @@ class InterurbanRoadStage(GeneratorStage):
         # that well-trafficked banks become drawn roads (towpaths, river roads).  Along the
         # bank is both hexes beside the same river and not across it: a step across is a
         # crossing, and earns no towpath.
-        banks_of: dict = defaultdict(set)
+        banks_of: dict[HexCoord, set[int]] = defaultdict(set)
         for i, river in enumerate(state.rivers):
             for c in river.banks():
                 banks_of[c].add(i)
@@ -192,7 +194,7 @@ class InterurbanRoadStage(GeneratorStage):
         # coverage by 0.4% of the map — it shrank the eligible set, and the percentiles
         # promptly re-cut the same fractions of whatever survived. Everything eligible is
         # now drawn, and a quiet lane is a TRACK rather than nothing at all.
-        road_edges: dict = {}
+        road_edges: dict[tuple[HexCoord, HexCoord], RoadTier] = {}
         if eligible:
             p_cut = max(1, round(len(eligible) * cfg.road_primary_pct))
             s_cut = max(
@@ -378,7 +380,7 @@ class InterurbanRoadStage(GeneratorStage):
         land_edge = make_road_edge_cost(cfg, crossings)
 
         # What the ground itself connects, ignoring roads entirely.
-        mass_of: dict = {}
+        mass_of: dict[HexCoord, HexCoord] = {}
         for seed in dry:
             if seed in mass_of:
                 continue
@@ -394,12 +396,12 @@ class InterurbanRoadStage(GeneratorStage):
 
         # The things that need joining: every road component, plus any settlement standing
         # on no road at all.
-        adj: dict = defaultdict(set)
+        adj: dict[HexCoord, set[HexCoord]] = defaultdict(set)
         for a, b in road_edges:
             adj[a].add(b)
             adj[b].add(a)
-        units: list = []
-        seen: set = set()
+        units: list[set[HexCoord]] = []
+        seen: set[HexCoord] = set()
         for node in adj:
             if node in seen:
                 continue
@@ -418,7 +420,7 @@ class InterurbanRoadStage(GeneratorStage):
             if place.coord in dry and place.coord not in seen:
                 units.append({place.coord})
 
-        by_mass: dict = defaultdict(list)
+        by_mass: dict[HexCoord, list[set[HexCoord]]] = defaultdict(list)
         for unit in units:
             by_mass[mass_of[next(iter(unit))]].append(unit)
 
@@ -468,8 +470,8 @@ class InterurbanRoadStage(GeneratorStage):
     @staticmethod
     def _road_home_tree(hexes, dest, net_adj, node_cost, edge_cost):
         """Every hex the network can reach *dest* from, with the way back and its cost."""
-        tree: dict = {dest: None}
-        home_cost: dict = {dest: 0.0}
+        tree: dict[HexCoord, HexCoord | None] = {dest: None}
+        home_cost: dict[HexCoord, float] = {dest: 0.0}
         if dest not in net_adj:
             return tree, home_cost
         queue = [(0.0, dest)]
@@ -496,7 +498,7 @@ class InterurbanRoadStage(GeneratorStage):
         canonical routes contributed a tier, which was a second, subtly different answer to
         "what counts as a road" — with edges as the stored form there is only one.
         """
-        road_adj: dict = defaultdict(set)
+        road_adj: dict[HexCoord, set[HexCoord]] = defaultdict(set)
         for a, b in road_edges:
             road_adj[a].add(b)
             road_adj[b].add(a)
@@ -514,7 +516,7 @@ class InterurbanRoadStage(GeneratorStage):
                         queue.append(n)
             return visited
 
-        visited_global: set = set()
+        visited_global: set[HexCoord] = set()
         components = []
         for cc in place_coords:
             if cc in visited_global:
@@ -555,7 +557,7 @@ class InterurbanRoadStage(GeneratorStage):
             return best
 
         # Settlements nothing can reach. Reported, not raised.
-        unreachable: list = []
+        unreachable: list[tuple[HexCoord, str]] = []
         max_iter = len(places) * 2
         for _ in range(max_iter):
             isolated = [s for s in places if s.coord not in main]

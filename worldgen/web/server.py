@@ -18,6 +18,7 @@ from dataclasses import asdict
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import yaml
@@ -47,7 +48,7 @@ DEFAULT_MAX_SIZE = 200
 _JOB_ROUTE = re.compile(r"^/api/jobs/([\w-]+)(?:/([\w.]+))?$")
 
 
-def _read_presets(directory: Path) -> list[dict]:
+def _read_presets(directory: Path) -> list[dict[str, Any]]:
     """The presets `worldgen presets` lists: JSON files of overrides in ./presets."""
     out = []
     for path in sorted(directory.glob("*.json")) if directory.is_dir() else []:
@@ -60,7 +61,7 @@ def _read_presets(directory: Path) -> list[dict]:
     return out
 
 
-def parse_config_text(text: str) -> dict:
+def parse_config_text(text: str) -> dict[str, Any]:
     """A pasted or uploaded config file, YAML or JSON, as the form's full set of values.
 
     The path fields are dropped rather than refused: a user's own worldgen.yaml may well
@@ -151,7 +152,7 @@ def make_handler(
         def _error(self, status: int, message: str) -> None:
             self._json({"error": message}, status)
 
-        def _download(self, name: str) -> dict:
+        def _download(self, name: str) -> dict[str, str]:
             return {"Content_Disposition": f'attachment; filename="{name}"'}
 
         # ---- routing -----------------------------------------------------------------
@@ -208,7 +209,7 @@ def make_handler(
             job = store.submit(seed, config)
             return self._json(job.summary(), HTTPStatus.ACCEPTED)
 
-        def _job_get(self, job: Job, action: str | None, query: dict) -> None:
+        def _job_get(self, job: Job, action: str | None, query: dict[str, str]) -> None:
             if action is None:
                 return self._json(job.summary())
             if action == "events":

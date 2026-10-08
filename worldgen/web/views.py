@@ -9,6 +9,7 @@ recorded here, beside the call that draws with them.
 import io
 from dataclasses import dataclass, fields
 from enum import Enum
+from typing import Any
 
 from ..core.hex import Hex
 from ..core.hex_grid import axial_to_pixel, pixel_to_axial
@@ -94,7 +95,7 @@ def hex_at(state: WorldState, view: str, x: float, y: float) -> Hex | None:
     return state.hexes.get(pixel_to_axial(x - ox, y - oy, frame.hex_size))
 
 
-def hex_outline(state: WorldState, view: str, h: Hex) -> dict:
+def hex_outline(state: WorldState, view: str, h: Hex) -> dict[str, float]:
     """Where *h* sits in *view*'s picture: its centre and size, to draw a highlight."""
     frame = _frame(view)
     ox, oy = _origin(state, frame)
@@ -112,7 +113,7 @@ def _plain(value):
     return value
 
 
-def describe(state: WorldState, h: Hex) -> dict:
+def describe(state: WorldState, h: Hex) -> dict[str, Any]:
     """Everything a hex carries, plus the names that make it readable: its settlement,
     the rivers through it, and the settlement whose territory it is."""
     out = {}

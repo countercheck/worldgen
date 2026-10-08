@@ -23,9 +23,9 @@ import math
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from ..core.hex import HexCoord, SettlementTier, TerrainClass
+from ..core.hex import HexCoord, Settlement, SettlementTier, TerrainClass
 from ..core.hex_grid import Corner, corner_to_pixel
-from ..core.world_state import WorldState
+from ..core.world_state import River, WorldState
 
 # Font size as a fraction of the hex size.
 _TIER_SCALE = {SettlementTier.CITY: 0.95, SettlementTier.TOWN: 0.75, SettlementTier.VILLAGE: 0.58}
@@ -105,7 +105,7 @@ def place_labels(
             x, y = to_pixel(s.coord)
             taken.append((x - m, y - m, x + m, y + m))
 
-    jobs: list[tuple] = []
+    jobs: list[tuple[tuple[int, int, HexCoord], str, Settlement | River]] = []
     for s in ws.settlements:
         jobs.append(((_TIER_ORDER[s.tier], -s.population, s.coord), "settlement", s))
     if rivers:

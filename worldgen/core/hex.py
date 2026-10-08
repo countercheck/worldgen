@@ -110,7 +110,7 @@ def terrain_bands(ws) -> tuple[float, float, float]:
     )
 
 
-def terrain_labels(ws) -> dict:
+def terrain_labels(ws) -> dict[HexCoord, TerrainLabel]:
     """Every hex's map label, using the thresholds the world was generated with.
 
     Read back off the serialised config rather than off a live `WorldConfig`, so a world

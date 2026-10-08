@@ -10,7 +10,7 @@ hex gets three scores, one per cultivation radius.  Each tier's placement stage 
 on its own.
 """
 
-from ..core.hex import Biome, LandCover, LandUse, SoilQuality, TerrainClass, is_steep
+from ..core.hex import Biome, HexCoord, LandCover, LandUse, SoilQuality, TerrainClass, is_steep
 from ..core.hex_grid import neighbors, ring
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
@@ -148,7 +148,7 @@ def _ring_offsets(max_radius: int) -> list[list[tuple[int, int]]]:
     return [ring((0, 0), d) for d in range(max_radius + 1)]
 
 
-def catchment_means(coords, food, radii: list[int]) -> dict[int, dict]:
+def catchment_means(coords, food, radii: list[int]) -> dict[int, dict[HexCoord, float]]:
     """Mean food value within each radius in *radii*, for every coord in *coords*.
 
     Off-map neighbours are left out of the mean rather than counted as zero, so a hex on
@@ -156,7 +156,7 @@ def catchment_means(coords, food, radii: list[int]) -> dict[int, dict]:
     """
     wanted = sorted(set(radii))
     offsets = _ring_offsets(wanted[-1])
-    out: dict[int, dict] = {r: {} for r in wanted}
+    out: dict[int, dict[HexCoord, float]] = {r: {} for r in wanted}
 
     for coord in coords:
         q, r = coord
@@ -196,7 +196,7 @@ class HabitabilityStage(GeneratorStage):
         from .riverside import river_index
 
         rivers = river_index(state, cfg)
-        raw: dict[str, dict] = {tier: {} for tier in radii}
+        raw: dict[str, dict[HexCoord, float]] = {tier: {} for tier in radii}
         for coord, hx in hexes.items():
             if (
                 hx.terrain_class in (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)

@@ -18,7 +18,7 @@ absorbs off the markets that sent it.  The size gap between a port and an inland
 produced by one constant rather than by a rule that says ports are bigger.
 """
 
-from ..core.hex import SettlementTier, TerrainClass
+from ..core.hex import HexCoord, SettlementTier, TerrainClass
 from ..core.hex_grid import distance, hex_range
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
@@ -76,7 +76,7 @@ class CityPromotionStage(GeneratorStage):
     # -- what each market already gathers -------------------------------------
 
     @staticmethod
-    def _market_draw(hexes, cfg) -> dict:
+    def _market_draw(hexes, cfg) -> dict[HexCoord, float]:
         """Each market's day-range surplus, read back off the territory it was given.
 
         `MarketStage` wrote `territory` and `territory_cost` onto every hex it claimed, so
@@ -94,19 +94,21 @@ class CityPromotionStage(GeneratorStage):
     # -- how far bulk can come ------------------------------------------------
 
     @staticmethod
-    def _bulk_reach(hexes, seat, cfg, rivers) -> dict:
+    def _bulk_reach(hexes, seat, cfg, rivers) -> dict[HexCoord, float]:
         """Cost of hauling bulk to *seat* from anywhere within `haulage_range_land`."""
         return CityPromotionStage._bulk_routes(hexes, seat, cfg, rivers)[0]
 
     @staticmethod
-    def _bulk_routes(hexes, seat, cfg, rivers) -> tuple[dict, dict]:
+    def _bulk_routes(
+        hexes, seat, cfg, rivers
+    ) -> tuple[dict[HexCoord, float], dict[HexCoord, HexCoord]]:
         """`bulk_routes` to one seat: the cost of hauling bulk there, and the way."""
         return bulk_routes(hexes, [seat], cfg, rivers=rivers)
 
     # -- transshipment --------------------------------------------------------
 
     @staticmethod
-    def _break_points(source, seat, toward, hexes, cfg, rivers) -> list:
+    def _break_points(source, seat, toward, hexes, cfg, rivers) -> list[HexCoord]:
         """The quays a cargo from *source* to *seat* crosses: every change in how it travels.
 
         Cart to boat, boat to cart, and barge to ship where a navigable river meets the sea.
@@ -156,8 +158,8 @@ class CityPromotionStage(GeneratorStage):
         """
         seats = sorted(s.coord for s in markets)
         remaining = dict(draw)
-        promoted: list = []
-        absorbed: dict = {}
+        promoted: list[HexCoord] = []
+        absorbed: dict[HexCoord, dict[HexCoord, float]] = {}
 
         while True:
             best, best_take, best_total = None, None, -1.0
@@ -186,7 +188,7 @@ class CityPromotionStage(GeneratorStage):
         return promoted, absorbed
 
     @staticmethod
-    def _allocate(markets, promoted, draw, reach, cfg) -> dict:
+    def _allocate(markets, promoted, draw, reach, cfg) -> dict[HexCoord, dict[HexCoord, float]]:
         """Where each market's shipped surplus goes: split between the cities by their pull.
 
         Grain went where it fetched most after carriage, not to the nearest buyer. A big city
@@ -221,7 +223,7 @@ class CityPromotionStage(GeneratorStage):
         }
 
         size = {c: float(start[c]) for c in cities}
-        absorbed: dict = {}
+        absorbed: dict[HexCoord, dict[HexCoord, float]] = {}
         for _ in range(max(1, cfg.city_pull_rounds)):
             absorbed = {c: {} for c in cities}
             for m, offers in survives.items():
@@ -242,7 +244,7 @@ class CityPromotionStage(GeneratorStage):
         return absorbed
 
     @staticmethod
-    def _nearest_share(offered, cost, total, cfg) -> dict:
+    def _nearest_share(offered, cost, total, cfg) -> dict[HexCoord, float]:
         """What a city actually takes of what is *offered*: `city_draw_share` of it, nearest first.
 
         Promotion is judged on everything that can reach a place; the take is capped. A city
@@ -252,7 +254,7 @@ class CityPromotionStage(GeneratorStage):
         surplus for a city of their own.
         """
         budget = total * cfg.city_draw_share
-        take: dict = {}
+        take: dict[HexCoord, float] = {}
         for other in sorted(offered, key=lambda o: (cost[o], o)):
             if budget <= 0.0:
                 break
@@ -308,7 +310,7 @@ class CityPromotionStage(GeneratorStage):
         by_coord = {s.coord: s for s in markets}
         start = {coord: s.population for coord, s in by_coord.items()}
 
-        def moved(source: tuple, taken: float) -> float:
+        def moved(source: HexCoord, taken: float) -> float:
             """The people who follow *taken* worth of surplus off *source*."""
             total = draw.get(source, 0.0)
             if total <= 0.0 or source not in start:
@@ -316,17 +318,17 @@ class CityPromotionStage(GeneratorStage):
             return start[source] * min(1.0, taken / total)
 
         share = cfg.transship_share if toward is not None else 0.0
-        handled: dict = {}
+        handled: dict[HexCoord, float] = {}
         # Every flow, as [origin q, r, destination q, r, people it feeds, kind], for the
         # road stage to carry: freight wears roads as travellers do.
-        freight: list = []
+        freight: list[list[int | float | str]] = []
         # Quays nobody stands at, keyed (quay, seat): the cargo through each and the people
         # it would support. The city keeps them for now; `ResourceStage` founds a port on
         # the busiest and moves them there.
-        unhandled: dict = {}
+        unhandled: dict[tuple[HexCoord, HexCoord], tuple[float, float]] = {}
 
-        lost: dict = {}
-        gained: dict = {}
+        lost: dict[HexCoord, float] = {}
+        gained: dict[HexCoord, float] = {}
         for seat, take in absorbed.items():
             for other, taken in take.items():
                 people = moved(other, taken)
@@ -407,11 +409,11 @@ class CityPromotionStage(GeneratorStage):
         routes = {c: bulk_routes(hexes, [c], cfg, budget=budget, rivers=rivers) for c in cities}
 
         handled = {(q, r): f for q, r, f in state.metadata.get("transshipment", [])}
-        unhandled: dict = {}
+        unhandled: dict[tuple[HexCoord, HexCoord], tuple[float, float]] = {}
         for q, r, sq, sr, food, people in state.metadata.get("unhandled_quays", []):
             unhandled[((q, r), (sq, sr))] = (food, people)
         freight = state.metadata.setdefault("freight", [])
-        delta: dict = {}
+        delta: dict[HexCoord, float] = {}
 
         for origin in cities:
             weight = {}

@@ -307,7 +307,13 @@ _LABEL_FACES = {
 }
 
 
-def _label_font(px: float, cache: dict, bold: bool = False, italic: bool = False):
+# What `_label_font` hands back: a TrueType face, or PIL's bitmap one where none loads.
+_Font = ImageFont.FreeTypeFont | ImageFont.ImageFont
+
+
+def _label_font(
+    px: float, cache: dict[tuple[int, bool, bool], _Font], bold: bool = False, italic: bool = False
+):
     key = (max(6, round(px)), bold, italic)
     if key not in cache:
         import matplotlib
@@ -330,7 +336,7 @@ def _draw_labels(img, draw, ws: WorldState, size: float, ox: float, oy: float, l
     A river's name is drawn onto its own small canvas, turned, and pasted, since
     `ImageDraw` cannot set text at an angle.
     """
-    fonts: dict = {}
+    fonts: dict[tuple[int, bool, bool], _Font] = {}
 
     def measure(text: str, px: float, bold: bool) -> tuple[float, float]:
         x0, y0, x1, y1 = draw.textbbox((0, 0), text, font=_label_font(px, fonts, bold))

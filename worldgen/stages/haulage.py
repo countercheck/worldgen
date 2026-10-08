@@ -20,7 +20,7 @@ mutation, so it can be unit-tested on synthetic grids.
 
 import heapq
 
-from ..core.hex import TerrainClass
+from ..core.hex import HexCoord, TerrainClass
 from ..core.hex_grid import neighbors
 from .riverside import WATER, Rivers
 
@@ -202,7 +202,7 @@ def make_bulk_cost(hexes, cfg, rivers: Rivers | None = None):
 
 def bulk_routes(
     hexes, seats, cfg, budget: float | None = None, rivers: Rivers | None = None
-) -> tuple[dict, dict]:
+) -> tuple[dict[HexCoord, float], dict[HexCoord, HexCoord]]:
     """Cost of hauling bulk to the nearest of *seats* from anywhere within `haulage_range_land`.
 
     A Dijkstra over `make_bulk_cost` rather than `make_travel_cost`. That distinction is the
@@ -221,8 +221,8 @@ def bulk_routes(
     if budget is None:
         budget = cfg.haulage_range_land
 
-    cost: dict = {seat: 0.0 for seat in seats}
-    toward: dict = {}
+    cost: dict[HexCoord, float] = {seat: 0.0 for seat in seats}
+    toward: dict[HexCoord, HexCoord] = {}
     heap = [(0.0, seat) for seat in sorted(seats)]
     heapq.heapify(heap)
     while heap:
@@ -298,8 +298,8 @@ def allocate_catchments(hexes, seats, budget: float, cfg, rivers: Rivers | None 
 
     node_cost, edge_cost = make_travel_cost(hexes, cfg, rivers)
 
-    owner: dict = {}
-    cost: dict = {}
+    owner: dict[HexCoord, HexCoord] = {}
+    cost: dict[HexCoord, float] = {}
     heap = [(0.0, seat, seat) for seat in seats if seat in hexes]
     heapq.heapify(heap)
 
@@ -327,7 +327,9 @@ def allocate_catchments(hexes, seats, budget: float, cfg, rivers: Rivers | None 
     return owner, cost
 
 
-def fishery_rim(hexes, owner: dict, cost: dict) -> tuple[dict, dict]:
+def fishery_rim(
+    hexes, owner: dict[HexCoord, HexCoord], cost: dict[HexCoord, float]
+) -> tuple[dict[HexCoord, HexCoord], dict[HexCoord, float]]:
     """Extend each catchment onto the water its land touches.
 
     A coastal settlement fishes, and `food_value` already scores open water for exactly
@@ -346,7 +348,7 @@ def fishery_rim(hexes, owner: dict, cost: dict) -> tuple[dict, dict]:
     out_owner = dict(owner)
     out_cost = dict(cost)
 
-    best: dict = {}
+    best: dict[HexCoord, tuple[tuple[float, HexCoord], HexCoord]] = {}
     for coord in sorted(owner):
         claim = (cost[coord], coord)
         for n in neighbors(coord):
@@ -365,14 +367,19 @@ def fishery_rim(hexes, owner: dict, cost: dict) -> tuple[dict, dict]:
     return out_owner, out_cost
 
 
-def gather(values: dict, owner: dict, cost: dict, range_limit: float) -> dict:
+def gather(
+    values: dict[HexCoord, float],
+    owner: dict[HexCoord, HexCoord],
+    cost: dict[HexCoord, float],
+    range_limit: float,
+) -> dict[HexCoord, float]:
     """Total haulage-weighted value each seat can draw from what it owns.
 
     The one arithmetic every tier shares: a village's production, a market's surplus draw,
     a city's bulk supply.  What changes between them is the range limit and what is being
     summed, never the shape of the sum.
     """
-    totals: dict = {}
+    totals: dict[HexCoord, float] = {}
     for coord, seat in owner.items():
         value = values.get(coord, 0.0)
         if value <= 0.0:
@@ -384,7 +391,7 @@ def gather(values: dict, owner: dict, cost: dict, range_limit: float) -> dict:
     return totals
 
 
-def settleable(hexes, cfg) -> set:
+def settleable(hexes, cfg) -> set[HexCoord]:
     """Hexes that could carry a settlement at all, before any scoring.
 
     The same exclusions `HabitabilityStage` scores to zero — you do not found a village on

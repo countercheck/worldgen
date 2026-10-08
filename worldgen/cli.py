@@ -1,5 +1,6 @@
 import time
 from pathlib import Path
+from typing import Any
 
 import click
 
@@ -370,7 +371,7 @@ def _parse_layers_value(
     return set(parsed)
 
 
-def _load_export_section(config_path: str) -> dict:
+def _load_export_section(config_path: str) -> dict[str, Any]:
     """Load and validate the optional top-level `export` config mapping."""
     if config_path.lower().endswith((".yaml", ".yml")):
         import yaml
@@ -440,7 +441,7 @@ def export_svg(
     from .export.svg_export import save as save_svg
 
     # Start with SVGConfig defaults, then override with config file, then CLI flags
-    svg_kwargs: dict = {
+    svg_kwargs: dict[str, Any] = {
         "style": "atlas",
         "color_mode": "biome",
         "hex_size": 12.0,
