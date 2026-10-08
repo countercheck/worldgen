@@ -15,7 +15,7 @@
  * tokens to try.
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 
 import {
   DEFAULT_CONFIG,
@@ -48,6 +48,7 @@ import {
   setFormation,
   setStandingOrders,
   setUnitStats,
+  renameCommander,
   setTask,
   subscribe,
   teleportUnit,
@@ -664,12 +665,15 @@ function Console({
           },
           ...Object.entries(joined.held).map(([commanderId, token]) => {
             // The commander's name, not their id. A referee switching seats is choosing a
-            // person to be, and "kellermann" is the engine's bookkeeping.
+            // person to be, and "kellermann" is the engine's bookkeeping. The campaign's
+            // name first, because the referee may have renamed them since this browser
+            // stored the link; the stored one is for a seat the view does not show.
             const seat = joined.seats[commanderId];
-            const faction = seat?.faction ?? board.commanders.get(commanderId)?.faction;
+            const live = board.commanders.get(commanderId);
+            const faction = live?.faction ?? seat?.faction;
             return {
               id: commanderId,
-              label: seat?.name ?? board.commanders.get(commanderId)?.name ?? commanderId,
+              label: live?.name ?? seat?.name ?? commanderId,
               token,
               color: faction === undefined ? undefined : board.factions.get(faction)?.color,
             };
@@ -741,6 +745,100 @@ function Console({
       {copy.orders.cancel}
     </button>
   );
+
+  /**
+   * What a referee can do with a formation, wherever they are looking at it: the sidebar
+   * for the one selected, or the order of battle for any of them.
+   *
+   * One set of controls in two places rather than two sets, so an order given from the
+   * drawer is the order given from the sidebar. Marching and placing want a hex from the
+   * map, so they select the formation and put the drawer away, as raising one does; the
+   * sidebar then carries the route being picked.
+   */
+  const toMap = (unitId: string): void => {
+    setSelectedId(unitId);
+    setRoster(false);
+  };
+
+  const refuse = (result: { ok: boolean; violations?: readonly { message: string }[] }): void => {
+    if (!result.ok) {
+      setPostError(result.violations?.map((v) => v.message).join('; ') ?? copy.orders.refused);
+    }
+  };
+
+  const orderActions = (unit: Unit): ReactNode => (
+    <div className="despatch-actions">
+      <button
+        className={ordering === unit.id ? 'primary' : ''}
+        onClick={() => {
+          setOrdering(unit.id);
+          setPicked([]);
+          toMap(unit.id);
+        }}
+      >
+        {ordering === unit.id ? copy.orders.pointing : copy.orders.march}
+      </button>
+      {view.tasks.some((t) => t.unitId === unit.id) && (
+        <button onClick={() => void clearTask(session, unit.id)}>{copy.orders.halt}</button>
+      )}
+      <button
+        onClick={() => {
+          setOrdering(PLACE_PREFIX + unit.id);
+          setPicked([]);
+          toMap(unit.id);
+        }}
+        title={copy.orders.placeHint}
+      >
+        {copy.orders.place}
+      </button>
+      {/* The rules give patrols to Scout. The button says what the next one costs,
+          because the fourth is not free and the cost is permanent. */}
+      {unit.traits.includes('scout') && unit.parentUnitId == null && (
+        <button
+          onClick={() => {
+            setPostError(null);
+            void detachPatrol(session, unit.id).then(refuse);
+          }}
+        >
+          {copy.orders.sendPatrol}
+          {patrolsOf(unit.id).length >= cfg.freePatrols
+            ? copy.orders.patrolCost(cfg.extraPatrolCost)
+            : ''}
+        </button>
+      )}
+    </div>
+  );
+
+  const taskAndFormation = (unit: Unit): ReactNode => (
+    <>
+      <TaskLine task={view.tasks.find((t) => t.unitId === unit.id)} plan={planFor(unit.id)} />
+      <FormationControl
+        unit={unit}
+        clockHours={clock}
+        cfg={cfg}
+        onSet={(formation) => {
+          setPostError(null);
+          void setFormation(session, unit.id, formation).then(refuse);
+        }}
+      />
+    </>
+  );
+
+  const unitPanel = (unit: Unit): ReactNode => {
+    const parent = unit.parentUnitId == null ? undefined : board.units.get(unit.parentUnitId);
+    return (
+      <UnitPanel
+        unit={unit}
+        name={unit.name}
+        factionName={board.factions.get(unit.faction)?.name ?? unit.faction}
+        color={board.factions.get(unit.faction)?.color ?? '#888'}
+        cfg={cfg}
+        clockHours={view.campaign.clockHours}
+        patrolsOut={patrolsOf(unit.id).length}
+        {...(parent === undefined ? {} : { parent })}
+      />
+    );
+  };
 
   return (
     <div className={`app pane-${pane}${sheetOpen ? ' sheet-open' : ''}`}>
@@ -1147,6 +1245,27 @@ function Console({
                   }
                   return joinLink({ campaignId: session.campaignId, token });
                 },
+                renderUnit: (unit) => (
+                  <>
+                    {orderActions(unit)}
+                    {taskAndFormation(unit)}
+                    {unitPanel(unit)}
+                  </>
+                ),
+                onRenameCommander: (commanderId, name) => {
+                  setSending(true);
+                  setPostError(null);
+                  void renameCommander(session, commanderId, name)
+                    .then((result) => setPostError(refusal(result)))
+                    .finally(() => setSending(false));
+                },
+                onRenameUnit: (unitId, name) => {
+                  setSending(true);
+                  setPostError(null);
+                  void setUnitStats(session, unitId, { name })
+                    .then((result) => setPostError(refusal(result)))
+                    .finally(() => setSending(false));
+                },
                 onAppoint: (commander) => {
                   setSending(true);
                   setPostError(null);
@@ -1404,53 +1523,7 @@ function Console({
               {/* Not the unit's name: the panel below already carries that, and a heading
                   repeated twice reads as two sections about different things. */}
               <h3>{copy.orders.heading}</h3>
-              <div className="despatch-actions">
-                <button
-                  className={ordering === shownUnit.id ? 'primary' : ''}
-                  onClick={() => {
-                    setOrdering(shownUnit.id);
-                    setPicked([]);
-                  }}
-                >
-                  {ordering === shownUnit.id ? copy.orders.pointing : copy.orders.march}
-                </button>
-                {view.tasks.some((t) => t.unitId === shownUnit.id) && (
-                  <button onClick={() => void clearTask(session, shownUnit.id)}>
-                    {copy.orders.halt}
-                  </button>
-                )}
-                {/* The rules give patrols to Scout. The button says what the next one
-                    costs, because the fourth is not free and the cost is permanent. */}
-                <button
-                  onClick={() => {
-                    setOrdering(PLACE_PREFIX + shownUnit.id);
-                    setPicked([]);
-                  }}
-                  title={copy.orders.placeHint}
-                >
-                  {copy.orders.place}
-                </button>
-                {shownUnit.traits.includes('scout') && shownUnit.parentUnitId == null && (
-                  <button
-                    onClick={() => {
-                      setPostError(null);
-                      void detachPatrol(session, shownUnit.id).then((result) => {
-                        if (!result.ok) {
-                          setPostError(
-                            result.violations?.map((v) => v.message).join('; ') ??
-                              copy.orders.refused,
-                          );
-                        }
-                      });
-                    }}
-                  >
-                    {copy.orders.sendPatrol}
-                    {patrolsOf(shownUnit.id).length >= cfg.freePatrols
-                      ? copy.orders.patrolCost(cfg.extraPatrolCost)
-                      : ''}
-                  </button>
-                )}
-              </div>
+              {orderActions(shownUnit)}
 
               {ordering === shownUnit.id && (
                 <div className="picked-route">
@@ -1494,33 +1567,16 @@ function Console({
                 </div>
               )}
 
-              <TaskLine
-                task={view.tasks.find((t) => t.unitId === shownUnit.id)}
-                plan={planFor(shownUnit.id)}
-              />
-
-              <FormationControl
-                unit={shownUnit}
-                clockHours={clock}
-                cfg={cfg}
-                onSet={(formation) => {
-                  setPostError(null);
-                  void setFormation(session, shownUnit.id, formation).then((result) => {
-                    if (!result.ok) {
-                      setPostError(
-                        result.violations?.map((v) => v.message).join('; ') ??
-                          copy.orders.refused,
-                      );
-                    }
-                  });
-                }}
-              />
+              {taskAndFormation(shownUnit)}
             </section>
           )}
 
           {isReferee && shownUnit !== null && (
             <StandingOrdersPanel
-              key={shownUnit.id}
+              // Keyed per formation so a new selection starts a fresh form, and prefixed
+              // because `UnitEdit` below is keyed by the same id: two siblings sharing a key
+              // left React unable to tell them apart, and every selection added a panel.
+              key={`standing:${shownUnit.id}`}
               orders={view.standingOrders[shownUnit.id]}
               cfg={cfg}
               forReferee
@@ -1528,28 +1584,11 @@ function Console({
             />
           )}
 
-          {shownUnit !== null && (
-            <UnitPanel
-              unit={shownUnit}
-              name={shownUnit.name}
-              factionName={board.factions.get(shownUnit.faction)?.name ?? shownUnit.faction}
-              color={board.factions.get(shownUnit.faction)?.color ?? '#888'}
-              cfg={cfg}
-              clockHours={view.campaign.clockHours}
-              patrolsOut={patrolsOf(shownUnit.id).length}
-              {...(() => {
-                const parent =
-                  shownUnit.parentUnitId == null
-                    ? undefined
-                    : board.units.get(shownUnit.parentUnitId);
-                return parent === undefined ? {} : { parent };
-              })()}
-            />
-          )}
+          {shownUnit !== null && unitPanel(shownUnit)}
 
           {isReferee && shownUnit !== null && (
             <UnitEdit
-              key={shownUnit.id}
+              key={`edit:${shownUnit.id}`}
               unit={shownUnit}
               clockHours={view.campaign.clockHours}
               formations={[...board.units.values()].filter(

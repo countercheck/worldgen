@@ -214,6 +214,87 @@ test('hands the referee a commander’s link, and the same one when asked again'
   await expect(link).toHaveText(sent ?? '');
 });
 
+test('shows one set of standing orders however many formations are picked in turn', async ({
+  page,
+}) => {
+  const sidebar = page.locator('.sidebar');
+  await page.locator('header').getByRole('button', { name: /^Order of battle/ }).click();
+  const roster = page.locator('.roster');
+  // Every formation on both sides, one after another: each pick used to leave the last
+  // one's panel behind, so the count climbed with every click.
+  for (const side of [/Armée du Nord/, /Coalition/]) {
+    await roster.getByRole('tab', { name: side }).click();
+    const rows = roster.locator('.cmd-unit');
+    for (let i = 0; i < (await rows.count()); i++) {
+      await rows.nth(i).click();
+      await expect(sidebar.getByRole('heading', { name: 'Standing orders' })).toHaveCount(1);
+    }
+  }
+});
+
+test('shows the referee every number on a formation in the order of battle', async ({ page }) => {
+  await page.locator('header').getByRole('button', { name: /^Order of battle/ }).click();
+  const roster = page.locator('.roster');
+  await roster.locator('.cmd-unit').first().click();
+  const full = roster.locator('.cmd-full');
+  for (const heading of ['Strength', 'Column', 'March', 'Reconnaissance']) {
+    await expect(full.getByRole('heading', { name: heading, exact: true })).toBeVisible();
+  }
+  await expect(full.getByText('Guns')).toBeVisible();
+  await expect(full.getByRole('button', { name: 'Battle · 1 h' })).toBeVisible();
+});
+
+test('marches and places a formation from the order of battle, on the map', async ({ page }) => {
+  const header = page.locator('header');
+  const roster = page.locator('.roster');
+  const orbat = header.getByRole('button', { name: /^Order of battle/ });
+
+  // March: the drawer gets out of the way and the sidebar takes the route.
+  await orbat.click();
+  await roster.locator('.cmd-unit').first().click();
+  await roster.locator('.cmd-full').getByRole('button', { name: 'March them somewhere' }).click();
+  await expect(roster).toBeHidden();
+  await expect(page.locator('.sidebar .picked-route')).toBeVisible();
+  await page.locator('.sidebar .picked-route').getByRole('button', { name: 'Cancel' }).click();
+
+  // Place: the same hand-over, and the map says what it is waiting for. The drawer opens
+  // again as it was left, with the formation still open in it.
+  await orbat.click();
+  await expect(roster.locator('.cmd-full')).toBeVisible();
+  await roster.locator('.cmd-full').getByRole('button', { name: 'Place' }).click();
+  await expect(roster).toBeHidden();
+  await expect(page.locator('.notice.picking')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.notice.picking')).toBeHidden();
+});
+
+test('renames an officer and a formation from the order of battle', async ({ page }) => {
+  await page.locator('header').getByRole('button', { name: /^Order of battle/ }).click();
+  const roster = page.locator('.roster');
+  await roster.getByRole('tab', { name: /Coalition/ }).click();
+
+  const rename = async (row: ReturnType<typeof roster.locator>, from: string, to: string) => {
+    await row.getByRole('button', { name: 'rename', exact: true }).first().click();
+    const input = roster.getByLabel('New name');
+    await expect(input).toHaveValue(from);
+    await input.fill(to);
+    await roster.getByRole('button', { name: 'Rename', exact: true }).click();
+    await expect(roster.locator('.cmd-row', { hasText: to })).toBeVisible();
+    await expect(roster.locator('.cmd-row', { hasText: from })).toHaveCount(0);
+  };
+
+  const officer = roster.locator('.cmd-row', { hasText: 'The Duke of Wellington' });
+  await rename(officer, 'The Duke of Wellington', 'Arthur Wellesley');
+  // The seat in the header is the same person, and says so.
+  await expect(page.locator('header').getByRole('button', { name: 'Arthur Wellesley' })).toBeVisible();
+  const formation = roster.locator('.cmd-row', { hasText: '3rd Division' });
+  await rename(formation, '3rd Division', 'Third Division');
+
+  // Put both back, so the campaign every other test opens is as it was.
+  await rename(roster.locator('.cmd-row', { hasText: 'Arthur Wellesley' }), 'Arthur Wellesley', 'The Duke of Wellington');
+  await rename(roster.locator('.cmd-row', { hasText: 'Third Division' }), 'Third Division', '3rd Division');
+});
+
 test('starts an uploaded world with no sides, and takes one the referee adds', async ({ page }) => {
   await page.goto('/');
   await page

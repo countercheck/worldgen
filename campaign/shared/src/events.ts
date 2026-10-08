@@ -95,6 +95,7 @@ export type EventPayload =
       readonly unitId?: string;
       readonly superiorId?: string | null;
     }
+  | { readonly kind: 'commander_renamed'; readonly commanderId: string; readonly name: string }
   | { readonly kind: 'unit_added'; readonly unit: Unit }
   | { readonly kind: 'unit_removed'; readonly unitId: string }
   /**

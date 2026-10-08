@@ -345,6 +345,15 @@ export function reassignCommander(
   return sendCommand(session, { kind: 'reassign_commander', commanderId, ...changes });
 }
 
+/** Call an officer something else. A formation is renamed with `setUnitStats`. */
+export function renameCommander(
+  session: Session,
+  commanderId: string,
+  name: string,
+): Promise<CommandResult> {
+  return sendCommand(session, { kind: 'rename_commander', commanderId, name });
+}
+
 export function clearTask(session: Session, unitId: string): Promise<CommandResult> {
   return sendCommand(session, { kind: 'clear_task', unitId });
 }

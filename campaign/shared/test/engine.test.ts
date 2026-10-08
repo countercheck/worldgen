@@ -1875,3 +1875,63 @@ describe('declare_battle', () => {
     expect(engaged(s)).toEqual([]);
   });
 });
+
+describe('renaming an officer', () => {
+  it('changes the name and nothing else about them', () => {
+    const out = apply(
+      { kind: 'rename_commander', commanderId: 'ney', name: '  Michel Ney  ' },
+      setUp(),
+      world,
+      'strict',
+    );
+    expect(out.ok).toBe(true);
+    // Trimmed on the way into the log, so the name is stored as it reads.
+    expect(out.state.commanders.get('ney')).toEqual({ ...NEY, name: 'Michel Ney' });
+    expect(out.events.map((e) => e.payload)).toEqual([
+      { kind: 'commander_renamed', commanderId: 'ney', name: 'Michel Ney' },
+    ]);
+  });
+
+  it('refuses a blank name, and an officer who is not there', () => {
+    const state = setUp();
+    expect(
+      check({ kind: 'rename_commander', commanderId: 'ney', name: '   ' }, state, world).map(
+        (v) => v.code,
+      ),
+    ).toEqual([CODES.MALFORMED]);
+    expect(
+      check({ kind: 'rename_commander', commanderId: 'ghost', name: 'Nobody' }, state, world).map(
+        (v) => v.code,
+      ),
+    ).toEqual([CODES.NO_SUCH_COMMANDER]);
+  });
+
+  it('is the referee’s alone', () => {
+    expect(isRefereeCommand({ kind: 'rename_commander', commanderId: 'ney', name: 'X' })).toBe(true);
+  });
+
+  it('survives a replay of the log', () => {
+    const out = apply(
+      { kind: 'rename_commander', commanderId: 'ney', name: 'Michel Ney' },
+      setUp(),
+      world,
+      'strict',
+    );
+    const again = applyAll(
+      [
+        CREATE,
+        { kind: 'add_faction', faction: RED },
+        { kind: 'add_faction', faction: BLUE },
+        { kind: 'add_unit', unit: division('red-1', 'red') },
+        { kind: 'add_unit', unit: division('blue-1', 'blue') },
+        { kind: 'add_commander', commander: NEY },
+        { kind: 'add_commander', commander: WELLINGTON },
+        { kind: 'rename_commander', commanderId: 'ney', name: 'Michel Ney' },
+      ],
+      EMPTY_STATE,
+      world,
+      'strict',
+    );
+    expect(again.state.commanders.get('ney')).toEqual(out.state.commanders.get('ney'));
+  });
+});
