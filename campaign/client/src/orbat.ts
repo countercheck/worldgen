@@ -36,6 +36,8 @@ export interface UnitDraft {
   readonly traits: readonly Trait[];
   readonly corps: string | null;
   readonly echelon: Echelon | null;
+  /** Null for the arm's usual battery: 24 for an artillery reserve, 6 for anything else. */
+  readonly guns: number | null;
   readonly at: Hex | null;
   /**
    * Who commands it, by name, and who they answer to.
@@ -61,6 +63,7 @@ export const emptyDraft = (faction: string): UnitDraft => ({
   traits: [],
   corps: null,
   echelon: null,
+  guns: null,
   at: null,
   commanderName: '',
   superiorId: '',
@@ -155,7 +158,7 @@ export function unitFrom(draft: UnitDraft, cfg: CampaignConfig, at: Hex): Unit {
     maxProvisions: 40,
     equipment: 30,
     maxEquipment: 30,
-    guns: draft.kind === 'artillery_reserve' ? 24 : 6,
+    guns: draft.guns ?? (draft.kind === 'artillery_reserve' ? 24 : 6),
     marchSpeedKmh: defaults.marchSpeedKmh,
     spacingM: defaults.spacingM,
     // A long tail is the trait's whole meaning, so raising a unit with it should produce

@@ -24,6 +24,8 @@
 #                 infantry, cavalry and artillery_reserve are divisions, and the rules
 #                 want one at least 4000 strong. A strict campaign (the default) refuses
 #                 a smaller one; lenient or open lets it through.
+#   guns:         optional. Pieces of artillery with the formation, any arm. Default 24
+#                 for artillery_reserve, 6 for everything else.
 #   experience:   optional, default 0. One of:
 #                   -2 raw, -1 reserve, 0 regular, 1 veteran, 2 elite
 #   echelon:      optional; guessed from strength if left out. Only changes the map
@@ -62,6 +64,7 @@ sides:
         - unit: 1re Division
           commander: Général Durutte
           strength: 7500
+          guns: 12
           experience: 1
           echelon: division
           corps: I Corps

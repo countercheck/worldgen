@@ -74,6 +74,7 @@ const NODE_KEYS = [
   'commanderId',
   'kind',
   'strength',
+  'guns',
   'experience',
   'echelon',
   'corps',
@@ -185,14 +186,17 @@ export function parseOob(
     const experience = oneOf<Experience>(raw, 'experience', EXPERIENCES, base.experience, here);
     const echelonRaw = raw.echelon == null ? null : oneOf<Echelon>(raw, 'echelon', ECHELONS, 'none', here);
 
-    let paperStrength = base.paperStrength;
-    if (raw.strength != null) {
-      if (typeof raw.strength === 'number' && Number.isInteger(raw.strength) && raw.strength >= 0) {
-        paperStrength = raw.strength;
-      } else {
-        at(here, copy.oob.notWhole('strength'));
-      }
-    }
+    const wholeOr = <T,>(k: string, fallback: T): number | T => {
+      const v = raw[k];
+      if (v == null) return fallback;
+      if (typeof v === 'number' && Number.isInteger(v) && v >= 0) return v;
+      at(here, copy.oob.notWhole(k));
+      return fallback;
+    };
+    const paperStrength = wholeOr('strength', base.paperStrength);
+    // Any formation may have guns, not only an artillery reserve: a division's own
+    // batteries are part of what it is, and the file is where a referee says how many.
+    const guns = wholeOr('guns', base.guns);
 
     const traits: Trait[] = [];
     if (raw.traits != null) {
@@ -229,6 +233,7 @@ export function parseOob(
       traits,
       corps: textOf(raw, 'corps', here) ?? null,
       echelon: echelonRaw,
+      guns,
       at: hex,
       commanderName: commanderName ?? '',
       superiorId,
