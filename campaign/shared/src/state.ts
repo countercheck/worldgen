@@ -295,6 +295,12 @@ export function reduce(state: CampaignState, event: LoggedEvent): CampaignState 
       });
     }
 
+    case 'commander_renamed': {
+      const commander = s.commanders.get(p.commanderId);
+      if (commander === undefined) return s;
+      return withCommander(s, { ...commander, name: p.name });
+    }
+
     case 'unit_added':
       return withUnit(s, p.unit);
 

@@ -59,6 +59,9 @@ export interface OrbatEditing {
   readonly onPlace: () => void;
   readonly onRaise: (unit: Unit, commander: Commander) => void;
   readonly onAppoint: (commander: Commander) => void;
+  /** Call an officer, or a formation, something else. */
+  readonly onRenameCommander: (commanderId: string, name: string) => void;
+  readonly onRenameUnit: (unitId: string, name: string) => void;
   /** Add a side. A campaign starts with none. */
   readonly onAddFaction: (faction: Faction) => void;
   /** Raise a whole order of battle from the text of a YAML file. See `oob.ts`. */
@@ -78,6 +81,7 @@ export interface OrbatEditing {
 type Editing =
   | { readonly kind: 'raise'; readonly superiorId: string | null }
   | { readonly kind: 'appoint'; readonly unitId: string }
+  | { readonly kind: 'rename'; readonly target: 'commander' | 'unit'; readonly id: string }
   | { readonly kind: 'side' }
   | null;
 
@@ -224,6 +228,7 @@ export function Roster({
     const line = f.line;
     const patrol = line?.unit !== null && line?.unit !== undefined && isPatrol(line.unit);
     const appointing = form?.kind === 'appoint' && form.unitId === f.unitId;
+    const renamingUnit = form?.kind === 'rename' && form.target === 'unit' && form.id === f.unitId;
 
     return (
       <li key={f.unitId} className="cmd-formation">
@@ -259,6 +264,16 @@ export function Roster({
               <span className="muted">{copy.roster.alsoRiding(f.alsoRiding.join(', '))}</span>
             )}
           </button>
+          {editing !== undefined && line?.unit != null && (
+            <button
+              className="cmd-action"
+              onClick={() =>
+                setForm(renamingUnit ? null : { kind: 'rename', target: 'unit', id: f.unitId })
+              }
+            >
+              {copy.roster.rename}
+            </button>
+          )}
           {editing !== undefined && !patrol && (
             <button
               className="cmd-action"
@@ -268,6 +283,19 @@ export function Roster({
             </button>
           )}
         </div>
+
+        {renamingUnit && editing !== undefined && (
+          <RenameForm
+            blurb={copy.roster.renameFormation(f.name)}
+            name={f.name}
+            busy={editing.busy}
+            onRename={(name) => {
+              editing.onRenameUnit(f.unitId, name);
+              setForm(null);
+            }}
+            onCancel={() => setForm(null)}
+          />
+        )}
 
         {expanded && <Details line={line} task={taskOf(f.unitId)} cfg={cfg} clockHours={clockHours} />}
 
@@ -292,6 +320,7 @@ export function Roster({
   const commanderNode = (c: CommandNode, root: boolean): ReactNode => {
     const isFolded = folded.has(c.id);
     const raising = form?.kind === 'raise' && form.superiorId === c.id;
+    const renaming = form?.kind === 'rename' && form.target === 'commander' && form.id === c.id;
 
     return (
       <li key={c.id} className="cmd-node">
@@ -313,6 +342,16 @@ export function Roster({
           {editing !== undefined && (
             <button
               className="cmd-action"
+              onClick={() =>
+                setForm(renaming ? null : { kind: 'rename', target: 'commander', id: c.id })
+              }
+            >
+              {copy.roster.rename}
+            </button>
+          )}
+          {editing !== undefined && (
+            <button
+              className="cmd-action"
               onClick={() => setForm(raising ? null : { kind: 'raise', superiorId: c.id })}
             >
               {copy.roster.addSubordinate}
@@ -329,6 +368,19 @@ export function Roster({
             </button>
           )}
         </div>
+
+        {renaming && editing !== undefined && (
+          <RenameForm
+            blurb={copy.roster.renameOfficer(c.name)}
+            name={c.name}
+            busy={editing.busy}
+            onRename={(name) => {
+              editing.onRenameCommander(c.id, name);
+              setForm(null);
+            }}
+            onCancel={() => setForm(null)}
+          />
+        )}
 
         {linkLine(c.id)}
 
@@ -541,5 +593,63 @@ function Details({
         {task !== null && ` · ${task}`}
       </dd>
     </dl>
+  );
+}
+
+/**
+ * A new name for an officer or a formation, in place in the tree.
+ *
+ * Offered only when it would change something: the same name again, or a blank one, is
+ * not sent. Escape puts it away, as it does every other form in the drawer.
+ */
+function RenameForm({
+  blurb,
+  name,
+  busy,
+  onRename,
+  onCancel,
+}: {
+  blurb: string;
+  name: string;
+  busy: boolean;
+  onRename: (name: string) => void;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState(name);
+  const next = value.trim();
+  const ready = !busy && next !== '' && next !== name;
+
+  return (
+    <form
+      className="orbat-form"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (ready) onRename(next);
+      }}
+    >
+      <p className="muted small">{blurb}</p>
+      <div className="orbat-grid">
+        <label>
+          <span>{copy.roster.newName}</span>
+          <input
+            value={value}
+            autoFocus
+            disabled={busy}
+            onChange={(e) => setValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') onCancel();
+            }}
+          />
+        </label>
+      </div>
+      <div className="despatch-actions">
+        <button type="submit" className="primary" disabled={!ready}>
+          {copy.roster.saveName}
+        </button>
+        <button type="button" onClick={onCancel}>
+          {copy.roster.cancelRename}
+        </button>
+      </div>
+    </form>
   );
 }

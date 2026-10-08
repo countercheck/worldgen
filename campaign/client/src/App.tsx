@@ -48,6 +48,7 @@ import {
   setFormation,
   setStandingOrders,
   setUnitStats,
+  renameCommander,
   setTask,
   subscribe,
   teleportUnit,
@@ -664,12 +665,15 @@ function Console({
           },
           ...Object.entries(joined.held).map(([commanderId, token]) => {
             // The commander's name, not their id. A referee switching seats is choosing a
-            // person to be, and "kellermann" is the engine's bookkeeping.
+            // person to be, and "kellermann" is the engine's bookkeeping. The campaign's
+            // name first, because the referee may have renamed them since this browser
+            // stored the link; the stored one is for a seat the view does not show.
             const seat = joined.seats[commanderId];
-            const faction = seat?.faction ?? board.commanders.get(commanderId)?.faction;
+            const live = board.commanders.get(commanderId);
+            const faction = live?.faction ?? seat?.faction;
             return {
               id: commanderId,
-              label: seat?.name ?? board.commanders.get(commanderId)?.name ?? commanderId,
+              label: live?.name ?? seat?.name ?? commanderId,
               token,
               color: faction === undefined ? undefined : board.factions.get(faction)?.color,
             };
@@ -1146,6 +1150,20 @@ function Console({
                     });
                   }
                   return joinLink({ campaignId: session.campaignId, token });
+                },
+                onRenameCommander: (commanderId, name) => {
+                  setSending(true);
+                  setPostError(null);
+                  void renameCommander(session, commanderId, name)
+                    .then((result) => setPostError(refusal(result)))
+                    .finally(() => setSending(false));
+                },
+                onRenameUnit: (unitId, name) => {
+                  setSending(true);
+                  setPostError(null);
+                  void setUnitStats(session, unitId, { name })
+                    .then((result) => setPostError(refusal(result)))
+                    .finally(() => setSending(false));
                 },
                 onAppoint: (commander) => {
                   setSending(true);

@@ -75,6 +75,11 @@ export type Command =
       readonly unitId?: string;
       readonly superiorId?: string | null;
     }
+  /**
+   * Call an officer something else: a misspelling put right, or a name the referee has
+   * only now settled on. A formation is renamed through `set_unit_stats`.
+   */
+  | { readonly kind: 'rename_commander'; readonly commanderId: string; readonly name: string }
   | { readonly kind: 'add_unit'; readonly unit: Unit }
   | { readonly kind: 'remove_unit'; readonly unitId: string }
   | {
@@ -194,6 +199,7 @@ const REFEREE_ONLY: ReadonlySet<CommandKind> = new Set([
   'add_commander',
   'remove_commander',
   'reassign_commander',
+  'rename_commander',
   'add_unit',
   'remove_unit',
   'advance_clock',
@@ -364,6 +370,15 @@ export function check(
       }
       break;
     }
+
+    case 'rename_commander':
+      requireCommander(cmd.commanderId);
+      // Hard: an officer with no name cannot be addressed, appointed under or written to,
+      // and every list that shows them would show a gap.
+      if (typeof cmd.name !== 'string' || cmd.name.trim() === '') {
+        v.push(hard(CODES.MALFORMED, 'an officer has to be called something'));
+      }
+      break;
 
     case 'reassign_commander': {
       const c = requireCommander(cmd.commanderId);
@@ -728,6 +743,9 @@ export function decide(
           ...(cmd.superiorId !== undefined ? { superiorId: cmd.superiorId } : {}),
         },
       ];
+
+    case 'rename_commander':
+      return [{ kind: 'commander_renamed', commanderId: cmd.commanderId, name: cmd.name.trim() }];
 
     case 'add_unit':
       return [{ kind: 'unit_added', unit: cmd.unit }];

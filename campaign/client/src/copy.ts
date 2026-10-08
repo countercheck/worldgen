@@ -655,6 +655,13 @@ export const copy = {
     // The referee's hands on it.
     addSubordinate: '+ subordinate',
     addOfficer: '+ officer',
+    // Renaming, from the tree. A formation's name can also be set in its "Set by hand" form.
+    rename: 'rename',
+    renameOfficer: (name: string): string => `A new name for ${name}.`,
+    renameFormation: (name: string): string => `A new name for ${name}.`,
+    newName: 'New name',
+    saveName: 'Rename',
+    cancelRename: 'Cancel',
     addArmyCommand: '+ army command',
     addSide: '+ side',
     noSides: 'No sides yet. Add one, with a name and a colour, before raising anybody.',
