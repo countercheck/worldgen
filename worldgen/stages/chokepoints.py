@@ -22,7 +22,7 @@ takes it. A pass settlement therefore appears only where the ground leaves no wa
 which on 1500 m of relief is a couple of places on a map and on flat country is none.
 """
 
-from ..core.hex import SOIL_RANK, Settlement, SettlementTier
+from ..core.hex import SOIL_RANK, HexCoord, Settlement, SettlementTier
 from ..core.hex_grid import distance, hex_range, neighbors, side_hexes
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import ROAD_TIER_RANK, RoadTier, WorldState, road_edge_key
@@ -87,7 +87,7 @@ def is_pass(coord, hexes, cfg) -> bool:
     return saddle_relief_m(coord, hexes) >= cfg.terrain_steep_gradient_m
 
 
-def residual_surplus(hexes, cfg) -> dict:
+def residual_surplus(hexes, cfg) -> dict[HexCoord, float]:
     """The marketable surplus the markets did not take.
 
     `gather` weights every hex by `usable_fraction` of the distance to its market, which
@@ -145,14 +145,14 @@ class ChokepointStage(GeneratorStage):
         return state
 
     @staticmethod
-    def _draw(hexes, seats, residual, cfg, rivers) -> dict:
+    def _draw(hexes, seats, residual, cfg, rivers) -> dict[HexCoord, float]:
         """What each seat can actually fetch off its own fields."""
         owner, cost = allocate_catchments(hexes, seats, cfg.rural_field_radius, cfg, rivers)
         return gather(residual, owner, cost, cfg.rural_field_radius)
 
     # -- what may be one -------------------------------------------------------
 
-    def _candidates(self, state, cfg) -> list:
+    def _candidates(self, state, cfg) -> list[HexCoord]:
         """Ground that holds a chokepoint *and* carries traffic over it.
 
         Both halves are needed. A bridge on a farm track is a plank, not a town; and a
@@ -205,20 +205,20 @@ class ChokepointStage(GeneratorStage):
         return sorted(held & settleable(hexes, cfg) - occupied)
 
     @staticmethod
-    def _through_network(state) -> set:
+    def _through_network(state) -> set[HexCoord]:
         """Road hexes on a component that already joins settlements to each other.
 
         A component holding fewer than two settlements carries no journey between them,
         whatever tier its edges came out at.
         """
-        adj: dict = {}
+        adj: dict[HexCoord, set[HexCoord]] = {}
         for a, b in state.road_edges:
             adj.setdefault(a, set()).add(b)
             adj.setdefault(b, set()).add(a)
 
         seats = {s.coord for s in state.settlements}
-        through: set = set()
-        seen: set = set()
+        through: set[HexCoord] = set()
+        seen: set[HexCoord] = set()
         for start in adj:
             if start in seen:
                 continue
@@ -236,7 +236,7 @@ class ChokepointStage(GeneratorStage):
 
     # -- planting --------------------------------------------------------------
 
-    def _plant(self, candidates, residual, state, cfg) -> list:
+    def _plant(self, candidates, residual, state, cfg) -> list[HexCoord]:
         """Greedy over what is left, claiming a village's fields outright as it goes.
 
         A hard claim rather than the decaying share markets use, because the two are
@@ -274,7 +274,7 @@ class ChokepointStage(GeneratorStage):
         for s in state.settlements:
             blocked |= set(hex_range(s.coord, cfg.chokepoint_min_separation))
 
-        seats: list = []
+        seats: list[HexCoord] = []
         pool = list(candidates)
         while pool:
             best = max(pool, key=lambda c: (score(c), c))
@@ -291,7 +291,7 @@ class ChokepointStage(GeneratorStage):
 
     # -- founding --------------------------------------------------------------
 
-    def _found(self, seats, draw, hexes, cfg, rivers) -> list:
+    def _found(self, seats, draw, hexes, cfg, rivers) -> list[Settlement]:
         """Sized by the fields it can work, the same arithmetic as every other tier.
 
         What differs is only the range: `rural_field_radius`, the daily walk out to the

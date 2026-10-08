@@ -2,9 +2,12 @@ import json
 import math
 import os
 from dataclasses import asdict, dataclass, fields
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .hex_grid import GRID_LAYOUTS
+
+if TYPE_CHECKING:
+    from .hex import Biome
 
 # How an imported image is read.  See `WorldConfig.heightmap_mode`.
 HEIGHTMAP_MODES = ("elevation", "coastline")
@@ -39,10 +42,10 @@ class ClimateContext:
 
     mean_temperature_c: float
     mean_precip_mm: float
-    palette: frozenset
+    palette: "frozenset[Biome]"
 
 
-def _palette(*names: str) -> frozenset:
+def _palette(*names: str) -> "frozenset[Biome]":
     from .hex import Biome
 
     return frozenset(getattr(Biome, n) for n in names)
@@ -1675,7 +1678,7 @@ class WorldConfig:
         return _construct(cls, data)
 
     @classmethod
-    def from_dict(cls, data: dict) -> "WorldConfig":
+    def from_dict(cls, data: dict[str, Any]) -> "WorldConfig":
         """Build a config from a mapping, such as the one a world.json keeps under
         `metadata.config`: tuples arrive as lists, and old keys are carried over as a file's
         would be."""
@@ -1876,7 +1879,7 @@ _RETIRED_FIELDS: dict[str, str] = {
 _RENAMED_FIELDS: dict[str, str] = {}
 
 
-def _construct(cls: type, data: dict) -> "WorldConfig":
+def _construct(cls: type, data: dict[str, Any]) -> "WorldConfig":
     """Build a config from a loaded mapping, with a readable error for a bad key.
 
     Without this an unknown key reaches the dataclass constructor and raises `TypeError`,

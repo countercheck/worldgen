@@ -104,7 +104,7 @@ def _parse_template(text: str) -> list[tuple[str, list[tuple[str, str]]]]:
     return [(title, items) for title, items in sections if items]
 
 
-def config_schema() -> list[dict]:
+def config_schema() -> list[dict[str, Any]]:
     """The form: sections of fields, each with its control, default and help text."""
     declared = {f.name: f for f in fields(WorldConfig)}
     defaults = asdict(WorldConfig())
@@ -132,7 +132,7 @@ def config_schema() -> list[dict]:
     return out
 
 
-def coerce(overrides: Any) -> dict:
+def coerce(overrides: Any) -> dict[str, Any]:
     """Check a browser's overrides against the dataclass and return them typed.
 
     `WorldConfig` validates its enumerated fields but not the types of its numbers, and a

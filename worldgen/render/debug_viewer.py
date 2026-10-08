@@ -14,7 +14,7 @@ from ..core.hex import (
     TerrainLabel,
     terrain_label,
 )
-from ..core.hex_grid import axial_to_pixel, corner_to_pixel, road_polylines
+from ..core.hex_grid import Corner, axial_to_pixel, corner_to_pixel, road_polylines
 from ..core.world_state import RoadTier, WorldState
 from . import glyphs
 
@@ -295,7 +295,7 @@ _DRAINAGE_BASE_WIDTH = 1.2
 _DRAINAGE_WIDTH_STEP = 1.4
 
 
-def _drainage_links(net) -> list[tuple[int, list]]:
+def _drainage_links(net) -> list[tuple[int, list[Corner]]]:
     """The network as maximal runs of one order, headwater end first.
 
     Every link `analysis.links_by_order` counts, including the one-corner ones — a single

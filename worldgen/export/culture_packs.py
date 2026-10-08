@@ -40,7 +40,7 @@ def _parse(text: str, name: str, source: str) -> LoadedPack:
     return LoadedPack(parse_pack(data, name), source, name, pack_hash(data))
 
 
-def _add(found: dict, loaded: LoadedPack, seen_here: dict) -> None:
+def _add(found: dict[str, LoadedPack], loaded: LoadedPack, seen_here: dict[str, str]) -> None:
     key = loaded.pack.key
     if key in seen_here:
         raise CulturePackError(

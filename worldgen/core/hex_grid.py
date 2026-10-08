@@ -2,8 +2,12 @@ import heapq
 import math
 from collections import deque
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from .hex import Hex, HexCoord, TerrainClass
+
+if TYPE_CHECKING:
+    from .world_state import RoadTier
 
 # Grid layouts.  Both store hexes under axial coordinates — only the *set* of hexes a
 # world is built from differs, so adjacency, distance and pathfinding are unaffected.
@@ -333,7 +337,7 @@ def astar_to_any(
     cost_fn: Callable[[Hex], float],
     edge_cost_fn: Callable[[Hex, Hex], float] | None = None,
     aim: HexCoord | None = None,
-    goal_cost: dict | None = None,
+    goal_cost: dict[HexCoord, float] | None = None,
 ) -> list[HexCoord] | None:
     """`astar`, but it ends at the best hex in *goals* rather than at one named hex.
 
@@ -362,7 +366,7 @@ def astar_to_any(
         return [start]
 
     open_set = [(0.0, start)]
-    came_from: dict = {start: None}
+    came_from: dict[HexCoord, HexCoord | None] = {start: None}
     g_score = {start: 0.0}
     visited = set()
     best_total, best_node = float("inf"), None
@@ -456,7 +460,9 @@ def road_water_transitions(sea_edges, hexes: dict[HexCoord, Hex]) -> set[HexCoor
     return out
 
 
-def road_polylines(road_edges, hexes: dict[HexCoord, Hex]) -> list[tuple]:
+def road_polylines(
+    road_edges, hexes: dict[HexCoord, Hex]
+) -> list[tuple["RoadTier", list[HexCoord]]]:
     """The road graph as drawable runs: `(tier, polyline)` pairs, each edge appearing once.
 
     Replaces `dedupe_road_paths`, which existed only to undo the old representation.  When
@@ -474,12 +480,12 @@ def road_polylines(road_edges, hexes: dict[HexCoord, Hex]) -> list[tuple]:
     Results come back in ascending tier rank, so a renderer drawing them in order paints
     primary roads last and a track never overdraws a highway.
     """
-    from .world_state import ROAD_TIER_RANK
+    from .world_state import ROAD_TIER_RANK, RoadTier
 
     # Water is skipped defensively: `road_edges` should hold none, but a world loaded from
     # a schema-1.3 file has its sea legs mixed in and must still draw.
     adjacency: dict[HexCoord, list[tuple[HexCoord, object]]] = {}
-    edges: dict[frozenset, object] = {}
+    edges: dict[frozenset[HexCoord], object] = {}
     for (a, b), edge in road_edges.items():
         if _is_water(hexes, a) or _is_water(hexes, b):
             continue
@@ -492,8 +498,8 @@ def road_polylines(road_edges, hexes: dict[HexCoord, Hex]) -> list[tuple]:
         """Neighbours reachable from *coord* along an edge of the same tier."""
         return [n for n, t in adjacency.get(coord, ()) if t == tier]
 
-    out: list[tuple] = []
-    walked: set[frozenset] = set()
+    out: list[tuple[RoadTier, list[HexCoord]]] = []
+    walked: set[frozenset[HexCoord]] = set()
 
     def walk(start: HexCoord, first: HexCoord, tier) -> None:
         run = [start, first]

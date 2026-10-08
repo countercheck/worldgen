@@ -25,13 +25,18 @@ settlements that can haul food to it — nearer ones sending more, and none more
 `resource_draw_share` of what it could — and the map's total population is unchanged.
 """
 
-from ..core.hex import LandUse, Settlement, SettlementRole, SettlementTier
+from typing import Any
+
+from ..core.hex import HexCoord, LandUse, Settlement, SettlementRole, SettlementTier
 from ..core.hex_grid import distance, grade_reachable_count, hex_range, neighbors
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
 from .haulage import bulk_routes, floatable, usable_fraction
 from .riverside import river_index
 from .road_cost import WATER, grade_is_under_cap
+
+# What `_work` reports of a site it put people to work at: where, how many, and as what.
+_Worked = tuple[HexCoord, int, SettlementRole]
 
 
 class ResourceStage(GeneratorStage):
@@ -41,7 +46,7 @@ class ResourceStage(GeneratorStage):
         hexes = state.hexes
         cfg = self.config
 
-        reach_cache: dict = {}
+        reach_cache: dict[HexCoord, int] = {}
 
         def reachable(coord) -> bool:
             """The same test every settlement passes: enough ground a cart can get about."""
@@ -73,7 +78,7 @@ class ResourceStage(GeneratorStage):
         if not rows or cfg.port_min_population <= 0:
             return
 
-        by_quay: dict = {}
+        by_quay: dict[HexCoord, dict[str, Any]] = {}
         for q, r, sq, sr, food, people in rows:
             entry = by_quay.setdefault((q, r), {"food": 0.0, "from": {}})
             entry["food"] += food
@@ -81,14 +86,14 @@ class ResourceStage(GeneratorStage):
 
         by_coord = {s.coord: s for s in state.settlements}
         founded = 0
-        taken: set = set()
+        taken: set[HexCoord] = set()
         for quay in sorted(by_quay, key=lambda c: (-by_quay[c]["food"], c)):
             if quay in taken:
                 continue
             front = [
                 c for c in hex_range(quay, cfg.transship_radius) if c in by_quay and c not in taken
             ]
-            owed: dict = {}
+            owed: dict[HexCoord, float] = {}
             for c in front:
                 for seat, people in by_quay[c]["from"].items():
                     owed[seat] = owed.get(seat, 0.0) + people
@@ -141,7 +146,7 @@ class ResourceStage(GeneratorStage):
 
     # -- mines ----------------------------------------------------------------
 
-    def _mines(self, state, reachable) -> list:
+    def _mines(self, state, reachable) -> list[_Worked]:
         """Ore deposits in high ground, each worked by a village or by the town beside it.
 
         Deposits are drawn at random over hexes with at least `ore_min_relief_m` of relief,
@@ -188,7 +193,7 @@ class ResourceStage(GeneratorStage):
         # is a separate question. Filtering while drawing would only move the mines to
         # workable ground and keep their number, when an ore field with no way out should
         # simply go unworked.
-        deposits: list = []
+        deposits: list[HexCoord] = []
         for i in order:
             if len(deposits) >= wanted:
                 break
@@ -200,7 +205,7 @@ class ResourceStage(GeneratorStage):
         # ore out never changes the size of the next.
         sizes = self.rng.lognormal(0.0, cfg.mine_workforce_sigma, size=len(deposits))
         worked = 0
-        output: list = []
+        output: list[_Worked] = []
         for coord, size in zip(deposits, sizes, strict=True):
             if coord not in to_outlet or not reachable(coord):
                 continue
@@ -213,7 +218,7 @@ class ResourceStage(GeneratorStage):
 
     # -- lumber ---------------------------------------------------------------
 
-    def _lumber(self, state, reachable) -> list:
+    def _lumber(self, state, reachable) -> list[_Worked]:
         """Camps in the big woods, on water that floats the timber out towards a city.
 
         A camp's worth is the woodland within `lumber_radius`, discounted by how far the
@@ -247,8 +252,8 @@ class ResourceStage(GeneratorStage):
                 scored.append((-worth, coord, mass))
         scored.sort()
 
-        camps: list = []
-        output: list = []
+        camps: list[HexCoord] = []
+        output: list[_Worked] = []
         for _, coord, mass in scored:
             if any(distance(coord, c) < cfg.lumber_min_separation for c in camps):
                 continue
@@ -333,7 +338,7 @@ class ResourceStage(GeneratorStage):
         self._found(state, coord, SettlementTier.VILLAGE, role, people, kind, index)
         return (coord, people, role)
 
-    def _draw(self, state, site, need, exclude=None) -> tuple[int, list]:
+    def _draw(self, state, site, need, exclude=None) -> tuple[int, list[tuple[Settlement, int]]]:
         """Move up to *need* people to *site* from the settlements that can feed it.
 
         Each sender's weight is its population times the share of a cargo that survives the
@@ -350,7 +355,7 @@ class ResourceStage(GeneratorStage):
         ]
         senders = [(s, w) for s, w in senders if w > 0.0]
         weight = sum(w for _, w in senders)
-        sent: list = []
+        sent: list[tuple[Settlement, int]] = []
         if weight <= 0.0:
             return 0, sent
         want = min(need, weight * cfg.resource_draw_share)

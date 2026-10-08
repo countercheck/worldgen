@@ -8,15 +8,19 @@ the two can gain a legend row or change placement without drifting apart.
 
 import math
 from dataclasses import dataclass
+from enum import Enum
 
 from ..core.hex import (
     DEFAULT_TERRAIN_BANDS,
+    Hex,
+    HexCoord,
     SettlementRole,
     SettlementTier,
     terrain_bands,
     terrain_label,
 )
 from ..core.hex_grid import (
+    Side,
     corner_to_pixel,
     road_polylines,
     road_water_transitions,
@@ -142,7 +146,7 @@ def _label(member) -> str:
     return str(member.value).replace("_", " ").title()
 
 
-def anchorage_points(ws: WorldState) -> list:
+def anchorage_points(ws: WorldState) -> list[HexCoord]:
     """Every land hex where a *drawn* route takes to the water, in stable order.
 
     Two sources, drawn with the same symbol because they mean the same thing to a
@@ -161,9 +165,9 @@ def anchorage_points(ws: WorldState) -> list:
     return sorted(points)
 
 
-def _bearings(ws: WorldState, hex_size: float) -> dict:
+def _bearings(ws: WorldState, hex_size: float) -> dict[Side, float]:
     """The screen bearing, in degrees, of the river along each side it runs: downstream."""
-    bearing: dict = {}
+    bearing: dict[Side, float] = {}
     for river in ws.rivers:
         for a, b in zip(river.corners, river.corners[1:], strict=False):
             (ax, ay), (bx, by) = corner_to_pixel(a, hex_size), corner_to_pixel(b, hex_size)
@@ -176,7 +180,7 @@ def _midpoint(side, hex_size: float) -> tuple[float, float]:
     return (ax + bx) / 2.0, (ay + by) / 2.0
 
 
-def river_marks(ws: WorldState, hex_size: float) -> list:
+def river_marks(ws: WorldState, hex_size: float) -> list[tuple[float, float, str, float]]:
     """Where rivers rise, where they end and where they run white, as `(x, y, kind,
     bearing)` in stable order, in pixels before the exporter's offset. *kind* is "source",
     "end" or "rapids" (a cataract or rapids); *bearing* is the river's, downstream, in
@@ -204,7 +208,7 @@ def river_marks(ws: WorldState, hex_size: float) -> list:
     return sorted(out)
 
 
-def crossings(ws: WorldState, hex_size: float) -> list:
+def crossings(ws: WorldState, hex_size: float) -> list[tuple[float, float, str, float]]:
     """Every bridge, and every ford on a major river, as `(x, y, kind, angle)` in stable
     order, at the middle of the river side it crosses, in pixels before the exporter's
     offset.  A minor river can be waded almost anywhere, so its fords go unmarked.
@@ -238,7 +242,7 @@ def rows(ws: WorldState, color_mode: str, layers: set[str]) -> list[LegendRow]:
             out.append(LegendRow("ramp", "Low → high elevation"))
         else:
             # One representative hex per category, so exporters can reuse their fill lookup.
-            samples: dict = {}
+            samples: dict[Enum, Hex] = {}
             bands = terrain_bands(ws)
             for hex_item in ws.hexes.values():
                 category = _fill_category(hex_item, color_mode, bands)

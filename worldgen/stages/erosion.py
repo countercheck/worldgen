@@ -4,7 +4,7 @@ from collections import defaultdict, deque
 import numpy as np
 from scipy.ndimage import gaussian_filter
 
-from ..core.hex_grid import corner_hexes, hex_corner_keys, side_hexes, side_joining
+from ..core.hex_grid import Corner, corner_hexes, hex_corner_keys, side_hexes, side_joining
 from ..core.hex_grid import distance as hex_distance
 from ..core.hex_grid import neighbors as hex_neighbors
 from ..core.pipeline import GeneratorStage
@@ -224,7 +224,7 @@ def _neighbour_table(state: WorldState, w: int, h: int) -> list[list[tuple[int, 
     return table
 
 
-def _corner_draws(state: WorldState, rng: np.random.Generator) -> dict:
+def _corner_draws(state: WorldState, rng: np.random.Generator) -> dict[Corner, float]:
     """One fixed uniform draw per corner of the map, for the wander rule.
 
     Fixed across carve passes so a corner keeps choosing the same way while its valley
@@ -238,7 +238,7 @@ def _corner_routing(
     arr: np.ndarray,
     sea_level: float,
     state: WorldState,
-    draws: dict,
+    draws: dict[Corner, float],
     wander_exponent: float,
     rng: np.random.Generator,
     inflow: dict[tuple[int, int], float] | None = None,
@@ -259,7 +259,7 @@ def _corner_routing(
     net = build_network(elevation, land, set(elevation) - land, set(), [], floor_blend)
     drainage = flow_direction(net, rng, wander_exponent, draws=draws)
 
-    sources: dict = defaultdict(float)
+    sources: dict[Corner, float] = defaultdict(float)
     for coord in sorted(land):
         corner = drain_corner(coord, net, drainage)
         if corner is not None:
@@ -362,7 +362,7 @@ def _incise_channels(
     def cell(coord):
         return index[coord]
 
-    def land_cells(corner) -> list:
+    def land_cells(corner) -> list[tuple[int, int]]:
         return [c for c in around.get(corner, ()) if arr[c] >= sea_level]
 
     def height(corner) -> float:
@@ -397,7 +397,7 @@ def _inflow_mouths(
     sea_level: float,
     state: WorldState,
     neighbours: list[list[tuple[int, int]]],
-    edges: tuple,
+    edges: tuple[str, ...],
     count: int,
     separation: int,
 ) -> list[tuple[int, int]]:

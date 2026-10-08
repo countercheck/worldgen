@@ -1,7 +1,7 @@
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -34,10 +34,10 @@ class GeneratorPipeline:
         self.seed = seed
         self.config = config
         self.rng = np.random.default_rng(seed)
-        self.stages: list[tuple[type[GeneratorStage], dict]] = []
+        self.stages: list[tuple[type[GeneratorStage], dict[str, Any]]] = []
 
     def add_stage(
-        self, stage_cls: type[GeneratorStage], stage_config: dict | None = None
+        self, stage_cls: type[GeneratorStage], stage_config: dict[str, Any] | None = None
     ) -> "GeneratorPipeline":
         """Add a stage to the pipeline."""
         self.stages.append((stage_cls, stage_config or {}))

@@ -25,7 +25,7 @@ Everywhere else the river stays a barrier, which is what makes a trunk river bou
 market catchment instead of being invisible to it.
 """
 
-from ..core.hex import TerrainClass
+from ..core.hex import HexCoord, TerrainClass
 from ..core.hex_grid import Side, hex_range, side_hexes
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
@@ -37,14 +37,14 @@ FORD = "ford"
 BRIDGE = "bridge"
 
 
-def crossing_pressure(side: Side, surplus: dict, radius: int) -> float:
+def crossing_pressure(side: Side, surplus: dict[HexCoord, float], radius: int) -> float:
     """How much there is on either side worth connecting: the surplus within *radius* of
     either bank."""
     around = {c for bank in side_hexes(side) for c in hex_range(bank, radius)}
     return sum(surplus.get(c, 0.0) for c in around)
 
 
-def _near(side: Side, radius: int) -> set:
+def _near(side: Side, radius: int) -> set[HexCoord]:
     return {c for bank in side_hexes(side) for c in hex_range(bank, radius)}
 
 
@@ -91,7 +91,7 @@ class CrossingStage(GeneratorStage):
             if 1.0 < span[s] <= cfg.rare_ford_max_span
             and catchment_carries_a_barge(sides[s].catchment_km2, cfg)
         )
-        near_rare: set = set()
+        near_rare: set[HexCoord] = set()
         for _, side in rare:
             if any(b in near_rare for b in side_hexes(side)):
                 continue
@@ -109,12 +109,12 @@ class CrossingStage(GeneratorStage):
         # forded beside a trunk river gets nobody across the trunk; counting it would
         # leave a well-watered map, fords on every brook, with hardly a bridge on it.
         sep = cfg.crossing_min_separation
-        forded: dict = {}  # hex -> the largest catchment forded within `sep` of it
+        forded: dict[HexCoord, float] = {}  # hex -> the largest catchment forded within `sep` of it
         for side in fords:
             km2 = sides[side].catchment_km2
             for c in _near(side, sep):
                 forded[c] = max(forded.get(c, 0.0), km2)
-        taken: set = set()
+        taken: set[HexCoord] = set()
 
         def served(side) -> bool:
             km2 = sides[side].catchment_km2 * cfg.ford_serves_bridge_fraction

@@ -1,7 +1,7 @@
 import heapq
 from collections import deque
 
-from ..core.hex import TerrainClass
+from ..core.hex import HexCoord, TerrainClass
 from ..core.hex_grid import neighbors
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
@@ -25,8 +25,10 @@ class WaterBodiesStage(GeneratorStage):
     def run(self, state: WorldState) -> WorldState:
         hexes = state.hexes
 
-        water: set = {c for c, hx in hexes.items() if hx.terrain_class == TerrainClass.OPEN_WATER}
-        visited: set = set()
+        water: set[HexCoord] = {
+            c for c, hx in hexes.items() if hx.terrain_class == TerrainClass.OPEN_WATER
+        }
+        visited: set[HexCoord] = set()
 
         for seed in water:
             if seed in visited:
@@ -106,10 +108,10 @@ def _fill_hollows(state: WorldState, cfg) -> None:
                 hexes[c].tags.add("hollow")
 
 
-def _bfs_component(seed, water: set) -> set:
+def _bfs_component(seed, water: set[HexCoord]) -> set[HexCoord]:
     """Return all water hexes reachable from seed."""
-    component: set = {seed}
-    queue: deque = deque([seed])
+    component: set[HexCoord] = {seed}
+    queue: deque[HexCoord] = deque([seed])
     while queue:
         coord = queue.popleft()
         for nbr in neighbors(coord):

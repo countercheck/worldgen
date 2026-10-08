@@ -41,6 +41,10 @@ These are checked, not just described: `tests/test_layering.py` parses every mod
 fails on a layer importing one above it. Add a rule there when you add one here.
 - All random calls use a seeded `numpy.random.Generator` passed explicitly — no global state
 - All tunable parameters live in `WorldConfig`; nothing hardcoded in stage logic
+- A `dict`, `list`, `set`, `tuple` or `frozenset` annotation says what it holds —
+  `dict[HexCoord, float]`, not `dict`; `dict[str, Any]` only for a genuinely mixed mapping
+  such as JSON. Checked too: `tests/test_annotations.py` fails on a bare one, since no ruff
+  rule catches it
 
 ## Testing rules
 

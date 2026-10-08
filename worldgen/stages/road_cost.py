@@ -1,6 +1,6 @@
-from ..core.hex import TerrainClass
-from ..core.hex_grid import neighbors, side_hexes
-from ..core.world_state import ROAD_TIER_RANK, RoadTier, road_edge_key
+from ..core.hex import HexCoord, TerrainClass
+from ..core.hex_grid import Side, neighbors, side_hexes
+from ..core.world_state import ROAD_TIER_RANK, RoadEdge, RoadTier, road_edge_key
 from .riverside import side_gradients, side_span
 
 WATER = (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
@@ -94,7 +94,7 @@ def water_edge_cost(from_hx, to_hx, cfg) -> float:
     return cfg.road_embark_cost if to_water else cfg.road_disembark_cost
 
 
-def river_crossings(river_sides) -> dict[frozenset, float]:
+def river_crossings(river_sides) -> dict[frozenset[HexCoord], float]:
     """Every pair of hexes a river runs between, mapped to that river's flow there.
 
     Rivers run along hexsides, so a road crosses one exactly when it steps between the two
@@ -150,9 +150,9 @@ def road_edge_cost(from_hx, to_hx, cfg, ring=None, crossings=None) -> float:
     )
 
 
-def settlement_rings(seats) -> dict:
+def settlement_rings(seats) -> dict[HexCoord, frozenset[HexCoord]]:
     """Hex -> the settlement seats it neighbours, for `settlement_skirt_cost`."""
-    out: dict = {}
+    out: dict[HexCoord, set[HexCoord]] = {}
     for seat in seats:
         for n in neighbors(seat):
             out.setdefault(n, set()).add(seat)
@@ -211,7 +211,7 @@ def tag_river_crossings(road_edges, state, cfg) -> None:
     never built.  A ford stays either way — it is terrain, and needs nobody to build it.
     """
     side_of = {frozenset(side_hexes(side)): side for side in state.river_sides}
-    best: dict = {}
+    best: dict[Side, RoadTier] = {}
     for key, tier in road_edges.items():
         side = side_of.get(frozenset(key))
         if side is None:
@@ -340,15 +340,13 @@ def route_through_settlements(
     return rerouted
 
 
-def as_road_edges(tiers, hexes) -> dict:
+def as_road_edges(tiers, hexes) -> dict[tuple[HexCoord, HexCoord], RoadEdge]:
     """Turn a key -> tier map into key -> `RoadEdge`, measuring each edge as it goes.
 
     The stages build with bare tiers because that is all the routing and tidying passes
     need. This is the one place the delta is measured, so the number a world carries is the
     number `slope_edge_cost` charged on.
     """
-    from ..core.world_state import RoadEdge
-
     out = {}
     for (a, b), tier in tiers.items():
         ha, hb = hexes.get(a), hexes.get(b)
@@ -363,7 +361,7 @@ def tier_near(road_edges, node, hops) -> RoadTier:
     TRACK where no road comes that close. Walked along the network rather than measured as
     the crow flies, so a trunk on the far side of a ridge is not "near".
     """
-    adj: dict = {}
+    adj: dict[HexCoord, list[HexCoord]] = {}
     for a, b in road_edges:
         adj.setdefault(a, []).append(b)
         adj.setdefault(b, []).append(a)
@@ -409,7 +407,7 @@ def fill_tier_gaps(road_edges, max_edges) -> int:
     promoted = 0
     for tier in (RoadTier.PRIMARY, RoadTier.SECONDARY):
         rank = ROAD_TIER_RANK[tier]
-        adj: dict = {}
+        adj: dict[HexCoord, list[HexCoord]] = {}
         for a, b in road_edges:
             adj.setdefault(a, []).append(b)
             adj.setdefault(b, []).append(a)
@@ -418,7 +416,7 @@ def fill_tier_gaps(road_edges, max_edges) -> int:
             return ROAD_TIER_RANK[road_edges[road_edge_key(a, b)]] >= rank
 
         # Union-find over the tier's own network, so a join made here counts for the next.
-        parent: dict = {}
+        parent: dict[HexCoord, HexCoord] = {}
 
         def find(n, parent=parent):
             parent.setdefault(n, n)
@@ -490,13 +488,13 @@ def prune_orphan_roads(road_edges, anchors) -> int:
 
     Mutates *road_edges*; returns how many edges were dropped.
     """
-    adj: dict = {}
+    adj: dict[HexCoord, set[HexCoord]] = {}
     for a, b in road_edges:
         adj.setdefault(a, set()).add(b)
         adj.setdefault(b, set()).add(a)
 
-    seen: set = set()
-    doomed: set = set()
+    seen: set[HexCoord] = set()
+    doomed: set[HexCoord] = set()
     for start in adj:
         if start in seen:
             continue

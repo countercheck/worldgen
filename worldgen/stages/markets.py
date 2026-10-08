@@ -21,6 +21,7 @@ glyph.  So the peasantry is present in the arithmetic and absent from the settle
 
 import heapq
 
+from ..core.hex import HexCoord
 from ..core.hex_grid import grade_reachable_count, hex_range, ring
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
@@ -88,7 +89,7 @@ class MarketStage(GeneratorStage):
 
     # -- planting -------------------------------------------------------------
 
-    def _plant(self, hexes, surplus, cfg, rivers) -> list:
+    def _plant(self, hexes, surplus, cfg, rivers) -> list[HexCoord]:
         """Lazy-greedy siting against a depleting surplus surface.
 
         Depletion only ever *reduces* a site's score, so the score function is monotone
@@ -110,7 +111,7 @@ class MarketStage(GeneratorStage):
                         total += value * share
             return total * (1.0 + site_bonus(coord, hexes[coord], hexes, cfg, rivers))
 
-        reach_cache: dict = {}
+        reach_cache: dict[HexCoord, int] = {}
 
         def reachable(coord):
             """Deferred to acceptance: it is the dear test, and most candidates never pop."""
@@ -129,8 +130,8 @@ class MarketStage(GeneratorStage):
         heap = [(-score(c), c) for c in candidates]
         heapq.heapify(heap)
 
-        seats: list = []
-        suppressed: set = set()
+        seats: list[HexCoord] = []
+        suppressed: set[HexCoord] = set()
 
         while heap:
             _, coord = heapq.heappop(heap)
