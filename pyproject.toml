@@ -45,7 +45,7 @@ worldgen = ["*.yaml", "naming/packs/*.yaml", "web/static/*"]
 target-version = "py311"
 line-length = 100
 # Documentation is prose, not source. Ruff 0.16 began formatting Python inside Markdown
-# fences, which collapses the aligned `file:line` annotation columns in TECH_DEBT.md and
+# fences, which collapses the aligned `file:line` annotation columns in
 # docs/REFERENCE.md into ragged single-space comments — the alignment is what makes those
 # excerpts readable as a table of pointers into the code. The snippets are also elided and
 # annotated rather than runnable, so formatting them as if they compiled is the wrong

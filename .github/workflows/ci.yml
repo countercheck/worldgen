@@ -62,7 +62,7 @@ jobs:
       # Measuring it here was tried and reverted: on this runner the JIT-disabled pass
       # took 20m15s against 6m26s with numba, turning a 13-minute job into a 27-minute
       # one on every push. Fourteen minutes a run is not worth making a number look
-      # right about code that was never actually untested. See TECH_DEBT.md item 1.
+      # right about code that was never actually untested. See issue #129.
       #
       # `NPY_DISABLE_CPU_FEATURES` keeps the world the same on every runner. GitHub hands
       # this job a mix of CPUs, and on the ones with AVX-512 (Intel Xeons, AMD EPYC 9xxx)

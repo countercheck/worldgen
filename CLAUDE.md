@@ -60,6 +60,20 @@ tool does this; by hand: `git worktree add .claude/worktrees/<name> -b <branch> 
 - `campaign/node_modules` is not shared — run `npm install` in the worktree's `campaign/`.
 - Remove the worktree once its branch is merged: `git worktree remove .claude/worktrees/<name>`.
 
+## Tech debt
+
+Tracked as GitHub issues labelled `tech-debt`, not in a file in the repo. The pinned issue
+#131 gives the order to work them in. `TECH_DEBT.md` is retired; its items became #113–#130.
+
+- Found some debt you aren't fixing now? Open an issue with the `tech-debt` label. Give its
+  category, a priority score (Priority = (Impact + Risk) × (6 − Effort), each 1–5) and an
+  effort size (S/M/L). Then record what you measured and the shape of the fix. If its order
+  relative to other debt matters, add it to #131.
+- Closing one: close the issue from the PR (`Closes #N`) and tick it in #131.
+- Deciding something should *not* be fixed: close it as "not planned" with the reason, so
+  it isn't raised again.
+- In code, cite the issue (`tech-debt #116`), never an item number.
+
 ## Pre-commit checks
 
 The pre-commit hook runs `ruff check` and `pytest` before every commit.

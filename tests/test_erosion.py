@@ -117,7 +117,7 @@ def test_widening_is_a_no_op_when_width_max_is_zero():
     assert (arr == before).all()
 
 
-# --- the size dependence recorded as debt item 19 -------------------------------
+# --- the size dependence recorded as tech-debt issue #116 ---------------------
 
 
 def _many_channels(w=41, h=9, cols=(6, 13, 20, 27, 34), flow=50.0, trunk=None):
@@ -161,7 +161,7 @@ def test_every_ordinary_channel_gets_a_floodplain_when_none_dominates():
 
 @pytest.mark.xfail(
     strict=True,
-    reason="debt item 19: `reach` scales against `flow.max()`, so one imported river "
+    reason="tech-debt #116: `reach` scales against `flow.max()`, so one imported river "
     "sizes every belt on the map and channels under ~5.25% of it get none at all. "
     "Measured on a real 96x96 map: 68 of 131 channels keep a floodplain with inflows "
     "on, 131 of 131 with them off.",
