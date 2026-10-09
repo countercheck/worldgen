@@ -362,10 +362,6 @@ def test_market_count_tracks_the_surplus_on_offer():
     assert rows[-1][1] > rows[0][1], f"richest and poorest supported the same count. {summary}"
 
 
-@pytest.mark.xfail(
-    reason="population not yet recalibrated for elevation_profile terrain; tech-debt #114",
-    strict=False,
-)
 def test_fertility_decides_how_many_markets_not_how_big():
     """The other half of the claim `test_market_count_tracks_the_surplus_on_offer` makes.
 
