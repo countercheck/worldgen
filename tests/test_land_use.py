@@ -10,7 +10,7 @@ import statistics
 
 import pytest
 
-from tests.worlds import build_pipeline, build_world
+from tests.worlds import build_pipeline, build_world, fork_world
 from worldgen.core.config import WorldConfig
 from worldgen.core.hex import SOIL_RANK, LandUse, SoilQuality, TerrainClass
 from worldgen.stages.habitability import actual_food, potential_food
@@ -20,6 +20,13 @@ _DEFAULTS = {"regional_climate": "temperate", "continent_falloff_edges": ("south
 
 def _world(**over):
     return build_world(seed=42, width=96, height=96, model="organic", **{**_DEFAULTS, **over})
+
+
+def _varied(**varied):
+    """`_world(**varied)`, built only from `LandUseStage` on: nothing earlier reads these."""
+    return fork_world(
+        "LandUseStage", varied, seed=42, width=96, height=96, model="organic", **_DEFAULTS
+    )
 
 
 @pytest.fixture(scope="module")
@@ -92,7 +99,7 @@ def test_wood_survives_between_the_markets(used):
 def test_a_wider_margin_clears_less(used):
     """The knob does what it says, monotonically."""
     counts = [
-        sum(1 for h in _land(_world(clearing_margin=m)) if h.land_use is LandUse.ARABLE)
+        sum(1 for h in _land(_varied(clearing_margin=m)) if h.land_use is LandUse.ARABLE)
         for m in (0.2, 0.45, 0.8)
     ]
     assert counts == sorted(counts, reverse=True), counts
@@ -183,7 +190,7 @@ def test_people_per_food_sets_density_and_nothing_else(used):
     rises with it, while the markets, the land use and the rural share stay where they are.
     """
     cfg = WorldConfig(**used.metadata["config"])
-    worlds = [_world(people_per_food=cfg.people_per_food * k) for k in (0.6, 1.4)]
+    worlds = [_varied(people_per_food=cfg.people_per_food * k) for k in (0.6, 1.4)]
     worlds.insert(1, used)
 
     def density(state):

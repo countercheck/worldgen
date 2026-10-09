@@ -7,7 +7,7 @@ so these test that the asymmetry is what decides, rather than that some number c
 import numpy as np
 import pytest
 
-from tests.worlds import build_pipeline, build_world
+from tests.worlds import build_pipeline, build_world, fork_world
 from worldgen.core.config import WorldConfig
 from worldgen.core.hex import SettlementTier, TerrainClass
 from worldgen.core.hex_grid import hex_range, neighbors
@@ -30,6 +30,19 @@ _CITY_DEFAULTS = {
 def _world(**over):
     """Memoised, so the several tests wanting the same world pay for it once."""
     return build_world(seed=42, width=96, height=96, model="organic", **{**_CITY_DEFAULTS, **over})
+
+
+def _varied(**varied):
+    """`_world(**varied)`, built only from `CityPromotionStage` on."""
+    return fork_world(
+        "CityPromotionStage",
+        varied,
+        seed=42,
+        width=96,
+        height=96,
+        model="organic",
+        **_CITY_DEFAULTS,
+    )
 
 
 def _split(state):
@@ -221,8 +234,8 @@ def test_the_land_decides_how_much_city_a_region_can_carry():
 
 
 def test_raising_the_threshold_promotes_fewer():
-    low = _world(city_min_draw=14.0)
-    high = _world(city_min_draw=60.0)
+    low = _varied(city_min_draw=14.0)
+    high = _varied(city_min_draw=60.0)
     assert len(_split(low)[0]) >= len(_split(high)[0])
 
 
