@@ -94,6 +94,7 @@ class VillageTrackStage(GeneratorStage):
         # tidying passes below are about which edges exist and how they rank; measuring
         # each one belongs in a single place.
         tiers = {key: edge.tier for key, edge in state.road_edges.items()}
+        traffic = {key: edge.traffic for key, edge in state.road_edges.items()}
         for key, tier in new_edges.items():
             tiers.setdefault(key, tier)
 
@@ -104,7 +105,7 @@ class VillageTrackStage(GeneratorStage):
 
         tag_river_crossings(tiers, state, cfg)
         tag_switchbacks(tiers, hexes, cfg)
-        state.road_edges = as_road_edges(tiers, hexes)
+        state.road_edges = as_road_edges(tiers, hexes, traffic)
 
         # `route_through_settlements` reroutes edges, and the per-hex adjacency written
         # while the tracks were laid does not know that. Rebuilt wholesale from the edges

@@ -340,7 +340,7 @@ def route_through_settlements(
     return rerouted
 
 
-def as_road_edges(tiers, hexes) -> dict[tuple[HexCoord, HexCoord], RoadEdge]:
+def as_road_edges(tiers, hexes, traffic=None) -> dict[tuple[HexCoord, HexCoord], RoadEdge]:
     """Turn a key -> tier map into key -> `RoadEdge`, measuring each edge as it goes.
 
     The stages build with bare tiers because that is all the routing and tidying passes
@@ -351,7 +351,8 @@ def as_road_edges(tiers, hexes) -> dict[tuple[HexCoord, HexCoord], RoadEdge]:
     for (a, b), tier in tiers.items():
         ha, hb = hexes.get(a), hexes.get(b)
         delta = delta_elevation(ha, hb) if ha is not None and hb is not None else 0.0
-        out[(a, b)] = RoadEdge(tier, delta)
+        carried = round(traffic.get((a, b), 0.0), 3) if traffic else 0.0
+        out[(a, b)] = RoadEdge(tier, delta, carried)
     return out
 
 

@@ -66,6 +66,7 @@ class InterurbanRoadStage(GeneratorStage):
         hex_traffic: dict[HexCoord, float] = defaultdict(float)
         edge_traffic: dict[tuple[HexCoord, HexCoord], float] = defaultdict(float)
         canonical_routes: dict[tuple[HexCoord, HexCoord], list[HexCoord]] = {}
+        journeys: dict[tuple[HexCoord, HexCoord], tuple[float, tuple[HexCoord, ...]]] = {}
         # The network as it grows, so a route can aim at the road rather than the town.
         net_adj: dict[HexCoord, set[HexCoord]] = defaultdict(set)
         # Costing the road home means a Dijkstra over the network per route, and the
@@ -125,6 +126,8 @@ class InterurbanRoadStage(GeneratorStage):
                     return
                 canonical_routes[key] = path
 
+            count, _ = journeys.get(key, (0.0, ()))
+            journeys[key] = (count + n, tuple(path))
             for c in path:
                 hex_traffic[c] += n
             for a, b in zip(path, path[1:], strict=False):
@@ -297,8 +300,15 @@ class InterurbanRoadStage(GeneratorStage):
         # The tiers were enough to build with; what goes out carries the delta elevation
         # too, signed in the direction of the key, so nothing downstream has to rebuild the
         # cost model to know how slow a segment is.
-        state.road_edges = as_road_edges(road_edges, hexes)
-        state.sea_edges = as_road_edges(sea_edges, hexes)
+        state.road_edges = as_road_edges(road_edges, hexes, edge_traffic)
+        state.sea_edges = as_road_edges(sea_edges, hexes, edge_traffic)
+        # And the journeys themselves, which the tiers were cut from: a place on a busy
+        # road lives on the people going past it, so the stages after this one need to
+        # know how many there were, not only how the road was drawn.
+        for coord, n in hex_traffic.items():
+            if coord in hexes:
+                hexes[coord].traffic = round(n, 3)
+        state.journeys = journeys
         return state
 
     def _route(self, hexes, origin, dest, net_adj, node_cost, edge_cost, cache, version):

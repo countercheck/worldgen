@@ -119,6 +119,9 @@ class RoadEdge:
 
     tier: RoadTier
     delta_elevation_m: float = 0.0
+    # Journeys along this edge, as `InterurbanRoadStage` routed them; 0 on an edge laid only
+    # to join the network up.
+    traffic: float = 0.0
 
 
 def road_edge_key(a: HexCoord, b: HexCoord) -> tuple[HexCoord, HexCoord]:
@@ -188,6 +191,14 @@ class WorldState:
     # Tags on the corners of the river network: source, end, confluence, mouth.
     river_corners: dict[Corner, set[str]] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
+    # The journeys `InterurbanRoadStage` routed, keyed by the pair of settlements at their
+    # ends (`road_edge_key` order): how many a year, and the path they take. Working data
+    # for the stages after the roads — a toll or a crossroads is paid by the journeys that
+    # pass it, out of the places they come from — and not written to world.json: what a
+    # reader needs of it is the traffic on each hex and edge, which is.
+    journeys: dict[tuple[HexCoord, HexCoord], tuple[float, tuple[HexCoord, ...]]] = field(
+        default_factory=dict, repr=False
+    )
 
     @classmethod
     def empty(cls, seed: int, width: int, height: int, layout: str = AXIAL) -> "WorldState":
@@ -271,6 +282,7 @@ class WorldState:
                     "wet_season_precip_mm": h.wet_season_precip_mm,
                     "dry_season_precip_mm": h.dry_season_precip_mm,
                     "groundwater_mm": h.groundwater_mm,
+                    "traffic": h.traffic,
                     "temperature": h.temperature,
                     "biome": h.biome.value if h.biome is not None else None,
                     "terrain_class": h.terrain_class.value,
@@ -334,6 +346,7 @@ class WorldState:
                     "b": list(b),
                     "tier": edge.tier.value,
                     "delta_elevation_m": edge.delta_elevation_m,
+                    "traffic": edge.traffic,
                 }
                 for (a, b), edge in sorted(self.road_edges.items())
             ],
@@ -343,6 +356,7 @@ class WorldState:
                     "b": list(b),
                     "tier": edge.tier.value,
                     "delta_elevation_m": edge.delta_elevation_m,
+                    "traffic": edge.traffic,
                 }
                 for (a, b), edge in sorted(self.sea_edges.items())
             ],
@@ -412,6 +426,7 @@ class WorldState:
                 wet_season_precip_mm=hd.get("wet_season_precip_mm", hd["moisture"] / 2),
                 dry_season_precip_mm=hd.get("dry_season_precip_mm", hd["moisture"] / 2),
                 groundwater_mm=hd.get("groundwater_mm", 0.0),
+                traffic=hd.get("traffic", 0.0),
                 temperature=hd["temperature"],
                 biome=Biome(hd["biome"]) if hd.get("biome") is not None else None,
                 terrain_class=TerrainClass(hd["terrain_class"]),
@@ -460,7 +475,7 @@ class WorldState:
         def read_edges(rows):
             return {
                 road_edge_key(tuple(ed["a"]), tuple(ed["b"])): RoadEdge(
-                    RoadTier(ed["tier"]), ed["delta_elevation_m"]
+                    RoadTier(ed["tier"]), ed["delta_elevation_m"], ed.get("traffic", 0.0)
                 )
                 for ed in rows
             }
