@@ -4,6 +4,7 @@ from collections import defaultdict, deque
 import numpy as np
 from scipy.ndimage import gaussian_filter
 
+from ..core.config import WorldConfig
 from ..core.hex_grid import Corner, corner_hexes, hex_corner_keys, side_hexes, side_joining
 from ..core.hex_grid import distance as hex_distance
 from ..core.hex_grid import neighbors as hex_neighbors
@@ -461,6 +462,7 @@ def _widen_valleys(
     max_relief: float,
     channel_fraction: float,
     meander: np.ndarray | None = None,
+    reference_km2: float = WorldConfig.valley_width_reference_km2,
 ) -> None:
     """Plane a flat floor outward from each channel, in place.
 
@@ -478,7 +480,12 @@ def _widen_valleys(
     bowl, which reads as a dry basin rather than a valley.
 
     Reach scales with *discharge*, since floodplain width goes roughly with the square
-    root of drainage area — hence the exponent.  Ground standing more than `max_relief`
+    root of drainage area — hence the exponent.  It is measured against a fixed catchment,
+    *reference_km2*, at which the reach is `width_max`, and is held there for anything
+    bigger.  Not against the largest river on the map: a river's floodplain is a matter of
+    its own discharge, and scaled by the largest, one river entering from off the map — or
+    one big trunk on a bigger map — narrowed every other belt and took the smaller ones
+    away entirely.  Ground standing more than `max_relief`
     above the floor is valley wall: it is left alone, and the fill stops rather than
     stepping over it, which is what keeps a valley to its valley instead of planing the
     countryside, and makes `width_max` a cap rather than the usual outcome.
@@ -505,8 +512,7 @@ def _widen_valleys(
         return
 
     flow = np.where(land, discharge, 0.0)
-    max_flow = float(flow.max())
-    if max_flow <= 0.0:
+    if float(flow.max()) <= 0.0:
         return
 
     threshold = float(np.quantile(flow[land], 1.0 - channel_fraction))
@@ -525,7 +531,7 @@ def _widen_valleys(
 
     for i, j in channels:
         i, j = int(i), int(j)
-        reach = width_max * (flow[i, j] / max_flow) ** width_exponent
+        reach = min(width_max * (flow[i, j] / reference_km2) ** width_exponent, width_max)
         if reach < 1.0:
             continue
         target[i, j] = arr[i, j]
@@ -809,6 +815,7 @@ class ErosionStage(GeneratorStage):
                         cfg.valley_max_relief_m / span,
                         cfg.valley_channel_fraction,
                         meander,
+                        cfg.valley_width_reference_km2,
                     )
 
             # Soil is settled last, against the final coastline.  Deposition was recorded

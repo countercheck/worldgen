@@ -278,6 +278,15 @@ class WorldConfig:
     valley_carve_passes: int = 3
     valley_width_max: float = 6.0  # Cap on valley half-width, in hexes (1 hex = 1 km)
     valley_width_exponent: float = 0.6  # Discharge -> width; 0.5 is the textbook root
+    # The catchment, in km2, at which a valley's half-width reaches `valley_width_max`
+    # (1 hex = 1 km, and catchment is counted in hexes, as the incision reference is).
+    # Smaller rivers get `valley_width_max * (A / this) ** valley_width_exponent`, and
+    # anything larger is held at the cap.  A fixed figure rather than the largest river
+    # on the map, because a river's floodplain depends on its own discharge — not on its
+    # neighbours', and not on how big a map it was drawn on.  Measured against the
+    # largest instead, one river entering from off the map, or one big native trunk on a
+    # larger map, narrowed every other belt on the map or took it away altogether.
+    valley_width_reference_km2: float = 150.0
     # Rise per hex away from the channel, in metres.  Small but not zero: a floodplain
     # drains toward its river rather than ponding.
     valley_floor_slope_m: float = 2.5
@@ -1325,6 +1334,11 @@ class WorldConfig:
         if self.valley_width_exponent < 0:
             raise ValueError(
                 f"valley_width_exponent must be >= 0, got {self.valley_width_exponent}"
+            )
+        if self.valley_width_reference_km2 <= 0:
+            raise ValueError(
+                "valley_width_reference_km2 must be > 0 — it is a divisor, got "
+                f"{self.valley_width_reference_km2}"
             )
         if self.valley_floor_slope_m < 0:
             raise ValueError(f"valley_floor_slope_m must be >= 0, got {self.valley_floor_slope_m}")

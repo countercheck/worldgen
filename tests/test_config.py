@@ -306,6 +306,13 @@ def test_world_config_validates_river_inflow_fields(kwargs, message):
         WorldConfig(**kwargs)
 
 
+@pytest.mark.parametrize("value", [0.0, -150.0])
+def test_valley_width_reference_must_be_positive(value):
+    """It divides every channel's discharge, so zero or less has no meaning."""
+    with pytest.raises(ValueError, match="valley_width_reference_km2"):
+        WorldConfig(valley_width_reference_km2=value)
+
+
 def test_river_inflow_edges_are_canonicalised():
     # Same normalisation the falloff edges get: a comma-separated string, any case, any
     # order, deduplicated, and stable so two equivalent configs compare equal.

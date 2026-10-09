@@ -66,9 +66,8 @@ def test_widening_disabled_leaves_the_field_alone():
 
 
 def test_a_bigger_channel_gets_a_wider_valley():
-    # Reach scales with a channel's share of the largest flow on the map, so the two have
-    # to be weighed against each other in one field — a lone channel is always the biggest
-    # there is, whatever number it carries.
+    # Reach scales with a channel's own discharge against a fixed reference, so of two
+    # channels below it the one carrying more water gets the wider floor.
     w, h = 41, 9
     arr = np.zeros((w, h))
     for i in range(w):
