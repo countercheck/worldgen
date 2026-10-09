@@ -238,3 +238,90 @@ def test_a_belt_is_the_same_width_on_a_bigger_map():
     big = _belt_widths(*_many_channels(w=45, cols=(7,), trunk=500.0), (7,))
     assert small[0] > 0
     assert big == small
+
+
+# --- the load an off-map river brings (tech-debt #119) ---------------------------
+
+_CAPACITY, _RATE, _MIN_LOAD = 4.0, 0.3, 0.15
+
+
+def _carry(arr, cells, meets, droplets=10, water=5.0, load=0.3):
+    from worldgen.stages.erosion import _carry_inlet_load
+
+    deposition = np.zeros_like(arr)
+    _carry_inlet_load(
+        arr, deposition, cells, meets, droplets, water, load, _CAPACITY, _RATE, _MIN_LOAD
+    )
+    return deposition
+
+
+def _gentle_course(w=30, h=9, sea_from=24):
+    """A river down the middle row of a gentle slope, into the sea at column *sea_from*."""
+    arr = np.zeros((w, h))
+    for i in range(w):
+        arr[i, :] = 1.0 - 0.002 * i if i < sea_from else 0.4
+    cells = [(i, h // 2) for i in range(sea_from)]
+    return arr, cells, ((sea_from, h // 2), 0.5, -np.inf)
+
+
+def test_the_carried_load_changes_no_height_on_land():
+    """It lays silt and cuts nothing, so it can send no water uphill and dig no pit."""
+    arr, cells, meets = _gentle_course()
+    before = arr.copy()
+    deposition = _carry(arr, cells, meets)
+    land = before >= 0.5
+    assert np.array_equal(arr[land], before[land])
+    assert deposition.min() >= 0.0
+    assert deposition[land].sum() > 0.0, "a gentle course should take some of the load as silt"
+
+
+def test_the_carried_load_builds_a_delta_where_it_meets_the_water():
+    arr, cells, meets = _gentle_course()
+    before = arr.copy()
+    deposition = _carry(arr, cells, meets)
+    water = before < 0.5
+    assert deposition[water].sum() > 0.0
+    assert (arr[water] > before[water]).any()
+
+
+def test_a_delta_is_built_up_to_the_water_and_never_onto_it():
+    """No cell becomes land: a great river's fan reaching the waterline across its mouth
+    sealed it, and the country behind filled as a lake."""
+    arr, cells, meets = _gentle_course()
+    _carry(arr, cells, meets, droplets=500)
+    assert (arr[24:, :] < 0.5).all()
+
+
+def test_a_lake_delta_fills_no_higher_than_the_lake():
+    arr = np.full((12, 9), 0.6)
+    arr[:6, :] = np.linspace(0.9, 0.7, 6)[:, None]
+    arr[6:9, 3:6] = 0.55  # a hollow standing in water to 0.6
+    arr[9:, :] = 0.3  # and the sea, below sea level at 0.5, within reach of it
+    cells = [(i, 4) for i in range(6)]
+    _carry(arr, cells, ((7, 4), 0.6, 0.5), droplets=500)
+    assert (arr[6:9, 3:6] < 0.6).all()
+    assert (arr[6:9, 3:6] > 0.55).any()
+    assert (arr[9:, :] == 0.3).all(), "a lake's delta was built in the sea beside it"
+
+
+def test_a_course_that_meets_no_water_takes_its_load_with_it():
+    arr, cells, _ = _gentle_course()
+    before = arr.copy()
+    deposition = _carry(arr, cells, None)
+    assert np.array_equal(arr, before)
+    assert deposition[24:, :].sum() == 0.0
+
+
+def test_no_droplets_lay_nothing():
+    arr, cells, meets = _gentle_course()
+    before = arr.copy()
+    assert _carry(arr, cells, meets, droplets=0).sum() == 0.0
+    assert np.array_equal(arr, before)
+
+
+def test_kept_water_means_every_delta_is_built():
+    """It never holds less than `0.01 * water * capacity`: above the delta threshold, a
+    course of any length still has a delta's worth when it meets the water."""
+    arr, cells, meets = _gentle_course(w=200, sea_from=190)
+    deposition = _carry(arr, cells, meets, droplets=1)
+    assert deposition[190:, :].sum() >= _MIN_LOAD
