@@ -1,5 +1,8 @@
+import numpy as np
+
 from ..core.hex import HexCoord, TerrainClass
 from ..core.hex_grid import Side, neighbors, side_hexes
+from ..core.routing import Grid
 from ..core.world_state import ROAD_TIER_RANK, RoadEdge, RoadTier, road_edge_key
 from .riverside import side_gradients, side_span
 
@@ -173,6 +176,49 @@ def make_road_edge_cost(cfg, crossings=None, ring=None):
         return road_edge_cost(from_hx, to_hx, cfg, ring, crossings)
 
     return edge_cost
+
+
+def road_node_costs(hexes, grid: Grid, cfg) -> np.ndarray:
+    """`terrain_base_cost` of every hex, as an array for `routing`."""
+    return grid.column(hexes, lambda hx: terrain_base_cost(hx, cfg))
+
+
+def road_edge_costs(hexes, grid: Grid, cfg, crossings=None, ring=None) -> np.ndarray:
+    """`make_road_edge_cost(cfg, crossings, ring)` for every step, as an array for `routing`.
+
+    Term for term what `road_edge_cost` adds, in the order it adds them, so each step comes
+    out the same double: `tests/test_road_cost.py` holds the two to `==`.
+    """
+    wet = grid.column(hexes, lambda hx: hx.terrain_class in WATER, np.bool_, False)
+    elevation = grid.column(hexes, lambda hx: hx.elevation)
+    i, d, j = grid.pairs()
+
+    rise = np.abs(elevation[j] - elevation[i])
+    under_cap = rise * 100.0 / cfg.hex_size_m < cfg.road_slope_cap_pct
+    slope = np.where(
+        wet[i] | wet[j],
+        0.0,
+        np.where(under_cap, rise / cfg.road_delta_elevation_per_hex, np.inf),
+    )
+    water = np.where(
+        wet[i] == wet[j], 0.0, np.where(wet[j], cfg.road_embark_cost, cfg.road_disembark_cost)
+    )
+    river = np.zeros((grid.size, 6))
+    for a, k, _, flow in grid.pair_steps((crossings or {}).items()):
+        river[a, k] = cfg.road_river_crossing_base + cfg.road_river_crossing_flow * flow
+    skirt = np.zeros((grid.size, 6))
+    for coord, seats in (ring or {}).items():
+        a = grid.index.get(coord)
+        if a is None or not seats:
+            continue
+        for k in range(6):
+            b = grid.nbr[a, k]
+            if b >= 0 and seats & ring.get(grid.coord(b), frozenset()):
+                skirt[a, k] = cfg.road_settlement_skirt_cost
+
+    edge = grid.edges()
+    edge[i, d] = ((slope + water) + river[i, d]) + skirt[i, d]
+    return edge
 
 
 def tag_switchbacks(road_edges, hexes, cfg) -> None:

@@ -14,6 +14,12 @@ dependencies = [
     "Pillow>=10.0",
     "click>=8.1",
     "pyyaml>=6.0",
+    # Compiles erosion's droplet loop and the route searches (`core/routing.py`). Both run
+    # without it, as plain Python, and about ten times slower: a 112x112 world goes from
+    # about five seconds to over a minute. It used to be the `perf` extra, which nothing
+    # installed — not CI, not the generator image — so the speed was only ever local.
+    # 0.61 is the first release with wheels for Python 3.13, which CI runs.
+    "numba>=0.61",
 ]
 
 [project.optional-dependencies]
@@ -27,9 +33,6 @@ dev = [
     # 0.15.12 against CI 0.16.6, which added formatting of Python inside Markdown. Bump
     # this deliberately, in a commit that says so.
     "ruff==0.16.6",
-]
-perf = [
-    "numba>=0.59",
 ]
 
 [project.scripts]

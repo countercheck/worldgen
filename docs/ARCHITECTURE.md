@@ -30,6 +30,7 @@ flowchart TB
         WS[world_state.py<br/>WorldState · River · RiverSide · Road<br/>river_sides · river_corners<br/>schema v2.0]
         HEX[hex.py<br/>Hex · TerrainClass · Settlement<br/>TerrainLabel · terrain_label]
         GRID[hex_grid.py<br/>axial / offset layouts<br/>corners · sides]
+        ROUTE[routing.py<br/>Dijkstras on cost arrays<br/>numba-compiled]
         ERR[errors.py]
     end
 

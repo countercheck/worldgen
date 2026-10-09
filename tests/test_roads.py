@@ -625,7 +625,7 @@ def test_a_bigger_settlement_sends_more_travellers(road_state):
     )
 
 
-def test_a_place_nothing_can_reach_does_not_break_generation():
+def test_a_place_nothing_can_reach_does_not_break_generation(monkeypatch):
     """Some maps are in pieces, and that is a fact about the world rather than an error.
 
     A river is always crossable at a price, so what can strand a settlement now is ground
@@ -641,14 +641,8 @@ def test_a_place_nothing_can_reach_does_not_break_generation():
     def no_route(*_a, **_k):
         return None
 
-    real_astar = ir.astar_to_any
-    ir.astar_to_any = no_route
-    try:
-        _edges, unreachable = stage._guarantee_connectivity(
-            state.hexes, state.settlements, {}, cfg, {}
-        )
-    finally:
-        ir.astar_to_any = real_astar
+    monkeypatch.setattr(ir, "_to_any", no_route)
+    _edges, unreachable = stage._guarantee_connectivity(state.hexes, state.settlements, {}, cfg, {})
 
     # It came back rather than raising, and it said what it could not reach.
     assert unreachable, "nothing was recorded as unreachable — the test did not bite"

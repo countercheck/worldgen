@@ -34,6 +34,9 @@ WORKDIR /home/app
 ENV PYTHONUNBUFFERED=1 \
     # matplotlib wants a writable cache directory and warns on every start without one.
     MPLCONFIGDIR=/tmp/matplotlib \
+    # numba caches what it compiles beside the source, and site-packages is not ours to
+    # write; without this the first world after every start pays the compile again.
+    NUMBA_CACHE_DIR=/tmp/numba \
     PORT=8000
 
 EXPOSE 8000

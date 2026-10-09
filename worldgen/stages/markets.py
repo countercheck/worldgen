@@ -22,16 +22,20 @@ glyph.  So the peasantry is present in the arithmetic and absent from the settle
 import heapq
 import math
 
+import numpy as np
+
+from ..core import routing
 from ..core.hex import HexCoord
-from ..core.hex_grid import grade_reachable_count, hex_range, neighbors, ring
+from ..core.hex_grid import grade_reachable_count, hex_range, ring
 from ..core.pipeline import GeneratorStage
+from ..core.routing import CostField
 from ..core.world_state import WorldState
 from .habitability import potential_food, site_bonus
 from .haulage import (
     allocate_catchments,
     fishery_rim,
-    make_travel_cost,
     settleable,
+    travel_field,
     usable_fraction,
 )
 from .riverside import WATER, river_index
@@ -43,52 +47,29 @@ from .road_cost import grade_is_under_cap
 _EPS = 1e-9
 
 
-def day_reach(
-    coord: HexCoord, hexes, radius: float, node_cost, edge_cost
-) -> list[tuple[HexCoord, float]]:
+def day_reach(coord: HexCoord, radius: float, field: CostField) -> list[tuple[HexCoord, float]]:
     """`[(hex, weight)]` for every hex a catchment rooted at *coord* would draw on.
 
     The walk `allocate_catchments` makes from a single seat — a Dijkstra over the travel
     cost, stopping at *radius* — then the water beside that land at its cheapest donor's
     cost, as `fishery_rim` grants it. Each hex is weighted `usable_fraction(cost, radius)`,
     the share of its surplus that survives the haul, and hexes worth nothing are left out.
-    *node_cost* and *edge_cost* are `make_travel_cost`'s closures, built once per world.
+    *field* is `travel_field`'s arrays, built once per world. Travel makes water
+    impassable, so the hexes it prices at `inf` to enter are the water the rim is cast on.
     """
-    cost: dict[HexCoord, float] = {coord: 0.0}
-    heap = [(0.0, coord)]
-    done: set[HexCoord] = set()
-    while heap:
-        d, c = heapq.heappop(heap)
-        if c in done:
-            continue
-        done.add(c)
-        hx = hexes[c]
-        for n in neighbors(c):
-            if n in done:
-                continue
-            n_hx = hexes.get(n)
-            if n_hx is None:
-                continue
-            step = node_cost(n_hx) + edge_cost(hx, n_hx)
-            if step == float("inf"):
-                continue
-            nd = d + step
-            if nd < radius and nd < cost.get(n, float("inf")):
-                cost[n] = nd
-                heapq.heappush(heap, (nd, n))
-    rim: dict[HexCoord, float] = {}
-    for c in done:
-        for n in neighbors(c):
-            if n in done:
-                continue
-            n_hx = hexes.get(n)
-            if n_hx is None or n_hx.terrain_class not in WATER:
-                continue
-            if cost[c] < rim.get(n, float("inf")):
-                rim[n] = cost[c]
-    out = [(c, usable_fraction(cost[c], radius)) for c in sorted(done)]
-    out += [(n, usable_fraction(rim[n], radius)) for n in sorted(rim)]
-    return [(c, w) for c, w in out if w > 0.0]
+    grid = field.grid
+    cost, done, rim = routing.day_walk(
+        grid.nbr, field.node, field.edge, field.node == np.inf, grid.index[coord], float(radius)
+    )
+    # Index order is coordinate order, so these come out sorted as the old lists were.
+    land, wet = np.flatnonzero(done), np.flatnonzero(rim < np.inf)
+    out = zip(
+        grid.coords(land) + grid.coords(wet),
+        cost[land].tolist() + rim[wet].tolist(),
+        strict=True,
+    )
+    weighed = ((c, usable_fraction(v, radius)) for c, v in out)
+    return [(c, w) for c, w in weighed if w > 0.0]
 
 
 class MarketStage(GeneratorStage):
@@ -158,7 +139,7 @@ class MarketStage(GeneratorStage):
         rings = math.ceil(radius / step) if step > 0.0 else 0
         offsets = [ring((0, 0), d) for d in range(rings + 1)]
         remaining = dict(surplus)
-        node_cost, edge_cost = make_travel_cost(hexes, cfg, rivers)
+        field = travel_field(hexes, cfg, rivers)
 
         def weight(c: float) -> float:
             return usable_fraction(c, radius)
@@ -167,7 +148,7 @@ class MarketStage(GeneratorStage):
 
         def reach(coord):
             if coord not in reach_cache:
-                reach_cache[coord] = day_reach(coord, hexes, radius, node_cost, edge_cost)
+                reach_cache[coord] = day_reach(coord, radius, field)
             return reach_cache[coord]
 
         bonus_cache: dict[HexCoord, float] = {}

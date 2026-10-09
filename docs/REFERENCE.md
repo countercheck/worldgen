@@ -84,6 +84,30 @@ The seed and full config are written into `WorldState.metadata` at the
 start of the run ([pipeline.py:46–47](../worldgen/core/pipeline.py#L46))
 and round-trip through `world.json`.
 
+### Route searches
+
+Every Dijkstra the settlement and road stages run — catchments, a market's day's walk,
+bulk haulage, the road network — goes through
+[worldgen/core/routing.py](../worldgen/core/routing.py). The stages turn their cost rules
+into arrays once (`node[i]` to enter a hex, `edge[i, d]` to step toward a neighbour), and
+the searches, compiled with numba, read those. The rules themselves stay where they were,
+in `haulage.py` and `road_cost.py`, as the closures they always were; the arrays are tested
+equal to them step for step.
+
+The searches were ported from dict-and-closure code that cost about thirty seconds of a
+36-second 112×112 build, and they find exactly what it found — the same paths, the same
+costs to the last bit. A tie broken the other way builds different roads just as
+reproducibly, which no same-seed test can see, so a change meant to preserve output is
+checked by hashing whole worlds before and after:
+
+```bash
+python3 scripts/world_fingerprint.py > before.txt
+# ... change ...
+python3 scripts/world_fingerprint.py | diff before.txt -
+```
+
+The hashes are only comparable on one machine (see `NPY_DISABLE_CPU_FEATURES` in `ci.yml`).
+
 ### Pipeline
 
 The stage list is defined once, in
@@ -579,8 +603,8 @@ than being scaled back up to fill the range it started with.
   there is no floodplain. It is also a **climate** setting, because the orographic term
   lifts on height above sea level — wearing the high ground down flattens the rain
   shadow. `3.0` has floodplains and keeps most of the shadow.
-- Without numba, this stage is roughly 10× slower; install numba
-  (`pip install numba`) for full speed.
+- numba compiles the droplet loop. It is a dependency, but the stage still runs without
+  it, roughly 10× slower.
 
 ---
 
