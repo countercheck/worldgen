@@ -306,6 +306,14 @@ def test_world_config_validates_river_inflow_fields(kwargs, message):
         WorldConfig(**kwargs)
 
 
+@pytest.mark.parametrize(
+    "name", ["erosion_inlet_droplets_per_km2", "erosion_inlet_water", "erosion_inlet_load"]
+)
+def test_the_inlet_load_settings_cannot_be_negative(name):
+    with pytest.raises(ValueError, match=name):
+        WorldConfig(**{name: -0.1})
+
+
 @pytest.mark.parametrize("value", [0.0, -150.0])
 def test_valley_width_reference_must_be_positive(value):
     """It divides every channel's discharge, so zero or less has no meaning."""
