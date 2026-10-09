@@ -6,7 +6,7 @@ mixins: `hydrology_fill.py` (sink filling, flow direction, accumulation) and
 """
 
 from ..core.hex import HexCoord, TerrainClass
-from ..core.hex_grid import neighbors
+from ..core.hex_grid import Corner, neighbors
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
 from .hydrology_fill import EdgesOf, HydrologyFill, OnBorder
@@ -73,7 +73,24 @@ class HydrologyStage(HydrologyFill, HydrologyRivers, GeneratorStage):
         # B2 — Rivers that arrive from beyond the border.  The map is a region, not a
         # world, so some of its water was gathered off it.  Each inlet is seeded with a
         # catchment it did not earn here, which is what makes it enter already wide.
-        inlets = self._inflow_inlets(flow_dir, filled, land, on_border, self._edges_of(state))
+        #
+        # Erosion chose them, and carved a course from each (tech-debt #153); they are
+        # taken from it rather than chosen again, so the river runs where its valley was
+        # cut.  A hand-off between the two stages and not a fact about the world, so it is
+        # taken out of the metadata rather than left in the saved world.  Only a pipeline
+        # whose erosion carved nothing chooses its own.
+        handed = state.metadata.pop("inflow_courses", None)
+        courses: list[list[Corner]] | None = None
+        if handed is not None:
+            courses = []
+            inlets = []
+            for coord, course in handed:
+                coord = tuple(coord)
+                if coord in land:
+                    inlets.append(coord)
+                    courses.append([tuple(c) for c in course])
+        else:
+            inlets = self._inflow_inlets(flow_dir, filled, land, on_border, self._edges_of(state))
         inflow_volume = max(1.0, self.config.river_inflow_volume * len(land))
         inflow = {c: inflow_volume for c in inlets}
 
@@ -167,5 +184,5 @@ class HydrologyStage(HydrologyFill, HydrologyRivers, GeneratorStage):
                     hexes[coord].tags.add("endorheic_shore")
 
         # R — The rivers themselves, along the sides between hexes.
-        self._route_on_corners(state, inlets, closed, min_catchment)
+        self._route_on_corners(state, inlets, closed, min_catchment, courses)
         return state

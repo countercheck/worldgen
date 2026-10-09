@@ -813,7 +813,11 @@ never drawn.
 
 **C — Rivers from off the map.** Inlets on the border, chosen by the `river_inflow_*`
 keys (§ [4.5](#rivers-from-off-the-map)), are seeded with a catchment they did not gather
-here, so they enter already wide.
+here, so they enter already wide. Erosion chooses them and hands each over in
+`state.metadata["inflow_courses"]` with the course its river runs; hydrology adopts both,
+sends the imported river down that course on the corner graph (`follow_course`) until it
+meets standing water, and drops the hand-off from the metadata. Only a pipeline whose
+erosion carved nothing chooses its own, by the same rule.
 
 **D — The rivers, on corners** (`_route_on_corners`, using `corner_drainage.py`)
 
@@ -2712,9 +2716,17 @@ no navigable river at all, and tropical 12.6%.
 #### Rivers from off the map
 
 The grid is a region, not a world, so a river may well have gathered its water beyond the
-border. An **inlet** is a border land hex whose own terrain already descends inland; it is
-seeded with a catchment it did not earn on this map, which makes it arrive already wide
-instead of starting as a trickle at the edge. Off-map inlet *erosion* by droplets was
+border. An **inlet** is a border land hex whose water then runs at least
+`river_inflow_min_length` across the map; it is seeded with a catchment it did not earn on
+this map, which makes it arrive already wide instead of starting as a trickle at the edge.
+
+Inlets are chosen **once**, by `ErosionStage` on the first carve pass's corner routing: a
+weighted draw over the border's candidates, by course length. The imported catchment then
+widens and cuts the valley along that course, and hydrology adopts the same inlets and
+sends each river down the same course, read off the finished ground. They used to be
+chosen twice — erosion by the steepest drop inland, hydrology by its own draw — and on
+96×96 maps with the shipped config agreed on none of ten, so the valley carved for an
+imported river was mostly not the one it ran down (tech-debt #153). Off-map inlet *erosion* by droplets was
 tried twice, measured worse than not doing it, and reverted — a droplet is one raindrop
 wherever it starts, so seeding them at a mouth digs a pit that inverts the inland fall and
 disqualifies the very cell it was meant to serve. Discharge seeding does the job instead.

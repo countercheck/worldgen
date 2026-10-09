@@ -259,6 +259,10 @@ class HydrologyFill:
     ) -> list[HexCoord]:
         """Border hexes where a river enters the map from a catchment beyond it.
 
+        Only for a pipeline whose erosion carved nothing.  Otherwise `ErosionStage` has
+        chosen the inlets already, by this same rule on its own routing, and hydrology
+        adopts them with their courses (tech-debt #153).
+
         Eligibility is read off `flow_dir` rather than re-derived from elevations, so an
         inlet's water is guaranteed to travel inland by the very field that will route
         it.  Three conditions do the work:

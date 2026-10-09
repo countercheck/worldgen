@@ -28,6 +28,7 @@ from .corner_drainage import (
     build_network,
     drain_corner,
     flow_direction,
+    follow_course,
     inlet_corner,
     is_lake_node,
     trace_streams,
@@ -54,6 +55,7 @@ class HydrologyRivers:
         inlets: list[HexCoord],
         closed: list[set[HexCoord]],
         min_catchment: float,
+        courses: list[list[Corner]] | None = None,
     ) -> None:
         """Route the map's rivers on the corner graph and record them.
 
@@ -63,6 +65,12 @@ class HydrologyRivers:
         `corner_drainage`) over the settled ground and writes what it finds — the courses
         into `state.rivers`, each side a river runs along into `state.river_sides`, and its
         sources, ends, mouths and confluences into `state.river_corners`.
+
+        *courses*, when given, are the courses erosion carved from each inlet, in the order
+        of *inlets*.  Each imported river is sent down its own (`follow_course`) and enters
+        at its first corner, rather than being routed afresh: erosion widened and cut that
+        valley for the imported catchment, and routed afresh the river took another
+        (tech-debt #153).
         """
         hexes = state.hexes
         water = (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
@@ -92,11 +100,18 @@ class HydrologyRivers:
         # A river arriving over the border carries a catchment it did not gather here.
         inflow_volume = max(1.0, self.config.river_inflow_volume * len(land))
         inflow: set[Corner] = set()
-        for coord in inlets:
-            corner = inlet_corner(coord, net, drainage)
-            if corner is not None:
-                sources[corner] += inflow_volume
-                inflow.add(corner)
+        if courses is not None:
+            for course in courses:
+                if course and course[0] in drainage.order:
+                    follow_course(net, drainage, course)
+                    sources[course[0]] += inflow_volume
+                    inflow.add(course[0])
+        else:
+            for coord in inlets:
+                corner = inlet_corner(coord, net, drainage)
+                if corner is not None:
+                    sources[corner] += inflow_volume
+                    inflow.add(corner)
 
         drainage.acc = accumulate(drainage.flow, sources)
         acc = drainage.acc

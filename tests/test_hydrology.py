@@ -633,3 +633,79 @@ def test_a_drier_catchment_raises_a_smaller_river():
     assert wet[mouth] == pytest.approx(5.0)
     assert shadowed[mouth] == pytest.approx(3.3)
     assert shadowed[mouth] < wet[mouth]
+
+
+# ---------------------------------------------------------------------------
+# One inlet, one course (tech-debt #153)
+# ---------------------------------------------------------------------------
+#
+# Erosion chooses the inlets and hands each to hydrology with the course its river runs;
+# hydrology adopts both.  They used to be chosen twice, by different rules, and agreed on
+# none of ten: the imported catchment widened valleys the imported river never ran down.
+
+_SHIPPED_KW = dict(width=48, height=48, model="organic", continent_falloff_edges=("south",))
+
+
+def _with_handoff(monkeypatch, seed):
+    """A world to hydrology, and the courses erosion handed it on the way."""
+    from .worlds import build_pipeline
+
+    seen = {}
+    run = HydrologyStage.run
+
+    def spy(self, state):
+        seen["courses"] = list(state.metadata.get("inflow_courses", []))
+        return run(self, state)
+
+    monkeypatch.setattr(HydrologyStage, "run", spy)
+    state = build_pipeline(seed=seed, until="HydrologyStage", **_SHIPPED_KW).run()
+    return state, seen["courses"]
+
+
+@pytest.mark.parametrize("seed", [11, 42])
+def test_hydrology_imports_rivers_at_the_inlets_erosion_carved_for(monkeypatch, seed):
+    state, courses = _with_handoff(monkeypatch, seed)
+    assert courses, "the shipped config's open north edge should admit an inlet"
+    assert set(_sources(state)) == {course[0] for _, course in courses}
+
+
+@pytest.mark.parametrize("seed", [11, 42])
+def test_an_imported_river_runs_the_course_erosion_carved(monkeypatch, seed):
+    """Every side of the course, until it meets standing water, carries the import."""
+    state, courses = _with_handoff(monkeypatch, seed)
+    cfg = WorldConfig(**state.metadata["config"])
+    land = [h for h in state.hexes.values() if h.terrain_class not in _WATER]
+    imported = cfg.river_inflow_volume * len(land)
+    from worldgen.core.hex_grid import side_joining
+
+    for _, course in courses:
+        for a, b in zip(course, course[1:], strict=False):
+            if any(
+                state.hexes[h].terrain_class in _WATER for h in corner_hexes(a) if h in state.hexes
+            ):
+                break
+            side = state.river_sides.get(side_joining(a, b))
+            assert side is not None, f"the imported river leaves its course at {a}"
+            assert side.catchment_km2 >= imported
+
+
+def test_the_handoff_is_not_kept_in_the_world():
+    state = build_world(seed=11, until="HydrologyStage", **_SHIPPED_KW)
+    assert "inflow_courses" not in state.metadata
+
+
+def test_a_map_that_admits_no_inlet_is_untouched_by_the_inlet_settings():
+    """The sea-ring default has no land on its border: asking for inlets changes nothing.
+
+    Nothing is chosen, so nothing is drawn and nothing handed on, and the world is the
+    one it was before inlets were chosen once rather than twice.
+    """
+    asked = build_world(seed=42, width=48, height=48, model="organic")
+    not_asked = build_world(seed=42, width=48, height=48, model="organic", river_inflow_count=0)
+
+    def world(state):
+        out = state.to_dict()
+        out["metadata"] = {k: v for k, v in out["metadata"].items() if k != "config"}
+        return out
+
+    assert world(asked) == world(not_asked)

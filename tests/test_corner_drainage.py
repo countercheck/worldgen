@@ -10,6 +10,7 @@ from worldgen.stages.corner_drainage import (
     build_network,
     drain_corner,
     flow_direction,
+    follow_course,
     is_lake_node,
     trace_streams,
 )
@@ -214,3 +215,57 @@ def test_a_map_too_dry_for_any_channel_keeps_its_largest_drainage_line():
     streams = trace_streams(drainage, threshold=1e9)
     assert len(streams.paths) == 1
     assert streams.paths[0][-1] in net.terminal
+
+
+# ---------------------------------------------------------------------------
+# follow_course: sending water down a course chosen elsewhere
+# ---------------------------------------------------------------------------
+
+
+def _down(drainage, start):
+    path, node = [], start
+    while node is not None and node not in path:
+        path.append(node)
+        node = drainage.flow.get(node)
+    return path, node
+
+
+def _a_course(net, wander_seed):
+    """A course down the slope, as a differently-seeded drainage of the same ground drew it."""
+    other = flow_direction(net, np.random.default_rng(wander_seed), 2.0)
+    head = max((c for c in other.order if c not in net.terminal), key=other.order.get)
+    return _down(other, head)[0]
+
+
+@pytest.mark.parametrize("seed", range(5))
+def test_following_a_course_never_loops_or_climbs(seed):
+    """Whatever course it is handed, the network stays a downhill tree with no loop."""
+    net, drainage, _, _ = _drain(_world(_slope, water=SEA), seed=seed)
+    follow_course(net, drainage, _a_course(net, seed + 100))
+    for node in drainage.order:
+        path, end = _down(drainage, node)
+        assert end is None, f"water from {node} goes round in a loop"
+        for a, b in zip(path, path[1:], strict=False):
+            assert drainage.filled[b] <= drainage.filled[a], f"{a} -> {b} runs uphill"
+
+
+@pytest.mark.parametrize("seed", range(5))
+def test_a_downhill_course_is_followed_to_the_sea(seed):
+    net, drainage, _, _ = _drain(_world(_slope, water=SEA), seed=seed)
+    """All the way down, until it is beside the sea, where the water runs straight in."""
+    course = _a_course(net, seed + 100)
+    taken = follow_course(net, drainage, course)
+    path = _down(drainage, course[0])[0]
+    assert taken >= len(course) - 2
+    assert path[: taken + 1] == course[: taken + 1]
+    assert path[-1] in net.wet
+    assert all(c not in net.wet for c in course[: taken + 1])
+    assert drainage.flow[course[taken]] in net.wet
+
+
+def test_a_course_is_not_followed_uphill():
+    net, drainage, _, _ = _drain(_world(_slope, water=SEA))
+    climb = list(reversed(_a_course(net, 7)))
+    before = dict(drainage.flow)
+    assert follow_course(net, drainage, climb) == 0
+    assert drainage.flow == before
