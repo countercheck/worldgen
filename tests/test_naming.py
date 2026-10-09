@@ -13,7 +13,9 @@ from worldgen.core.world_state import WorldState
 from worldgen.naming import GLOSS, read_site
 
 # The names settlements are founded with, which naming is there to replace.
-_PLACEHOLDER = re.compile(r"_(city|town|village|market|port|mine|lumber|pass|bridge)_\d+$")
+_PLACEHOLDER = re.compile(
+    r"_(city|town|village|market|port|mine|lumber|pass|bridge|portage|caravansary|crossroads)_\d+$"
+)
 
 _KW = {"width": 64, "height": 64}
 
