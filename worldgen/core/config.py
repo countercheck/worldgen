@@ -43,6 +43,13 @@ class ClimateContext:
     mean_temperature_c: float
     mean_precip_mm: float
     palette: "frozenset[Biome]"
+    # The share of the year's rain that falls in the wetter half of it: 0.5 is a year with
+    # no seasons, 1.0 one in which it does not rain for six months. `WorldConfig.
+    # wet_season_share` says what reads it and where each climate's figure comes from.
+    wet_season_share: float
+    # Whether the crops grow in the wet half-year (monsoon, taiga) or the dry one (the
+    # Mediterranean summer). See `WorldConfig.crops_grow_in_wet_season`.
+    crops_grow_in_wet_season: bool
 
 
 def _palette(*names: str) -> "frozenset[Biome]":
@@ -59,17 +66,29 @@ _ALWAYS = ("ALPINE", "TUNDRA", "WETLAND", "OCEAN")
 
 CLIMATE_CONTEXTS: dict[str, ClimateContext] = {
     # Mean annual temperature at sea level, in degrees Celsius — real figures for the
-    # regions these name, rather than positions on an abstract 0-1 axis.
-    "boreal": ClimateContext(1.0, 450.0, _palette("BOREAL", "GRASSLAND", *_ALWAYS)),
+    # regions these name, rather than positions on an abstract 0-1 axis. The last two are
+    # the wet season's share of the year's rain and whether crops grow in it
+    # (`WorldConfig.wet_season_share`, `WorldConfig.crops_grow_in_wet_season`).
+    "boreal": ClimateContext(1.0, 450.0, _palette("BOREAL", "GRASSLAND", *_ALWAYS), 0.65, True),
     "temperate": ClimateContext(
-        10.0, 800.0, _palette("TEMPERATE_FOREST", "GRASSLAND", "BOREAL", "SHRUBLAND", *_ALWAYS)
+        10.0,
+        800.0,
+        _palette("TEMPERATE_FOREST", "GRASSLAND", "BOREAL", "SHRUBLAND", *_ALWAYS),
+        0.55,
+        False,
     ),
     "mediterranean": ClimateContext(
-        16.0, 550.0, _palette("SHRUBLAND", "GRASSLAND", "TEMPERATE_FOREST", *_ALWAYS)
+        16.0,
+        550.0,
+        _palette("SHRUBLAND", "GRASSLAND", "TEMPERATE_FOREST", *_ALWAYS),
+        0.75,
+        False,
     ),
-    "arid": ClimateContext(21.0, 200.0, _palette("DESERT", "SHRUBLAND", "GRASSLAND", *_ALWAYS)),
+    "arid": ClimateContext(
+        21.0, 200.0, _palette("DESERT", "SHRUBLAND", "GRASSLAND", *_ALWAYS), 0.8, False
+    ),
     "tropical": ClimateContext(
-        26.0, 2000.0, _palette("TROPICAL", "GRASSLAND", "SHRUBLAND", *_ALWAYS)
+        26.0, 2000.0, _palette("TROPICAL", "GRASSLAND", "SHRUBLAND", *_ALWAYS), 0.8, True
     ),
 }
 
@@ -456,6 +475,78 @@ class WorldConfig:
     # slopes catch the rain and which sit in a shadow — and this says what that pattern
     # is worth in real rainfall.
     mean_precip_mm: float | None = None
+    # The share of the year's rain that falls in its wetter half. None takes it from
+    # regional_climate. Annual rainfall says how much water a place gets and this says
+    # when, which for farming decides as much as how much. ClimateStage splits each hex's
+    # rain into a wet and a dry half-year (`Hex.wet_season_precip_mm`,
+    # `Hex.dry_season_precip_mm`), and soil reads each against half the annual rainfall
+    # bands: the dry arm — is there water enough for a crop? — reads the dry season, and
+    # the wet arm — is the ground leached and waterlogged? — reads the wet one. At 0.5 the
+    # halves are equal and soil reads exactly the annual bands, so a year without seasons
+    # comes out as it did before seasons existed.
+    #
+    # Each climate's figure is the wetter six months' share in the long-run monthly normals
+    # of the places it is named after, and the history is why it matters:
+    #
+    #   temperate      0.55  Atlantic Europe: London, Paris, the Low Countries. Rain in
+    #                        every month with a mild autumn-winter peak. Neither season is
+    #                        short of water, which is how the open fields ran a winter and
+    #                        a spring crop side by side and kept stock on the meadow all
+    #                        summer.
+    #   mediterranean  0.75  Athens, Seville and Valencia near 0.8, Rome nearer 0.65.
+    #                        Winter wet, summer dry. Winter wheat and barley grow on the
+    #                        winter rain, but the summer drought burns off the pasture and
+    #                        anything sown in spring, so arable was a thin biennial fallow
+    #                        of winter cereal and the flocks walked to the hills for summer
+    #                        grass: the transhumance of the Castilian Mesta, the Apulian
+    #                        tratturi and the Provencal drailles. Here the dry season is
+    #                        the warm one, so the drought lands on the growing season.
+    #   arid           0.8   Desert rain is bunched whichever side of the desert it falls
+    #                        on — the Sahel's in a summer monsoon, the Maghreb's and the
+    #                        Levant's in winter — and most of the year is dry either way.
+    #                        That is why the desert margin is herded rather than ploughed.
+    #   tropical       0.8   Savanna and monsoon: India, West Africa, mainland South-East
+    #                        Asia, with Bombay above 0.9. A summer of rain and a long dry
+    #                        winter. The rains are the growing season (the kharif crop) and
+    #                        they leach the ground as they come. Equatorial rainforest is
+    #                        nearer 0.6; set that here for one.
+    #   boreal         0.65  Continental taiga rains in summer (Yakutsk and Irkutsk near
+    #                        0.75, Scandinavia nearer 0.55). The cold caps boreal soil at
+    #                        MARGINAL whatever falls.
+    #
+    # Which half the crops grow in is the other half of the question, and it is
+    # `crops_grow_in_wet_season`.
+    wet_season_share: float | None = None
+    # Whether the crops grow in the wet half-year or the dry one. None takes it from
+    # regional_climate. The dry arm of the soil rule reads the rain of the season the crops
+    # grow in: where that is the dry one, the drought falls on the crop; where it is the wet
+    # one, the dry season is the cool or fallow half, when nothing is in the ground to fail.
+    #
+    #   mediterranean  dry   Winter wet, summer dry, and the summer is the growing season
+    #                        for pasture and anything sown in spring. Winter cereal lives
+    #                        on the winter's water banked in the ground
+    #                        (`soil_water_carryover`), which is why it came out a country of
+    #                        biennial fallow and transhumance.
+    #   temperate      dry   Crops grow in the summer half, which in Atlantic Europe is the
+    #                        slightly drier one. At 0.55 it makes little difference.
+    #   arid           dry   The desert this region names is the one c. 1800 Europe traded
+    #                        across: the Maghreb, Egypt and the Levant, winter-rain deserts
+    #                        whose little rain comes in the cool months and is gone by the
+    #                        heat. A Sahel-type desert, with its rain in a summer monsoon
+    #                        that the millet is sown into, is `true` here.
+    #   tropical       wet   Savanna and monsoon: the kharif crop is sown into the rains
+    #                        and harvested as they end. The dry season is the long winter
+    #                        when the fields stand empty, so its drought costs no crop.
+    #   boreal         wet   The taiga's rain falls in summer, and its winter falls as snow
+    #                        that lies until spring and melts into the ground the crop is
+    #                        sown in. Read the dry season here and a subarctic map loses its
+    #                        markets to a drought that is really a snowpack.
+    #
+    # The dry arm reads the growing season without the carryover when it is the wet one:
+    # what the ground banks is carried *out* of the rains into the dry months, and a crop
+    # growing in the rains already has it. So at equal rain and share, a climate that grows
+    # in its wet season never ploughs worse than one that grows in its dry season.
+    crops_grow_in_wet_season: bool | None = None
 
     # ---- Haulage economics -------------------------------------------------
     # The ranges the settlement hierarchy is built on.  Each is a *travel-cost* budget,
@@ -910,6 +1001,36 @@ class WorldConfig:
     # `food_drowned_precip_mm`, `biome_cold_temp_c` and `ford_max_catchment_km2`. A second
     # copy of any of them could only drift from the first.
     soil_dry_farming_min_precip_mm: float = 250.0
+    # How much of the wet season's surplus over the dry the ground holds and gives back
+    # after the rains, as a share of that surplus. Soil reads each half-year against half
+    # the annual bands (`wet_season_share`), and without this a mediterranean year would
+    # be read as if the crop saw only the summer's rain — 550 mm at 0.75 leaves 140 mm, a
+    # desert's worth, where the real country grew wheat on it. What it grew it on was the
+    # winter's water stored in the soil: a loam holds 100-200 mm a plant can draw, the
+    # winter rains fill it, and the crop ripens on it into the dry months. That is what the
+    # Mediterranean's bare fallow was for — a year of it banks a second winter's rain for
+    # the next crop. The carried water leaves the wet season too, so it eases leaching by as
+    # much as it eases drought, and the two seasons still sum to the year. 0 reads each
+    # season bare; 0.5 evens any year out entirely, as if the ground were a perfect store.
+    soil_water_carryover: float = 0.3
+    # Oases: groundwater surfacing in the desert. The same lever as `soil_water_carryover`
+    # — water added to what soil's dry arm reads for the growing season — but from below,
+    # on a few hexes, and from an aquifer rather than from last winter's rain. Kharga,
+    # Dakhla and Siwa in the Egyptian desert, the Fezzan, Tafilalt under the Atlas, the
+    # Ghouta at Damascus: each a spring or a line of wells where the water table meets the
+    # surface, carrying date palms, barley and a caravan town on rain that grows nothing.
+    #
+    # Sited where groundwater does surface — in depressions (a `hollow` or the rim of a
+    # closed basin first, then ground lying below its surroundings, which takes in the
+    # foot of an upland) — and only on DESERT, so a region whose palette has no desert has
+    # none. How many: `oasis_per_1000_km2` of desert, rounded; zero turns them off.
+    oasis_per_1000_km2: float = 2.0
+    # Groundwater an oasis gives the crop over its growing half-year, in millimetres. 250
+    # lifts a desert hex at 200 mm a year well into the arable band.
+    oasis_groundwater_mm: float = 250.0
+    # How far the water reaches, in hexes: 0 is a single well, 1 the spring and the six
+    # hexes round it — some 7 km², about a small oasis of the Western Desert.
+    oasis_radius: int = 1
     # What ground yields relative to its soil, by what is done with it. Cleared land under
     # the plough is the full value; wood on the same soil feeds far fewer people, which is
     # what gives clearing economic weight and makes assarting visible on the map.
@@ -1346,6 +1467,23 @@ class WorldConfig:
             self.mean_temperature_c = context.mean_temperature_c
         if self.mean_precip_mm is None:
             self.mean_precip_mm = context.mean_precip_mm
+        if self.wet_season_share is None:
+            self.wet_season_share = context.wet_season_share
+        if self.crops_grow_in_wet_season is None:
+            self.crops_grow_in_wet_season = context.crops_grow_in_wet_season
+        if not (0.5 <= self.wet_season_share <= 1.0):
+            raise ValueError(
+                "wet_season_share is the wetter half-year's share of the rain, so must be "
+                f"in [0.5, 1], got {self.wet_season_share}"
+            )
+        for name in ("oasis_per_1000_km2", "oasis_groundwater_mm", "oasis_radius"):
+            if getattr(self, name) < 0:
+                raise ValueError(f"{name} must be >= 0, got {getattr(self, name)}")
+        if not (0.0 <= self.soil_water_carryover <= 0.5):
+            raise ValueError(
+                "soil_water_carryover must be in [0, 0.5]: past half, the ground would "
+                f"make the dry season the wetter one, got {self.soil_water_carryover}"
+            )
         if not (0.0 < self.mean_precip_mm <= 12000.0):
             raise ValueError(
                 "mean_precip_mm must be a plausible annual rainfall in millimetres, "

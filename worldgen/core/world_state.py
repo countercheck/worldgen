@@ -268,6 +268,9 @@ class WorldState:
                     "r": h.coord[1],
                     "elevation": h.elevation,
                     "moisture": h.moisture,
+                    "wet_season_precip_mm": h.wet_season_precip_mm,
+                    "dry_season_precip_mm": h.dry_season_precip_mm,
+                    "groundwater_mm": h.groundwater_mm,
                     "temperature": h.temperature,
                     "biome": h.biome.value if h.biome is not None else None,
                     "terrain_class": h.terrain_class.value,
@@ -404,6 +407,11 @@ class WorldState:
                 coord=coord,
                 elevation=hd["elevation"],
                 moisture=hd["moisture"],
+                # A world saved before the seasons were split has only the year's rain;
+                # an even split is what a year without seasons is, and still sums to it.
+                wet_season_precip_mm=hd.get("wet_season_precip_mm", hd["moisture"] / 2),
+                dry_season_precip_mm=hd.get("dry_season_precip_mm", hd["moisture"] / 2),
+                groundwater_mm=hd.get("groundwater_mm", 0.0),
                 temperature=hd["temperature"],
                 biome=Biome(hd["biome"]) if hd.get("biome") is not None else None,
                 terrain_class=TerrainClass(hd["terrain_class"]),

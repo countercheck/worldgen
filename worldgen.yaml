@@ -295,6 +295,16 @@ regional_climate: temperate
 # Set one only to shift a region off its climate's default on purpose.
 mean_temperature_c:       # Mean annual temperature at sea level, in Celsius. Blank = from regional_climate (boreal 1, temperate 10, mediterranean 16, arid 21, tropical 26).
 mean_precip_mm:           # Mean annual rainfall over land, in millimetres. Blank = from regional_climate (boreal 450, temperate 800, mediterranean 550, arid 200, tropical 2000). The orographic pass gives a relative wet/dry pattern; this says what it is worth in real rain.
+# When the rain falls: the share of the year's rain in its wetter half. Soil reads the dry
+# half for drought and the wet half for leaching, so the same annual rain farms worse the
+# more it bunches — the Mediterranean's summer drought, which is why it ran on winter
+# cereal, sheep and transhumance on rainfall that would plough in Kent. 0.5 is a year
+# without seasons and reads exactly as annual rain does.
+wet_season_share:         # Wetter half-year's share of the rain, 0.5-1. Blank = from regional_climate (boreal 0.65, temperate 0.55, mediterranean 0.75, arid 0.8, tropical 0.8).
+# And which half the crops grow in. Where it is the dry half (the Mediterranean summer)
+# the drought falls on the crop; where it is the wet half (the monsoon, the taiga summer,
+# its winter snow stored to spring) the dry season is a fallow winter and costs nothing.
+crops_grow_in_wet_season: # true/false. Blank = from regional_climate (true for boreal and tropical; false for temperate, mediterranean, arid). Set true for a Sahel-type monsoon desert.
 wind_direction: [1.0, 0.0]  # Wind vector [x, y] driving moisture transport. Default: [1.0, 0.0] (eastward)
 latitude_temp_range_c: 0.0  # Degrees between the map's pole-ward and equator-ward edges. Negligible across a region — 128 km is about a degree of latitude. Default: 0.0
 lapse_rate_c_per_km: 6.5    # How fast air cools with height, in Celsius per km. 6.5 is the standard environmental lapse rate. Default: 6.5
@@ -375,6 +385,18 @@ food_water_value: 0.4      # Fishing. Non-zero so a coastal site is not penalise
 # biome_dry_precip_mm, biome_wet_precip_mm, food_drowned_precip_mm, biome_cold_temp_c and
 # ford_max_catchment_km2), because a second copy of any of them could only drift.
 soil_dry_farming_min_precip_mm: 250.0 # Below this nothing is grown without irrigation. Default: 250
+# Soil reads each half-year (wet_season_share) against half of these annual bands. The
+# ground banks some of the rains and gives it back in the drought — a loam holds 100-200 mm
+# a crop can draw, and a Mediterranean bare fallow was a year spent filling it — so a share
+# of the wet season's surplus over the dry is moved across before the bands are read.
+soil_water_carryover: 0.3 # Share of the wet season's surplus carried into the dry, 0-0.5. 0 reads each season bare; 0.5 evens every year. Default: 0.3
+# Oases: groundwater surfacing in the desert (Kharga, Siwa, the Fezzan, Tafilalt). The same
+# lever as the carryover — water added to the growing season soil reads — but from an
+# aquifer, on a few DESERT hexes in depressions or ground lying below its surroundings.
+# The spring is tagged `oasis`. Only DESERT takes one, so only an arid region has any.
+oasis_per_1000_km2: 2.0     # Oases per 1000 km2 of desert, rounded. 0 turns them off. Default: 2.0
+oasis_groundwater_mm: 250.0 # Groundwater an oasis gives the crop over its growing half-year, mm. Default: 250
+oasis_radius: 1             # Hexes the water reaches: 0 a single well, 1 the spring and its six neighbours. Default: 1
 
 # What ground yields relative to its soil, by what is done with it. Cleared land under the
 # plough is the full value; wood on the same soil feeds far fewer people, which is what

@@ -119,6 +119,48 @@ def test_sea_edges_and_catchment_round_trip(tmp_path):
     assert abs(ws2.hexes[(0, 0)].catchment_km2 - 137.5) < 1e-9
 
 
+def test_the_seasons_round_trip(tmp_path):
+    """Soil reads the two half-years, not the year, so they are what a reader of the saved
+    world needs in order to say why a hex came out grazing. Distinct values, so a round
+    trip that swapped them or rebuilt them from the year's total would show."""
+    ws = _small_world()
+    h = ws.hexes[(0, 0)]
+    h.moisture = 600.0
+    h.wet_season_precip_mm = 450.0
+    h.dry_season_precip_mm = 150.0
+    path = tmp_path / "world.json"
+    json_export.save(ws, path)
+    h2 = json_export.load(path).hexes[(0, 0)]
+    assert h2.wet_season_precip_mm == pytest.approx(450.0)
+    assert h2.dry_season_precip_mm == pytest.approx(150.0)
+
+
+def test_an_oasis_round_trips(tmp_path):
+    """Soil reads the groundwater, and a caravan route will want the spring."""
+    ws = _small_world()
+    h = ws.hexes[(0, 0)]
+    h.groundwater_mm = 250.0
+    h.tags.add("oasis")
+    path = tmp_path / "world.json"
+    json_export.save(ws, path)
+    h2 = json_export.load(path).hexes[(0, 0)]
+    assert h2.groundwater_mm == pytest.approx(250.0)
+    assert "oasis" in h2.tags
+
+
+def test_a_world_saved_before_the_seasons_loads_as_an_even_year(tmp_path):
+    """Its hexes carry only the year's rain. An even split is a year without seasons, and
+    it still sums to what the world said fell."""
+    ws = _small_world()
+    data = ws.to_dict()
+    for hd in data["hexes"]:
+        del hd["wet_season_precip_mm"]
+        del hd["dry_season_precip_mm"]
+    h = WorldState.from_dict(data).hexes[(0, 0)]
+    assert h.wet_season_precip_mm == pytest.approx(h.moisture / 2)
+    assert h.wet_season_precip_mm + h.dry_season_precip_mm == pytest.approx(h.moisture)
+
+
 def test_territory_round_trips(tmp_path):
     ws = _small_world()
     ws.hexes[(0, 0)].territory = (1, 1)
