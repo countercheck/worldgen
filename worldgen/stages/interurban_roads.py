@@ -1,23 +1,26 @@
 from collections import defaultdict, deque
-from heapq import heappop, heappush
+from dataclasses import dataclass
 
+import numpy as np
+
+from ..core import routing
 from ..core.hex import HexCoord, SettlementRole, SettlementTier, TerrainClass
-from ..core.hex_grid import astar_to_any, distance, neighbors
+from ..core.hex_grid import distance, neighbors
 from ..core.pipeline import GeneratorStage
+from ..core.routing import Grid
 from ..core.world_state import ROAD_TIER_RANK, RoadTier, WorldState, road_edge_key
 from .road_cost import (
     add_traffic,
     as_road_edges,
     fill_tier_gaps,
-    make_road_edge_cost,
-    pheromone_discount,
     prune_orphan_roads,
     river_crossings,
+    road_edge_costs,
+    road_node_costs,
     route_through_settlements,
     settlement_rings,
     tag_river_crossings,
     tag_switchbacks,
-    terrain_base_cost,
     tier_near,
 )
 
@@ -63,7 +66,6 @@ class InterurbanRoadStage(GeneratorStage):
         if not settlements:
             return state
 
-        hex_traffic: dict[HexCoord, float] = defaultdict(float)
         edge_traffic: dict[tuple[HexCoord, HexCoord], float] = defaultdict(float)
         canonical_routes: dict[tuple[HexCoord, HexCoord], list[HexCoord]] = {}
         journeys: dict[tuple[HexCoord, HexCoord], tuple[float, tuple[HexCoord, ...]]] = {}
@@ -73,9 +75,7 @@ class InterurbanRoadStage(GeneratorStage):
         # network barely changes once the trunks are down — so keep the answer and rebuild
         # only when an edge has actually been added since it was worked out.
         net_version = [0]
-        home_cache: dict[
-            HexCoord, tuple[int, dict[HexCoord, HexCoord | None], dict[HexCoord, float]]
-        ] = {}
+        home_cache: dict[HexCoord, tuple[int, np.ndarray, np.ndarray]] = {}
 
         # Where the rivers run between hexes: a step across one is a crossing, and pays.
         crossings = river_crossings(state.river_sides)
@@ -83,14 +83,11 @@ class InterurbanRoadStage(GeneratorStage):
         # Which seats each hex neighbours, so an edge can be charged for skirting one.
         ring = settlement_rings(settled)
 
-        def node_cost(hx):
-            # No discount for running beside a river. Roads follow valleys because valleys
-            # are the low, level, well-watered ground that leads somewhere, not because a
-            # rule pays them to.
-            base = terrain_base_cost(hx, cfg)
-            return pheromone_discount(base, hex_traffic[hx.coord], cfg)
-
-        edge_cost = make_road_edge_cost(cfg, crossings, ring)
+        # A hex costs its terrain, worn down by the traffic over it (`pheromone_discount`).
+        # No discount for running beside a river. Roads follow valleys because valleys are
+        # the low, level, well-watered ground that leads somewhere, not because a rule pays
+        # them to.
+        net = _Network.of(hexes, cfg, crossings, ring)
 
         # Travellers come from population rather than from tier, so a market of 6,200 wears
         # a deeper road out of its gates than one of 900. Population used to enter only on
@@ -119,9 +116,7 @@ class InterurbanRoadStage(GeneratorStage):
             if key in canonical_routes:
                 path = canonical_routes[key]
             else:
-                path = self._route(
-                    hexes, origin, dest, net_adj, node_cost, edge_cost, home_cache, net_version[0]
-                )
+                path = self._route(net, origin, dest, home_cache, net_version[0])
                 if path is None or len(path) < 2:
                     return
                 canonical_routes[key] = path
@@ -129,12 +124,14 @@ class InterurbanRoadStage(GeneratorStage):
             count, _ = journeys.get(key, (0.0, ()))
             journeys[key] = (count + n, tuple(path))
             for c in path:
-                hex_traffic[c] += n
+                net.wear(c, n)
             for a, b in zip(path, path[1:], strict=False):
                 edge_traffic[road_edge_key(a, b)] += n
                 if b not in net_adj[a]:
                     net_adj[a].add(b)
                     net_adj[b].add(a)
+                    net.join(a, net_adj[a])
+                    net.join(b, net_adj[b])
                     net_version[0] += 1
 
         for origin_s in travellers:
@@ -305,13 +302,12 @@ class InterurbanRoadStage(GeneratorStage):
         # And the journeys themselves, which the tiers were cut from: a place on a busy
         # road lives on the people going past it, so the stages after this one need to
         # know how many there were, not only how the road was drawn.
-        for coord, n in hex_traffic.items():
-            if coord in hexes:
-                hexes[coord].traffic = round(n, 3)
+        for i in np.flatnonzero(net.worn).tolist():
+            hexes[net.grid.coord(i)].traffic = round(float(net.traffic[i]), 3)
         state.journeys = journeys
         return state
 
-    def _route(self, hexes, origin, dest, net_adj, node_cost, edge_cost, cache, version):
+    def _route(self, net, origin, dest, cache, version):
         """The journey from *origin* to *dest*: a new leg, then the road that already goes there.
 
         A traveller bound for a town does not need a road of their own all the way, they need
@@ -344,29 +340,34 @@ class InterurbanRoadStage(GeneratorStage):
         # Every hex from which dest is reachable on the network so far, with the way back
         # and what it costs. Empty for the first traveller, who therefore paths the whole
         # way and becomes the road that everyone after them joins.
+        grid = net.grid
         cached = cache.get(dest)
         if cached is not None and cached[0] == version:
             tree, home_cost = cached[1], cached[2]
         else:
-            tree, home_cost = self._road_home_tree(hexes, dest, net_adj, node_cost, edge_cost)
+            tree, home_cost = routing.along(
+                net.adj, grid.nbr, net.node, net.traffic, net.factor, net.edge, grid.index[dest]
+            )
             cache[dest] = (version, tree, home_cost)
-
-        def road_home(node):
-            out = []
-            while node is not None:
-                out.append(node)
-                node = tree[node]
-            return out
 
         # No short circuit when the origin is already on the network. It is tempting — there
         # is a road home, so take it — but that is `_stitch_via_junction`'s mistake in
         # another guise, committing to an existing route without weighing it against a
         # direct one. The origin is itself a goal reached at no cost, so the network route
         # is the search's opening candidate and is beaten only if striking out pays.
-        leg = astar_to_any(hexes, origin, set(tree), node_cost, edge_cost, goal_cost=home_cost)
+        leg = _to_any(
+            grid,
+            net.node,
+            net.edge,
+            origin,
+            home_cost < np.inf,
+            traffic=net.traffic,
+            factor=net.factor,
+            goal_cost=home_cost,
+        )
         if leg is None:
             return None
-        return leg + road_home(tree[leg[-1]])
+        return leg + routing.walk_back(grid, tree, int(tree[grid.index[leg[-1]]]))[::-1]
 
     @staticmethod
     def _join_by_land(hexes, places, road_edges, cfg, crossings):
@@ -394,12 +395,10 @@ class InterurbanRoadStage(GeneratorStage):
         water = (TerrainClass.OPEN_WATER, TerrainClass.INLAND_WATER)
         dry = {c for c, hx in hexes.items() if hx.terrain_class not in water}
 
-        def land_cost(hx):
-            if hx.terrain_class in water:
-                return float("inf")
-            return terrain_base_cost(hx, cfg)
-
-        land_edge = make_road_edge_cost(cfg, crossings)
+        grid = Grid.of(hexes)
+        wet = grid.column(hexes, lambda hx: hx.terrain_class in water, np.bool_, False)
+        land_cost = np.where(wet, np.inf, road_node_costs(hexes, grid, cfg))
+        land_edge = road_edge_costs(hexes, grid, cfg, crossings)
 
         # What the ground itself connects, ignoring roads entirely.
         mass_of: dict[HexCoord, HexCoord] = {}
@@ -454,6 +453,7 @@ class InterurbanRoadStage(GeneratorStage):
             # trunk onto a spur.
             group.sort(key=len, reverse=True)
             joined = set(group[0])
+            goals = grid.mask(joined)
             for unit in group[1:]:
                 if unit & joined:
                     continue
@@ -464,7 +464,7 @@ class InterurbanRoadStage(GeneratorStage):
                 # which is how a settlement could stay stranded with a route ten hexes away.
                 best = None
                 for src in sorted(unit):
-                    path = astar_to_any(hexes, src, joined, land_cost, land_edge)
+                    path = _to_any(grid, land_cost, land_edge, src, goals)
                     if path and len(path) > 1 and (best is None or len(path) < len(best)):
                         best = path
                 if best is None:
@@ -486,32 +486,9 @@ class InterurbanRoadStage(GeneratorStage):
                 for a, b in zip(best, best[1:], strict=False):
                     road_edges.setdefault(road_edge_key(a, b), tier)
                 joined |= set(best) | unit
+                goals[[grid.index[c] for c in (*best, *unit)]] = True
                 added += 1
         return added
-
-    @staticmethod
-    def _road_home_tree(hexes, dest, net_adj, node_cost, edge_cost):
-        """Every hex the network can reach *dest* from, with the way back and its cost."""
-        tree: dict[HexCoord, HexCoord | None] = {dest: None}
-        home_cost: dict[HexCoord, float] = {dest: 0.0}
-        if dest not in net_adj:
-            return tree, home_cost
-        queue = [(0.0, dest)]
-        while queue:
-            cost, c = heappop(queue)
-            if cost > home_cost.get(c, float("inf")):
-                continue
-            for n in net_adj[c]:
-                if n not in hexes:
-                    continue
-                step = node_cost(hexes[n]) + edge_cost(hexes[c], hexes[n])
-                if step == float("inf"):
-                    continue
-                if cost + step < home_cost.get(n, float("inf")):
-                    home_cost[n] = cost + step
-                    tree[n] = c
-                    heappush(queue, (cost + step, n))
-        return tree, home_cost
 
     def _guarantee_connectivity(self, hexes, places, road_edges, cfg, crossings):
         """Join any settlement the traffic model left off the network.
@@ -550,10 +527,9 @@ class InterurbanRoadStage(GeneratorStage):
             return road_edges, []
         main = max(components, key=len)
 
-        def plain_cost(hx):
-            return terrain_base_cost(hx, cfg)
-
-        plain_edge = make_road_edge_cost(cfg, crossings)
+        grid = Grid.of(hexes)
+        plain_cost = road_node_costs(hexes, grid, cfg)
+        plain_edge = road_edge_costs(hexes, grid, cfg, crossings)
 
         def adopt(path, tier) -> None:
             """Lay *path* into the network at *tier*, without demoting anything."""
@@ -588,7 +564,7 @@ class InterurbanRoadStage(GeneratorStage):
             progressed = False
             for iso in isolated:
                 # One search against the whole main component, not one per settlement in
-                # it. `astar_to_any` with no `aim` is a Dijkstra that stops at the first
+                # it. `_to_any` with no residual is a Dijkstra that stops at the first
                 # goal it reaches, which — the frontier being ordered by true cost — is
                 # the cheapest goal; that is exactly the argmin the old loop computed by
                 # running a full A* to every candidate and throwing all but one away.
@@ -597,8 +573,8 @@ class InterurbanRoadStage(GeneratorStage):
                 # at 160x160 organic it was 1,645 A* runs and 74 s of a 101 s stage, and
                 # the cost grew as the main component did, so every settlement joined made
                 # the next one more expensive to join.
-                best_path = astar_to_any(
-                    hexes, iso.coord, main & place_coords, plain_cost, plain_edge
+                best_path = _to_any(
+                    grid, plain_cost, plain_edge, iso.coord, grid.mask(main & place_coords)
                 )
                 if best_path:
                     adopt(best_path, tier_for(iso.coord))
@@ -619,3 +595,75 @@ class InterurbanRoadStage(GeneratorStage):
                 main.add(iso.coord)
 
         return road_edges, unreachable
+
+
+@dataclass
+class _Network:
+    """The road stage's search state: the costs, the traffic wearing them down, the roads.
+
+    Traffic is an array rather than a dict so the searches can read it; `worn` records
+    which hexes any journey has crossed, the hexes the stage writes a `traffic` to.
+    """
+
+    grid: Grid
+    node: np.ndarray
+    edge: np.ndarray
+    factor: float
+    traffic: np.ndarray
+    worn: np.ndarray
+    # Per hex, the directions of the roads out of it, in the order its adjacency set
+    # iterates. `routing.along` breaks ties in that order, as the dict search it replaced
+    # did, so the order is copied from the set rather than recomputed.
+    adj: np.ndarray
+
+    @classmethod
+    def of(cls, hexes, cfg, crossings, ring) -> "_Network":
+        grid = Grid.of(hexes)
+        return cls(
+            grid=grid,
+            node=road_node_costs(hexes, grid, cfg),
+            edge=road_edge_costs(hexes, grid, cfg, crossings, ring),
+            factor=float(cfg.road_pheromone_factor),
+            traffic=np.zeros(grid.size),
+            worn=np.zeros(grid.size, np.bool_),
+            adj=np.full((grid.size, 6), -1, np.int64),
+        )
+
+    def wear(self, coord: HexCoord, n: float) -> None:
+        i = self.grid.index[coord]
+        self.traffic[i] += n
+        self.worn[i] = True
+
+    def join(self, coord: HexCoord, roads: set[HexCoord]) -> None:
+        """Copy *coord*'s road neighbours across, in the order the set holds them."""
+        row = self.adj[self.grid.index[coord]]
+        row[:] = -1
+        for k, other in enumerate(roads):
+            row[k] = self.grid.direction(coord, other)
+
+
+def _to_any(grid, node, edge, start, goals, traffic=None, factor=0.0, goal_cost=None):
+    """`hex_grid.astar_to_any` (with no `aim`) over cost arrays: the path to the best goal.
+
+    *goals* is a mask. With *goal_cost* each goal is weighed by what remains from it; without,
+    the first goal reached is the cheapest. *traffic* wears the node costs as the road
+    network's pheromone does.
+    """
+    if start not in grid.index or not goals.any():
+        return None
+    s = grid.index[start]
+    if goals[s]:
+        return [start]
+    mode = routing.FIRST_GOAL if goal_cost is None else routing.GOAL_COST
+    came, best = routing.to_any(
+        grid.nbr,
+        node,
+        np.zeros(0) if traffic is None else traffic,
+        factor,
+        edge,
+        s,
+        goals,
+        np.zeros(0) if goal_cost is None else goal_cost,
+        mode,
+    )
+    return None if best < 0 else routing.walk_back(grid, came, best)

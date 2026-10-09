@@ -17,8 +17,8 @@ from worldgen.stages.habitability import potential_food, site_bonus
 from worldgen.stages.haulage import (
     allocate_catchments,
     fishery_rim,
-    make_travel_cost,
     settleable,
+    travel_field,
     usable_fraction,
 )
 from worldgen.stages.land_use import LandUseStage
@@ -72,7 +72,7 @@ def test_day_reach_is_the_catchment_a_lone_seat_would_get(sited):
     state, cfg, rivers = sited
     hexes = state.hexes
     radius = cfg.market_day_radius
-    node_cost, edge_cost = make_travel_cost(hexes, cfg, rivers)
+    field = travel_field(hexes, cfg, rivers)
     for seat in sorted(settleable(hexes, cfg))[::17]:
         owner, cost = allocate_catchments(hexes, [seat], radius, cfg, rivers)
         owner, cost = fishery_rim(hexes, owner, cost)
@@ -81,7 +81,7 @@ def test_day_reach_is_the_catchment_a_lone_seat_would_get(sited):
             for c in owner
             if usable_fraction(cost[c], radius) > 0.0
         }
-        got = dict(day_reach(seat, hexes, radius, node_cost, edge_cost))
+        got = dict(day_reach(seat, radius, field))
         assert got.keys() == expected.keys(), f"day-reach of {seat} is not its catchment"
         for c, w in got.items():
             assert w == pytest.approx(expected[c])
@@ -96,8 +96,8 @@ def test_a_ridge_beside_a_candidate_lowers_its_score(sited):
     surplus = {c: potential_food(h, cfg) for c, h in state.hexes.items()}
 
     def score(hexes, seat):
-        node_cost, edge_cost = make_travel_cost(hexes, cfg, rivers)
-        return sum(surplus[c] * w for c, w in day_reach(seat, hexes, radius, node_cost, edge_cost))
+        field = travel_field(hexes, cfg, rivers)
+        return sum(surplus[c] * w for c, w in day_reach(seat, radius, field))
 
     # The best-fed candidate, so there is countryside beyond the ridge to lose.
     seat = max(sorted(settleable(state.hexes, cfg)), key=lambda c: score(state.hexes, c))
@@ -134,7 +134,7 @@ def test_lazy_greedy_sites_the_same_markets_as_brute_force(sited):
     lazy = MarketStage(cfg, None)._plant(hexes, surplus, cfg, rivers)
     assert len(lazy) >= 3, f"only {len(lazy)} markets; the comparison needs a subject"
 
-    node_cost, edge_cost = make_travel_cost(hexes, cfg, rivers)
+    field = travel_field(hexes, cfg, rivers)
     candidates = [
         c
         for c in sorted(settleable(hexes, cfg))
@@ -143,7 +143,7 @@ def test_lazy_greedy_sites_the_same_markets_as_brute_force(sited):
         )
         >= cfg.settlement_min_reachable
     ]
-    reach = {c: day_reach(c, hexes, radius, node_cost, edge_cost) for c in candidates}
+    reach = {c: day_reach(c, radius, field) for c in candidates}
     bonus = {c: 1.0 + site_bonus(c, hexes[c], hexes, cfg, rivers) for c in candidates}
     remaining = dict(surplus)
     suppressed: set = set()

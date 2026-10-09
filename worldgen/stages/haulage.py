@@ -18,10 +18,12 @@ Pure functions and one Dijkstra, in the shape of `road_cost.py`: no stage class,
 mutation, so it can be unit-tested on synthetic grids.
 """
 
-import heapq
+import numpy as np
 
+from ..core import routing
 from ..core.hex import HexCoord, TerrainClass
 from ..core.hex_grid import neighbors
+from ..core.routing import CostField, Grid
 from .riverside import WATER, Rivers
 
 
@@ -127,6 +129,9 @@ def make_travel_cost(hexes, cfg, rivers: Rivers | None = None):
     route; a catchment is ground somebody works, and leaving the sea traversable at
     `road_water_cost` would let one coastal settlement claim an entire strait.  Fishing is
     handled by `fishery_rim`, which is bounded by the land that does the fishing.
+
+    The searches read this as arrays (`travel_field`); these closures are the rule as
+    written, and `tests/test_routing.py` holds the arrays equal to them step for step.
     """
 
     def node_cost(hx) -> float:
@@ -167,6 +172,9 @@ def make_bulk_cost(hexes, cfg, rivers: Rivers | None = None):
     reach (`Rivers`).  Two such hexes are one voyage only if they share the reach: two
     rivers side by side, or one river either side of a cataract, mean landing and loading
     again, and are charged both.
+
+    The searches read this as arrays (`bulk_field`), held equal to these closures by
+    `tests/test_routing.py`.
     """
     if rivers is None:
         raise ValueError("bulk haulage needs the world's rivers: pass river_index(state, cfg)")
@@ -234,39 +242,135 @@ def bulk_routes(
     river trade keeps to going downstream (`river_trade.river_trade_flows`); the cost of a
     step it allows is unchanged.
     """
-    node_cost, edge_cost = make_bulk_cost(hexes, cfg, rivers)
+    field = bulk_field(hexes, cfg, rivers)
+    grid = field.grid
     if budget is None:
         budget = cfg.haulage_range_land
 
+    # The search expands outward from the seat, but the cargo travels the other way — so
+    # each relaxation prices the step *n -> here*, toward the seat (`routing.from_seats`).
+    # Getting the edge direction wrong does not fail loudly: slope is the only asymmetric
+    # term, so it silently inflates the draw of every place the country rises toward.
+    allowed = np.zeros((0, 6), np.bool_)
+    if step_allowed is not None:
+        allowed = np.zeros((grid.size, 6), np.bool_)
+        i, d, j = grid.pairs()
+        allowed[i, d] = [
+            step_allowed(hexes[grid.coord(a)], hexes[grid.coord(b)])
+            for a, b in zip(i.tolist(), j.tolist(), strict=True)
+        ]
+    seeds = np.array([grid.index[s] for s in sorted(seats)], np.int64)
+    cost_at, toward_at, order = routing.from_seats(
+        grid.nbr, field.node, field.edge, allowed, step_allowed is not None, seeds, float(budget)
+    )
+
     cost: dict[HexCoord, float] = {seat: 0.0 for seat in seats}
     toward: dict[HexCoord, HexCoord] = {}
-    heap = [(0.0, seat) for seat in sorted(seats)]
-    heapq.heapify(heap)
-    while heap:
-        d, coord = heapq.heappop(heap)
-        if d > cost.get(coord, float("inf")):
-            continue
-        hx = hexes[coord]
-        for n in neighbors(coord):
-            n_hx = hexes.get(n)
-            if n_hx is None:
-                continue
-            # The search expands outward from the seat, but the cargo travels the other
-            # way — so each relaxation prices the step *n -> here*, toward the seat.
-            # Getting the edge direction wrong does not fail loudly: slope is the only
-            # asymmetric term, so it silently inflates the draw of every place the country
-            # rises toward.
-            if step_allowed is not None and not step_allowed(n_hx, hx):
-                continue
-            step = node_cost(n_hx) + edge_cost(n_hx, hx)
-            if step == float("inf"):
-                continue
-            nd = d + step
-            if nd < budget and nd < cost.get(n, float("inf")):
-                cost[n] = nd
-                toward[n] = coord
-                heapq.heappush(heap, (nd, n))
+    reached = grid.coords(order)
+    cost.update(zip(reached, cost_at[order].tolist(), strict=True))
+    toward.update(zip(reached, grid.coords(toward_at[order]), strict=True))
     return cost, toward
+
+
+def _grid(hexes, rivers: Rivers | None) -> Grid:
+    return _cached(rivers, hexes, None, "grid", lambda: Grid.of(hexes))
+
+
+def _cached(rivers: Rivers | None, hexes, cfg, kind: str, build):
+    """*build()*, kept on *rivers* for the next search over the same world.
+
+    A `Rivers` is built from one world at one moment (`river_index`), so it is the natural
+    owner of the cost arrays that read it: a stage that rebuilds it to see new crossings
+    gets fresh arrays with it, and one that keeps it reuses them across every seat it
+    routes from — a hundred `bulk_routes` calls to a stage, where building the arrays is
+    most of what a single call costs.
+    """
+    if rivers is None:
+        return build()
+    cache = rivers.__dict__.setdefault("_routing", {})
+    hit = cache.get(kind)
+    if hit is not None and hit[0] is hexes and hit[1] is cfg:
+        return hit[2]
+    out = build()
+    cache[kind] = (hexes, cfg, out)
+    return out
+
+
+def travel_field(hexes, cfg, rivers: Rivers | None = None) -> CostField:
+    """`make_travel_cost` as arrays, for `routing`. Equal to the closures step for step."""
+    return _cached(rivers, hexes, cfg, "travel", lambda: _travel(hexes, cfg, rivers)[0])
+
+
+def bulk_field(hexes, cfg, rivers: Rivers | None = None) -> CostField:
+    """`make_bulk_cost` as arrays, for `routing`. Equal to the closures step for step."""
+    if rivers is None:
+        raise ValueError("bulk haulage needs the world's rivers: pass river_index(state, cfg)")
+    return _cached(rivers, hexes, cfg, "bulk", lambda: _bulk(hexes, cfg, rivers))
+
+
+def _travel(hexes, cfg, rivers):
+    """The travel field, and the per-hex pieces `_bulk` builds on."""
+    grid = _grid(hexes, rivers)
+    wet = grid.column(hexes, lambda hx: hx.terrain_class in WATER, np.bool_, False)
+    elevation = grid.column(hexes, lambda hx: hx.elevation)
+    i, d, j = grid.pairs()
+
+    ford = np.zeros((grid.size, 6))
+    if rivers is not None:
+        for a, k, _, cost in grid.pair_steps(rivers.crossing.items()):
+            ford[a, k] = cost
+    climb = elevation[j] - elevation[i]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        ascent = np.where(climb <= 0.0, 0.0, climb / cfg.travel_ascent_per_hex)
+    edge = grid.edges()
+    edge[i, d] = np.where(wet[i] | wet[j], np.inf, ascent + ford[i, d])
+    node = np.where(wet, np.inf, cfg.road_flat_cost)
+    return CostField(grid, node, edge), wet
+
+
+def _bulk(hexes, cfg, rivers: Rivers) -> CostField:
+    travel, wet = _travel(hexes, cfg, rivers)
+    grid = travel.grid
+    i, d, j = grid.pairs()
+
+    afloat = wet.copy()
+    for c in rivers.reaches:
+        if c in grid.index:
+            afloat[grid.index[c]] = True
+    landing = grid.column(
+        hexes,
+        lambda hx: (
+            cfg.haulage_transship_cost
+            if hx.terrain_class is TerrainClass.OPEN_WATER
+            else cfg.haulage_river_transship_cost
+        ),
+    )
+    toll_cost = cfg.toll_bridge_share * cfg.haulage_range_land
+    bridged = np.zeros((grid.size, 6), np.bool_)
+    for a, k, _, _ in grid.pair_steps((pair, None) for pair in rivers.bridged):
+        bridged[a, k] = True
+
+    # `Rivers.joined` only where both ends are afloat and one is a bank: water to water is
+    # always joined, and the bank cases are few enough to ask one by one.
+    both = afloat[i] & afloat[j]
+    joined = both & wet[i] & wet[j]
+    for t in np.flatnonzero(both & ~(wet[i] & wet[j])).tolist():
+        a, b = hexes[grid.coord(i[t])], hexes[grid.coord(j[t])]
+        joined[t] = rivers.joined(a, b)
+
+    walk = travel.edge[i, d]
+    edge = grid.edges()
+    edge[i, d] = np.where(
+        afloat[i] != afloat[j],
+        np.where(afloat[i], landing[i], landing[j]),
+        np.where(
+            both,
+            np.where(joined, 0.0, (landing[i] + walk) + landing[j]),
+            np.where(bool(toll_cost) & bridged[i, d], walk + toll_cost, walk),
+        ),
+    )
+    node = np.where(afloat, cfg.road_flat_cost / cfg.haulage_range_water_mult, travel.node)
+    return CostField(grid, node, edge)
 
 
 def ford_cost(from_hx, to_hx, rivers: Rivers | None) -> float:
@@ -315,34 +419,16 @@ def allocate_catchments(hexes, seats, budget: float, cfg, rivers: Rivers | None 
     if not seats or budget <= 0.0:
         return {}, {}
 
-    node_cost, edge_cost = make_travel_cost(hexes, cfg, rivers)
+    field = travel_field(hexes, cfg, rivers)
+    grid = field.grid
+    seeds = np.array([grid.index[s] for s in seats if s in hexes], np.int64)
+    owner_at, cost_at, order = routing.catchments(
+        grid.nbr, field.node, field.edge, seeds, float(budget)
+    )
 
-    owner: dict[HexCoord, HexCoord] = {}
-    cost: dict[HexCoord, float] = {}
-    heap = [(0.0, seat, seat) for seat in seats if seat in hexes]
-    heapq.heapify(heap)
-
-    while heap:
-        d, coord, seat = heapq.heappop(heap)
-        if coord in owner:
-            continue
-        owner[coord] = seat
-        cost[coord] = d
-
-        hx = hexes[coord]
-        for n in neighbors(coord):
-            if n in owner:
-                continue
-            n_hx = hexes.get(n)
-            if n_hx is None:
-                continue
-            step = node_cost(n_hx) + edge_cost(hx, n_hx)
-            if step == float("inf"):
-                continue
-            nd = d + step
-            if nd < budget:
-                heapq.heappush(heap, (nd, n, seat))
-
+    taken = grid.coords(order)
+    owner = dict(zip(taken, grid.coords(owner_at[order]), strict=True))
+    cost = dict(zip(taken, cost_at[order].tolist(), strict=True))
     return owner, cost
 
 
