@@ -240,3 +240,128 @@ def test_config_validation():
     for bad_quantile in (0.0, 1.5):
         with pytest.raises(ValueError, match="alluvium_quantile"):
             WorldConfig(alluvium_quantile=bad_quantile)
+
+
+# ---------------------------------------------------------------------------
+# The load an off-map river brings (tech-debt #119)
+# ---------------------------------------------------------------------------
+#
+# The shipped config's open north edge admits inlets; the sea ring admits none.
+
+_SHIPPED = dict(width=48, height=48, model="organic", continent_falloff_edges=("south",))
+
+
+def _loaded(monkeypatch, seed, **over):
+    """A world to hydrology, its droplet record, and where each imported course met water."""
+    from tests.worlds import build_pipeline
+    from worldgen.stages import erosion
+
+    seen = {"meets": []}
+    normalise, carry = erosion._normalise_alluvium, erosion._carry_inlet_load
+
+    def keep_record(deposition, *a, **k):
+        seen["deposition"] = deposition.copy()
+        return normalise(deposition, *a, **k)
+
+    def keep_meeting(arr, deposition, cells, meets, *a):
+        seen["meets"].append(meets)
+        return carry(arr, deposition, cells, meets, *a)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(erosion, "_normalise_alluvium", keep_record)
+        patch.setattr(erosion, "_carry_inlet_load", keep_meeting)
+        state = build_pipeline(seed=seed, until="HydrologyStage", **{**_SHIPPED, **over}).run()
+    return state, seen
+
+
+def _until_erosion(seed, **over):
+    from tests.worlds import build_world
+
+    return build_world(seed=seed, until="ErosionStage", **{**_SHIPPED, **over})
+
+
+@pytest.mark.parametrize("seed", [11, 42])
+def test_an_imported_river_builds_a_delta_where_it_meets_standing_water(monkeypatch, seed):
+    """Against the same world without it, and against the native rivers beside it.
+
+    The rain starts empty on this map's land, so an imported river used to bring the
+    discharge of everything it drained beyond the border and none of its load, and built
+    nothing where it met the sea or a lake. Measured as what it laid within two hexes of
+    where it meets the water; a native river's fan is what the rain built at its mouth.
+    """
+    from worldgen.core.hex_grid import corner_hexes, hex_range
+
+    on, loaded = _loaded(monkeypatch, seed)
+    _, bare = _loaded(monkeypatch, seed, erosion_inlet_droplets_per_km2=0.0)
+    met = [m for m in loaded["meets"] if m is not None]
+    assert met, "the fixture should have an imported river that meets water"
+    assert bare["meets"] == []
+
+    natives = []
+    sources = {c for c, t in on.river_corners.items() if "river_source_offmap" in t}
+    for river in on.rivers:
+        if river.corners[0] in sources:
+            continue
+        if "river_mouth" not in on.river_corners.get(river.corners[-1], set()):
+            continue
+        fan = {c for h in corner_hexes(river.corners[-1]) for c in hex_range(h, 2) if c in on.hexes}
+        natives.append(sum(max(loaded["deposition"][on.grid_index(c)], 0.0) for c in fan))
+    native = sum(natives) / len(natives) if natives else 0.0
+
+    cfg = WorldConfig(**on.metadata["config"])
+    for cell, _level, _floor in met:
+        fan = {c for c in hex_range(on.coord_at(*cell), 2) if c in on.hexes}
+        laid = sum(
+            loaded["deposition"][on.grid_index(c)] - bare["deposition"][on.grid_index(c)]
+            for c in fan
+        )
+        assert laid >= cfg.erosion_delta_min_load, f"no delta where the course met water at {cell}"
+        assert laid >= native, f"the delta at {cell} is smaller than the native rivers' ({native})"
+
+
+@pytest.mark.parametrize("seed", [11, 42])
+def test_the_imported_load_moves_no_shore(seed):
+    """Sea stays sea and land stays land: a delta is built up to the water, never onto it.
+
+    Built onto it, a great river's fan sealed its own mouth as a bar of dry land, and the
+    country behind filled as a lake of 1,600 km2. That the load raises nothing above the
+    water it lies in is checked directly on the carry (`test_erosion`).
+    """
+    on = _until_erosion(seed)
+    off = _until_erosion(seed, erosion_inlet_droplets_per_km2=0.0)
+    for coord, hx in off.hexes.items():
+        assert (on.hexes[coord].elevation < 0.0) == (hx.elevation < 0.0), f"{coord} changed shore"
+
+
+def test_the_imported_load_leaves_the_inlets_where_they_were(monkeypatch):
+    on, _ = _loaded(monkeypatch, 42)
+    off, _ = _loaded(monkeypatch, 42, erosion_inlet_droplets_per_km2=0.0)
+
+    def sources(state):
+        return sorted(c for c, t in state.river_corners.items() if "river_source_offmap" in t)
+
+    assert sources(on)
+    assert sources(on) == sources(off)
+
+
+def test_off_is_off(monkeypatch):
+    """With no droplets the load is never carried, and nothing is drained again for it."""
+    from tests.worlds import build_pipeline
+    from worldgen.stages import erosion
+
+    def refuse(*a, **k):
+        raise AssertionError("the load was carried with erosion_inlet_droplets_per_km2 = 0")
+
+    monkeypatch.setattr(erosion, "_carry_inlet_load", refuse)
+    monkeypatch.setattr(erosion, "_inlet_course", refuse)
+    build_pipeline(
+        seed=42, until="ErosionStage", erosion_inlet_droplets_per_km2=0.0, **_SHIPPED
+    ).run()
+
+
+def test_the_imported_load_is_reproducible():
+    from tests.worlds import build_pipeline
+
+    a = build_pipeline(seed=11, until="HydrologyStage", **_SHIPPED).run()
+    b = build_pipeline(seed=11, until="HydrologyStage", **_SHIPPED).run()
+    assert a.to_dict() == b.to_dict()

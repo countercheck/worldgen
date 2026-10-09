@@ -221,6 +221,26 @@ class WorldConfig:
     erosion_channel_affinity_gain: float = 0.5
     erosion_affinity_update_interval: int = 500
     erosion_delta_min_load: float = 0.15
+    # Sediment brought in by a river entering from off the map (tech-debt #119).  The rain
+    # droplets start empty on this map's land, so an imported river arrived with the
+    # discharge of the catchment it drained beyond the border and none of its load, and cut
+    # its way to the coast instead of building a delta there.  Loaded droplets are carried
+    # down each imported river's course from its inlet to bring that load.  They deposit
+    # and never cut: the imported river's cutting is already in the incision, which is
+    # seeded with its catchment.
+    # How many, per km2 of imported catchment (`river_inflow_volume` x land area), so the
+    # load scales with the country drained.  0 disables.
+    erosion_inlet_droplets_per_km2: float = 0.02
+    # The water each carries; a raindrop starts with 1.  What a droplet can hold goes with
+    # its water: on a reach too gentle to carry the load it drops the excess as floodplain
+    # silt, down to `0.01 x water x erosion_capacity`, and carries the rest to the delta.
+    # Unlike a raindrop's it is kept all the way down — a river gathers water rather than
+    # soaking away — so above `erosion_delta_min_load / (0.01 x erosion_capacity)`, 3.75 at
+    # the defaults, every imported river that meets standing water builds a delta there.
+    erosion_inlet_water: float = 5.0
+    # The load each starts with, as a multiple of `erosion_delta_min_load`, the least load
+    # that builds a delta.  Above 1, so what reaches the sea is enough to build one.
+    erosion_inlet_load: float = 2.0
 
     # Channel incision.  The droplets above cut in proportion to slope alone: each carries
     # one unit of water whatever country it drains, which is stream power with the area
@@ -1388,6 +1408,9 @@ class WorldConfig:
             raise ValueError(
                 f"erosion_incision_max_cut_m must be >= 0, got {self.erosion_incision_max_cut_m}"
             )
+        for name in ("erosion_inlet_droplets_per_km2", "erosion_inlet_water", "erosion_inlet_load"):
+            if getattr(self, name) < 0:
+                raise ValueError(f"{name} must be >= 0, got {getattr(self, name)}")
         if self.erosion_droplet_overcut_m < 0:
             raise ValueError(
                 f"erosion_droplet_overcut_m must be >= 0, got {self.erosion_droplet_overcut_m}"
