@@ -199,8 +199,9 @@ a message to regenerate it from its seed; there is no migration.
 | `river_sides` | `dict[Side, RiverSide]` | Every hexside a river runs along: `catchment_km2`, `flow` (a 0–1 rank against the largest river), `drop_m`, and `tags` ⊂ {`ford`, `bridge`, `cataract`, `rapids`} |
 | `river_corners` | `dict[Corner, set[str]]` | Tags on the points of the network: `river_source`, `river_source_offmap`, `river_end`, `river_mouth`, `confluence` |
 | `settlements` | `list[Settlement]` | Cities, towns, and villages combined |
-| `road_edges` | `dict[(HexCoord, HexCoord), RoadEdge]` | The road network, one tier (PRIMARY / SECONDARY / TRACK) per undirected land edge |
+| `road_edges` | `dict[(HexCoord, HexCoord), RoadEdge]` | The road network, one tier (PRIMARY / SECONDARY / TRACK) per undirected land edge, with its signed `delta_elevation_m` and the `traffic` it carries (journeys a year as `InterurbanRoadStage` routed them; 0 on an edge laid only to join the network) |
 | `sea_edges` | `dict[(HexCoord, HexCoord), RoadEdge]` | The water legs of the same network, kept apart from the roads |
+| `journeys` | `dict[(HexCoord, HexCoord), (float, path)]` | Working data, **not written to world.json**: every pair of settlements `InterurbanRoadStage` routed journeys between, how many, and the path. `ChokepointStage` charges road tolls and finds crossroads from it |
 | `ferries` | `list[Ferry]` | Kept in the schema, but nothing fills it since rivers moved onto hexsides: no land is sealed off by a river any more |
 | `metadata` | `dict` | `{"seed": ..., "config": ...}` snapshot |
 
@@ -216,6 +217,7 @@ Convenience accessors: `all_land()`, `all_open_water()`, `all_inland_water()`,
 | `moisture` | `float` | `[0.0, 1.0]` | Climate |
 | `wet_season_precip_mm`, `dry_season_precip_mm` | `float` | mm; sum to `moisture` | Climate (`wet_season_share`) |
 | `groundwater_mm` | `float` | mm over the growing season; 0 off an oasis | Soil (oases) |
+| `traffic` | `float` | journeys a year through the hex; 0 off every route | Interurban Roads |
 | `temperature` | `float` | `[0.0, 1.0]` (clamped) | Climate |
 | `terrain_class` | `TerrainClass` | enum | Terrain Class, Water Bodies, Hydrology |
 | `biome` | `Biome \| None` | enum | Biome |
@@ -1818,7 +1820,8 @@ map's total population is unchanged by this stage.
   city kept for them. Quays within `transship_radius` of each other are pooled onto the
   busiest; where that share reaches `port_min_population` a port is founded and paid it.
   A port past `city_min_population` is a city.
-- **Toll towns** (role `bridge`, `portage` or `caravansary`). `CityPromotionStage` also
+- **Toll towns** (role `bridge`, `portage` or `caravansary`; `ChokepointStage` adds
+  `pass` and `crossroads` from the road traffic, § [3.11a](#311a-chokepoints--organic)). `CityPromotionStage` also
   records the tolls (`toll_bridge_share`, `toll_portage_share`) that no settlement stood
   within `toll_radius` of, in `metadata["unhandled_tolls"]` as `[q, r, seat q, r, food,
   people, kind]`. Toll points within `toll_radius` of each other are one crossing, pooled
@@ -1920,7 +1923,8 @@ with self-reinforcing pheromone trails.
 
 **Reads:** `hex.terrain_class`, `hex.elevation`, `state.river_sides`,
 `hex.coord`, `state.settlements` (CITY and TOWN tiers only).
-**Writes:** `state.road_edges`, `state.sea_edges`, `hex.road_connections`,
+**Writes:** `state.road_edges` (with each edge's `traffic`), `state.sea_edges`,
+`hex.road_connections`, `hex.traffic`, `state.journeys`,
 `RiverSide.tags` (`"ford"` / `"bridge"`), `hex.tags` (`"switchback"`),
 `hex.habitability_village` (+0.2 boost).
 
@@ -2151,8 +2155,8 @@ gated on holding something rather than sprinkled across the countryside.
 
 **Reads:** `state.road_edges`, `state.river_sides`, `hex.soil`, `hex.tags`, `hex.elevation`, `hex.territory`,
 `hex.territory_cost`, the food surface.
-**Writes:** `state.settlements`, `hex.settlement`, and a `pass` tag on every saddle that
-qualifies.
+**Writes:** `state.settlements`, `hex.settlement`, a `pass` tag on every saddle that
+qualifies, settlement populations (road tolls), and `metadata["road_tolls"]`.
 
 **Config:** § [4.10](#410-haulage-and-markets--the-organic-model).
 
@@ -2237,6 +2241,52 @@ it had while a rejected neighbour was still in.
 
 Against a median market town of 967 on the temperate map, and a largest city of 39,805 —
 three tiers, each an order apart, and none of them a target count.
+
+#### Then the road traffic pays its way (tech-debt #142)
+
+After the villages, [wayside.py](../worldgen/stages/wayside.py) reads the journeys the roads
+were built for (`state.journeys`) and charges them where they have no way round:
+
+- **Bridges** over water too big to wade — a side bridged and not forded, with the road
+  over it; the toll point is the bank with the better soil.
+- **Passes** — a `pass` hex on the road.
+- **Desert crossings** — a run of DESERT hexes on a route at least `market_day_radius`
+  long, more than a day's march: the caravan waters at the roadside hex nearest an `oasis`
+  spring within `toll_radius`, or failing one at the best-watered roadside hex.
+
+Each journey crossing pays `toll_per_journey` food (× `people_per_food` in people) to the
+settlement within `toll_radius` of the toll point, half off each of the journey's two
+ends; neither end pays itself. So it is conserved: it moves people from the places the
+journeys come from to the places they pass. A village the tolls have made more toll
+station than farm takes the role of what pays it (`bridge`, `pass`, `caravansary` for a
+desert stop or a bridge on unusable ground) and is a town once it is
+`port_min_population`. What each settlement collected is in `metadata["road_tolls"]` as
+`[site q, r, kind, collector q, r, food, people]`.
+
+A toll nobody stands within `toll_radius` of founds a settlement through the same rule as
+the bulk tolls (`ResourceStage.found_on_tolls`): pooled within `toll_radius`, founded where
+it brings `toll_min_draw` food. Every such place is on the road by construction, so the
+network needs no new road and no re-tiering.
+
+**Crossroads.** Last, a road hex where three or more roads carrying `road_min_traffic`
+meet, with no settlement within 2 × `toll_radius`, scores the passing trade through it
+(`toll_per_journey` per journey) times the number of roads meeting. Best first, a hex
+scoring `crossroads_min_draw` founds a town of role `crossroads`, paid for, like a toll,
+by the ends of the journeys through it. Role `crossroads` rather than `market`: a market
+is sited and sized on a countryside, and this place has none.
+
+**Result** (defaults; toll towns are town-tier settlements founded on a toll or living
+mainly on one, against the median of the other towns):
+
+| world | toll towns | median toll town / other towns | crossroads towns (median) |
+|---|---|---|---|
+| 96² temperate 42 | 3 | 2,078 / 1,008 = 2.06 | 2 (2,522) |
+| 96² temperate 11 | 2 | 2,621 / 800 = 3.27 | 1 (3,554) |
+| 96² temperate 19 | 0 | — | 2 (1,400) |
+| 128² temperate 3 | 5 | 1,074 / 982 = 1.09 | 2 (1,614) |
+| 96² arid 11 | 1 | 1,522 / 1,710 = 0.89 | 0 |
+| 96² temperate 42, south falloff | 5 | 1,493 / 957 = 1.56 | 5 (2,287) |
+| 96² tropical 42, 96² arid 7 | 0 | — | 0 |
 
 ---
 
@@ -2797,7 +2847,9 @@ the surplus it draws on is depleted, and the scan repeats until nothing clears t
 | `toll_bridge_share` | `float` | `0.1` | Tolls at chokepoints (§ [3.10e](#310e-city-provisioning-trade-and-freight--organic)): every cargo — provisioning, manufactures, river trade — stepping over a bridge across water too big to wade (a side `CrossingStage` bridged) leaves this share of the people it feeds with the settlement nearest the bridge within `toll_radius`; neither end of the flow pays itself. A share of what the cargo feeds, not of its price: a toll proper was small — the Sound Dues ran about 1–5% of a cargo's value, a pontage pennies a cart — but a bridge town lived on everything the traffic needed as well. The bulk haul over a tolled bridge also costs `toll_bridge_share` × `haulage_range_land` extra, the haul that loses a cargo the same share, so a carter with a ford nearer than that goes round. Bridge traffic in the bulk model is small (on seven test worlds 0–1.9% of the cargo through quays), because a cargo that reaches a big river boards it rather than crossing. 0 turns bridge tolls off. Validated in [0, 0.5] |
 | `toll_portage_share` | `float` | `0.4` | A cargo walked round a cataract pays this share once, at the portage, to the settlement within `toll_radius` of it, in place of the landing above the falls and the loading below them — one charge rather than two quays at `transship_share`. Aswan at the First Cataract, Louisville at the Falls of the Ohio, the fall-line towns of the American east coast. 0.4 is the two landings' combined share; against keeping the landings as two quays, on the four test worlds with portages it makes the median portage town larger on two (by about half), level on a third and smaller on the fourth. 0 makes the landings ordinary quays again, and with `toll_bridge_share` also 0 the world is exactly as it was without tolls. Validated in [0, 0.5] |
 | `toll_radius` | `int` | `2` | How far from a bridge or a portage, in hexes, the settlement that collects its toll may stand. At 4 an existing market collects at more portages instead of a portage town being founded. Validated `>= 0` |
-| `toll_min_draw` | `float` | `1.0` | The least toll income, in food units like `chokepoint_min_draw` (× `people_per_food` for people: 1.0 is 80), that founds a settlement at a toll point nobody holds — a town if it brings `port_min_population` people, a village if fewer, a city on the same terms as a port. Bridge towns founded on unusable soil are **caravansaries**: ground that feeds nobody, where the toll is the only living. 0 founds none. Validated `>= 0` |
+| `toll_min_draw` | `float` | `12.0` | The least toll income, in food units like `chokepoint_min_draw` (× `people_per_food` for people: 12 is 960), that founds a settlement at a toll point nobody holds — bulk or road — a town if it brings `port_min_population` people, a village if fewer, a city on the same terms as a port. About what a median market town's countryside gives it: a place with no fields is worth founding only where the traffic does for it what a countryside does for a market, and below that the inn and the toll-keeper stand in the nearest village. At 1 it founded a long tail of toll hamlets of 80–400. Bridge towns founded on unusable soil, and every desert stop, are **caravansaries**: ground that feeds nobody, where the traffic is the only living. 0 founds none. Validated `>= 0` |
+| `toll_per_journey` | `float` | `0.03` | Food each road journey leaves at every bridge, pass and desert stop it crosses, with the settlement within `toll_radius` (§ [3.11a](#311a-chokepoints--organic)); and the passing trade a crossroads lives on. What bridge, pass and caravan towns lived on was travellers, droves and carts — pontage was charged by the cart and the head — not the bulk freight, which goes by water. A journey is a sampled unit, so this is a calibration: at 0.03 tolls and crossroads hold 3–15% of the urban population on the test worlds, the scale of England's carriers, carters, ostlers and innkeepers around 1800. Conserved: paid half by each end of the journey. 0 turns road tolls and crossroads off. Validated `>= 0` |
+| `crossroads_min_draw` | `float` | `36.0` | A road hex where three or more busy roads meet, clear of settlements by 2 × `toll_radius`, founds a crossroads town if its passing trade (food, at `toll_per_journey` a journey) times the roads meeting reaches this. 36 is `toll_min_draw` at a junction of three. 0 founds none. Validated `>= 0` |
 | `city_min_population` | `int` | `5000` | A town that grows past this becomes a city whatever it draws — the entrepôt, which handles a hinterland's trade rather than eating its food. 0 turns it off. Validated `>= 0` |
 | `port_min_population` | `int` | `250` | A port is founded at an unattended quay (or waterfront of quays within `transship_radius`) whose trade share reaches this many people. 0 turns ports off. § [3.10d](#310d-resource-settlements--organic) |
 | `port_city_min_separation` | `int` | `12` | A port whose trade alone reaches `city_min_population` is a city only if no other city stands within this many hexes, and … |

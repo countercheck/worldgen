@@ -66,6 +66,9 @@ _CHOKE_DEFAULTS = {
     "regional_climate": "temperate",
     "continent_falloff_edges": ("south",),
     "chokepoint_min_road_tier": "track",
+    # The village tier on its own: the road tolls this stage also charges (#142) rename the
+    # villages they pay and move people between markets, and are tested in test_tolls.
+    "toll_per_journey": 0.0,
 }
 
 
@@ -88,8 +91,16 @@ _FOUNDED = (
     SettlementRole.BRIDGE,
     SettlementRole.PORTAGE,
     SettlementRole.CARAVANSARY,
+    SettlementRole.PASS,
+    SettlementRole.CROSSROADS,
 )
-_TOLLED = (SettlementRole.BRIDGE, SettlementRole.PORTAGE, SettlementRole.CARAVANSARY)
+_TOLLED = (
+    SettlementRole.BRIDGE,
+    SettlementRole.PORTAGE,
+    SettlementRole.CARAVANSARY,
+    SettlementRole.PASS,
+    SettlementRole.CROSSROADS,
+)
 
 
 def _villages(state):
@@ -322,10 +333,11 @@ def test_thin_country_grows_villages_on_unusable_ground_only_where_tolls_pay_for
     must never do is stand on sand — and the arid world does grow one here, on a pass on
     arable ground, so the soil assertion finally has a subject.
 
-    With one exception, which tolls brought (tech-debt #142): a village on ground that feeds
-    nobody may stand where a bridge or a portage pays it a living — a caravansary — but only
-    one `ResourceStage` founded on a toll, and only if the toll clears `toll_min_draw`.
-    Every other village, the chokepoint tier above all, still stands on arable ground.
+    With one exception, which tolls brought (tech-debt #142): a settlement on ground that
+    feeds nobody may stand where a toll pays it a living — a caravansary — but only one
+    founded on a toll, and only if the toll clears `toll_min_draw`. Every other village,
+    the chokepoint tier above all, still stands on arable ground. Checked on the same two
+    worlds with the tolls on.
     """
 
     # Seed 8 rather than the suite's seed 1. Once freight began wearing the roads, seed 1's
@@ -359,20 +371,24 @@ def test_thin_country_grows_villages_on_unusable_ground_only_where_tolls_pay_for
         assert SOIL_RANK[soil] >= SOIL_RANK[SoilQuality.ARABLE], (
             f"village at {v.coord} stands on {soil.value} ground in a desert"
         )
-    cfg = WorldConfig(**{**_CHOKE_DEFAULTS, "regional_climate": "arid"})
-    floor = cfg.toll_min_draw * cfg.people_per_food
-    for state in (arid, temperate):
+    on = {k: v for k, v in _CHOKE_DEFAULTS.items() if k != "toll_per_journey"}
+    for climate in ("arid", "temperate"):
+        state = build_world(
+            seed=11,
+            width=_CHOKE_SIZE,
+            height=_CHOKE_SIZE,
+            model="organic",
+            **{**on, "regional_climate": climate},
+        )
         for v in state.settlements:
-            if v.tier is not SettlementTier.VILLAGE:
-                continue
             if state.hexes[v.coord].soil is not SoilQuality.UNUSABLE:
                 continue
-            if v.role in (SettlementRole.MINING, SettlementRole.LUMBER):
-                continue  # fed from beyond, like a city: they stand on the ore and the wood
-            assert v.role in _TOLLED, f"village at {v.coord} on unusable ground lives on nothing"
-            assert v.population >= floor, (
-                f"{v.role.value} at {v.coord} has {v.population} people, under the toll floor"
-            )
+            # Founded on a toll (the floor is `test_tolls`'s to check), or fed from beyond
+            # like a city: a mine stands on the ore and a camp in the wood. Nothing else.
+            if v.tier is SettlementTier.VILLAGE:
+                assert v.role in (*_TOLLED, SettlementRole.MINING, SettlementRole.LUMBER), (
+                    f"village at {v.coord} on unusable ground lives on nothing"
+                )
 
 
 # --- what it takes from the tier above ---------------------------------------

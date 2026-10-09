@@ -951,11 +951,39 @@ class WorldConfig:
     # instead of portage towns being founded there.
     toll_radius: int = 2
     # The least toll income, in food units like `chokepoint_min_draw`, that founds a
-    # settlement at a toll point nobody holds. A town (`port_min_population`) if it brings
-    # that many; a village below. On ground that feeds nobody (UNUSABLE soil) this is the
-    # only thing that can found one: the caravansary, which lives on the traffic alone.
-    # 0 founds none.
-    toll_min_draw: float = 1.0
+    # settlement at a toll point nobody holds (× people_per_food for people: 12 is 960).
+    # A town (`port_min_population`) if it brings that many; a village below. On ground
+    # that feeds nobody (UNUSABLE soil) this is the only thing that can found one: the
+    # caravansary, which lives on the traffic alone. 0 founds none.
+    #
+    # About what a median market town's countryside gives it, and deliberately: a place
+    # with no fields of its own is worth founding only where the traffic does for it what
+    # a countryside does for a market. Below that the toll-keeper, the inn and the smithy
+    # stand in the nearest village and the traffic pays no one a place on the map. Every
+    # toll a road or a cargo pays is charged either way — this decides only where it founds
+    # a settlement. Founded toll towns are therefore market-town-sized or larger, which is
+    # what the bridge towns and caravan cities were; measured at 1, the floor founded a
+    # long tail of toll hamlets of 80-400 that the map had no use for.
+    toll_min_draw: float = 12.0
+    # Tolls on the road traffic (tech-debt #142): every journey `InterurbanRoadStage`
+    # routed over a bridge, through a pass, or across a desert stretch longer than a day's
+    # march (`market_day_radius` hexes, watering at the oasis nearest the road) leaves this
+    # much food — `people_per_food` times it in people — with the settlement within
+    # `toll_radius`, half off each end of the journey. The bulk freight is cargo that goes
+    # by water where it can; what bridge towns, pass towns and caravan cities lived on was
+    # this: travellers, droves and carts, charged at the bridge by the cart and the head,
+    # and fed, stabled and shod there. A journey is a sampled unit (`road_travellers_per_pop`
+    # and the freight rates), so this is a calibration rather than a price: at 0.03 the
+    # wayside economy — tolls and crossroads — holds 3-15% of the urban population on the
+    # test worlds, the scale of England's carriers, carters, ostlers and innkeepers around
+    # 1800. 0 turns road tolls and crossroads off.
+    toll_per_journey: float = 0.03
+    # A crossroads town is founded on a road hex where three or more busy roads meet, at
+    # least 2 × `toll_radius` from any settlement, if the passing trade there (food, at
+    # `toll_per_journey` a journey) times the number of roads meeting reaches this. 36 is
+    # `toll_min_draw` at a junction of three: a crossroads of more roads is founded on less
+    # traffic, since every road is custom. 0 founds none.
+    crossroads_min_draw: float = 36.0
     # A town that grows past this becomes a city whatever it draws: the entrepôt, which
     # handles a hinterland's trade rather than eating its food. 0 turns it off.
     city_min_population: int = 5000
@@ -1658,6 +1686,8 @@ class WorldConfig:
         for name in (
             "toll_radius",
             "toll_min_draw",
+            "toll_per_journey",
+            "crossroads_min_draw",
             "port_min_population",
             "ore_deposits_per_1000_km2",
             "ore_min_separation",
