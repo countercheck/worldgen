@@ -325,6 +325,54 @@ def trace_streams(drainage: Drainage, threshold: float, forced: Iterable[Node] =
     return Streams(paths=paths, channel=channel, upstream=dict(upstream))
 
 
+def follow_course(net: CornerNetwork, drainage: Drainage, course: list[Node]) -> int:
+    """Send the water at the head of *course* down it, in place, as far as it can go.
+
+    Each step along it replaces the one `flow_direction` drew, so long as the water could
+    have gone that way: to a neighbour no higher on the filled surface.  Across a filled
+    hollow every way is level, and the fill order there is only one choice among many, so
+    the course may cross it against that order.  It stops where it first asks for anything
+    else, or at a corner whose water runs into the sea or a lake, which is where the river
+    meets standing water; from there the water goes the way the drainage sends it.
+
+    Steps that would send the water round in a loop are given back, last first, until the
+    water leaving the end of what is kept gets away.  Returns how many steps were kept.
+    """
+    order = drainage.order
+    filled = drainage.filled
+    flow = drainage.flow
+    steps = 0
+    for here, there in zip(course, course[1:], strict=False):
+        if here not in order or here in net.terminal or there not in order:
+            break
+        onward = flow.get(here)
+        if onward is not None and (onward in net.wet or is_lake_node(onward)):
+            break
+        if there not in net.neighbors[here] or filled[there] > filled[here]:
+            break
+        steps += 1
+
+    drawn = {course[k]: flow.get(course[k]) for k in range(steps)}
+    for k in range(steps):
+        flow[course[k]] = course[k + 1]
+    while steps:
+        position = {course[k]: k for k in range(steps)}
+        node: Node | None = course[steps]
+        back = None
+        for _ in range(len(order) + 1):
+            if node is None:
+                break
+            if node in position:
+                back = position[node]
+                break
+            node = flow.get(node)
+        if back is None:
+            break
+        steps -= 1
+        flow[course[steps]] = drawn[course[steps]]
+    return steps
+
+
 def inlet_corner(coord: HexCoord, net: CornerNetwork, drainage: Drainage) -> Corner | None:
     """Where a river arriving over the border at *coord* joins the corner network.
 

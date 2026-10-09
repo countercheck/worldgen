@@ -16,7 +16,7 @@ generating a world and hoping the branch is reached.
 import numpy as np
 
 from worldgen.core.world_state import WorldState
-from worldgen.stages.erosion import _inflow_mouths, _neighbour_table, _widen_valleys
+from worldgen.stages.erosion import _choose_inlets, _course, _drain, _widen_valleys
 
 
 def _sloping_shelf(w=12, h=12):
@@ -24,35 +24,58 @@ def _sloping_shelf(w=12, h=12):
     arr = np.zeros((w, h))
     for i in range(w):
         for j in range(h):
-            arr[i, j] = 1.0 - 0.05 * i
+            arr[i, j] = 1.0 - 0.05 * i + 0.001 * j
     state = WorldState.empty(seed=1, width=w, height=h)
-    return arr, state, _neighbour_table(state, w, h)
+    net, drainage = _drain(arr, 0.0, state, {}, 2.0, np.random.default_rng(0))
+    return arr, state, net, drainage
 
 
-# --- _inflow_mouths -------------------------------------------------------------
+def _choose(arr, state, net, drainage, rng=None, **over):
+    kw = dict(edges=("west",), count=2, separation=1, min_length_km=1.0, length_bias=2.0)
+    kw.update(over)
+    return _choose_inlets(arr, 0.0, state, net, drainage, rng or np.random.default_rng(3), **kw)
+
+
+# --- _choose_inlets -------------------------------------------------------------
 
 
 def test_no_inflows_are_admitted_when_none_are_asked_for():
-    arr, state, nbrs = _sloping_shelf()
-    assert _inflow_mouths(arr, 0.0, state, nbrs, ("west",), 0, 3) == []
+    assert _choose(*_sloping_shelf(), count=0) == []
 
 
 def test_inflows_are_capped_at_the_count_asked_for():
-    """The ranking is by drop, so without a cap the whole west edge would qualify."""
-    arr, state, nbrs = _sloping_shelf()
-    unlimited = _inflow_mouths(arr, 0.0, state, nbrs, ("west",), 99, 1)
-    assert len(unlimited) > 2, "fixture is meant to offer several candidate mouths"
-
-    capped = _inflow_mouths(arr, 0.0, state, nbrs, ("west",), 2, 1)
-    assert len(capped) == 2
-    assert capped == unlimited[:2], "the cap should keep the best, not an arbitrary two"
+    shelf = _sloping_shelf()
+    assert len(_choose(*shelf, count=99)) > 2, "fixture is meant to offer several inlets"
+    assert len(_choose(*shelf, count=2)) == 2
 
 
 def test_inflows_only_come_from_the_edges_named():
-    arr, state, nbrs = _sloping_shelf()
-    w, h = arr.shape
-    for i, j in _inflow_mouths(arr, 0.0, state, nbrs, ("west",), 4, 1):
-        assert i == 0, f"mouth at {(i, j)} is not on the west edge"
+    for i, _j in _choose(*_sloping_shelf(), count=4):
+        assert i == 0, "an inlet off the west edge was admitted"
+
+
+def test_an_inlet_has_a_course_at_least_as_long_as_asked():
+    """Length is the rule: a hex whose water meets the sea a step later is no inlet."""
+    arr, state, net, drainage = _sloping_shelf()
+    from worldgen.stages.corner_drainage import inlet_corner
+
+    for cell in _choose(arr, state, net, drainage, count=4, min_length_km=4.0):
+        head = inlet_corner(state.coord_at(*cell), net, drainage)
+        assert (len(_course(drainage, head)) - 1) / 3**0.5 >= 4.0
+    assert _choose(arr, state, net, drainage, min_length_km=1000.0) == []
+
+
+def test_no_candidate_means_no_draw():
+    """A map whose border is all sea admits no inlet, and must not move the generator.
+
+    Every later draw the stage makes would shift with it, and the sea-ring default map —
+    which never admits an inlet — would stop being the world it was.
+    """
+    shelf = _sloping_shelf()
+    rng = np.random.default_rng(5)
+    before = rng.bit_generator.state
+    assert _choose(*shelf, rng=rng, edges=("east",), min_length_km=1000.0) == []
+    assert rng.bit_generator.state == before
 
 
 # --- _widen_valleys guards ------------------------------------------------------
@@ -122,7 +145,7 @@ def test_widening_is_a_no_op_when_width_max_is_zero():
 def _many_channels(w=41, h=9, cols=(6, 13, 20, 27, 34), flow=50.0, trunk=None):
     """Several equal channels, optionally beside one carrying far more.
 
-    *trunk* stands for a river entering from off the map: `_inflow_mouths` seeds it with
+    *trunk* stands for a river entering from off the map: erosion seeds it with
     `river_inflow_volume x land area`, which is far more than any river the map raises
     for itself.
     """

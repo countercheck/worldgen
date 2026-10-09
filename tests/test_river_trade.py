@@ -19,9 +19,15 @@ from worldgen.stages.interurban_roads import InterurbanRoadStage
 from worldgen.stages.river_trade import coastal, downstream_rank
 from worldgen.stages.riverside import river_index
 
-# The 96x96 temperate coast `test_cities` uses. Seed 42 shares its memoised world; seed 11
-# is the one whose rivers fall over cataracts on their way to a coastal town. Seed 42's
-# great river leaves the map, so none of its river trade passes a portage.
+# The 96x96 temperate coast `test_cities` uses. Seed 42 shares its memoised world, and its
+# great river leaves the map, so none of its river trade passes a portage. `_SEED` is a
+# world whose rivers fall over cataracts on their way to a coastal town.
+#
+# Seed history: 11 → 4. Seed 11's trade past a portage rode an imported river; once the
+# inlets were chosen once rather than twice (tech-debt #153), that river came in down
+# another valley and no trade passed a cataract. Of seeds 1-7, 11 and 19, only 4 and 6
+# carry trade past a portage both before that change and after it.
+_SEED = 4
 _DEFAULTS = {
     "regional_climate": "temperate",
     "continent_falloff_edges": ("south",),
@@ -34,7 +40,7 @@ _SIZE = {"width": 96, "height": 96, "model": "organic"}
 def before():
     """The world as `CityPromotionStage` leaves it with the river trade off."""
     return build_pipeline(
-        until="CityPromotionStage", seed=11, **_SIZE, **_DEFAULTS, river_trade_share=0.0
+        until="CityPromotionStage", seed=_SEED, **_SIZE, **_DEFAULTS, river_trade_share=0.0
     ).run()
 
 
@@ -62,7 +68,7 @@ def test_share_zero_changes_nothing(before):
     CityPromotionStage._river_trade = lambda self, state, cfg: None
     try:
         without = build_pipeline(
-            until="CityPromotionStage", seed=11, **_SIZE, **_DEFAULTS, river_trade_share=0.0
+            until="CityPromotionStage", seed=_SEED, **_SIZE, **_DEFAULTS, river_trade_share=0.0
         ).run()
     finally:
         CityPromotionStage._river_trade = real

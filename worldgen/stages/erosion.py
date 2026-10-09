@@ -5,9 +5,9 @@ import numpy as np
 from scipy.ndimage import gaussian_filter
 
 from ..core.config import WorldConfig
+from ..core.hex import HexCoord
 from ..core.hex_grid import Corner, corner_hexes, hex_corner_keys, side_hexes, side_joining
 from ..core.hex_grid import distance as hex_distance
-from ..core.hex_grid import neighbors as hex_neighbors
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
 from .corner_drainage import (
@@ -202,29 +202,6 @@ def _drop_particle(
         px, py = new_px, new_py
 
 
-def _neighbour_table(state: WorldState, w: int, h: int) -> list[list[tuple[int, int]]]:
-    """Each grid cell's in-bounds hex neighbours, as flat-indexed (col, row) pairs.
-
-    Built once and shared by the sink fill and the accumulation across every carve pass.
-    Those walk every cell six ways several times over, and resolving the neighbourhood
-    through `coord_at`, `neighbors` and `grid_index` each time made the widening cost more
-    than the droplet simulation it follows — about four times the test suite's runtime.
-    The mapping is the same on every pass, so it is worth computing once.
-    """
-    table: list[list[tuple[int, int]]] = []
-    for i in range(w):
-        for j in range(h):
-            cell = []
-            for n in hex_neighbors(state.coord_at(i, j)):
-                if n not in state.hexes:
-                    continue
-                ni, nj = state.grid_index(n)
-                if 0 <= ni < w and 0 <= nj < h:
-                    cell.append((ni, nj))
-            table.append(cell)
-    return table
-
-
 def _corner_draws(state: WorldState, rng: np.random.Generator) -> dict[Corner, float]:
     """One fixed uniform draw per corner of the map, for the wander rule.
 
@@ -233,6 +210,58 @@ def _corner_draws(state: WorldState, rng: np.random.Generator) -> dict[Corner, f
     """
     corners = sorted({c for coord in state.hexes for c in hex_corner_keys(coord)})
     return dict(zip(corners, rng.random(len(corners)).tolist(), strict=True))
+
+
+def _drain(
+    arr: np.ndarray,
+    sea_level: float,
+    state: WorldState,
+    draws: dict[Corner, float],
+    wander_exponent: float,
+    rng: np.random.Generator,
+    floor_blend: float = 0.0,
+) -> tuple[CornerNetwork, Drainage]:
+    """Drain the working surface along hexsides, as hydrology will drain the finished one.
+
+    Valleys have to be cut where the rivers will be, and hydrology routes its rivers on
+    the corner graph (`corner_drainage`), so this drains the same graph over the field
+    being carved.  The fill inside `flow_direction` lets water cross a depression rather
+    than vanish into it, without raising the ground itself.  How much water then passes
+    each corner is `_accumulate`'s business.
+    """
+    w, h = arr.shape
+    elevation = {state.coord_at(i, j): float(arr[i, j]) for i in range(w) for j in range(h)}
+    land = {c for c, z in elevation.items() if z >= sea_level}
+    net = build_network(elevation, land, set(elevation) - land, set(), [], floor_blend)
+    return net, flow_direction(net, rng, wander_exponent, draws=draws)
+
+
+def _accumulate(
+    arr: np.ndarray,
+    sea_level: float,
+    state: WorldState,
+    net: CornerNetwork,
+    drainage: Drainage,
+    inflow: dict[tuple[int, int], float] | None = None,
+) -> None:
+    """Fill in `drainage.acc`: every land cell's rain, and what the inlets bring.
+
+    Every land cell's rain runs off to its lowest corner and down from there, and a river
+    entering from off the map brings the catchment it gathered beyond it.
+    """
+    w, h = arr.shape
+    land = {state.coord_at(i, j) for i in range(w) for j in range(h) if arr[i, j] >= sea_level}
+    sources: dict[Corner, float] = defaultdict(float)
+    for coord in sorted(land):
+        corner = drain_corner(coord, net, drainage)
+        if corner is not None:
+            sources[corner] += 1.0
+    for cell, volume in (inflow or {}).items():
+        coord = state.coord_at(*cell)
+        corner = inlet_corner(coord, net, drainage) if coord in land else None
+        if corner is not None:
+            sources[corner] += volume
+    drainage.acc = accumulate(drainage.flow, sources)
 
 
 def _corner_routing(
@@ -245,36 +274,9 @@ def _corner_routing(
     inflow: dict[tuple[int, int], float] | None = None,
     floor_blend: float = 0.0,
 ) -> tuple[CornerNetwork, Drainage]:
-    """Drain the working surface along hexsides, as hydrology will drain the finished one.
-
-    Valleys have to be cut where the rivers will be, and hydrology routes its rivers on
-    the corner graph (`corner_drainage`), so this drains the same graph over the field
-    being carved: every land cell's rain runs off to its lowest corner and down from
-    there, and a river entering from off the map brings the catchment it gathered beyond
-    it.  The fill inside `flow_direction` lets water cross a depression rather than vanish
-    into it, without raising the ground itself.
-    """
-    w, h = arr.shape
-    elevation = {state.coord_at(i, j): float(arr[i, j]) for i in range(w) for j in range(h)}
-    land = {c for c, z in elevation.items() if z >= sea_level}
-    net = build_network(elevation, land, set(elevation) - land, set(), [], floor_blend)
-    drainage = flow_direction(net, rng, wander_exponent, draws=draws)
-
-    sources: dict[Corner, float] = defaultdict(float)
-    for coord in sorted(land):
-        corner = drain_corner(coord, net, drainage)
-        if corner is not None:
-            sources[corner] += 1.0
-    # A river entering from off the map brings a catchment this map never had.  Seeding it
-    # is what makes the valley match the water: widening scales its reach by discharge,
-    # so without this an imported trunk is measured as the trickle its first few on-map
-    # hexes would raise, and gets a trickle's valley.
-    for cell, volume in (inflow or {}).items():
-        coord = state.coord_at(*cell)
-        corner = inlet_corner(coord, net, drainage) if coord in land else None
-        if corner is not None:
-            sources[corner] += volume
-    drainage.acc = accumulate(drainage.flow, sources)
+    """`_drain` then `_accumulate`: the routing, and the water on it."""
+    net, drainage = _drain(arr, sea_level, state, draws, wander_exponent, rng, floor_blend)
+    _accumulate(arr, sea_level, state, net, drainage, inflow)
     return net, drainage
 
 
@@ -393,31 +395,56 @@ def _incise_channels(
             arr[c] = max(min(arr[c], floor), deepest[c])
 
 
-def _inflow_mouths(
+def _course(drainage: Drainage, corner: Corner) -> list[Corner]:
+    """The corners water starting at *corner* runs through, to where it leaves the network."""
+    path: list[Corner] = []
+    seen: set[Corner] = set()
+    node: Corner | None = corner
+    while node is not None and node not in seen:
+        seen.add(node)
+        path.append(node)
+        node = drainage.flow.get(node)
+    return path
+
+
+def _choose_inlets(
     arr: np.ndarray,
     sea_level: float,
     state: WorldState,
-    neighbours: list[list[tuple[int, int]]],
+    net: CornerNetwork,
+    drainage: Drainage,
+    rng: np.random.Generator,
+    *,
     edges: tuple[str, ...],
     count: int,
     separation: int,
+    min_length_km: float,
+    length_bias: float,
 ) -> list[tuple[int, int]]:
-    """Border cells where a river from beyond the map would enter, best first.
+    """Border cells where a river from beyond the map enters, chosen once for the world.
 
-    The criterion is hydrology's: land on a chosen edge whose ground falls away inland.
-    Erosion cannot ask which hexes hydrology will pick — that runs three stages later and
-    needs a priority-flood this stage has no reason to do — but it does not have to.
-    Carving these deepens the very descent hydrology ranks on, so the mouths chosen here
-    are the ones it goes on to choose, and the two agree by construction.
+    This is the one place inlets are chosen.  Hydrology adopts them, with the course each
+    took here (tech-debt #153).  They used to be chosen twice, here by the steepest drop
+    inland and in hydrology by a weighted draw of its own, and the two agreed on none of
+    ten: the imported catchment widened and cut valleys hydrology never sent the imported
+    river down, while its river ran through ground carved for a trickle.
 
-    Ranked by drop and thinned by `separation`, so two inlets do not land in one valley.
+    The rule is the one hydrology used, read off the corner routing this stage carves by.
+    A land cell on a chosen edge is a candidate if the water joining the network at its
+    inlet corner (`inlet_corner`) then runs at least *min_length_km*.  Candidates are
+    drawn at random, weighted by that length raised to *length_bias*, and thinned by
+    *separation* so two inlets do not land in one valley.  Length rather than the drop
+    inland, because the drop is one step's view, and on its own it happily picks a hex
+    that descends steeply and meets the sea three hexes later.
+
+    No candidate, no draw: a map whose border is all sea draws nothing.
     """
-    if count <= 0:
+    if count <= 0 or not edges:
         return []
     w, h = arr.shape
     wanted = set(edges)
-    candidates: list[tuple[float, tuple[int, int]]] = []
-
+    candidates: list[tuple[int, int]] = []
+    weights: list[float] = []
     for i in range(w):
         for j in range(h):
             on_edge = set()
@@ -431,24 +458,30 @@ def _inflow_mouths(
                 on_edge.add("south")
             if not (on_edge & wanted) or arr[i, j] < sea_level:
                 continue
-            best = 0.0
-            for ni, nj in neighbours[i * h + j]:
-                if arr[ni, nj] < sea_level:
-                    continue
-                if ni in (0, w - 1) or nj in (0, h - 1):
-                    continue  # still on the border: along the edge, not into the map
-                best = max(best, arr[i, j] - arr[ni, nj])
-            if best > 0.0:
-                candidates.append((best, (i, j)))
+            corner = inlet_corner(state.coord_at(i, j), net, drainage)
+            if corner is None:
+                continue
+            length = (len(_course(drainage, corner)) - 1) * _SIDE_KM
+            if length <= 0.0 or length < min_length_km:
+                continue
+            candidates.append((i, j))
+            weights.append(length**length_bias)
 
-    candidates.sort(key=lambda c: (-c[0], c[1]))
     chosen: list[tuple[int, int]] = []
-    for _drop, cell in candidates:
-        if len(chosen) >= count:
+    remaining = list(range(len(candidates)))
+    while remaining and len(chosen) < count:
+        total = sum(weights[k] for k in remaining)
+        if total <= 0.0:
             break
-        coord = state.coord_at(*cell)
-        if all(hex_distance(coord, state.coord_at(*c)) >= separation for c in chosen):
-            chosen.append(cell)
+        probs = [weights[k] / total for k in remaining]
+        pick = remaining[int(rng.choice(len(remaining), p=probs))]
+        chosen.append(candidates[pick])
+        here = state.coord_at(*candidates[pick])
+        remaining = [
+            k
+            for k in remaining
+            if k != pick and hex_distance(state.coord_at(*candidates[k]), here) >= separation
+        ]
     return chosen
 
 
@@ -747,27 +780,17 @@ class ErosionStage(GeneratorStage):
         # evolution model does, and it is the only way the two agree by the time anything
         # downstream reads either.
         carving = cfg.valley_width_max > 0.0 or cfg.erosion_incision_m_per_pass > 0.0
+        handoff: tuple[list[tuple[int, int]], dict[Corner, float]] | None = None
         if land_coords and carving:
             # Rivers that enter from off the map bring a catchment this map never had, and
             # nothing here knew about it: accumulation starts every cell at one hex of
             # rain, so an imported trunk was measured as the trickle its first few on-map
-            # hexes raise, and widening gave it a trickle's valley.  Seed the mouths with
+            # hexes raise, and widening gave it a trickle's valley.  Seed the inlets with
             # what they actually carry — the same quantity hydrology seeds them with — and
-            # the valley follows the water without any special case for it.
-            neighbours = _neighbour_table(state, w, h)
+            # the valley follows the water without any special case for it.  They are
+            # chosen on the first pass's routing, below, and kept for the rest.
             inflow_volume = max(1.0, cfg.river_inflow_volume * len(land_coords))
-            inflow = {
-                mouth: inflow_volume
-                for mouth in _inflow_mouths(
-                    arr,
-                    sea_shaped,
-                    state,
-                    neighbours,
-                    tuple(cfg.river_inflow_edges),
-                    cfg.river_inflow_count,
-                    cfg.river_inflow_min_separation,
-                )
-            }
+            inflow: dict[tuple[int, int], float] | None = None
 
             # The two height knobs are quoted in metres and the field is normalised, so
             # they are divided by the same span the array was built with.
@@ -776,16 +799,33 @@ class ErosionStage(GeneratorStage):
             for _ in range(cfg.valley_carve_passes):
                 # Drained once per pass, shared by both carving steps: they are the same
                 # routing, and a second fill for the same answer is pure cost.
-                _net, drainage = _corner_routing(
+                net, drainage = _drain(
                     arr,
                     sea_shaped,
                     state,
                     draws,
                     cfg.river_wander_exponent,
                     self.rng,
-                    inflow,
                     cfg.corner_floor_blend,
                 )
+                if inflow is None:
+                    inflow = {
+                        cell: inflow_volume
+                        for cell in _choose_inlets(
+                            arr,
+                            sea_shaped,
+                            state,
+                            net,
+                            drainage,
+                            self.rng,
+                            edges=tuple(cfg.river_inflow_edges),
+                            count=cfg.river_inflow_count,
+                            separation=cfg.river_inflow_min_separation,
+                            min_length_km=cfg.river_inflow_min_length * max(w, h),
+                            length_bias=cfg.river_inflow_length_bias,
+                        )
+                    }
+                _accumulate(arr, sea_shaped, state, net, drainage, inflow)
                 acc = _hex_discharge(state, drainage, w, h)
                 # Incise first, then widen.  Incision cuts the line; widening planes the
                 # floor outward from it.  The other way round would plane a floor flat and
@@ -818,6 +858,9 @@ class ErosionStage(GeneratorStage):
                         cfg.valley_width_reference_km2,
                     )
 
+            if inflow:
+                handoff = (sorted(inflow), draws)
+
             # Soil is settled last, against the final coastline.  Deposition was recorded
             # over the pre-renormalisation field and the belts over the carved one, but
             # neither is read until here, so both are scored against the ground the rest of
@@ -842,5 +885,30 @@ class ErosionStage(GeneratorStage):
         for col in range(w):
             for row in range(h):
                 state.hexes[state.coord_at(col, row)].elevation = float(metres[col, row])
+
+        if handoff is not None:
+            # Hand the inlets to hydrology with the course each runs, so it adopts both
+            # rather than choosing and routing again (tech-debt #153).  Routed once more,
+            # on the finished ground in metres: the last carve pass was routed before its
+            # own cut and widening, and the profile reshapes heights after them, and a
+            # course read off either one steps uphill here and there by centimetres.
+            # Hydrology will not send water uphill, so it would leave the course there.
+            cells, draws = handoff
+            net, drainage = _drain(
+                metres,
+                0.0,
+                state,
+                draws,
+                cfg.river_wander_exponent,
+                self.rng,
+                cfg.corner_floor_blend,
+            )
+            courses: list[tuple[HexCoord, list[Corner]]] = []
+            for cell in cells:
+                coord = state.coord_at(*cell)
+                corner = inlet_corner(coord, net, drainage) if metres[cell] >= 0.0 else None
+                if corner is not None:
+                    courses.append((coord, _course(drainage, corner)))
+            state.metadata["inflow_courses"] = courses
 
         return state
