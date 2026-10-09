@@ -127,6 +127,7 @@ _GENERIC_WEIGHT = {
     "shore": 1.5,
     "hill": 1.5,
     "market": 1.5,
+    "stow": 2.5,
 }
 
 # Hex tags that are themselves a head.
@@ -147,6 +148,8 @@ _ROLE_GENERIC = {
     SettlementRole.MARKET: "market",
     SettlementRole.BRIDGE: "bridge",
     SettlementRole.PORTAGE: "falls",
+    SettlementRole.PASS: "pass",
+    SettlementRole.CROSSROADS: "stow",
 }
 
 # What any place of a tier can be called, whatever its site. Several heads per tier, as

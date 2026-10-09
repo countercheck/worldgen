@@ -45,27 +45,39 @@ from .road_cost import WATER, grade_is_under_cap
 # What `_work` reports of a site it put people to work at: where, how many, and as what.
 _Worked = tuple[HexCoord, int, SettlementRole]
 
+# What a settlement founded on a toll is, by the kind of toll that paid most there.
+_TOLL_ROLE = {
+    "bridge": SettlementRole.BRIDGE,
+    "portage": SettlementRole.PORTAGE,
+    "pass": SettlementRole.PASS,
+    "desert": SettlementRole.CARAVANSARY,
+    "crossroads": SettlementRole.CROSSROADS,
+}
+
+
+def reachability(hexes, cfg):
+    """`reachable(coord)`: the test every settlement passes, enough ground a cart can get
+    about. Cached, since a stage asks it of the same few sites again and again."""
+    reach_cache: dict[HexCoord, int] = {}
+
+    def reachable(coord) -> bool:
+        if coord not in reach_cache:
+            reach_cache[coord] = grade_reachable_count(
+                coord,
+                hexes,
+                lambda a, b: grade_is_under_cap(a, b, cfg),
+                cfg.settlement_min_reachable,
+            )
+        return reach_cache[coord] >= cfg.settlement_min_reachable
+
+    return reachable
+
 
 class ResourceStage(GeneratorStage):
     """Founds ports at unattended quays, mines on the ore, and lumber camps in the woods."""
 
     def run(self, state: WorldState) -> WorldState:
-        hexes = state.hexes
-        cfg = self.config
-
-        reach_cache: dict[HexCoord, int] = {}
-
-        def reachable(coord) -> bool:
-            """The same test every settlement passes: enough ground a cart can get about."""
-            if coord not in reach_cache:
-                reach_cache[coord] = grade_reachable_count(
-                    coord,
-                    hexes,
-                    lambda a, b: grade_is_under_cap(a, b, cfg),
-                    cfg.settlement_min_reachable,
-                )
-            return reach_cache[coord] >= cfg.settlement_min_reachable
-
+        reachable = reachability(state.hexes, self.config)
         self._ports(state, reachable)
         self._tolls(state, reachable)
         worked = self._mines(state, reachable) + self._lumber(state, reachable)
@@ -148,11 +160,23 @@ class ResourceStage(GeneratorStage):
         could only ever have lived on the traffic.
         """
         cfg = self.config
-        hexes = state.hexes
         rows = state.metadata.pop("unhandled_tolls", [])
         if not rows or cfg.toll_min_draw <= 0.0:
             return
+        self.found_on_tolls(state, rows, reachable, cfg.toll_min_draw * cfg.people_per_food)
 
+    def found_on_tolls(self, state, rows, reachable, floor) -> list[Settlement]:
+        """Found settlements on *rows* of tolls nobody collected; return the ones founded.
+
+        Each row is `[site q, r, seat q, r, food, people, kind]`: *people* owed to the site
+        by the settlement at *seat*. Sites within `toll_radius` of each other are pooled onto
+        the busiest. A settlement within `toll_radius` of the pool collects it; otherwise one
+        is founded if it brings at least *floor* people. Shared with `ChokepointStage`, which
+        founds on the tolls the road traffic pays.
+        """
+        cfg = self.config
+        hexes = state.hexes
+        out: list[Settlement] = []
         by_site: dict[HexCoord, dict[str, Any]] = {}
         for q, r, sq, sr, food, people, kind in rows:
             entry = by_site.setdefault((q, r), {"food": 0.0, "from": {}, "kind": {}})
@@ -186,15 +210,15 @@ class ResourceStage(GeneratorStage):
                 hx = hexes[site]
                 if hx.settlement is not None or hx.terrain_class in WATER or not reachable(site):
                     continue
-                if sum(owed.values()) < cfg.toll_min_draw * cfg.people_per_food:
+                if sum(owed.values()) < floor:
                     continue
             transfers = [
                 (by_coord[seat], min(round(people), by_coord[seat].population - 1))
                 for seat, people in sorted(owed.items())
-                if seat in by_coord
+                if seat in by_coord and by_coord[seat] is not holder
             ]
             moved = sum(n for _, n in transfers if n > 0)
-            if holder is None and moved < cfg.toll_min_draw * cfg.people_per_food:
+            if holder is None and moved < floor:
                 continue
             for city, n in transfers:
                 if n > 0:
@@ -203,12 +227,13 @@ class ResourceStage(GeneratorStage):
                 holder.population += moved
                 continue
             kind = max(sorted(kinds), key=lambda k: kinds[k])
-            role = SettlementRole(kind)
+            role = _TOLL_ROLE[kind]
             # A bridge town on ground that feeds nobody is a caravansary: the traffic is the
             # only living there. A portage town keeps its name wherever it stands — the
             # falls are rock as often as not, and Aswan is on granite.
             if role is SettlementRole.BRIDGE and hexes[site].soil is SoilQuality.UNUSABLE:
-                role, kind = SettlementRole.CARAVANSARY, "caravansary"
+                role = SettlementRole.CARAVANSARY
+            kind = role.value
             big = 0 < cfg.city_min_population <= moved and self._may_be_city(state, site)
             if big:
                 tier = SettlementTier.CITY
@@ -219,7 +244,9 @@ class ResourceStage(GeneratorStage):
                 tier = SettlementTier.VILLAGE
             self._found(state, site, tier, role, moved, kind, founded)
             by_coord[site] = state.hexes[site].settlement
+            out.append(by_coord[site])
             founded += 1
+        return out
 
     def _may_be_city(self, state, quay) -> bool:
         """Whether a port founded on trade alone may be a city: farmland round it, and no

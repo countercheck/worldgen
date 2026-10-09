@@ -216,7 +216,9 @@ class SettlementRole(Enum):
     `BRIDGE`, `PORTAGE` and `CARAVANSARY` are the places `ResourceStage` founds on the toll
     of a chokepoint nobody held (tech-debt #142): a bridge over water too big to wade, the
     landings either side of a cataract, and either of those on ground that feeds nobody,
-    where the traffic is the only living there is.
+    where the traffic is the only living there is. `ChokepointStage` founds them too on the
+    road traffic, with `PASS` at a pass, `CARAVANSARY` at a desert watering stop, and
+    `CROSSROADS` where several busy roads meet.
     """
 
     AGRICULTURAL = "agricultural"
@@ -227,6 +229,8 @@ class SettlementRole(Enum):
     BRIDGE = "bridge"
     PORTAGE = "portage"
     CARAVANSARY = "caravansary"
+    PASS = "pass"
+    CROSSROADS = "crossroads"
 
 
 @dataclass

@@ -22,17 +22,37 @@ takes it. A pass settlement therefore appears only where the ground leaves no wa
 which on 1500 m of relief is a couple of places on a map and on flat country is none.
 """
 
-from ..core.hex import SOIL_RANK, HexCoord, Settlement, SettlementTier, SoilQuality
+from typing import Any
+
+from ..core.hex import (
+    SOIL_RANK,
+    HexCoord,
+    Settlement,
+    SettlementRole,
+    SettlementTier,
+    SoilQuality,
+)
 from ..core.hex_grid import distance, hex_range, neighbors, side_hexes
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import ROAD_TIER_RANK, RoadTier, WorldState, road_edge_key
+from . import wayside
 from .city_town import _assign_role
 from .habitability import actual_food
 from .haulage import allocate_catchments, gather, settleable, usable_fraction
+from .resources import ResourceStage, reachability
 from .riverside import river_index
 
 PASS = "pass"
 BRIDGE = "bridge"
+
+# What a village the road tolls have made is called, by the toll that pays it most.
+_TOLL_ROLE = {
+    wayside.BRIDGE: SettlementRole.BRIDGE,
+    wayside.PASS: SettlementRole.PASS,
+    wayside.DESERT: SettlementRole.CARAVANSARY,
+}
+# Villages `ResourceStage` founded for a trade of their own, which a toll does not rename.
+_RESOURCE_ROLES = (SettlementRole.MINING, SettlementRole.LUMBER)
 
 
 def saddle_relief_m(coord, hexes) -> float:
@@ -120,14 +140,26 @@ class ChokepointStage(GeneratorStage):
             if is_pass(coord, hexes, cfg):
                 hexes[coord].tags.add(PASS)
 
+        self._villages(state, cfg)
+        # Then the places that live on the road traffic rather than on fields: tolls at the
+        # bridges, passes and desert crossings, and the crossroads. After the villages, so a
+        # bridge village collects its bridge's toll; from the journeys the roads were built
+        # for, so nothing here re-routes a road.
+        if cfg.toll_per_journey > 0.0 and state.journeys:
+            self._wayside(state, cfg)
+        return state
+
+    def _villages(self, state, cfg) -> None:
+        """The bridgehead and pass villages, each on the fields it can work."""
+        hexes = state.hexes
         candidates = self._candidates(state, cfg)
         if not candidates:
-            return state
+            return
 
         residual = residual_surplus(hexes, cfg)
         seats = self._plant(candidates, residual, state, cfg)
         if not seats:
-            return state
+            return
 
         # Twice, so the floor is applied to the figure it names rather than to an estimate
         # of it. Planting has to score on hex distance — the exclusive partition does not
@@ -138,11 +170,96 @@ class ChokepointStage(GeneratorStage):
         draw = self._draw(hexes, seats, residual, cfg, river_index(state, cfg))
         seats = [s for s in seats if draw.get(s, 0.0) >= cfg.chokepoint_min_draw]
         if not seats:
-            return state
+            return
         draw = self._draw(hexes, seats, residual, cfg, river_index(state, cfg))
 
         state.settlements.extend(self._found(seats, draw, hexes, cfg, river_index(state, cfg)))
-        return state
+
+    # -- the road traffic ------------------------------------------------------
+
+    def _wayside(self, state, cfg) -> None:
+        """Tolls on the road journeys, and the towns they and the crossroads found (#142).
+
+        Every journey crossing a toll point pays `toll_per_journey` food — `people_per_food`
+        times that in people — to the settlement within `toll_radius` of it, half off each
+        of the journey's two ends; neither end pays itself. Tolls nobody collected found a
+        bridge town, a pass town or a caravansary where they bring `toll_min_draw` food
+        (`ResourceStage.found_on_tolls`). Then the crossroads, best first, on what is left.
+        """
+        hexes = state.hexes
+        rivers = river_index(state, cfg)
+        per = cfg.toll_per_journey * cfg.people_per_food  # people a journey's toll keeps
+        sites = wayside.toll_sites(state, cfg, rivers, lambda c: PASS in hexes[c].tags)
+        by_coord = {s.coord: s for s in state.settlements}
+        delta: dict[HexCoord, float] = {}
+        tolls: list[list[Any]] = []
+        collected: dict[tuple[HexCoord, str, HexCoord], float] = {}
+        unpaid: list[list[Any]] = []
+        for (site, kind), pairs in sorted(sites.items()):
+            near = [(distance(site, c), c) for c in hex_range(site, cfg.toll_radius)]
+            near = [x for x in near if x[1] in by_coord]
+            holder = min(near)[1] if near else None
+            for (a, b), n in sorted(pairs.items()):
+                if holder in (a, b):
+                    continue
+                cut = n * per
+                if holder is None:
+                    for seat in (a, b):
+                        unpaid.append([*site, *seat, n * cfg.toll_per_journey / 2, cut / 2, kind])
+                    continue
+                delta[holder] = delta.get(holder, 0.0) + cut
+                delta[a] = delta.get(a, 0.0) - cut / 2
+                delta[b] = delta.get(b, 0.0) - cut / 2
+                key = (site, kind, holder)
+                collected[key] = collected.get(key, 0.0) + n
+        _apply(delta, by_coord)
+        income: dict[HexCoord, dict[str, float]] = {}
+        for (site, kind, holder), n in sorted(collected.items()):
+            tolls.append(
+                [*site, kind, *holder, round(n * cfg.toll_per_journey, 3), round(n * per, 3)]
+            )
+            income.setdefault(holder, {})
+            income[holder][kind] = income[holder].get(kind, 0.0) + n * per
+        if tolls:
+            state.metadata["road_tolls"] = tolls
+        # A village the traffic has made more of a toll station than a farm is named for what
+        # pays it, and is a town once it is `port_min_population`, as a founded one would be.
+        for coord, kinds in sorted(income.items()):
+            s = by_coord[coord]
+            if s.tier is not SettlementTier.VILLAGE or s.role in _RESOURCE_ROLES:
+                continue
+            if sum(kinds.values()) * 2 >= s.population:
+                s.role = _TOLL_ROLE[max(sorted(kinds), key=lambda k: kinds[k])]
+                if s.role is SettlementRole.BRIDGE and hexes[coord].soil is SoilQuality.UNUSABLE:
+                    s.role = SettlementRole.CARAVANSARY
+            if s.population >= cfg.port_min_population:
+                s.tier = SettlementTier.TOWN
+
+        founder = ResourceStage(cfg, self.rng)
+        reachable = reachability(hexes, cfg)
+        if unpaid and cfg.toll_min_draw > 0.0:
+            founder.found_on_tolls(
+                state, unpaid, reachable, cfg.toll_min_draw * cfg.people_per_food
+            )
+
+        # The crossroads: discs of `toll_radius` that no settlement's overlaps, so a
+        # crossroads town is never a town's own junction and never two towns' share of one.
+        if cfg.crossroads_min_draw <= 0.0:
+            return
+        for score, site, pairs in wayside.crossroads(state, cfg):
+            if score < cfg.crossroads_min_draw:
+                break
+            if any(
+                c in hexes and hexes[c].settlement is not None
+                for c in hex_range(site, 2 * cfg.toll_radius)
+            ):
+                continue
+            rows = [
+                [*site, *seat, n * cfg.toll_per_journey / 2, n * per / 2, wayside.CROSSROADS]
+                for (a, b), n in sorted(pairs.items())
+                for seat in (a, b)
+            ]
+            founder.found_on_tolls(state, rows, reachable, 0.0)
 
     @staticmethod
     def _draw(hexes, seats, residual, cfg, rivers) -> dict[HexCoord, float]:
@@ -326,6 +443,12 @@ class ChokepointStage(GeneratorStage):
             hx.settlement = s
             out.append(s)
         return out
+
+
+def _apply(delta, by_coord) -> None:
+    for coord, d in sorted(delta.items()):
+        s = by_coord[coord]
+        s.population = max(1, round(s.population + d))
 
 
 __all__ = ["ChokepointStage", "is_pass", "residual_surplus", "saddle_relief_m"]

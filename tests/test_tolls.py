@@ -31,7 +31,7 @@ from worldgen.stages.riverside import Rivers, river_index
 # tolls on it, and a portage town is founded on one nobody held.
 _DEFAULTS = {"regional_climate": "temperate"}
 _KW = dict(seed=11, width=96, height=96, model="organic", **_DEFAULTS)
-_OFF = dict(toll_bridge_share=0.0, toll_portage_share=0.0)
+_OFF = dict(toll_bridge_share=0.0, toll_portage_share=0.0, toll_per_journey=0.0)
 
 
 def _grid(n=8):
