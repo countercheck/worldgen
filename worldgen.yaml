@@ -198,6 +198,7 @@ erosion_smoothing_sigma: 0.5           # Blur applied after the droplets and bef
 valley_carve_passes: 3       # Cut, re-measure the drainage, cut again. Default: 3
 valley_width_max: 6.0        # Cap on valley half-width, in hexes. 0 disables widening entirely. Default: 6.0
 valley_width_exponent: 0.6   # Discharge -> width. 0.5 is the textbook root. Default: 0.6
+valley_width_reference_km2: 150.0 # Catchment in km2 at which a valley reaches valley_width_max; bigger rivers are held at the cap. Fixed, not the largest river on the map, so a belt depends on its own river alone. Default: 150.0
 valley_floor_slope_m: 2.5    # Rise per hex away from the channel, in metres, so a floodplain drains to its river rather than ponding. Default: 2.5
 valley_max_relief_m: 100.0   # How much height a river can plane away per pass, in metres. Ground standing higher than this above the channel is valley wall and stays. Default: 100.0
 valley_channel_fraction: 0.02 # Fraction of the land counting as channel, by discharge. Default: 0.02

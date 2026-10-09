@@ -14,7 +14,6 @@ generating a world and hoping the branch is reached.
 """
 
 import numpy as np
-import pytest
 
 from worldgen.core.world_state import WorldState
 from worldgen.stages.erosion import _inflow_mouths, _neighbour_table, _widen_valleys
@@ -159,13 +158,6 @@ def test_every_ordinary_channel_gets_a_floodplain_when_none_dominates():
     assert _channels_given_a_belt(arr, discharge, cols) == list(cols)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="tech-debt #116: `reach` scales against `flow.max()`, so one imported river "
-    "sizes every belt on the map and channels under ~5.25% of it get none at all. "
-    "Measured on a real 96x96 map: 68 of 131 channels keep a floodplain with inflows "
-    "on, 131 of 131 with them off.",
-)
 def test_an_imported_trunk_river_does_not_strip_the_other_channels():
     """One very large channel must not cost the ordinary ones their floodplains.
 
@@ -180,3 +172,46 @@ def test_an_imported_trunk_river_does_not_strip_the_other_channels():
     cols = (6, 13, 20, 27, 34)
     arr, discharge = _many_channels(cols=cols, trunk=5_000.0)
     assert _channels_given_a_belt(arr, discharge, cols) == list(cols)
+
+
+def _belt_widths(arr, discharge, cols):
+    """How many cells of row 4 each channel's widening lowered, by channel."""
+    before = arr.copy()
+    _widen_valleys(
+        arr,
+        discharge,
+        sea_level=0.0,
+        width_max=6.0,
+        width_exponent=0.6,
+        floor_slope=0.001,
+        max_relief=0.5,
+        channel_fraction=0.4,
+    )
+    cut = before[:, 4] - arr[:, 4] > 1e-12
+    return [int(cut[c - 3 : c + 4].sum()) for c in cols]
+
+
+def test_a_belt_is_sized_by_its_own_river_not_the_largest_on_the_map():
+    """Adding a far bigger river elsewhere leaves every other belt exactly as wide.
+
+    A floodplain is laid down by its own river wandering, so its width is a matter of
+    that river's discharge.  Sized against the largest flow on the map instead, the belt
+    a channel got depended on what else happened to be on the map with it.
+    """
+    cols = (6, 13, 20, 27, 34)
+    alone = _belt_widths(*_many_channels(cols=cols), cols)
+    beside_a_trunk = _belt_widths(*_many_channels(cols=cols, trunk=5_000.0), cols)
+    assert all(width > 0 for width in alone)
+    assert beside_a_trunk == alone
+
+
+def test_a_belt_is_the_same_width_on_a_bigger_map():
+    """The same channel on a map three times as wide gets the same belt.
+
+    A bigger map raises a bigger trunk of its own, without any river from off the map:
+    the larger map here carries one ten times the size, as a native trunk would be.
+    """
+    small = _belt_widths(*_many_channels(w=15, cols=(7,)), (7,))
+    big = _belt_widths(*_many_channels(w=45, cols=(7,), trunk=500.0), (7,))
+    assert small[0] > 0
+    assert big == small
