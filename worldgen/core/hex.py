@@ -242,6 +242,10 @@ class Hex:
     # Water an oasis gives the crop from below over its growing season, in millimetres;
     # zero off an oasis. The spring itself is also tagged `oasis`.
     groundwater_mm: float = 0.0
+    # Journeys a year through this hex, as `InterurbanRoadStage` routed them: travellers
+    # between settlements and the carts their freight puts on the road. Zero where no route
+    # passes. Kept because a place on a busy road lives on the people going past it.
+    traffic: float = 0.0
     temperature: float = 0.0
     biome: Biome | None = None
     # How much water passes, twice over. `river_flow` is normalised against the largest
