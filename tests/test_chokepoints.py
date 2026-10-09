@@ -9,7 +9,7 @@ nothing from the tier above.
 import numpy as np
 import pytest
 
-from tests.worlds import build_pipeline, build_world
+from tests.worlds import build_pipeline, build_world, fork_world
 from worldgen.core.config import WorldConfig
 from worldgen.core.hex import (
     SOIL_RANK,
@@ -101,6 +101,19 @@ _TOLLED = (
     SettlementRole.PASS,
     SettlementRole.CROSSROADS,
 )
+
+
+def _gated(tier):
+    """The chokepoint world with the gate at *tier*, built only from `ChokepointStage` on."""
+    return fork_world(
+        "ChokepointStage",
+        {"chokepoint_min_road_tier": tier},
+        seed=_CHOKE_SEED,
+        width=_CHOKE_SIZE,
+        height=_CHOKE_SIZE,
+        model="organic",
+        **_CHOKE_DEFAULTS,
+    )
 
 
 def _villages(state):
@@ -305,16 +318,13 @@ def test_a_bridge_over_sand_founds_nothing_on_the_sand(left, right, expected):
 
 def test_a_stricter_gate_founds_fewer():
     """Traffic is what makes a crossing worth a settlement, so demanding more gives less."""
-    counts = [
-        len(_villages(_world(chokepoint_min_road_tier=tier)))
-        for tier in ("track", "secondary", "primary")
-    ]
+    counts = [len(_villages(_gated(tier))) for tier in ("track", "secondary", "primary")]
     assert counts == sorted(counts, reverse=True), (
         f"village counts by gate track/secondary/primary were {counts}"
     )
 
 
-def test_thin_country_grows_villages_on_unusable_ground_only_where_tolls_pay_for_them():
+def test_thin_country_grows_few_villages_and_only_on_its_good_ground():
     """A desert is mostly empty, and what lives in it lives on the exceptions.
 
     This used to assert an arid map grew no villages at all, and before soil existed that
@@ -333,11 +343,7 @@ def test_thin_country_grows_villages_on_unusable_ground_only_where_tolls_pay_for
     must never do is stand on sand — and the arid world does grow one here, on a pass on
     arable ground, so the soil assertion finally has a subject.
 
-    With one exception, which tolls brought (tech-debt #142): a settlement on ground that
-    feeds nobody may stand where a toll pays it a living — a caravansary — but only one
-    founded on a toll, and only if the toll clears `toll_min_draw`. Every other village,
-    the chokepoint tier above all, still stands on arable ground. Checked on the same two
-    worlds with the tolls on.
+    The exception tolls brought is the next test's: these worlds have tolls off.
     """
 
     # Seed 7 rather than the suite's seed 1. Once freight began wearing the roads, seed 1's
@@ -373,6 +379,20 @@ def test_thin_country_grows_villages_on_unusable_ground_only_where_tolls_pay_for
         assert SOIL_RANK[soil] >= SOIL_RANK[SoilQuality.ARABLE], (
             f"village at {v.coord} stands on {soil.value} ground in a desert"
         )
+
+
+def test_a_village_on_ground_that_feeds_nobody_lives_on_a_toll():
+    """The one exception to villages standing on good ground, which tolls brought.
+
+    A settlement on ground that feeds nobody may stand where a toll pays it a living — a
+    caravansary — but only one founded on a toll, and only if the toll clears
+    `toll_min_draw` (tech-debt #142). Every other village, the chokepoint tier above all,
+    still stands on arable ground. Checked in a desert and in well-watered country, with
+    the tolls on.
+
+    Split from the test above, whose worlds it shares nothing with, so the two run in
+    parallel: four 112x112 builds in one test made it the slowest in the suite.
+    """
     on = {k: v for k, v in _CHOKE_DEFAULTS.items() if k != "toll_per_journey"}
     for climate in ("arid", "temperate"):
         state = build_world(

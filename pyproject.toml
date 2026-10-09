@@ -20,6 +20,7 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
+    "pytest-xdist>=3.6",
     # Pinned exactly, not floored. A linter is a gate, and an unpinned gate moves on its
     # own: CI installs the newest release at build time while a contributor keeps whatever
     # they installed months ago, so the build breaks on a version bump nobody made. That
@@ -58,7 +59,16 @@ ignore = ["E501"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--tb=short -q"
+# In parallel, one worker per core. The suite is world generation from end to end, and
+# run in sequence it took nine minutes; spread over the cores it is under two.
+#
+# `loadgroup` hands out tests one at a time — so a slow module does not pin its whole file
+# to one worker — except where a module marks itself `xdist_group`, which keeps it on one.
+# Each worker builds its own copy of the session's shared worlds (`tests/worlds.py`), which
+# costs CPU but not wall time.
+#
+# `-n0` runs in sequence, for `--pdb` or a print you want to see in order.
+addopts = "--tb=short -q -n auto --dist loadgroup"
 
 [tool.coverage.run]
 source = ["worldgen"]

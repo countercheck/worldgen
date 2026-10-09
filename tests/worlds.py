@@ -98,6 +98,83 @@ def build_world(
     return _WORLD_CACHE[key]
 
 
+def fork_world(
+    at: str,
+    varied: dict[str, object],
+    seed: int = 42,
+    width: int = 64,
+    height: int = 64,
+    model: str = "classic",
+    **cfg_overrides,
+):
+    """`build_world(..., **cfg_overrides, **varied)`, sharing every stage before *at*.
+
+    For the tests that turn one knob and compare: three 112x112 worlds that differ only in
+    a setting `ChokepointStage` reads are three full builds, each of which spends most of
+    its time on stages the setting cannot touch. So the world up to *at* is built once,
+    memoised, and the stages from *at* on are run over a copy of it with *varied* applied.
+
+    The result is the world a full build would make, bit for bit — not an approximation.
+    Each stage's RNG is drawn from the pipeline's in order (`GeneratorPipeline.run`), so the
+    tail draws the same seeds by drawing past the head's first. That holds only if no stage
+    before *at* reads a varied setting, and that is not left to the caller to get right: the
+    shared head is built with those settings made unreadable, and a stage that reads one
+    fails the build rather than quietly forking a different world.
+    """
+    import copy
+
+    import numpy as np
+
+    pipeline = build_pipeline(
+        seed=seed, width=width, height=height, model=model, **{**cfg_overrides, **varied}
+    )
+    names = [cls.__name__ for cls, _ in pipeline.stages]
+    k = names.index(at)
+    head = _guarded_head(seed, width, height, model, names[k - 1], frozenset(varied), cfg_overrides)
+
+    state = copy.deepcopy(head)
+    state.metadata["config"] = pipeline.config.__dict__
+    for _ in range(k):
+        pipeline.rng.integers(0, 2**32)
+    for stage_cls, _ in pipeline.stages[k:]:
+        child_rng = np.random.default_rng(pipeline.rng.integers(0, 2**32))
+        state = stage_cls(pipeline.config, child_rng).run(state)
+    return state
+
+
+def _guarded_head(seed, width, height, model, until, unreadable, cfg_overrides):
+    """The world up to *until*, built with the *unreadable* settings raising if read."""
+    key = (
+        "head",
+        seed,
+        width,
+        height,
+        model,
+        until,
+        unreadable,
+        repr(sorted(cfg_overrides.items())),
+    )
+    if key not in _WORLD_CACHE:
+        pipeline = build_pipeline(
+            seed=seed, width=width, height=height, model=model, until=until, **cfg_overrides
+        )
+        cfg = pipeline.config
+
+        class Guarded(type(cfg)):
+            def __getattribute__(self, name):
+                if name in unreadable:
+                    raise AssertionError(
+                        f"`{name}` is read before the fork, so forking there is not the "
+                        "world a full build makes: fork at an earlier stage"
+                    )
+                return super().__getattribute__(name)
+
+        cfg.__class__ = Guarded
+        _WORLD_CACHE[key] = pipeline.run()
+        cfg.__class__ = Guarded.__mro__[1]
+    return _WORLD_CACHE[key]
+
+
 def lay_road(ws, path, tier):
     """Write a hex path into the world as a route of *tier*.
 

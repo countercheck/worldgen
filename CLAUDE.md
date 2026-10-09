@@ -14,7 +14,8 @@ pip install -e ".[dev]"
 ## Commands
 
 ```bash
-python3 -m pytest          # run tests
+python3 -m pytest          # run tests, in parallel (pytest-xdist, one worker per core)
+python3 -m pytest -n0      # in sequence, for --pdb or ordered output
 python3 -m ruff check .    # lint
 python3 -m ruff format .   # format
 ```

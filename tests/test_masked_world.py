@@ -36,6 +36,10 @@ CAMPAIGN = ROOT / "campaign"
 FOG_TAG = "fog"
 REMEMBERED_TAG = "remembered"
 
+# One worker for the whole module. The fixture runs `npm run build`, which writes
+# `campaign/dist`; split across xdist workers, two builds would write it at once.
+pytestmark = pytest.mark.xdist_group("campaign-build")
+
 
 @pytest.fixture(scope="module")
 def masked_json():
