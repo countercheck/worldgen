@@ -14,6 +14,7 @@ generating a world and hoping the branch is reached.
 """
 
 import numpy as np
+import pytest
 
 from worldgen.core.world_state import WorldState
 from worldgen.stages.erosion import _choose_inlets, _course, _drain, _widen_valleys
@@ -242,86 +243,143 @@ def test_a_belt_is_the_same_width_on_a_bigger_map():
 
 # --- the load an off-map river brings (tech-debt #119) ---------------------------
 
-_CAPACITY, _RATE, _MIN_LOAD = 4.0, 0.3, 0.15
+_SEA = 0.5
 
 
-def _carry(arr, cells, meets, droplets=10, water=5.0, load=0.3):
-    from worldgen.stages.erosion import _carry_inlet_load
+def _valley(w=30, h=11, sea_from=24, belt=True):
+    """A river down the middle row of a gentle slope into the sea, with its valley belt.
 
-    deposition = np.zeros_like(arr)
-    _carry_inlet_load(
-        arr, deposition, cells, meets, droplets, water, load, _CAPACITY, _RATE, _MIN_LOAD
-    )
-    return deposition
-
-
-def _gentle_course(w=30, h=9, sea_from=24):
-    """A river down the middle row of a gentle slope, into the sea at column *sea_from*."""
+    The sea reaches the east edge, so it is the open sea. Discharge is a trunk's along the
+    middle row and a trickle elsewhere; the belt is three cells either side of it, credited
+    as `_widen_valleys` credits one, most beside the channel.
+    """
     arr = np.zeros((w, h))
+    mid = h // 2
     for i in range(w):
-        arr[i, :] = 1.0 - 0.002 * i if i < sea_from else 0.4
-    cells = [(i, h // 2) for i in range(sea_from)]
-    return arr, cells, ((sea_from, h // 2), 0.5, -np.inf)
+        arr[i, :] = 0.9 - 0.01 * i if i < sea_from else 0.3
+        if i < sea_from:
+            arr[i, :] += 0.002 * np.abs(np.arange(h) - mid)
+    discharge = np.ones((w, h))
+    discharge[:, mid] = 1_000.0
+    meander = np.zeros((w, h))
+    if belt:
+        for j in range(h):
+            d = abs(j - mid)
+            if 0 < d <= 3:
+                meander[:sea_from, j] = 1.0 - d / 4.0
+    return arr, discharge, meander, WorldState.empty(seed=1, width=w, height=h)
 
 
-def test_the_carried_load_changes_no_height_on_land():
-    """It lays silt and cuts nothing, so it can send no water uphill and dig no pit."""
-    arr, cells, meets = _gentle_course()
+def _stage(**over):
+    from worldgen.core.config import WorldConfig
+    from worldgen.stages.erosion import ErosionStage
+
+    cfg = WorldConfig(valley_channel_fraction=0.02, **over)
+    return ErosionStage(cfg, np.random.default_rng(0)), cfg
+
+
+def _bring(arr, discharge, meander, state, volume=100.0, **over):
+    """Run an imported river in at the west edge; returns what changed and the record."""
+    from worldgen.stages.erosion import _drain_to_the_sea, _inlet_reaches
+
+    stage, cfg = _stage(**over)
+    net, drainage = _drain_to_the_sea(arr, _SEA, state, {}, 2.0, np.random.default_rng(0))
+    mouth = (0, arr.shape[1] // 2)
+    reaches, sea = _inlet_reaches(arr, _SEA, state, net, drainage, mouth)
     before = arr.copy()
-    deposition = _carry(arr, cells, meets)
-    land = before >= 0.5
-    assert np.array_equal(arr[land], before[land])
-    assert deposition.min() >= 0.0
-    assert deposition[land].sum() > 0.0, "a gentle course should take some of the load as silt"
+    deposition = np.zeros_like(arr)
+    stage._load_inlets(
+        arr, deposition, state, net, drainage, {mouth: volume}, _SEA, meander, discharge
+    )
+    span = cfg.max_elevation_m + cfg.seabed_depth_m
+    load = cfg.erosion_inlet_yield_m / span * volume
+    return before, deposition, reaches, sea, load, cfg, state
 
 
-def test_the_carried_load_builds_a_delta_where_it_meets_the_water():
-    arr, cells, meets = _gentle_course()
-    before = arr.copy()
-    deposition = _carry(arr, cells, meets)
-    water = before < 0.5
+def test_the_river_lays_a_fixed_share_of_its_load_at_every_reach():
+    """The load falls away geometrically down the course: f of what is left, each reach."""
+    before, deposition, reaches, sea, load, cfg, _ = _bring(*_valley())
+    assert len(reaches) > 5 and sea is not None
+    f = cfg.erosion_inlet_drop_fraction
+    on_land = deposition[before >= _SEA].sum()
+    assert on_land == pytest.approx(load * (1.0 - (1.0 - f) ** len(reaches)))
+
+
+def test_no_channel_bed_rises():
+    """The bed is scoured, not built up — neither this river's nor any other's within reach."""
+    arr, discharge, meander, state = _valley()
+    _, deposition, reaches, _, _, _, _ = _bring(arr, discharge, meander, state)
+    mid = arr.shape[1] // 2
+    assert all(deposition[c] == 0.0 for c in reaches)
+    assert (deposition[:, mid] == 0.0).all()
+
+
+def test_a_cell_rises_no_more_than_the_reaches_that_can_reach_it_lay():
+    """Each reach lays at most `f` of the load; a cell is in the floodplain only of reaches
+    within the belt's half-width of it, so that bounds its rise — with no tuned clamp."""
+    before, deposition, reaches, _, load, cfg, _ = _bring(*_valley())
+    f, r = cfg.erosion_inlet_drop_fraction, int(cfg.valley_width_max)
+    w, h = before.shape
+    for i in range(w):
+        for j in range(h):
+            if before[i, j] < _SEA:
+                continue
+            near = sum(1 for a, b in reaches if abs(a - i) + abs(b - j) <= r)
+            assert deposition[i, j] <= f * load * near + 1e-12
+
+
+def test_a_gorge_with_no_belt_lays_on_its_banks():
+    before, deposition, reaches, _, _, _, _ = _bring(*_valley(belt=False))
+    raised = {(i, j) for i, j in zip(*np.nonzero(deposition), strict=True) if before[i, j] >= _SEA}
+    assert raised
+    for i, j in raised:
+        assert any(abs(i - a) + abs(j - b) == 1 for a, b in reaches), f"{(i, j)} is no bank"
+
+
+def test_what_reaches_the_sea_fans_out_below_the_waterline():
+    before, deposition, _, sea, _, _, _ = _bring(*_valley())
+    water = before < _SEA
     assert deposition[water].sum() > 0.0
-    assert (arr[water] > before[water]).any()
+    after = before + deposition
+    assert (after[water] < _SEA).all(), "the fan was built onto the waterline"
+    assert deposition[sea] == deposition[water].max(), "the fan is thickest at the mouth"
 
 
-def test_a_delta_is_built_up_to_the_water_and_never_onto_it():
-    """No cell becomes land: a great river's fan reaching the waterline across its mouth
-    sealed it, and the country behind filled as a lake."""
-    arr, cells, meets = _gentle_course()
-    _carry(arr, cells, meets, droplets=500)
-    assert (arr[24:, :] < 0.5).all()
+def test_the_load_is_conserved():
+    """Laid on land, laid at sea, or recorded as gone to the deep: nothing else."""
+    arr, discharge, meander, state = _valley()
+    before, deposition, _, _, load, cfg, state = _bring(arr, discharge, meander, state)
+    span = cfg.max_elevation_m + cfg.seabed_depth_m
+    deep = state.metadata["inlet_sediment_to_deep_m_km2"] / span
+    assert deposition.sum() + deep == pytest.approx(load, rel=1e-4)
+    assert state.metadata["inlet_sediment_off_map_m_km2"] == 0.0
 
 
-def test_a_lake_delta_fills_no_higher_than_the_lake():
-    arr = np.full((12, 9), 0.6)
-    arr[:6, :] = np.linspace(0.9, 0.7, 6)[:, None]
-    arr[6:9, 3:6] = 0.55  # a hollow standing in water to 0.6
-    arr[9:, :] = 0.3  # and the sea, below sea level at 0.5, within reach of it
-    cells = [(i, 4) for i in range(6)]
-    _carry(arr, cells, ((7, 4), 0.6, 0.5), droplets=500)
-    assert (arr[6:9, 3:6] < 0.6).all()
-    assert (arr[6:9, 3:6] > 0.55).any()
-    assert (arr[9:, :] == 0.3).all(), "a lake's delta was built in the sea beside it"
+def test_a_fan_with_no_room_sends_its_load_to_the_deep():
+    from worldgen.stages.erosion import _fan_out
+
+    arr, _, _, state = _valley()
+    deposition = np.zeros_like(arr)
+    left = _fan_out(arr, deposition, state, (24, 5), _SEA, 1_000.0, radius=2)
+    assert left == pytest.approx(1_000.0 - deposition.sum())
+    assert left > 0.0
+    assert (arr[24:, :] < _SEA).all()
+    assert deposition[28:, :].sum() == 0.0, "the fan went past its radius"
 
 
-def test_a_course_that_meets_no_water_takes_its_load_with_it():
-    arr, cells, _ = _gentle_course()
-    before = arr.copy()
-    deposition = _carry(arr, cells, None)
-    assert np.array_equal(arr, before)
-    assert deposition[24:, :].sum() == 0.0
+def test_a_river_that_leaves_the_map_takes_its_load_with_it():
+    arr, discharge, meander, state = _valley(sea_from=30)
+    _, deposition, _, sea, load, cfg, state = _bring(arr, discharge, meander, state)
+    assert sea is None
+    span = cfg.max_elevation_m + cfg.seabed_depth_m
+    off = state.metadata["inlet_sediment_off_map_m_km2"] / span
+    assert deposition.sum() + off == pytest.approx(load, rel=1e-4)
 
 
-def test_no_droplets_lay_nothing():
-    arr, cells, meets = _gentle_course()
-    before = arr.copy()
-    assert _carry(arr, cells, meets, droplets=0).sum() == 0.0
-    assert np.array_equal(arr, before)
-
-
-def test_kept_water_means_every_delta_is_built():
-    """It never holds less than `0.01 * water * capacity`: above the delta threshold, a
-    course of any length still has a delta's worth when it meets the water."""
-    arr, cells, meets = _gentle_course(w=200, sea_from=190)
-    deposition = _carry(arr, cells, meets, droplets=1)
-    assert deposition[190:, :].sum() >= _MIN_LOAD
+def test_a_hollow_on_the_course_is_crossed_and_left_as_it_was():
+    """No reach in a hollow: filled to its spill, one flooded 800 km2 around it."""
+    arr, discharge, meander, state = _valley()
+    arr[10:13, 3:8] -= 0.05  # a basin across the valley
+    before, deposition, reaches, sea, _, _, _ = _bring(arr, discharge, meander, state)
+    assert sea is not None
+    assert not any(10 <= i < 13 and 3 <= j < 8 for i, j in reaches)

@@ -223,24 +223,19 @@ class WorldConfig:
     erosion_delta_min_load: float = 0.15
     # Sediment brought in by a river entering from off the map (tech-debt #119).  The rain
     # droplets start empty on this map's land, so an imported river arrived with the
-    # discharge of the catchment it drained beyond the border and none of its load, and cut
-    # its way to the coast instead of building a delta there.  Loaded droplets are carried
-    # down each imported river's course from its inlet to bring that load.  They deposit
-    # and never cut: the imported river's cutting is already in the incision, which is
-    # seeded with its catchment.
-    # How many, per km2 of imported catchment (`river_inflow_volume` x land area), so the
-    # load scales with the country drained.  0 disables.
-    erosion_inlet_droplets_per_km2: float = 0.02
-    # The water each carries; a raindrop starts with 1.  What a droplet can hold goes with
-    # its water: on a reach too gentle to carry the load it drops the excess as floodplain
-    # silt, down to `0.01 x water x erosion_capacity`, and carries the rest to the delta.
-    # Unlike a raindrop's it is kept all the way down — a river gathers water rather than
-    # soaking away — so above `erosion_delta_min_load / (0.01 x erosion_capacity)`, 3.75 at
-    # the defaults, every imported river that meets standing water builds a delta there.
-    erosion_inlet_water: float = 5.0
-    # The load each starts with, as a multiple of `erosion_delta_min_load`, the least load
-    # that builds a delta.  Above 1, so what reaches the sea is enough to build one.
-    erosion_inlet_load: float = 2.0
+    # discharge of the catchment it drained beyond the border and none of its load.
+    # How much it brings: this depth of its imported catchment's ground (`river_inflow_volume`
+    # x land area, in km2), in metres, delivered as sediment.  0 disables.
+    erosion_inlet_yield_m: float = 0.4
+    # The share of what it still carries that it lays on the floodplain at each reach of
+    # its course, a reach being a corner of the drainage, about half a kilometre.  A fixed
+    # share, so the load falls away down the course instead of piling where the river first
+    # slackens; what is left at the sea fans out beyond the mouth.
+    erosion_inlet_drop_fraction: float = 0.01
+    # How far out from the mouth the fan may spread, in hexes (1 hex = 1 km).  It fills
+    # the nearest water first, up to just under its surface; what does not fit within this
+    # is carried out to deep water and recorded in metadata["inlet_sediment_to_deep_m_km2"].
+    erosion_inlet_fan_radius: int = 10
 
     # Channel incision.  The droplets above cut in proportion to slope alone: each carries
     # one unit of water whatever country it drains, which is stream power with the area
@@ -1408,9 +1403,14 @@ class WorldConfig:
             raise ValueError(
                 f"erosion_incision_max_cut_m must be >= 0, got {self.erosion_incision_max_cut_m}"
             )
-        for name in ("erosion_inlet_droplets_per_km2", "erosion_inlet_water", "erosion_inlet_load"):
+        for name in ("erosion_inlet_yield_m", "erosion_inlet_fan_radius"):
             if getattr(self, name) < 0:
                 raise ValueError(f"{name} must be >= 0, got {getattr(self, name)}")
+        if not 0.0 <= self.erosion_inlet_drop_fraction <= 1.0:
+            raise ValueError(
+                "erosion_inlet_drop_fraction must be in [0, 1], got "
+                f"{self.erosion_inlet_drop_fraction}"
+            )
         if self.erosion_droplet_overcut_m < 0:
             raise ValueError(
                 f"erosion_droplet_overcut_m must be >= 0, got {self.erosion_droplet_overcut_m}"

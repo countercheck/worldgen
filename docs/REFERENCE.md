@@ -497,8 +497,8 @@ removing high-frequency noise, and producing natural-looking channels.
 
 **Config:** `erosion_droplets_per_hex`, `erosion_inertia`, `erosion_capacity`,
 `erosion_deposition`, `erosion_erosion_rate`, `erosion_channel_affinity_gain`,
-`erosion_affinity_update_interval`, `erosion_delta_min_load`, `erosion_inlet_droplets_per_km2`,
-`erosion_inlet_water`, `erosion_inlet_load`, `max_elevation_m`,
+`erosion_affinity_update_interval`, `erosion_delta_min_load`, `erosion_inlet_yield_m`,
+`erosion_inlet_drop_fraction`, `erosion_inlet_fan_radius`, `max_elevation_m`,
 `seabed_depth_m`.
 
 **Units.** The erosion constants are *shares of the map's relief* rather than physical
@@ -587,39 +587,44 @@ delta at its mouth, while a lone droplet off a hillside leaves almost nothing.
 
 **The load an off-map river brings** (tech-debt #119). The rain droplets start empty on
 this map's land, so a river entering from off the map used to arrive with the discharge of
-everything it drained beyond the border and none of its load: it reached the water cutting
-and built no delta. After the carve passes, the carved ground is drained once more and
-`round(erosion_inlet_droplets_per_km2 × imported km²)` loaded droplets are carried down each
-imported river's course (`_inlet_course`, `_carry_inlet_load`), each starting with
-`erosion_inlet_water` water and `erosion_inlet_load × erosion_delta_min_load` sediment.
+everything it drained beyond the border and none of its load. After the carve passes, each
+imported river brings `erosion_inlet_yield_m` of its imported catchment's ground as
+sediment, and lays it down its course (`ErosionStage._load_inlets`):
 
-- They follow the routed course, not the lattice gradient. Raindrops released at an inlet
-  mostly stepped back over the border within a few steps or wandered into other valleys.
-- They deposit under the raindrop's rule wherever they are over capacity, but keep their
-  water and speed: a river gathers water downstream rather than soaking away. They **never
-  cut**: the imported river's cutting is already in the incision, which is seeded with its
-  catchment, and cutting is what made droplets seeded at an inlet dig a pit that turned the
-  inland fall around. What they lay on the course is recorded as silt (alluvium) and
-  changes no height on land — piled into the bed, it filled the gorge below an inlet to the
-  inlet's own height and levelled the fall that makes it one.
-- What is left builds a delta where the course **meets standing water**: the sea, at a
-  coast corner, or a lake — the first corner the fill had to raise — filling that hollow
-  no higher than the level its water stands at. A course that leaves the map over a border
-  takes its load with it.
-
-- The delta is built up to the waterline and never onto it, so a sea stays sea and land
-  stays land: a great river's fan reaching the level across its mouth sealed it as a bar
-  of dry land, and the country behind it filled as a lake. A lake's delta is laid on its
-  own bed, never in the sea within reach of it.
+- **A fixed share at every reach.** At each reach of the course — a corner of the drainage,
+  traced on the carved ground by `_inlet_reaches` — the river lays
+  `erosion_inlet_drop_fraction` of what it still carries, so the load falls away
+  geometrically downstream. Laid instead by a raindrop's rule, whatever was over capacity
+  where the river first slackened, it piled up to 425 m in the gorge below an inlet, and
+  980 m when spread over a belt there a hex or two wide.
+- **On the floodplain, never in a channel** (`_floodplain`). Each reach's share is spread
+  over the valley belt `_widen_valleys` planed there, weighted by its `meander` credit —
+  most beside the channel, nothing at the bluff, where a flood drops its load — or, in a
+  gorge with no belt, over its banks. It raises the ground and is recorded as alluvium, as
+  rain's deposit is both. No cell a river runs past is touched — every imported course,
+  and every cell carrying hydrology's channel threshold (`channel_min_discharge` over this
+  climate's runoff): raised by a few metres, the cells small streams cross dammed them and
+  ponded a thousand hexes as lakes.
+- **Lakes and hollows are crossed, not filled.** A reach the fill had to raise lays
+  nothing, and ground below sea level that does not reach the map's edge is drained as a
+  lake the river passes through (`_drain_to_the_sea`). Filled to their spill, such hollows
+  flooded 800 km² around them.
+- **What is left fans out into the open sea** (`_fan_out`): the nearest water first, built
+  up to just under its surface, then the next ring out, within `erosion_inlet_fan_radius`
+  hexes, so the fan is thickest at the mouth and thins seaward. It stops `_UNDER_WATER`
+  short of the surface, so sea stays sea — built onto the waterline across a great river's
+  mouth, it closed the mouth as a bar of dry land and the country behind filled as a lake.
+  What finds no room goes on to deep water, and a river that leaves the map takes its load
+  with it; both are recorded (`metadata["inlet_sediment_to_deep_m_km2"]`,
+  `["inlet_sediment_off_map_m_km2"]`), never laid.
 - The droplet record is scaled (`alluvium_quantile`) against the rain's deposition alone,
-  so a dozen cells of imported silt cannot reset what counts as deep soil for the map.
+  so the imported silt cannot reset what counts as deep soil for the map.
 
-On 96×96 worlds with the shipped falloff (seeds 11, 42, 3, 7, 19) all ten imported
-courses meet standing water — eight the sea, two a lake — and each lays 306–760 m of
-sediment within two hexes of where it does, where the native rivers' mouths hold 0–238 m.
-Land heights, the coast, PRIME ground, food and markets barely move. The last few
-kilometres above the mouth still net-cut, as native rivers' do: that is the rain droplets
-cutting the lower course, which this does not touch.
+On 96×96 worlds with the shipped falloff (seeds 11, 42, 3, 7, 19), land rises by at most
+16 m and 8 m at the 95th percentile, no channel cell moves, and no lake grows. Three of the
+five worlds' imported rivers reach the open sea and fan out over 9–20 cells there, nothing
+going to the deep; on seeds 11 and 42 both cross lakes and leave the map over a border,
+taking their load with them.
 
 **Post-process**
 
@@ -2644,9 +2649,9 @@ thing whatever the map's vertical scale — the old `terrain_hill_gradient` made
 | `erosion_channel_affinity_gain` | `float` | `0.5` | `≥ 0` (validated) | Affinity bump per erosion event. Higher = stronger channel reinforcement |
 | `erosion_affinity_update_interval` | `int` | `500` | `≥ 1` (validated) | Droplets between channel-affinity re-weighting passes |
 | `erosion_delta_min_load` | `float` | `0.15` | `≥ 0` (validated) | Sediment a droplet must still carry on reaching the sea for it to build anything. Below this the load is treated as carried away along the shore. Without it every droplet trickling off a nearby hillside deposited where it entered the water, silting the shelf evenly instead of building deltas at the river mouths |
-| `erosion_inlet_droplets_per_km2` | `float` | `0.02` | `≥ 0` (validated) | Loaded droplets carried down each off-map river's course, per km² of imported catchment (`river_inflow_volume` × land area), so the load scales with the country drained. `0` disables, and the world is the one it was without them |
-| `erosion_inlet_water` | `float` | `5.0` | `≥ 0` (validated) | Water each carries; a raindrop starts with 1. Kept all the way down, since a river gathers water rather than soaking away. On a reach too gentle to carry the load it drops the excess as floodplain silt, down to `0.01 × water × erosion_capacity`, and the rest builds the delta — so above `erosion_delta_min_load / (0.01 × erosion_capacity)`, 3.75 at the defaults, every imported river that meets standing water builds one |
-| `erosion_inlet_load` | `float` | `2.0` | `≥ 0` (validated) | Sediment each starts with, as a multiple of `erosion_delta_min_load` — above 1, so what reaches the water is enough to build a delta |
+| `erosion_inlet_yield_m` | `float` | `0.4` | `≥ 0` (validated) | Sediment an off-map river brings, as this depth of its imported catchment's ground (`river_inflow_volume` × land area, in km²), in metres. `0` disables, and the world is the one it was without it |
+| `erosion_inlet_drop_fraction` | `float` | `0.01` | `[0, 1]` (validated) | Share of what it still carries that it lays on the floodplain at each reach of its course, about half a kilometre. A fixed share, so the load falls away down the course instead of piling where the river first slackens |
+| `erosion_inlet_fan_radius` | `int` | `10` | `≥ 0` (validated) | How far out from the mouth, in hexes, what reaches the sea may fan out. What finds no room within it goes on to deep water, recorded in `metadata["inlet_sediment_to_deep_m_km2"]` |
 
 The erosion constants are shares of the map's relief rather than physical quantities, so
 the stage converts to a normalised copy at its boundary and back to metres on the way out

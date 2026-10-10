@@ -8,11 +8,13 @@ from ..core.config import WorldConfig
 from ..core.hex import HexCoord
 from ..core.hex_grid import Corner, corner_hexes, hex_corner_keys, side_hexes, side_joining
 from ..core.hex_grid import distance as hex_distance
+from ..core.hex_grid import neighbors as hex_neighbors
 from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
 from .corner_drainage import (
     CornerNetwork,
     Drainage,
+    Node,
     accumulate,
     build_network,
     drain_corner,
@@ -52,7 +54,6 @@ def _deposit_delta(
     h: int,
     sea_level: float,
     min_load: float,
-    floor: float = -math.inf,
 ) -> None:
     """Spread a droplet's load as a fan from where its channel meets the sea.
 
@@ -69,10 +70,6 @@ def _deposit_delta(
     Nothing is lifted above the waterline: a delta progrades to sea level and then
     builds seaward, it does not pile into hills.  That is also what stops sediment from
     sealing the map edge back up into dry land far from any river.
-
-    *sea_level* is the waterline of whatever water it is: a lake's, for a delta built into
-    a lake.  Only ground at or above *floor* is built on — a lake's delta is laid on its
-    own bed, not in the sea that happens to lie within reach of it.
     """
     if sediment < min_load:
         # Too little to build anything.  A droplet that trickled off a nearby hillside
@@ -98,7 +95,7 @@ def _deposit_delta(
                     continue  # interior of the box: belongs to a smaller ring
                 i = ci + di
                 j = cj + dj
-                if 0 <= i < w and 0 <= j < h and floor <= arr[i, j] < sea_level:
+                if 0 <= i < w and 0 <= j < h and arr[i, j] < sea_level:
                     count += 1
         if count == 0:
             continue
@@ -110,7 +107,7 @@ def _deposit_delta(
                     continue
                 i = ci + di
                 j = cj + dj
-                if 0 <= i < w and 0 <= j < h and floor <= arr[i, j] < sea_level:
+                if 0 <= i < w and 0 <= j < h and arr[i, j] < sea_level:
                     raised = arr[i, j] + share
                     arr[i, j] = raised if raised < sea_level else sea_level
                     # The silt arrives whether or not the ground can rise to show it: a
@@ -150,9 +147,7 @@ def _drop_particle(
         if ci < 0 or ci >= w or cj < 0 or cj >= h:
             break
         if arr[ci, cj] < sea_level:
-            _deposit_delta(
-                arr, alluvium, ci, cj, sediment, w, h, sea_level, delta_min_load, -math.inf
-            )
+            _deposit_delta(arr, alluvium, ci, cj, sediment, w, h, sea_level, delta_min_load)
             break
 
         # Gradient from 4 neighbors (clamp at edges)
@@ -496,158 +491,192 @@ def _choose_inlets(
     return chosen
 
 
-def _inlet_course(
+def _drain_to_the_sea(
+    arr: np.ndarray,
+    sea_level: float,
+    state: WorldState,
+    draws: dict[Corner, float],
+    wander_exponent: float,
+    rng: np.random.Generator,
+    floor_blend: float = 0.0,
+) -> tuple[CornerNetwork, Drainage]:
+    """`_drain`, but with only the sea that reaches the map's edge as the sea.
+
+    Ground below sea level that does not reach the edge is a hollow, not the ocean, and
+    hydrology makes a lake of it.  Here it is drained as one: water entering it fills it
+    and spills on, so a river that meets it is followed on past it to the open sea.
+    """
+    w, h = arr.shape
+    elevation = {state.coord_at(i, j): float(arr[i, j]) for i in range(w) for j in range(h)}
+    land = {c for c, z in elevation.items() if z >= sea_level}
+    ocean: set[HexCoord] = set()
+    pockets: list[list[HexCoord]] = []
+    seen: set[HexCoord] = set()
+    for start in sorted(set(elevation) - land):
+        if start in seen:
+            continue
+        part, queue = [], deque([start])
+        seen.add(start)
+        while queue:
+            c = queue.popleft()
+            part.append(c)
+            for n in hex_neighbors(c):
+                if n in elevation and n not in land and n not in seen:
+                    seen.add(n)
+                    queue.append(n)
+        if any(state.on_border(c) for c in part):
+            ocean.update(part)
+        else:
+            pockets.append(part)
+    net = build_network(elevation, land, ocean, set(), pockets, floor_blend)
+    return net, flow_direction(net, rng, wander_exponent, draws=draws)
+
+
+def _inlet_reaches(
     arr: np.ndarray,
     sea_level: float,
     state: WorldState,
     net: CornerNetwork,
     drainage: Drainage,
     mouth: tuple[int, int],
-) -> tuple[list[tuple[int, int]], tuple[tuple[int, int], float, float] | None]:
-    """The cells an imported river runs down from *mouth*, and where it meets still water.
+) -> tuple[list[tuple[int, int]], tuple[int, int] | None]:
+    """The reaches an imported river runs down from *mouth*, and where it reaches the sea.
 
-    Traced on the corner routing from the corner the inflow joins at, each corner standing
-    for its lowest land hex, as it does when incision measures a corner's height.  It runs
-    until the river meets standing water, which is either of two things:
+    Traced on `_drain_to_the_sea`'s routing from the corner the inflow joins at.  Each
+    reach is a corner's lowest land hex, as incision measures a corner's height, taken
+    once.  A corner the fill had to raise — the river crossing a hollow or a lake — is no
+    reach: the river passes through without laying anything, so a lake is never filled
+    and never grows (filled to its spill, one flooded 800 km2 of the country around it).
 
-    *   the sea, at a corner beside it — the cell is the sea cell there, at sea level;
-    *   a lake, at the first corner the fill had to raise to drain: a hollow the water
-        stands in.  The lowest cell the water crosses in it, at the level it fills to.
-
-    Returns the cells and that meeting, as (cell, water level, lowest ground built on) —
-    a lake's delta is laid on its own bed, above the sea — or `None` for a course that
-    leaves the map over a border without meeting either.
+    Returns the reaches in order and the sea cell the river runs out into, or `None` for
+    a river that leaves the map over a border instead.
     """
     coord = state.coord_at(*mouth)
     if arr[mouth] < sea_level:
         return [], None
-    corner = inlet_corner(coord, net, drainage)
-    if corner is None:
-        return [], None
-    cells: list[tuple[int, int]] = [mouth]
-    seen: set[Corner] = set()
-    while corner is not None and corner not in seen:
-        seen.add(corner)
-        around = [state.grid_index(hx) for hx in corner_hexes(corner) if hx in state.hexes]
-        dry = [c for c in around if arr[c] >= sea_level]
-        wet = [c for c in around if arr[c] < sea_level]
-        if corner in net.wet and wet:
-            return cells, (min(wet, key=lambda c: (arr[c], c)), sea_level, -math.inf)
-        if dry:
-            low = min(dry, key=lambda c: (arr[c], c))
-            level = drainage.filled.get(corner, -math.inf)
-            if level > net.elevation[corner] + 1e-12:
-                floor = _hollow_floor(arr, sea_level, state, drainage, corner, level)
-                # Only a hollow some ground lies below the water in.  A corner can be
-                # raised by the fill with every hex around it above the level — its height
-                # is lifted toward their mean (`corner_floor_blend`) — and there is nothing
-                # there for a delta to build into: the river runs on.
-                if floor is not None and arr[floor] < level:
-                    return cells, (floor, level, sea_level)
-            if low != cells[-1]:
-                cells.append(low)
-        corner = drainage.flow.get(corner)
-    return cells, None
+    node: Node | None = inlet_corner(coord, net, drainage)
+    reaches: list[tuple[int, int]] = []
+    seen: set[Node] = set()
+    while node is not None and node not in seen:
+        seen.add(node)
+        if not is_lake_node(node):
+            around = [state.grid_index(hx) for hx in corner_hexes(node) if hx in state.hexes]
+            wet = [c for c in around if arr[c] < sea_level]
+            if node in net.wet and wet:
+                return reaches, min(wet, key=lambda c: (arr[c], c))
+            dry = [c for c in around if arr[c] >= sea_level]
+            raised = drainage.filled.get(node, -math.inf) > net.elevation[node] + 1e-12
+            if dry and not raised:
+                low = min(dry, key=lambda c: (arr[c], c))
+                if low not in reaches:
+                    reaches.append(low)
+        node = drainage.flow.get(node)
+    return reaches, None
 
 
-def _hollow_floor(
+def _floodplain(
     arr: np.ndarray,
     sea_level: float,
-    state: WorldState,
-    drainage: Drainage,
-    corner: Corner,
-    level: float,
-) -> tuple[int, int] | None:
-    """The lowest cell the water crosses in the hollow it enters at *corner*.
+    meander: np.ndarray,
+    discharge: np.ndarray,
+    reach: tuple[int, int],
+    channel: np.ndarray,
+    *,
+    width_max: float,
+    width_exponent: float,
+    reference_km2: float,
+) -> tuple[list[tuple[int, int]], list[float]]:
+    """The floodplain of *reach*, and the share of a deposit each of its cells takes.
 
-    The corner where a river first meets a lake is on its shore, and the ground there is
-    at the water's edge: a delta centred on it finds little or nothing below the water to
-    build on.  The water crosses the hollow to its outlet, and the deepest ground on that
-    crossing is where the lake stands.
+    The floodplain is the valley belt `_widen_valleys` planed there: the cells of *meander*
+    it credited, within the half-width it gives a river of that discharge, measured on the
+    four-neighbour lattice it fills on.  Shares go with *meander* — how far into its own
+    belt a cell lies, most beside the channel and nothing at the bluff — because that is
+    where a flood drops its load, the levee and the near floor first as the water slows
+    leaving the channel, and it is the profile the belt's own alluvium already has.
+
+    A reach with no belt — a gorge the carve could not widen — has its banks, the cells
+    beside it, in equal shares.  No *channel* cell is ever part of a floodplain: the bed is
+    scoured, not built up, and that includes every other river's bed within reach.
     """
-    best: tuple[float, tuple[int, int]] | None = None
-    seen: set[Corner] = set()
-    node: Corner | None = corner
-    while node is not None and node not in seen and drainage.filled.get(node, -math.inf) >= level:
-        seen.add(node)
-        for hx in corner_hexes(node):
-            if hx in state.hexes:
-                cell = state.grid_index(hx)
-                if arr[cell] >= sea_level and (best is None or (arr[cell], cell) < best):
-                    best = (float(arr[cell]), cell)
-        node = drainage.flow.get(node)
-    return None if best is None else best[1]
+    w, h = arr.shape
+    ci, cj = reach
+    half = min(width_max * (discharge[ci, cj] / reference_km2) ** width_exponent, width_max)
+    r = max(1, int(half))
+    cells: list[tuple[int, int]] = []
+    weights: list[float] = []
+    for di in range(-r, r + 1):
+        for dj in range(-(r - abs(di)), r - abs(di) + 1):
+            i, j = ci + di, cj + dj
+            inside = 0 <= i < w and 0 <= j < h
+            if inside and not channel[i, j] and arr[i, j] >= sea_level and meander[i, j] > 0.0:
+                cells.append((i, j))
+                weights.append(float(meander[i, j]))
+    if not cells:
+        for i, j in ((ci + 1, cj), (ci - 1, cj), (ci, cj + 1), (ci, cj - 1)):
+            if 0 <= i < w and 0 <= j < h and not channel[i, j] and arr[i, j] >= sea_level:
+                cells.append((i, j))
+                weights.append(1.0)
+    total = sum(weights)
+    return cells, [x / total for x in weights]
 
 
-def _carry_inlet_load(
+def _fan_out(
     arr: np.ndarray,
     deposition: np.ndarray,
-    cells: list[tuple[int, int]],
-    meets: tuple[tuple[int, int], float, float] | None,
-    droplets: int,
-    water: float,
+    state: WorldState,
+    mouth: tuple[int, int],
+    sea_level: float,
     load: float,
-    capacity: float,
-    deposition_rate: float,
-    delta_min_load: float,
-) -> None:
-    """Carry an off-map catchment's load down its river, in place.
+    radius: int,
+) -> float:
+    """Lay *load* down as a fan over the sea beyond *mouth*, in place.
 
-    Each of *droplets* starts with *water* and *load* and steps down *cells* under the
-    rule `_drop_particle` deposits by: it can hold `fall * water * capacity`, the fall
-    floored at 0.01 as a raindrop's is, and drops a share of anything over that where it
-    is.  What is left where the river *meets* standing water builds a delta there through
-    `_deposit_delta`, as a raindrop's would at the coast — into the sea, or into a lake,
-    filling the hollow no higher than the level its water stands at.  A river that leaves
-    the map without meeting either takes what is left with it.
+    The river's load goes on past the mouth and settles as the current slackens: the
+    nearest water first, built up to just under its surface, then the next ring out, so
+    the fan is thickest at the mouth, thins seaward, and widens as it goes because there
+    is more water further out.  How thick a cell gets is how deep the water over it was.
+    None is built onto: the fan stops `_UNDER_WATER` short of the surface, so sea stays
+    sea and the mouth is never sealed — built onto the waterline across a great river's
+    mouth, it closed the mouth as a bar of dry land, and the country behind filled as a
+    lake of 1,600 km2 on one world measured.
 
-    Unlike a raindrop it neither soaks away nor slows as it falls: a raindrop's water
-    shrinks by `_EVAPORATION` a step, but a river gathers water downstream, it does not
-    lose it.  That is also what makes the delta certain.  With its water kept, it never
-    holds less than the floor, `0.01 * water * capacity`, and at the shipped water that is
-    above `erosion_delta_min_load`.  Measured with the raindrop's losses, most of the load
-    was spent on the course long before the mouth, and fewer than half the imported rivers
-    that met standing water built anything there.
-
-    It never cuts, and on land it changes no height at all: only the delta, below the
-    water, is built up.  The imported river's power to cut is already in the model — the
-    inflow is seeded into the discharge that incision cuts by — and this is its load,
-    which is what nothing else brings.  Cutting is also exactly what went wrong when
-    droplets were seeded at an inlet before (tech-debt #119): an empty droplet at full
-    capacity digs a pit at the mouth, turning its inland fall around and disqualifying the
-    very inlet it was meant for.  Leaving the land's heights alone, it cannot do that, nor
-    send any water uphill.
-
-    It follows the routed course rather than the lattice gradient a raindrop follows.  A
-    raindrop does not fill a depression and is free to step back over the border, so of
-    the droplets released at an inlet most left the map again within a few steps and the
-    rest wandered into other valleys: hardly any load reached the river it belonged to.
+    The fan spreads only through sea, ring by ring, no further than *radius* hexes, and
+    within a ring each cell takes its share of what is left in proportion to the water
+    over it, so the front thins evenly rather than piling at one point.  Returns what found
+    no room: carried out to deep water, and never dumped at the mouth.
     """
-    if droplets <= 0 or load <= 0.0 or len(cells) < 2 and meets is None:
-        return
-    w, h = arr.shape
-    for _ in range(droplets):
-        sediment = load
-        for (ci, cj), (ni, nj) in zip(cells, cells[1:], strict=False):
-            dh = arr[ni, nj] - arr[ci, cj]
-            cap = max(-dh, 0.01) * water * capacity
-            if sediment > cap:
-                # Silt laid on the floor of the course, and recorded as silt only.  The
-                # valley the carve has just settled is left at the height it was cut to:
-                # piled into the bed, a river's whole load filled the gorge below its inlet
-                # to the inlet's own height, hundreds of metres, and levelled the very fall
-                # that makes the inlet an inlet.
-                drop = deposition_rate * (sediment - cap)
-                deposition[ci, cj] += drop
-                sediment -= drop
-        if meets is not None:
-            (mi, mj), level, floor = meets
-            # Built up to the waterline and not onto it.  A raindrop's delta may reach the
-            # level and become land, but this load is a great river's: its fan reached the
-            # level across the whole mouth, sealed it as a bar of dry land, and the country
-            # behind it filled as a lake of 1,600 km2 on one world measured.
-            below = level - _UNDER_WATER
-            _deposit_delta(arr, deposition, mi, mj, sediment, w, h, below, delta_min_load, floor)
+    top = sea_level - _UNDER_WATER
+
+    def room(cell: tuple[int, int]) -> float:
+        z = arr[cell]
+        return top - z if z < top else 0.0
+
+    ring = [state.coord_at(*mouth)]
+    seen = set(ring)
+    left = load
+    for _ in range(radius + 1):
+        if not ring or left <= 0.0:
+            break
+        cells = [state.grid_index(c) for c in ring]
+        space = [room(c) for c in cells]
+        total = sum(space)
+        if total > 0.0:
+            share = min(1.0, left / total)
+            for cell, r in zip(cells, space, strict=True):
+                laid = r * share
+                arr[cell] += laid
+                deposition[cell] += laid
+            left -= total * share
+        nxt = []
+        for coord in ring:
+            for n in hex_neighbors(coord):
+                if n in state.hexes and n not in seen:
+                    seen.add(n)
+                    if arr[state.grid_index(n)] < sea_level:
+                        nxt.append(n)
+        ring = sorted(nxt)
+    return max(left, 0.0)
 
 
 def _widen_valleys(
@@ -843,33 +872,79 @@ class ErosionStage(GeneratorStage):
         drainage: Drainage,
         inflow: dict[tuple[int, int], float],
         sea_level: float,
+        meander: np.ndarray,
+        discharge: np.ndarray,
     ) -> None:
         """Bring each imported river's load in with it (tech-debt #119).
 
         The rain droplets start empty on this map's land, so a river entering from off the
-        map arrived with the discharge of everything it drained beyond the border and the
-        sediment of the one hex it entered on, and cut its way to the coast instead of
-        building a delta there.  Each inlet gets droplets in proportion to the catchment it
-        imports, as the rain is in proportion to the land, each arriving loaded.
+        map arrived with the discharge of everything it drained beyond the border and none
+        of its load, and laid nothing where it met the sea.  Each imported river brings
+        `erosion_inlet_yield_m` of its catchment's ground, and drops a fraction,
+        `erosion_inlet_drop_fraction`, of what it still carries at every reach on the way
+        down: on that reach's floodplain (`_floodplain`), as height and as silt, as rain's
+        deposit is both.  What is left goes on into the sea and fans out there
+        (`_fan_out`).
+
+        A fixed fraction a reach, so the load falls away along the course rather than
+        being dumped at the first gentle stretch.  Laid by a raindrop's rule — whatever is
+        over capacity, where the river first slackens — it piled up to 425 m in the gorge
+        below an inlet, and 980 m when spread over a belt there only a hex or two wide.
+
+        A river that leaves the map takes what it has left with it.  That, and what a fan
+        had no room for, is recorded in metres over a square kilometre, never laid.
         """
         cfg = self.config
-        if cfg.erosion_inlet_droplets_per_km2 <= 0.0:
+        if cfg.erosion_inlet_yield_m <= 0.0:
             return
-        load = cfg.erosion_inlet_load * cfg.erosion_delta_min_load
+        span = cfg.max_elevation_m + cfg.seabed_depth_m
+        land = arr >= sea_level
+        flow = np.where(land, discharge, 0.0)
+        # Every cell a river runs past is left alone, not just the trunks the carve widened:
+        # raised by a few metres, a cell a small stream crosses dams it, and on one world
+        # the ponds behind such dams took a thousand hexes of land as lakes.  A river is
+        # where hydrology will draw one: `channel_min_discharge` over this climate's runoff.
+        runoff = cfg.runoff_mm(cfg.mean_precip_mm)
+        stream = cfg.channel_min_discharge / runoff if runoff > 0.0 else math.inf
+        trunk = float(np.quantile(flow[land], 1.0 - cfg.valley_channel_fraction))
+        channel = land & (flow >= min(stream, trunk))
+        courses = {
+            mouth: _inlet_reaches(arr, sea_level, state, net, drainage, mouth) for mouth in inflow
+        }
+        for reaches, _ in courses.values():
+            for c in reaches:
+                channel[c] = True
+        to_deep = off_map = 0.0
         for mouth, volume in sorted(inflow.items()):
-            cells, meets = _inlet_course(arr, sea_level, state, net, drainage, mouth)
-            _carry_inlet_load(
-                arr,
-                deposition,
-                cells,
-                meets,
-                int(round(cfg.erosion_inlet_droplets_per_km2 * volume)),
-                cfg.erosion_inlet_water,
-                load,
-                cfg.erosion_capacity,
-                cfg.erosion_deposition,
-                cfg.erosion_delta_min_load,
-            )
+            reaches, sea = courses[mouth]
+            load = cfg.erosion_inlet_yield_m / span * volume
+            for reach in reaches:
+                cells, shares = _floodplain(
+                    arr,
+                    sea_level,
+                    meander,
+                    discharge,
+                    reach,
+                    channel,
+                    width_max=cfg.valley_width_max,
+                    width_exponent=cfg.valley_width_exponent,
+                    reference_km2=cfg.valley_width_reference_km2,
+                )
+                if not cells:
+                    continue
+                drop = cfg.erosion_inlet_drop_fraction * load
+                for cell, share in zip(cells, shares, strict=True):
+                    arr[cell] += drop * share
+                    deposition[cell] += drop * share
+                load -= drop
+            if sea is None:
+                off_map += load
+            else:
+                to_deep += _fan_out(
+                    arr, deposition, state, sea, sea_level, load, cfg.erosion_inlet_fan_radius
+                )
+        state.metadata["inlet_sediment_to_deep_m_km2"] = round(to_deep * span, 3)
+        state.metadata["inlet_sediment_off_map_m_km2"] = round(off_map * span, 3)
 
     def run(self, state: WorldState) -> WorldState:
         cfg = self.config
@@ -1071,12 +1146,12 @@ class ErosionStage(GeneratorStage):
                     )
 
             rain_deposition = None
-            if inflow and cfg.erosion_inlet_droplets_per_km2 > 0.0:
+            if inflow and cfg.erosion_inlet_yield_m > 0.0:
                 # The load each imported river brings, carried down its course once the
-                # valleys are cut, to wherever it meets standing water: drained once more,
-                # on the carved ground, so the hollows it finds are the ones left standing
-                # for hydrology to fill as lakes, and not ones the carve went on to breach.
-                net, drainage = _drain(
+                # valleys are cut, through the lakes it meets and out to the sea: drained
+                # once more, on the carved ground, so the hollows it finds are the ones left
+                # standing for hydrology to fill, and not ones the carve went on to breach.
+                net, drainage = _drain_to_the_sea(
                     arr,
                     sea_shaped,
                     state,
@@ -1086,7 +1161,9 @@ class ErosionStage(GeneratorStage):
                     cfg.corner_floor_blend,
                 )
                 rain_deposition = deposition.copy()
-                self._load_inlets(arr, deposition, state, net, drainage, inflow, sea_shaped)
+                self._load_inlets(
+                    arr, deposition, state, net, drainage, inflow, sea_shaped, meander, acc
+                )
             if inflow:
                 handoff = (sorted(inflow), draws)
 

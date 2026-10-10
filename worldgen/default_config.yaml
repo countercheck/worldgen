@@ -130,13 +130,12 @@ erosion_erosion_rate: 0.3              # Rate of terrain erosion. Default: 0.3
 erosion_channel_affinity_gain: 0.5     # Affinity gain per deposition event; higher = deeper channels. Default: 0.5
 erosion_affinity_update_interval: 500  # Update channel affinity every N droplets. Default: 500
 erosion_delta_min_load: 0.15 # Sediment a droplet must still carry when it reaches the sea for it to build anything. Below this the load is treated as carried away along the shore rather than settling. Without it every droplet that trickled off a nearby hillside deposited where it entered the water, silting the shelf evenly instead of building deltas at the river mouths. Default: 0.15
-# Sediment an off-map river brings (tech-debt #119). Loaded droplets are carried down each
-# imported river's course to where it meets the sea or a lake, and build a delta there:
-# the rain starts empty on this map's land, so without them an imported river brought its
-# discharge and none of its load. They deposit and never cut.
-erosion_inlet_droplets_per_km2: 0.02 # Droplets per km2 of imported catchment, so the load scales with the country drained. 0 disables. Default: 0.02
-erosion_inlet_water: 5.0 # Water each carries, kept all the way down (a raindrop starts with 1 and loses it). Gentle reaches take the load above 0.01 x this x erosion_capacity as floodplain silt; the rest builds the delta. Above 3.75 at the defaults every imported river that meets water builds one. Default: 5.0
-erosion_inlet_load: 2.0 # Load each starts with, as a multiple of erosion_delta_min_load, the least load that builds a delta. Default: 2.0
+# Sediment an off-map river brings (tech-debt #119). It lays a fixed share of what it
+# carries on the floodplain of every reach of its course, never in a channel and never in
+# a lake, and what is left fans out into the open sea below the waterline.
+erosion_inlet_yield_m: 0.4 # Depth of the imported catchment's ground (river_inflow_volume x land area, in km2) the river brings as sediment, in metres. 0 disables. Default: 0.4
+erosion_inlet_drop_fraction: 0.01 # Share of what it still carries laid on the floodplain at each reach (about half a km), so the load falls away down the course. 0-1. Default: 0.01
+erosion_inlet_fan_radius: 10 # How far out from the mouth, in hexes, the rest may fan out; what finds no room goes to deep water. Default: 10
 
 # Channel incision. The droplets above cut by slope alone — one unit of water per droplet
 # whatever country it drains — so nothing tells a trunk from the hillslope beside it, no
