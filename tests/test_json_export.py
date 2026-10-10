@@ -120,19 +120,18 @@ def test_sea_edges_and_catchment_round_trip(tmp_path):
 
 
 def test_the_seasons_round_trip(tmp_path):
-    """Soil reads the two half-years, not the year, so they are what a reader of the saved
+    """Soil reads the four seasons, not the year, so they are what a reader of the saved
     world needs in order to say why a hex came out grazing. Distinct values, so a round
-    trip that swapped them or rebuilt them from the year's total would show."""
+    trip that reordered them or rebuilt them from the year's total would show."""
     ws = _small_world()
     h = ws.hexes[(0, 0)]
     h.moisture = 600.0
-    h.wet_season_precip_mm = 450.0
-    h.dry_season_precip_mm = 150.0
+    h.season_precip_mm = (150.0, 30.0, 180.0, 240.0)
     path = tmp_path / "world.json"
     json_export.save(ws, path)
     h2 = json_export.load(path).hexes[(0, 0)]
-    assert h2.wet_season_precip_mm == pytest.approx(450.0)
-    assert h2.dry_season_precip_mm == pytest.approx(150.0)
+    assert h2.season_precip_mm == pytest.approx((150.0, 30.0, 180.0, 240.0))
+    assert isinstance(h2.season_precip_mm, tuple)
 
 
 def test_an_oasis_round_trips(tmp_path):
@@ -154,11 +153,28 @@ def test_a_world_saved_before_the_seasons_loads_as_an_even_year(tmp_path):
     ws = _small_world()
     data = ws.to_dict()
     for hd in data["hexes"]:
-        del hd["wet_season_precip_mm"]
-        del hd["dry_season_precip_mm"]
+        del hd["season_precip_mm"]
     h = WorldState.from_dict(data).hexes[(0, 0)]
-    assert h.wet_season_precip_mm == pytest.approx(h.moisture / 2)
-    assert h.wet_season_precip_mm + h.dry_season_precip_mm == pytest.approx(h.moisture)
+    assert h.season_precip_mm == pytest.approx((h.moisture / 4,) * 4)
+    assert sum(h.season_precip_mm) == pytest.approx(h.moisture)
+
+
+def test_a_world_saved_with_two_half_years_loads_as_four_seasons(tmp_path):
+    """#145 saved a wet and a dry half-year. Each is split evenly over two seasons, the wet
+    half on the two its region's preset makes wettest, which soil reads exactly as it read
+    the halves; and the four still sum to the year."""
+    ws = _small_world()
+    ws.metadata["config"] = {"regional_climate": "tropical"}
+    data = ws.to_dict()
+    for hd in data["hexes"]:
+        del hd["season_precip_mm"]
+        hd["moisture"] = 1000.0
+        hd["wet_season_precip_mm"] = 800.0
+        hd["dry_season_precip_mm"] = 200.0
+    h = WorldState.from_dict(data).hexes[(0, 0)]
+    # The tropical preset's rains are summer and autumn.
+    assert h.season_precip_mm == pytest.approx((100.0, 400.0, 400.0, 100.0))
+    assert sum(h.season_precip_mm) == pytest.approx(1000.0)
 
 
 def test_territory_round_trips(tmp_path):

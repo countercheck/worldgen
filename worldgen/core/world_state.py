@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from .config import SEASONS, halves_as_seasons, season_split
 from .hex import Hex, HexCoord, Settlement
 from .hex_grid import (
     AXIAL,
@@ -279,8 +280,7 @@ class WorldState:
                     "r": h.coord[1],
                     "elevation": h.elevation,
                     "moisture": h.moisture,
-                    "wet_season_precip_mm": h.wet_season_precip_mm,
-                    "dry_season_precip_mm": h.dry_season_precip_mm,
+                    "season_precip_mm": list(h.season_precip_mm),
                     "groundwater_mm": h.groundwater_mm,
                     "traffic": h.traffic,
                     "temperature": h.temperature,
@@ -415,16 +415,15 @@ class WorldState:
         ws.settlements = settlements
         settlement_by_coord = {s.coord: s for s in settlements}
 
+        config = ws.metadata.get("config") or {}
+        climate = config.get("regional_climate", "temperate")
         for hd in data.get("hexes", []):
             coord = (hd["q"], hd["r"])
             h = Hex(
                 coord=coord,
                 elevation=hd["elevation"],
                 moisture=hd["moisture"],
-                # A world saved before the seasons were split has only the year's rain;
-                # an even split is what a year without seasons is, and still sums to it.
-                wet_season_precip_mm=hd.get("wet_season_precip_mm", hd["moisture"] / 2),
-                dry_season_precip_mm=hd.get("dry_season_precip_mm", hd["moisture"] / 2),
+                season_precip_mm=_seasons_of(hd, climate),
                 groundwater_mm=hd.get("groundwater_mm", 0.0),
                 traffic=hd.get("traffic", 0.0),
                 temperature=hd["temperature"],
@@ -485,3 +484,26 @@ class WorldState:
         ws.ferries = [Ferry(a=tuple(fd["a"]), b=tuple(fd["b"])) for fd in data["ferries"]]
 
         return ws
+
+
+def _seasons_of(hd: dict[str, Any], climate: str) -> tuple[float, float, float, float]:
+    """A saved hex's four seasons of rain, from whichever form the file has them in.
+
+    Four seasons are read as they are. A world saved with #145's wet and dry half-years
+    has each half split evenly over two seasons, the wet half on the two its region's
+    preset makes wettest (`halves_as_seasons`), which soil reads exactly as it read the
+    halves. A world saved before either has only the year's rain, and an even year is what
+    a year without seasons is. All three sum to the year.
+    """
+    if "season_precip_mm" in hd:
+        a, b, c, d = (float(v) for v in hd["season_precip_mm"])
+        return (a, b, c, d)
+    annual = hd["moisture"]
+    if "wet_season_precip_mm" in hd and "dry_season_precip_mm" in hd:
+        wet, dry = hd["wet_season_precip_mm"], hd["dry_season_precip_mm"]
+        _, wet_pair, _ = halves_as_seasons(0.5, climate)
+        out = [dry / 2.0] * 4
+        for name in wet_pair:
+            out[SEASONS.index(name)] = wet / 2.0
+        return (out[0], out[1], out[2], out[3])
+    return season_split(annual, (0.25, 0.25, 0.25, 0.25))

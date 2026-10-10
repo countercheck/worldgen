@@ -116,17 +116,13 @@ function control(field) {
       return box;
     });
     set = (v) => boxes.forEach((b) => (b.checked = (v || []).includes(b.value)));
-  } else if (kind === "pair") {
-    const a = el("input", { type: "number", step: "any" });
-    const b = el("input", { type: "number", step: "any" });
-    const update = () => setValue(name, [Number(a.value) || 0, Number(b.value) || 0], set);
-    a.addEventListener("change", update);
-    b.addEventListener("change", update);
-    input = el("div", { className: "inline" }, [a, b]);
-    set = (v) => {
-      a.value = v[0];
-      b.value = v[1];
-    };
+  } else if (kind === "numbers") {
+    // A fixed run of numbers: a vector's two, or the four seasons' shares.
+    const boxes = Array.from({ length: field.size || 2 }, () => el("input", { type: "number", step: "any" }));
+    const update = () => setValue(name, boxes.map((b) => Number(b.value) || 0), set);
+    for (const b of boxes) b.addEventListener("change", update);
+    input = el("div", { className: "inline" }, boxes);
+    set = (v) => boxes.forEach((b, i) => (b.value = v == null ? "" : v[i]));
   } else if (choices) {
     input = el("select");
     for (const choice of choices) input.append(el("option", { value: choice, textContent: choice || "(none)" }));
@@ -535,12 +531,14 @@ function drawMarker({ x, y, size }) {
   marker.removeAttribute("hidden");
 }
 
+const SEASONS = ["spring", "summer", "autumn", "winter"];
+
 const FORMAT = {
   elevation: (v) => `${v.toFixed(0)} m`,
   temperature: (v) => `${v.toFixed(1)} °C`,
   moisture: (v) => `${v.toFixed(0)} mm`,
-  wet_season_precip_mm: (v) => `${v.toFixed(0)} mm`,
-  dry_season_precip_mm: (v) => `${v.toFixed(0)} mm`,
+  // Spring, summer, autumn, winter: March to May, June to August, and on round the year.
+  season_precip_mm: (v) => SEASONS.map((s, i) => `${s} ${v[i].toFixed(0)}`).join(" · ") + " mm",
   groundwater_mm: (v) => `${v.toFixed(0)} mm`,
   slope: (v) => `${v.toFixed(1)} m`,
   relief: (v) => `${v.toFixed(0)} m`,
@@ -551,12 +549,13 @@ const FORMAT = {
 // Shown first, in this order; everything else the hex carries follows.
 const ORDER = [
   "coord", "terrain_class", "biome", "elevation", "slope", "relief", "temperature",
-  "moisture", "wet_season_precip_mm", "dry_season_precip_mm", "groundwater_mm", "rivers", "river_flow", "catchment_km2", "land_cover", "soil", "land_use",
+  "moisture", "season_precip_mm", "groundwater_mm", "rivers", "river_flow", "catchment_km2", "land_cover", "soil", "land_use",
   "cultivated", "rural_population", "territory_of", "roads", "tags",
 ];
 
 function show(name, value) {
   if (value == null || (Array.isArray(value) && value.length === 0)) return "—";
+  if (name === "season_precip_mm" && Array.isArray(value)) return FORMAT[name](value);
   if (FORMAT[name] && typeof value === "number") return FORMAT[name](value);
   if (typeof value === "number") return Number.isInteger(value) ? String(value) : value.toFixed(2);
   if (typeof value === "boolean") return value ? "yes" : "no";

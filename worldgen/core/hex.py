@@ -238,13 +238,13 @@ class Hex:
     coord: HexCoord
     elevation: float = 0.0
     moisture: float = 0.0
-    # `moisture` is the year's rain in millimetres; these split it between the wetter and
-    # the drier half-year, by the region's `wet_season_share`, and sum to it. Soil reads
-    # them: a crop fails in the dry season, ground is leached in the wet one.
-    wet_season_precip_mm: float = 0.0
-    dry_season_precip_mm: float = 0.0
-    # Water an oasis gives the crop from below over its growing season, in millimetres;
-    # zero off an oasis. The spring itself is also tagged `oasis`.
+    # `moisture` is the year's rain in millimetres; this splits it into the four seasons
+    # (spring, summer, autumn, winter, as `SEASONS` in core.config) by the region's
+    # `season_shares`, and sums to it. Soil reads them: a crop fails in the seasons it
+    # grows in, ground is leached in the wettest one.
+    season_precip_mm: tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
+    # Water an oasis gives the crop from below, in millimetres over a half-year of growing
+    # season; zero off an oasis. The spring itself is also tagged `oasis`.
     groundwater_mm: float = 0.0
     # Journeys a year through this hex, as `InterurbanRoadStage` routed them: travellers
     # between settlements and the carts their freight puts on the road. Zero where no route

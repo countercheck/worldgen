@@ -49,29 +49,113 @@ def test_standing_water_is_not_short_of_rain(climate_state):
             ), f"water hex has {h.moisture:.0f} mm — it should not read as the driest ground"
 
 
-def test_the_two_seasons_are_the_year(climate_state):
-    """The split says when the rain falls, never how much: the halves sum to the year, the
-    wet half is the wetter, and every hex divides by the region's share."""
-    share = climate_state.metadata["config"]["wet_season_share"]
+def test_the_four_seasons_are_the_year(climate_state):
+    """The split says when the rain falls, never how much: the four seasons sum to the
+    year, none is negative, and every hex divides by the region's shares."""
+    shares = climate_state.metadata["config"]["season_shares"]
     for h in climate_state.hexes.values():
-        assert h.wet_season_precip_mm + h.dry_season_precip_mm == pytest.approx(h.moisture)
-        assert h.wet_season_precip_mm >= h.dry_season_precip_mm
-        assert h.wet_season_precip_mm == pytest.approx(h.moisture * share)
+        assert len(h.season_precip_mm) == 4
+        assert sum(h.season_precip_mm) == pytest.approx(h.moisture)
+        assert min(h.season_precip_mm) >= -1e-9
+        for mm, share in zip(h.season_precip_mm, shares, strict=True):
+            assert mm == pytest.approx(h.moisture * share)
 
 
 def test_each_climate_has_its_own_seasons():
-    """Summer drought is what makes the Mediterranean pastoral on rainfall that would
-    plough in Kent, so its year must be the more bunched of the two."""
-    from worldgen.core.config import CLIMATE_CONTEXTS
+    """Every preset's four shares sum to the year and its crops grow in named seasons.
+    Summer drought is what makes the Mediterranean pastoral on rainfall that would plough
+    in Kent, so its summer must be the drier of the two; and the monsoon's rain is bunched
+    into its growing seasons."""
+    from worldgen.core.config import CLIMATE_CONTEXTS, SEASONS
 
-    for name in CLIMATE_CONTEXTS:
-        assert 0.5 <= WorldConfig(regional_climate=name).wet_season_share <= 1.0
-    assert (
-        WorldConfig(regional_climate="mediterranean").wet_season_share
-        > WorldConfig(regional_climate="temperate").wet_season_share
+    for name, context in CLIMATE_CONTEXTS.items():
+        assert sum(context.season_shares) == pytest.approx(1.0), name
+        assert all(s >= 0 for s in context.season_shares), name
+        assert context.growing_seasons and set(context.growing_seasons) <= set(SEASONS)
+        cfg = WorldConfig(regional_climate=name)
+        assert cfg.season_shares == pytest.approx(context.season_shares)
+        assert cfg.growing_seasons == context.growing_seasons
+    summer = SEASONS.index("summer")
+    med = WorldConfig(regional_climate="mediterranean")
+    assert med.season_shares[summer] < WorldConfig().season_shares[summer]
+    assert max(med.season_shares) > max(WorldConfig().season_shares)
+    tropical = WorldConfig(regional_climate="tropical")
+    grown = sum(tropical.season_shares[i] for i in tropical.growing_season_indices)
+    assert grown > 0.75, "the monsoon's rain should fall in its growing seasons"
+
+
+def test_a_monsoon_can_bunch_its_rain_into_adjacent_or_opposite_seasons():
+    """The climate decides the shape. The tropical preset is the adjacent kind: summer and
+    autumn, then a long dry. East Africa's long and short rains are the opposite kind —
+    spring and autumn, with a dry summer between — and set the same way, so either reaches
+    the hexes as given."""
+    from worldgen.core.config import SEASONS, season_split
+
+    def wettest_two(shares):
+        return sorted(sorted(range(4), key=lambda i: -shares[i])[:2])
+
+    adjacent = WorldConfig(regional_climate="tropical")
+    a, b = wettest_two(adjacent.season_shares)
+    assert (b - a) % 4 in (1, 3), "the tropical preset's rains should be neighbours"
+
+    bimodal = WorldConfig(
+        regional_climate="tropical",
+        season_shares=(0.47, 0.07, 0.24, 0.22),
+        growing_seasons=("autumn", "spring"),
     )
-    with pytest.raises(ValueError, match="wet_season_share"):
-        WorldConfig(wet_season_share=0.4)
+    a, b = wettest_two(bimodal.season_shares)
+    assert (b - a) % 4 == 2, "long and short rains are opposite seasons"
+    assert bimodal.growing_seasons == ("spring", "autumn")
+    split = season_split(1000.0, bimodal.season_shares)
+    assert sum(split) == pytest.approx(1000.0)
+    assert split[SEASONS.index("summer")] < split[SEASONS.index("spring")]
+    assert split[SEASONS.index("summer")] < split[SEASONS.index("autumn")]
+
+
+def test_the_season_settings_are_validated():
+    with pytest.raises(ValueError, match="sum to 1"):
+        WorldConfig(season_shares=(0.4, 0.4, 0.4, 0.4))
+    with pytest.raises(ValueError, match="negative"):
+        WorldConfig(season_shares=(0.6, -0.1, 0.25, 0.25))
+    with pytest.raises(ValueError, match="four numbers"):
+        WorldConfig(season_shares=(0.5, 0.5))
+    with pytest.raises(ValueError, match="growing_seasons"):
+        WorldConfig(growing_seasons=("monsoon",))
+    with pytest.raises(ValueError, match="growing_seasons"):
+        WorldConfig(growing_seasons=())
+    # Typed to two places, a year can be a hundredth out; it is rescaled to sum to one.
+    assert sum(WorldConfig(season_shares=(0.33, 0.33, 0.33, 0.0)).season_shares) == (
+        pytest.approx(1.0)
+    )
+    assert WorldConfig(growing_seasons="summer").growing_seasons == ("summer",)
+
+
+def test_a_config_written_with_two_half_years_reads_as_four_seasons():
+    """#145's `wet_season_share` and `crops_grow_in_wet_season` carry over: each half split
+    evenly over two seasons, the wet half on the two the region's preset makes wettest, and
+    the crops in the pair the flag named."""
+    with pytest.warns(DeprecationWarning, match="season_shares"):
+        med = WorldConfig.from_dict(
+            {
+                "regional_climate": "mediterranean",
+                "wet_season_share": 0.75,
+                "crops_grow_in_wet_season": False,
+            }
+        )
+    assert med.season_shares == pytest.approx((0.125, 0.125, 0.375, 0.375))
+    assert med.growing_seasons == ("spring", "summer")
+    with pytest.warns(DeprecationWarning):
+        trop = WorldConfig.from_dict(
+            {
+                "regional_climate": "tropical",
+                "wet_season_share": 0.8,
+                "crops_grow_in_wet_season": True,
+            }
+        )
+    assert trop.season_shares == pytest.approx((0.1, 0.4, 0.4, 0.1))
+    assert trop.growing_seasons == ("summer", "autumn")
+    with pytest.warns(DeprecationWarning), pytest.raises(ValueError, match="wet_season_share"):
+        WorldConfig.from_dict({"wet_season_share": 0.4})
 
 
 def test_a_shore_takes_no_rain_from_the_sea_beside_it(monkeypatch):

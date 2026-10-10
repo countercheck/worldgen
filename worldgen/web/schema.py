@@ -20,6 +20,7 @@ from ..core.config import (
     ELEVATION_PROFILE_CHOICES,
     HEIGHTMAP_MODES,
     MODELS,
+    SEASONS,
     WorldConfig,
 )
 from ..core.hex_grid import GRID_LAYOUTS
@@ -46,6 +47,7 @@ def _choices() -> dict[str, tuple[str, ...]]:
         "heightmap_mode": HEIGHTMAP_MODES,
         "elevation_profile": ELEVATION_PROFILE_CHOICES,
         "regional_climate": tuple(CLIMATE_CONTEXTS),
+        "growing_seasons": SEASONS,
         "chokepoint_min_road_tier": ("primary", "secondary", "track"),
         "naming_substrate_pack": ("", *packs),
         "naming_packs": packs,
@@ -65,8 +67,16 @@ def _kind(annotation: Any) -> tuple[str, bool]:
         args = get_args(annotation)
         if len(args) == 2 and args[1] is Ellipsis:
             return "list", nullable
-        return "pair", nullable
+        return "numbers", nullable
     return {bool: "bool", int: "int", float: "float", str: "str"}[annotation], nullable
+
+
+def _size(annotation: Any) -> int:
+    """How many numbers a fixed-length tuple field holds: two for a vector, four for the
+    seasons."""
+    if isinstance(annotation, types.UnionType):
+        annotation = next(a for a in get_args(annotation) if a is not type(None))
+    return len(get_args(annotation))
 
 
 def _strip_comment(line: str) -> str:
@@ -124,6 +134,8 @@ def config_schema() -> list[dict[str, Any]]:
                 "default": list(default) if isinstance(default, tuple) else default,
                 "help": help_text,
             }
+            if kind == "numbers":
+                entry["size"] = _size(declared[name].type)
             if name in choices:
                 entry["choices"] = list(choices[name])
             section.append(entry)
@@ -157,11 +169,14 @@ def coerce(overrides: Any) -> dict[str, Any]:
                 raise ValueError(f"{name} needs a value")
             out[name] = None
             continue
-        out[name] = _coerce_one(name, kind, value, choices.get(name))
+        size = _size(declared[name].type) if kind == "numbers" else 0
+        out[name] = _coerce_one(name, kind, value, choices.get(name), size)
     return out
 
 
-def _coerce_one(name: str, kind: str, value: Any, allowed: tuple[str, ...] | None) -> Any:
+def _coerce_one(
+    name: str, kind: str, value: Any, allowed: tuple[str, ...] | None, size: int = 2
+) -> Any:
     def number(v: Any) -> float:
         if isinstance(v, bool) or not isinstance(v, int | float):
             raise ValueError(f"{name} must be a number, got {v!r}")
@@ -178,9 +193,9 @@ def _coerce_one(name: str, kind: str, value: Any, allowed: tuple[str, ...] | Non
         return int(v)
     if kind == "float":
         return number(value)
-    if kind == "pair":
-        if not isinstance(value, list) or len(value) != 2:
-            raise ValueError(f"{name} must be a pair of numbers")
+    if kind == "numbers":
+        if not isinstance(value, list) or len(value) != size:
+            raise ValueError(f"{name} must be {size} numbers")
         return [number(v) for v in value]
     if kind == "list":
         if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
