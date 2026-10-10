@@ -8,7 +8,7 @@ country it is named after.
 import collections
 
 from tests.worlds import build_world
-from worldgen.core.config import WorldConfig
+from worldgen.core.config import WorldConfig, halves_as_seasons, season_split
 from worldgen.core.hex import SOIL_RANK, Biome, Hex, LandCover, SoilQuality, TerrainClass
 from worldgen.stages.riverside import Rivers, river_index
 from worldgen.stages.soil import is_alluvium, rainfall_soil, slope_soil
@@ -52,19 +52,27 @@ def test_rainfall_fails_differently_at_each_end():
 
 
 def even_year(annual_mm, cfg):
-    """A year without seasons: each half-year gets half the rain."""
-    return rainfall_soil(annual_mm / 2, annual_mm / 2, cfg)
+    """A year without seasons: each season gets a quarter of the rain."""
+    return rainfall_soil(season_split(annual_mm, (0.25, 0.25, 0.25, 0.25)), cfg)
 
 
 def seasonal_year(annual_mm, wet_season_share, cfg):
-    return rainfall_soil(annual_mm * wet_season_share, annual_mm * (1 - wet_season_share), cfg)
+    """#145's year of two halves, as four seasons: the wet half in autumn and winter, the
+    dry half in spring and summer (a temperate region's wettest pair)."""
+    shares, _, _ = halves_as_seasons(wet_season_share, "temperate")
+    return rainfall_soil(season_split(annual_mm, shares), cfg)
+
+
+# The two halves' growing seasons in `seasonal_year`.
+IN_WET = ("autumn", "winter")
+IN_DRY = ("spring", "summer")
 
 
 def test_rainfall_is_best_across_the_arable_band():
     """The band is `biome_dry_precip_mm`..`biome_wet_precip_mm`, the same pair BiomeStage
     classifies on, so the two systems cannot drift apart about what counts as wet. Soil
-    reads each season against half of it, and in a year without seasons that is exactly
-    the annual band."""
+    reads each season against a quarter of it, and in a year without seasons that is
+    exactly the annual band."""
     cfg = WorldConfig()
     for mm in (cfg.biome_dry_precip_mm, 700, cfg.biome_wet_precip_mm):
         assert even_year(mm, cfg) is SoilQuality.ARABLE
@@ -81,6 +89,73 @@ def test_rainfall_is_monotonic_toward_the_band():
     assert wet == sorted(wet, reverse=True)
 
 
+def _pr145_rainfall_soil(wet_mm, dry_mm, cfg, in_wet, groundwater_mm=0.0):
+    """#145's rule over two half-years, kept here as the reference the seasons must match."""
+    carried = cfg.soil_water_carryover * max(0.0, wet_mm - dry_mm)
+    growing = wet_mm if in_wet else dry_mm + carried
+    dry = 2.0 * (growing + groundwater_mm)
+    wet = 2.0 * (wet_mm - carried)
+    if dry < cfg.soil_dry_farming_min_precip_mm:
+        return SoilQuality.UNUSABLE
+    if dry < cfg.biome_dry_precip_mm:
+        return SoilQuality.GRAZING
+    if wet <= cfg.biome_wet_precip_mm:
+        return SoilQuality.ARABLE
+    if wet < cfg.food_drowned_precip_mm:
+        return SoilQuality.MARGINAL
+    return SoilQuality.UNUSABLE
+
+
+def test_four_seasons_holding_two_halves_read_as_the_halves_did():
+    """The calibration: a year whose four shares are #145's two halves, each split evenly
+    over two seasons, reads exactly as #145 read it, for every climate's region, share,
+    carryover, growing half and oasis."""
+    for climate in ("temperate", "mediterranean", "arid", "tropical", "boreal"):
+        for share in (0.5, 0.55, 0.65, 0.75, 0.8, 0.95):
+            shares, wet_pair, dry_pair = halves_as_seasons(share, climate)
+            for in_wet in (True, False):
+                for carryover in (0.0, 0.3, 0.5):
+                    cfg = WorldConfig(
+                        regional_climate=climate,
+                        season_shares=shares,
+                        growing_seasons=wet_pair if in_wet else dry_pair,
+                        soil_water_carryover=carryover,
+                    )
+                    for annual in range(50, 4000, 37):
+                        for groundwater in (0.0, 250.0):
+                            seasons = season_split(annual, shares)
+                            old = _pr145_rainfall_soil(
+                                annual * share, annual - annual * share, cfg, in_wet, groundwater
+                            )
+                            assert rainfall_soil(seasons, cfg, groundwater) is old, (
+                                climate,
+                                share,
+                                in_wet,
+                                carryover,
+                                annual,
+                                groundwater,
+                            )
+
+
+def test_the_dry_arm_reads_the_growing_seasons():
+    """A crop fails for want of water in the seasons it grows in, so the same year farms
+    better grown in its wet seasons than in its dry ones, and where there are several the
+    dry arm reads their mean: a dry summer is made up by a wet spring."""
+    seasons = (300.0, 10.0, 200.0, 290.0)  # 800 mm with a summer drought
+
+    def grown_in(*names):
+        return rainfall_soil(seasons, WorldConfig(growing_seasons=names))
+
+    assert grown_in("summer") is SoilQuality.GRAZING
+    assert grown_in("spring") is SoilQuality.ARABLE
+    assert SOIL_RANK[grown_in("spring", "summer")] >= SOIL_RANK[grown_in("summer")]
+    # Only the growing seasons are read: moving rain between two seasons the crop does not
+    # grow in, without making either the wettest or the driest, changes nothing.
+    shifted = (300.0, 10.0, 290.0, 200.0)
+    cfg = WorldConfig(growing_seasons=("summer",))
+    assert rainfall_soil(shifted, cfg) is rainfall_soil(seasons, cfg)
+
+
 def test_a_drier_dry_season_farms_worse_on_the_same_rain():
     """The Mediterranean's summer drought, as a rule: bunching the same annual rain into
     one season can only cost the dry arm, never help it.
@@ -89,12 +164,12 @@ def test_a_drier_dry_season_farms_worse_on_the_same_rain():
     leaves a summer of steppe, which is grazing, even with the winter's water the ground
     carries over.
     """
-    cfg = WorldConfig()
+    cfg = WorldConfig(growing_seasons=IN_DRY)
     assert even_year(480, cfg) is SoilQuality.ARABLE
     assert seasonal_year(480, 0.75, cfg) is SoilQuality.GRAZING
     shares = [0.5 + 0.05 * i for i in range(11)]
     for carryover in (0.0, cfg.soil_water_carryover, 0.49):
-        c = WorldConfig(soil_water_carryover=carryover)
+        c = WorldConfig(growing_seasons=IN_DRY, soil_water_carryover=carryover)
         for annual in range(300, 1000, 25):
             ranks = [SOIL_RANK[seasonal_year(annual, s, c)] for s in shares]
             assert ranks == sorted(ranks, reverse=True), (
@@ -103,19 +178,21 @@ def test_a_drier_dry_season_farms_worse_on_the_same_rain():
 
 
 def test_a_wetter_wet_season_leaches_sooner():
-    """And the wet arm reads the wet season: the same rain bunched into one half-year
-    leaches ground that would have been arable had it fallen evenly."""
+    """And the wet arm reads the wettest season: the same rain bunched into part of the
+    year leaches ground that would have been arable had it fallen evenly."""
     cfg = WorldConfig()
     assert even_year(950, cfg) is SoilQuality.ARABLE
     assert seasonal_year(950, 0.75, cfg) is SoilQuality.MARGINAL
+    # A single peak quarter does it as surely as a wet half-year.
+    assert rainfall_soil(season_split(950, (0.15, 0.55, 0.2, 0.1)), cfg) is (SoilQuality.MARGINAL)
 
 
 def test_a_crop_grown_in_the_rains_never_ploughs_worse():
-    """Where crops grow in the wet season the drought falls on a fallow winter, so at equal
-    rain and share a monsoon or taiga year is never worse ground than a Mediterranean one —
-    and bunching the rain cannot make a wet-season crop thirsty."""
-    in_wet = WorldConfig(crops_grow_in_wet_season=True)
-    in_dry = WorldConfig(crops_grow_in_wet_season=False)
+    """Where crops grow in the wet seasons the drought falls on a fallow one, so at equal
+    rain and shares a monsoon or taiga year is never worse ground than a Mediterranean one
+    — and bunching the rain cannot make a wet-season crop thirsty."""
+    in_wet = WorldConfig(growing_seasons=IN_WET)
+    in_dry = WorldConfig(growing_seasons=IN_DRY)
     for annual in range(100, 3400, 25):
         for share in (0.5, 0.55, 0.65, 0.75, 0.9, 1.0):
             wet = SOIL_RANK[seasonal_year(annual, share, in_wet)]
@@ -127,18 +204,24 @@ def test_a_crop_grown_in_the_rains_never_ploughs_worse():
 
 
 def test_each_climate_grows_its_crops_in_its_own_season():
-    """The Mediterranean grows in its summer drought; the taiga and the monsoon in their
-    rains."""
-    assert not WorldConfig(regional_climate="mediterranean").crops_grow_in_wet_season
-    assert WorldConfig(regional_climate="boreal").crops_grow_in_wet_season
-    assert WorldConfig(regional_climate="tropical").crops_grow_in_wet_season
-    assert WorldConfig(regional_climate="boreal", crops_grow_in_wet_season=False)
+    """The Mediterranean grows through its summer drought; the taiga and the monsoon in
+    their rains."""
+
+    def in_wettest(cfg):
+        wettest = max(range(4), key=lambda i: cfg.season_shares[i])
+        return wettest in cfg.growing_season_indices
+
+    assert not in_wettest(WorldConfig(regional_climate="mediterranean"))
+    assert "summer" in WorldConfig(regional_climate="mediterranean").growing_seasons
+    assert in_wettest(WorldConfig(regional_climate="boreal"))
+    assert in_wettest(WorldConfig(regional_climate="tropical"))
+    assert WorldConfig(regional_climate="boreal", growing_seasons=("winter",))
 
 
 def test_the_ground_carries_the_rains_into_the_drought():
     """Carryover only ever narrows the gap between the seasons — it eases the drought and
     the leaching both — so more of it never makes ground worse, and a perfect store (0.5)
-    reads any year as an even one."""
+    reads any year of two halves as an even one."""
     for annual in range(200, 3200, 50):
         for share in (0.6, 0.75, 0.9, 1.0):
             bare = seasonal_year(annual, share, WorldConfig(soil_water_carryover=0.0))

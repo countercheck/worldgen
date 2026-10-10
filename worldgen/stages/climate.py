@@ -3,6 +3,7 @@ import math
 import numpy as np
 from scipy.ndimage import gaussian_filter
 
+from ..core.config import season_split
 from ..core.hex import HexCoord, TerrainClass
 from ..core.hex_grid import corner_hexes, neighbors, side_corners, side_hexes
 from ..core.pipeline import GeneratorStage
@@ -149,13 +150,12 @@ class ClimateStage(GeneratorStage):
                 h.moisture = self.config.mean_precip_mm
 
         # Then say when it falls. The year's rain is what the pattern above decides; the
-        # region's climate decides how it divides between a wet and a dry half-year, and
-        # every hex divides the same way — the orographic pattern says where rain falls,
-        # not in which months. Last, so the two halves always sum to the year.
-        share = self.config.wet_season_share
+        # region's climate decides how it divides between the four seasons, and every hex
+        # divides the same way — the orographic pattern says where rain falls, not in
+        # which months. Last, so the four seasons always sum to the year.
+        shares = self.config.season_shares
         for h in state.hexes.values():
-            h.wet_season_precip_mm = h.moisture * share
-            h.dry_season_precip_mm = h.moisture - h.wet_season_precip_mm
+            h.season_precip_mm = season_split(h.moisture, shares)
 
 
 def _near_rivers(state: WorldState) -> dict[HexCoord, list[tuple[float, float]]]:
