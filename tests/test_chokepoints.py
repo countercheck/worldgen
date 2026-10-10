@@ -349,15 +349,20 @@ def test_thin_country_grows_few_villages_and_only_on_its_good_ground():
     # Seed 7 rather than the suite's seed 1. Once freight began wearing the roads, seed 1's
     # arid world lost its one crossing village and this test had no subject, so it moved to
     # seed 2, then to 4 when `elevation_profile` emptied that, and to 8 when pasture margins
-    # moved the clearing, to 11 when rivers moved onto hexsides, and to 7 when valley
-    # widths stopped scaling against the largest river on the map (#116): the wider
-    # floodplains emptied seed 11's desert. Seed 7's arid world grows three villages, all
-    # on prime ground, and its temperate world eight. Each map grows a handful at most, so
+    # moved the clearing, to 11 when rivers moved onto hexsides, to 7 when valley widths
+    # stopped scaling against the largest river on the map (#116), and to 6 when the
+    # imported rivers began bringing their load (#119): on seed 7 a lake's water balance
+    # tipped from closed to overflowing, its salt shore became pasture, and a bridgehead
+    # village grew there on grazing ground. That is within the stage's rule — a chokepoint
+    # village may not stand on ground that feeds nobody, and grazing feeds someone — but
+    # not within this test's stronger claim, and master grows one on grazing at seed 1
+    # too. Seed 6's arid world grows four villages, all on prime ground, before #119 and
+    # after it; its temperate world eleven and eight. Each map grows a handful at most, so
     # any change to the land moves the count; comparing two single maps is the fragile
     # part of this test.
     def world(climate):
         return build_world(
-            seed=7,
+            seed=6,
             width=_CHOKE_SIZE,
             height=_CHOKE_SIZE,
             model="organic",

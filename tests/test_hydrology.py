@@ -671,18 +671,27 @@ def test_hydrology_imports_rivers_at_the_inlets_erosion_carved_for(monkeypatch, 
 
 @pytest.mark.parametrize("seed", [11, 42])
 def test_an_imported_river_runs_the_course_erosion_carved(monkeypatch, seed):
-    """Every side of the course, until it meets standing water, carries the import."""
+    """Every side of the course, until it meets standing water, carries the import.
+
+    Up to the last step, not including it. Where the water is one step away, hydrology
+    sends the river into it the steepest way (`flow_direction`), as `follow_course` lets it,
+    and an imported river's delta fan (#119) reshapes the shore it runs into: the final
+    step may enter the water at a neighbouring corner of the same shore.
+    """
     state, courses = _with_handoff(monkeypatch, seed)
     cfg = WorldConfig(**state.metadata["config"])
     land = [h for h in state.hexes.values() if h.terrain_class not in _WATER]
     imported = cfg.river_inflow_volume * len(land)
     from worldgen.core.hex_grid import side_joining
 
+    def wet(corner):
+        return any(
+            state.hexes[h].terrain_class in _WATER for h in corner_hexes(corner) if h in state.hexes
+        )
+
     for _, course in courses:
         for a, b in zip(course, course[1:], strict=False):
-            if any(
-                state.hexes[h].terrain_class in _WATER for h in corner_hexes(a) if h in state.hexes
-            ):
+            if wet(a) or wet(b):
                 break
             side = state.river_sides.get(side_joining(a, b))
             assert side is not None, f"the imported river leaves its course at {a}"

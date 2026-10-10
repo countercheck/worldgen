@@ -307,11 +307,17 @@ def test_world_config_validates_river_inflow_fields(kwargs, message):
 
 
 @pytest.mark.parametrize(
-    "name", ["erosion_inlet_droplets_per_km2", "erosion_inlet_water", "erosion_inlet_load"]
+    ("name", "value"),
+    [
+        ("erosion_inlet_yield_m", -0.1),
+        ("erosion_inlet_fan_radius", -1),
+        ("erosion_inlet_drop_fraction", -0.1),
+        ("erosion_inlet_drop_fraction", 1.1),
+    ],
 )
-def test_the_inlet_load_settings_cannot_be_negative(name):
+def test_the_inlet_load_settings_are_validated(name, value):
     with pytest.raises(ValueError, match=name):
-        WorldConfig(**{name: -0.1})
+        WorldConfig(**{name: value})
 
 
 @pytest.mark.parametrize("value", [0.0, -150.0])
