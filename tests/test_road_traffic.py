@@ -28,7 +28,8 @@ def test_the_roads_keep_their_traffic(routed):
 
 
 def test_every_journey_starts_and_ends_at_a_settlement(routed):
-    seats = {s.coord for s in routed.settlements}
+    """Or at a gate, where it goes on off the map."""
+    seats = {s.coord for s in routed.settlements} | {g.coord for g in routed.gates}
     assert routed.journeys
     for (a, b), (n, path) in routed.journeys.items():
         assert n > 0.0 and a in seats and b in seats

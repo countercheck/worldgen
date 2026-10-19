@@ -157,7 +157,11 @@ class InterurbanRoadStage(GeneratorStage):
         # With one rate, provisioning outweighed the goods trade and its spokes took the
         # primary tier from the roads between cities. Timber is left off: it floats, and a
         # lumber camp's road is its river. Busiest first, as the travellers are.
-        rate = {"goods": cfg.road_goods_freight_per_person}
+        # Trade from beyond the map (`offmap_trade`) is the long-haul carrier trade too.
+        rate = {
+            "goods": cfg.road_goods_freight_per_person,
+            "offmap": cfg.road_goods_freight_per_person,
+        }
         rate["food"] = rate["ore"] = cfg.road_raw_freight_per_person
         flows = state.metadata.get("freight", [])
         for oq, or_, dq, dr, people, kind in sorted(flows, key=lambda f: (-f[4], f[:4])):
@@ -272,6 +276,8 @@ class InterurbanRoadStage(GeneratorStage):
         # A land network reaching no settlement is a residue of the traffic threshold; one
         # reaching only a shore is a road to a harbour, which is a road to somewhere.
         anchors |= {c for key in sea_edges for c in key}
+        # And a road to a land gate is a road off the map, which is a road to somewhere.
+        anchors |= {g.coord for g in state.gates}
         prune_orphan_roads(road_edges, anchors)
 
         for a, b in list(road_edges) + list(sea_edges):

@@ -148,6 +148,21 @@ class Ferry:
     b: HexCoord
 
 
+@dataclass(frozen=True)
+class Gate:
+    """Where trade from beyond the map comes in: a border hex on one of its edges.
+
+    The map is a piece of a larger world, and its roads and sea lanes run on off it. A
+    *land* gate is the border hex a road leaves by; a *sea* gate is the open water a ship
+    sails in from. `OffmapGateStage` places them, and the off-map trade they carry is
+    `offmap_trade.offmap_trade_flows`.
+    """
+
+    coord: HexCoord
+    edge: str  # north, south, east or west
+    kind: str  # land or sea
+
+
 @dataclass
 class WorldState:
     seed: int
@@ -187,6 +202,8 @@ class WorldState:
     # connectivity by any means is the components of both.
     sea_edges: dict[tuple[HexCoord, HexCoord], RoadEdge] = field(default_factory=dict)
     ferries: list[Ferry] = field(default_factory=list)
+    # Where off-map trade comes in, in the order `OffmapGateStage` chose them.
+    gates: list[Gate] = field(default_factory=list)
     # Every hexside some river runs along, keyed by `hex_grid.side_of` names.
     river_sides: dict[Side, RiverSide] = field(default_factory=dict)
     # Tags on the corners of the river network: source, end, confluence, mouth.
@@ -232,6 +249,20 @@ class WorldState:
         """True for hexes on the outermost ring of the grid, which drain off the map."""
         col, row = self.grid_index(coord)
         return col == 0 or col == self.width - 1 or row == 0 or row == self.height - 1
+
+    def edges_of(self, coord: HexCoord) -> frozenset[str]:
+        """The map edges *coord* lies on: none inland, two at a corner."""
+        col, row = self.grid_index(coord)
+        found = set()
+        if col == 0:
+            found.add("west")
+        if col == self.width - 1:
+            found.add("east")
+        if row == 0:
+            found.add("north")
+        if row == self.height - 1:
+            found.add("south")
+        return frozenset(found)
 
     def all_land(self) -> list[Hex]:
         """All non-water hexes."""
@@ -361,6 +392,7 @@ class WorldState:
                 for (a, b), edge in sorted(self.sea_edges.items())
             ],
             "ferries": [{"a": list(f.a), "b": list(f.b)} for f in self.ferries],
+            "gates": [{"coord": list(g.coord), "edge": g.edge, "kind": g.kind} for g in self.gates],
         }
 
     @classmethod
@@ -482,6 +514,10 @@ class WorldState:
         ws.sea_edges = read_edges(data["sea_edges"])
         ws.road_edges = read_edges(data["road_edges"])
         ws.ferries = [Ferry(a=tuple(fd["a"]), b=tuple(fd["b"])) for fd in data["ferries"]]
+        ws.gates = [
+            Gate(coord=tuple(gd["coord"]), edge=gd["edge"], kind=gd["kind"])
+            for gd in data.get("gates", [])
+        ]
 
         return ws
 

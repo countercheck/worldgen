@@ -39,10 +39,14 @@ def _founded(state, role):
 
 
 def test_founding_moves_people_and_makes_none():
+    """Moved, but for what a port or a toll town is paid from beyond the map, counted."""
     before = build_world(until="CityPromotionStage", **_KW)
     after = _resourced()
-    assert sum(s.population for s in after.settlements) == sum(
-        s.population for s in before.settlements
+    imported = after.metadata.get("offmap_imports", 0.0) - before.metadata.get(
+        "offmap_imports", 0.0
+    )
+    assert sum(s.population for s in after.settlements) == pytest.approx(
+        sum(s.population for s in before.settlements) + imported
     )
 
 

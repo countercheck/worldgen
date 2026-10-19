@@ -21,6 +21,7 @@ from ..core.hex import (
 )
 from ..core.hex_grid import (
     Side,
+    axial_to_pixel,
     corner_to_pixel,
     road_polylines,
     road_water_transitions,
@@ -165,6 +166,29 @@ def anchorage_points(ws: WorldState) -> list[HexCoord]:
     return sorted(points)
 
 
+def gate_marks(ws: WorldState, hex_size: float) -> list[tuple[float, float, str, float, float]]:
+    """Each off-map gate as `(x, y, kind, dx, dy)`: where it is and which way is into the map.
+
+    Into the map is along the axis of the gate's edge, toward the middle of the map —
+    worked out from the pixels rather than assumed from the edge's name, so it holds in
+    every grid layout.
+    """
+    if not ws.gates:
+        return []
+    pts = [axial_to_pixel(c, hex_size) for c in ws.hexes]
+    mx = sum(p[0] for p in pts) / len(pts)
+    my = sum(p[1] for p in pts) / len(pts)
+    out = []
+    for g in ws.gates:
+        px, py = axial_to_pixel(g.coord, hex_size)
+        if g.edge in ("west", "east"):
+            dx, dy = (1.0 if mx > px else -1.0), 0.0
+        else:
+            dx, dy = 0.0, (1.0 if my > py else -1.0)
+        out.append((px, py, g.kind, dx, dy))
+    return out
+
+
 def _bearings(ws: WorldState, hex_size: float) -> dict[Side, float]:
     """The screen bearing, in degrees, of the river along each side it runs: downstream."""
     bearing: dict[Side, float] = {}
@@ -273,6 +297,8 @@ def rows(ws: WorldState, color_mode: str, layers: set[str]) -> list[LegendRow]:
         for tier in RoadTier:
             if tier in present:
                 out.append(LegendRow("road", f"{_label(tier)} road", tier))
+    if "roads" in layers and ws.gates:
+        out.append(LegendRow("gate", "Off-map trade"))
 
     if "anchorages" in layers and anchorage_points(ws):
         out.append(LegendRow("anchorage", "Anchorage"))

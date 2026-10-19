@@ -129,6 +129,24 @@ def _get_hex_fill(
     return _rgb_to_hex(*rgb[:3])
 
 
+_GATE_INK = {"land": "#6e3418", "sea": "#1b3a5c"}
+
+
+def _gate_marker(kind: str, cx: float, cy: float, dx: float, dy: float, scale: float = 1.0) -> str:
+    """Where off-map trade comes in: a solid arrowhead on the border, pointing inward."""
+    s = 8.0 * scale
+    px, py = -dy, dx
+    pts = [
+        (cx + dx * 0.95 * s, cy + dy * 0.95 * s),
+        (cx - dx * 0.55 * s + px * 0.75 * s, cy - dy * 0.55 * s + py * 0.75 * s),
+        (cx - dx * 0.55 * s - px * 0.75 * s, cy - dy * 0.55 * s - py * 0.75 * s),
+    ]
+    return (
+        f'<polygon points="{" ".join(f"{x:.2f},{y:.2f}" for x, y in pts)}"'
+        f' fill="{_GATE_INK[kind]}" stroke="white" stroke-width="{max(0.4, 0.12 * s):.2f}"/>'
+    )
+
+
 def _anchorage_marker(cx: float, cy: float, scale: float = 1.0) -> str:
     """Anchor symbol marking where a road embarks onto, or lands from, water.
 
@@ -304,6 +322,8 @@ def _legend_glyph(
 
     if row.kind == "anchorage":
         return _anchorage_marker(cx, cy, scale=g / legend.SYMBOL_BOX)
+    if row.kind == "gate":
+        return _gate_marker("land", cx, cy, 1.0, 0.0, scale=g / legend.SYMBOL_BOX)
 
     if row.kind in ("river_source", "river_end", "rapids"):
         kind = row.kind.removeprefix("river_")
@@ -635,6 +655,12 @@ def render(ws: WorldState, config: SVGConfig | None = None) -> str:
                 f' stroke-linecap="round" stroke-linejoin="round"{da}/>'
             )
         out.append("    </g>")
+        gates = legend.gate_marks(ws, size)
+        if gates:
+            out.append('    <g id="roads-gates">')
+            for px, py, kind, dx, dy in gates:
+                out.append(f"      {_gate_marker(kind, px + ox, py + oy, dx, dy, size / 12.0)}")
+            out.append("    </g>")
         out.append("  </g>")
 
     if "crossings" in layers:

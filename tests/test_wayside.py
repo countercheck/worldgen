@@ -115,14 +115,16 @@ def tolled():
 
 def test_the_road_tolls_move_people_and_make_none(routed):
     """Run the stage with the tolls on and off over the same roads: the villages are the
-    same, so the totals must be too, but for rounding."""
+    same, so the totals must be too, but for rounding and for what journeys from beyond
+    the map paid, which is counted."""
     import copy
 
     def total(toll):
         state = copy.deepcopy(routed)
         cfg = WorldConfig(**_CFG, toll_per_journey=toll)
         state = ChokepointStage(cfg, np.random.default_rng(0)).run(state)
-        return sum(s.population for s in state.settlements), len(state.settlements)
+        made = state.metadata.get("offmap_imports", 0.0)
+        return sum(s.population for s in state.settlements) - made, len(state.settlements)
 
     on, n_on = total(0.03)
     off, _ = total(0.0)

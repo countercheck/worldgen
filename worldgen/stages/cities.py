@@ -26,6 +26,7 @@ from ..core.pipeline import GeneratorStage
 from ..core.world_state import WorldState
 from .habitability import actual_food
 from .haulage import bulk_routes, gather, navigable, usable_fraction
+from .offmap_trade import IMPORT, offmap_trade_flows
 from .river_trade import river_trade_flows
 from .riverside import WATER, river_index
 
@@ -83,6 +84,7 @@ class CityPromotionStage(GeneratorStage):
             self._resize(state, markets, absorbed, draw, promoted, cfg, toward)
             self._trade(state, cfg)
         self._river_trade(state, cfg)
+        self._offmap_trade(state, cfg)
 
         # The second road to a city: a town grown past `city_min_population`, which after
         # transshipment is an entrepôt that feeds nobody's hinterland but handles everyone's.
@@ -553,6 +555,80 @@ class CityPromotionStage(GeneratorStage):
 
         state.metadata["river_trade"] = routes
         books.write(state, by_coord)
+
+    # -- trade from beyond the map --------------------------------------------
+
+    def _offmap_trade(self, state, cfg) -> None:
+        """Trade through the gates on the map's edges, paying its way at every quay.
+
+        `offmap_trade_flows` finds each gate's imports to the towns and cities it reaches
+        and its through-trade to the gates on other edges. Each pays every charge on its
+        path (`_charges`) to whoever stands at each, as `_trade` does — but out of worth
+        from outside rather than off its two ends (`_import`). Recorded as freight of kind
+        `offmap`, which wears the roads as manufactures do, with each flow's path in
+        `metadata["offmap_trade"]` and the people it brought in `metadata["offmap_imports"]`.
+        """
+        if cfg.offmap_trade_share <= 0.0 or not state.gates:
+            return
+        rivers = river_index(state, cfg)
+        flows = offmap_trade_flows(state, cfg, rivers)
+        if not flows:
+            return
+        hexes = state.hexes
+        by_coord = {s.coord: s for s in state.settlements}
+        books = _Books.read(state)
+        freight = state.metadata.setdefault("freight", [])
+        routes: list[list[Any]] = []
+        brought = 0.0
+
+        for flow in flows:
+            origin, dest, volume = flow.origin, flow.dest, flow.people
+            freight.append([*origin, *dest, round(volume, 3), "offmap"])
+            toward = dict(zip(flow.path, flow.path[1:], strict=False))
+            charges = self._charges(origin, dest, toward, hexes, cfg, rivers)
+            imported = flow.kind == IMPORT
+            got, taken = self._import(charges, origin, dest, volume, imported, by_coord, books, cfg)
+            brought += got
+            # What the cargo has left once its quays and portages are paid: nothing for an
+            # import, which landed it, and for transit what its road tolls may come out of.
+            left = 0.0 if imported else volume - taken
+            routes.append(
+                [*origin, *dest, round(volume, 3), flow.kind, round(left, 3)]
+                + [[list(h) for h in flow.path]]
+            )
+
+        state.metadata["offmap_trade"] = routes
+        md = state.metadata
+        md["offmap_imports"] = md.get("offmap_imports", 0.0) + brought
+        books.write(state, by_coord)
+
+    def _import(
+        self, charges, gate, dest, volume, imported, by_coord, books, cfg
+    ) -> tuple[float, float]:
+        """Pay an off-map flow's *charges* out of the cargo itself, and land the rest at *dest*.
+
+        Nothing comes off either end: the cargo is worth from beyond the map, so everyone it
+        pays is that much bigger, and so is the town an import lands at (*imported*), by
+        what is left of it. Charges nobody collects are left on the books against the
+        *gate*, for `ResourceStage` to found a port or a toll town on out of the same worth.
+        Returns the people it brought onto the map now, and what the charges took.
+        """
+        food = volume / cfg.people_per_food
+        delta = books.delta
+        brought = 0.0
+        taken = 0.0
+        for charge, handler, cut in self._pay(charges, gate, dest, by_coord, volume):
+            taken += cut
+            if handler is None:
+                books.unpaid(charge, gate, food, cut)
+                continue
+            delta[handler] = delta.get(handler, 0.0) + cut
+            books.paid(charge, handler, food, cut)
+            brought += cut
+        if imported and dest in by_coord:
+            delta[dest] = delta.get(dest, 0.0) + volume - taken
+            brought += volume - taken
+        return brought, taken
 
     def _split(self, charges, origin, dest, volume, by_coord, books, cfg) -> None:
         """Pay a flow between two settlements its *charges*, drawn half from each end.

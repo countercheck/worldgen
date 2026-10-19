@@ -209,12 +209,18 @@ def tolled():
 
 
 def test_tolls_move_people_and_make_none(tolled):
-    """Conserved: the same world with tolls off has the same people, differently placed."""
+    """Conserved: the same world with tolls off has the same people, differently placed —
+    less, in each, what trade from beyond the map brought, which is counted."""
+
+    def own(state):
+        made = state.metadata.get("offmap_imports", 0.0)
+        return sum(s.population for s in state.settlements) - made
+
     off = build_world(until="ResourceStage", **_KW, **_OFF)
-    total = sum(s.population for s in tolled.settlements)
-    assert abs(total - sum(s.population for s in off.settlements)) <= len(tolled.settlements)
+    total = own(tolled)
+    assert abs(total - own(off)) <= len(tolled.settlements)
     before = build_world(until="LandUseStage", **_KW)
-    assert abs(total - sum(s.population for s in before.settlements)) <= len(tolled.settlements)
+    assert abs(total - own(before)) <= len(tolled.settlements)
 
 
 def test_every_toll_is_collected_at_a_chokepoint_within_reach(tolled):
