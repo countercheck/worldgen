@@ -86,9 +86,14 @@ def default_stages(model: str = "classic") -> tuple[type["GeneratorStage"], ...]
         from .crossings import CrossingStage
         from .land_use import LandUseStage
         from .markets import MarketStage
+        from .offmap_gates import OffmapGateStage
         from .resources import ResourceStage
 
         return physical + (
+            # Where trade from beyond the map comes in, from the terrain alone: the roads
+            # off the map leave by the easiest ground, and a city grows on the trade that
+            # comes through them, so the gates are known before anything is sited.
+            OffmapGateStage,
             # Crossings before markets, deliberately: a bridging point is the cheapest
             # ground in a district to reach from both banks, so it should be a reason a
             # market grows there rather than something noticed afterwards.

@@ -467,6 +467,29 @@ def render_svg(state: WorldState, attribute: str, hex_size: float = 20) -> str:
                 f' stroke="{style["stroke"]}" stroke-width="{style["stroke-width"]}"'
                 f' stroke-linecap="round" stroke-linejoin="round"{da}/>'
             )
+        # Where off-map trade comes in: an arrowhead on the border, pointing at the middle.
+        if state.gates:
+            centre = [axial_to_pixel(c, hex_size) for c in state.hexes]
+            mx = sum(p[0] for p in centre) / len(centre)
+            my = sum(p[1] for p in centre) / len(centre)
+            for g in state.gates:
+                gx, gy = axial_to_pixel(g.coord, hex_size)
+                if g.edge in ("west", "east"):
+                    dx, dy = (1.0 if mx > gx else -1.0), 0.0
+                else:
+                    dx, dy = 0.0, (1.0 if my > gy else -1.0)
+                s = 0.5 * hex_size
+                cx, cy = gx + ox, gy + oy
+                tri = [
+                    (cx + dx * s, cy + dy * s),
+                    (cx - dx * 0.6 * s - dy * 0.8 * s, cy - dy * 0.6 * s + dx * 0.8 * s),
+                    (cx - dx * 0.6 * s + dy * 0.8 * s, cy - dy * 0.6 * s - dx * 0.8 * s),
+                ]
+                fill = "#6e3418" if g.kind == "land" else "#1b3a5c"
+                out.append(
+                    f'    <polygon points="{_points_str(tri)}" fill="{fill}"'
+                    f' stroke="white" stroke-width="0.8"/>'
+                )
         out.append("  </g>")
 
     if attribute == "drainage":

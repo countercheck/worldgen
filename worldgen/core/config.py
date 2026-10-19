@@ -1014,6 +1014,41 @@ class WorldConfig:
     # the Ohio and Mississippi ran 2,000 km to New Orleans and were broken up there for
     # their timber, since taking them back up was not worth it. Twice manufactures' reach.
     river_trade_range_mult: float = 6.0
+    # Trade from beyond the map (tech-debt #149). The map is a region, not a world: its
+    # roads and sea lanes run on off it, and the trade that came in along them — the
+    # caravans that watered at Palmyra, the mule trains over the Alpine passes, the
+    # shipping into a port from overseas — began and ended far away. Gates on every edge
+    # in `offmap_trade_edges` carry it: a land gate where a road leaves the map, a sea
+    # gate where ships sail in. One land gate per `offmap_land_gate_spacing` hexes of land
+    # border, one sea gate per `offmap_sea_gate_spacing` of sea border, each edge with
+    # any of either getting at least one.
+    offmap_trade_edges: tuple[str, ...] = ("north", "south", "east", "west")
+    offmap_land_gate_spacing: int = 40
+    offmap_sea_gate_spacing: int = 60
+    # A land gate stands on the cheapest ground: the border hex from which getting
+    # `offmap_gate_depth` hexes into the map costs least — a valley mouth or a low pass,
+    # not a cliff. A sea gate stands where open water comes nearest a coast.
+    offmap_gate_depth: int = 10
+    # Gates crowd each other out softly. Candidates are ranked on their edge, 0 for the
+    # cheapest way in and 1 for the dearest, and each chosen gate within
+    # `offmap_gate_crowding_radius` adds penalty x (1 - d / radius) to that: at 1, the hex
+    # beside a gate is as poor a site as the worst ground on the edge. 0 turns it off.
+    offmap_gate_crowding_radius: int = 25
+    offmap_gate_crowding_penalty: float = 1.0
+    # How much trade comes in, as a share of the people in the map's towns and cities,
+    # split evenly between the gates. It is worth from outside, so unlike every other
+    # flow it is not conserved: what it brings is new people, at the towns it reaches and
+    # at the quays and tolls it pays on the way, and the total is kept in
+    # metadata["offmap_imports"]. 0 turns off-map trade off.
+    offmap_trade_share: float = 0.05
+    # Share of each gate's trade that only passes through, to a gate on another edge;
+    # the rest is imported to the towns and cities it reaches. Through-traffic is what
+    # pays the pass towns and the caravanserais on a crossing.
+    offmap_transit_share: float = 0.5
+    # How far off-map trade reaches from its gate, as a multiple of haulage_range_land,
+    # and how much further again the through-trade goes to reach the far side.
+    offmap_trade_range_mult: float = 3.0
+    offmap_transit_range_mult: float = 2.0
     # Transshipment: every change in how a city's cargo travels — cart to boat, barge to
     # ship — leaves this share of the people it feeds with the settlement handling that
     # quay, the nearest within `transship_radius`. Conserved: the handlers eat out of the
@@ -1591,6 +1626,14 @@ class WorldConfig:
             self.continent_falloff_edges, "continent_falloff_edges"
         )
         self.river_inflow_edges = _coerce_edges(self.river_inflow_edges, "river_inflow_edges")
+        self.offmap_trade_edges = _coerce_edges(self.offmap_trade_edges, "offmap_trade_edges")
+        for name in ("offmap_land_gate_spacing", "offmap_sea_gate_spacing"):
+            if getattr(self, name) < 1:
+                raise ValueError(f"{name} must be >= 1, got {getattr(self, name)}")
+        if not 0.0 <= self.offmap_transit_share <= 1.0:
+            raise ValueError(
+                f"offmap_transit_share must be in [0, 1], got {self.offmap_transit_share}"
+            )
         if not (0.0 <= self.continent_shelf_variance <= 1.0):
             raise ValueError(
                 f"continent_shelf_variance must be in [0, 1], got {self.continent_shelf_variance}"
@@ -1818,6 +1861,12 @@ class WorldConfig:
             "manufactured_range_mult",
             "river_trade_share",
             "river_trade_range_mult",
+            "offmap_gate_depth",
+            "offmap_gate_crowding_radius",
+            "offmap_gate_crowding_penalty",
+            "offmap_trade_share",
+            "offmap_trade_range_mult",
+            "offmap_transit_range_mult",
             "road_raw_freight_per_person",
             "road_goods_freight_per_person",
             "cataract_min_drop_m",

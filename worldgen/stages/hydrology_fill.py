@@ -194,23 +194,8 @@ class HydrologyFill:
 
     @staticmethod
     def _edges_of(state: WorldState) -> EdgesOf:
-        """Build the coordinate-to-edge-names lookup for *state*'s grid layout."""
-        w, h = state.width, state.height
-
-        def edges_of(coord: HexCoord) -> frozenset[str]:
-            col, row = state.grid_index(coord)
-            found = set()
-            if col == 0:
-                found.add("west")
-            if col == w - 1:
-                found.add("east")
-            if row == 0:
-                found.add("north")
-            if row == h - 1:
-                found.add("south")
-            return frozenset(found)
-
-        return edges_of
+        """The coordinate-to-edge-names lookup for *state*'s grid layout."""
+        return state.edges_of
 
     @staticmethod
     def _downstream_lengths(
