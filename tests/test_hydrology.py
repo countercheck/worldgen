@@ -718,3 +718,12 @@ def test_a_map_that_admits_no_inlet_is_untouched_by_the_inlet_settings():
         return out
 
     assert world(asked) == world(not_asked)
+
+
+def test_the_runoff_hydrology_records_is_worked_out_season_by_season():
+    """The campaign turns catchment into discharge with this figure, so it has to be the
+    one every generator stage uses: the year's runoff summed over the seasons (#120)."""
+    ws = build_world(until="HydrologyStage", regional_climate="mediterranean")
+    cfg = WorldConfig.from_dict(ws.metadata["config"])
+    assert ws.metadata["runoff_mm"] == pytest.approx(cfg.seasonal_runoff_mm())
+    assert ws.metadata["runoff_mm"] > cfg.runoff_mm(cfg.mean_precip_mm)

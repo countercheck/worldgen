@@ -362,3 +362,56 @@ def test_every_climate_evaporates_something_and_the_warm_ones_evaporate_more():
 def test_world_config_validates_rain_shadow_strength(value):
     with pytest.raises(ValueError, match="rain_shadow_strength"):
         WorldConfig(rain_shadow_strength=value)
+
+
+# Seasonal runoff (tech-debt #120). Pike's curve is non-linear in rain, so a year whose rain
+# is bunched into a season or two must shed more than the same rain spread evenly.
+
+
+def test_an_even_year_runs_off_exactly_as_the_annual_curve_says():
+    cfg = WorldConfig(season_shares=(0.25, 0.25, 0.25, 0.25))
+    for precip in (50.0, 200.0, 800.0, 3000.0):
+        assert cfg.seasonal_runoff_mm(precip) == pytest.approx(cfg.runoff_mm(precip))
+
+
+def test_bunched_rain_runs_off_more_than_the_same_rain_spread_evenly():
+    even = WorldConfig(season_shares=(0.25, 0.25, 0.25, 0.25))
+    bunched = WorldConfig(season_shares=(0.05, 0.05, 0.10, 0.80))
+    for precip in (300.0, 800.0, 2000.0):
+        assert bunched.seasonal_runoff_mm(precip) > even.seasonal_runoff_mm(precip)
+
+
+def test_seasonal_runoff_never_exceeds_the_rain_and_never_drops_below_the_floor():
+    for name in ("arid", "mediterranean", "temperate", "boreal", "tropical"):
+        cfg = WorldConfig(regional_climate=name)
+        for precip in (0.0, 10.0, cfg.mean_precip_mm, 5000.0):
+            got = cfg.seasonal_runoff_mm(precip)
+            assert got >= cfg.min_runoff_mm, name
+            assert got <= max(precip, cfg.min_runoff_mm) + 1e-9, name
+
+
+def test_the_floor_applies_to_the_year_not_to_each_season():
+    """A season with no rain earns no runoff. Flooring each season would hand a desert a
+    quarter of `min_runoff_mm` for every dry season, on top of what its wet one shed."""
+    cfg = WorldConfig(season_shares=(0.0, 0.0, 0.0, 1.0), min_runoff_mm=25.0)
+    wet_season_alone = cfg._pike_runoff_mm(800.0, cfg.pet_mm()) / 4
+    assert cfg.seasonal_runoff_mm(200.0) == pytest.approx(max(25.0, wet_season_alone))
+
+
+def test_seasonal_runoff_defaults_to_the_climate_mean():
+    cfg = WorldConfig(regional_climate="mediterranean")
+    assert cfg.seasonal_runoff_mm() == cfg.seasonal_runoff_mm(cfg.mean_precip_mm)
+
+
+def test_dry_summer_and_monsoon_climates_gain_runoff_and_even_ones_do_not():
+    """What #120 is for: the climates whose rain is bunched shed more than the annual curve
+    credited them with; the ones whose rain is even barely move."""
+
+    def gain(name):
+        cfg = WorldConfig(regional_climate=name, min_runoff_mm=0.0)
+        return cfg.seasonal_runoff_mm() / cfg.runoff_mm(cfg.mean_precip_mm)
+
+    assert gain("mediterranean") > 1.1
+    assert gain("tropical") > 1.05
+    assert gain("temperate") == pytest.approx(1.0, abs=0.02)
+    assert gain("boreal") == pytest.approx(1.0, abs=0.02)

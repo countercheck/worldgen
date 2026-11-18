@@ -93,7 +93,7 @@ def _make_port_role_test_hexes():
 
 def _navigable_catchment(cfg):
     """The catchment a river hex needs before a boat floats on it, plus a margin."""
-    return cfg.navigable_min_discharge / cfg.runoff_mm(cfg.mean_precip_mm) * 1.1
+    return cfg.navigable_min_discharge / cfg.seasonal_runoff_mm() * 1.1
 
 
 def _riverside(catchment_km2):

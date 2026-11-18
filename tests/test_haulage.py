@@ -36,7 +36,7 @@ def _river(hx, catchment_km2):
 
 def _catchment_for(cfg, discharge):
     """The catchment area that yields *discharge* under this config's climate."""
-    return discharge / cfg.runoff_mm(cfg.mean_precip_mm)
+    return discharge / cfg.seasonal_runoff_mm()
 
 
 # --- usable_fraction ---------------------------------------------------------

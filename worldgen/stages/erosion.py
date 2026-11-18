@@ -904,7 +904,7 @@ class ErosionStage(GeneratorStage):
         # raised by a few metres, a cell a small stream crosses dams it, and on one world
         # the ponds behind such dams took a thousand hexes of land as lakes.  A river is
         # where hydrology will draw one: `channel_min_discharge` over this climate's runoff.
-        runoff = cfg.runoff_mm(cfg.mean_precip_mm)
+        runoff = cfg.seasonal_runoff_mm()
         stream = cfg.channel_min_discharge / runoff if runoff > 0.0 else math.inf
         trunk = float(np.quantile(flow[land], 1.0 - cfg.valley_channel_fraction))
         channel = land & (flow >= min(stream, trunk))

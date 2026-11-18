@@ -95,6 +95,12 @@ class BiomeStage(GeneratorStage):
         # vanished entirely; and it would have called a cold region dry when cold country
         # is exactly where peat forms, because so little of its rain evaporates away.
         #
+        # Annual runoff, not `seasonal_runoff_mm`, and deliberately so: the rivers read the
+        # seasonal figure because a wet season's flood is water down the channel, but a
+        # bog needs ground that stays wet, and bunching the rain into a season makes the
+        # rest of the year drier. Read seasonally, a mediterranean map grew 60% more
+        # wetland from its winter rains alone (#120).
+        #
         # A river runs along a hexside, and it floods over the lower of its two banks: the
         # higher one sheds its water back into the river.  So the ground that waterlogs is
         # the lower bank of each side.
