@@ -75,7 +75,7 @@ def _fill_hollows(state: WorldState, cfg) -> None:
                 heapq.heappush(heap, (level[nbr], nbr))
 
     under = {c for c in hexes if c not in water and level[c] > hexes[c].elevation}
-    wet_enough = cfg.runoff_mm(cfg.mean_precip_mm) >= cfg.lake_min_runoff_mm
+    wet_enough = cfg.seasonal_runoff_mm() >= cfg.lake_min_runoff_mm
     # Sorted so the hollows are found in the same order every run.
     for start in sorted(under):
         if start not in under:

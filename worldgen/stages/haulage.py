@@ -64,7 +64,7 @@ def catchment_carries_a_barge(catchment_km2: float, cfg) -> bool:
     The navigability test less the cataract, because `CataractStage` has to ask this of a
     reach to decide whether it is a cataract — a small steep river is only a brook.
     """
-    discharge = catchment_km2 * cfg.runoff_mm(cfg.mean_precip_mm)
+    discharge = catchment_km2 * cfg.seasonal_runoff_mm()
     return discharge >= cfg.navigable_min_discharge
 
 

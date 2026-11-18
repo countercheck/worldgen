@@ -118,7 +118,7 @@ class HydrologyStage(HydrologyFill, HydrologyRivers, GeneratorStage):
         land_acc_vals = list(acc.values())
         if not land_acc_vals:
             return state
-        runoff_mm = self.config.runoff_mm(self.config.mean_precip_mm)
+        runoff_mm = self.config.seasonal_runoff_mm()
         if runoff_mm <= 0.0 or self.config.channel_min_discharge <= 0.0:
             state.rivers = []
             return state

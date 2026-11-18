@@ -151,7 +151,7 @@ class Rivers:
 def river_index(state, cfg) -> Rivers:
     """Read *state*'s river sides and corners into a `Rivers`."""
     gradient = side_gradients(state)
-    runoff = cfg.runoff_mm(cfg.mean_precip_mm)
+    runoff = cfg.seasonal_runoff_mm()
     crossing: dict[frozenset[HexCoord], float] = {}
     navigable_sides = []
     portage: set[HexCoord] = set()

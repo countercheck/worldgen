@@ -2090,11 +2090,44 @@ class WorldConfig:
         """
         if temp_c is None:
             temp_c = self.mean_temperature_c
+        return max(self.min_runoff_mm, self._pike_runoff_mm(precip_mm, self.pet_mm(temp_c)))
+
+    def seasonal_runoff_mm(
+        self, precip_mm: float | None = None, temp_c: float | None = None
+    ) -> float:
+        """A year's runoff worked out season by season, from `season_shares`.
+
+        This is the figure every consumer turns a catchment into discharge with. Pike's
+        curve is non-linear, so applying it to the year's average rain gets the wrong
+        answer whenever the rain is bunched: a mediterranean winter or a monsoon summer
+        runs off far more than the same rain spread evenly over the year (tech-debt #120).
+        Each season's rain is read as an annual rate, put through the curve, and a quarter
+        of the result is kept. An even year comes out the same as `runoff_mm`.
+
+        PET is held at the annual figure, because seasons do not carry a temperature yet.
+        That understates a climate whose rain falls in the cool half of the year.
+
+        The `min_runoff_mm` floor applies once, to the year. Applied season by season it
+        would be four quarter-floors, and a season with no rain would earn runoff it never
+        had.
+        """
+        if precip_mm is None:
+            precip_mm = self.mean_precip_mm
+        if temp_c is None:
+            temp_c = self.mean_temperature_c
         pet = self.pet_mm(temp_c)
+        year = sum(
+            self._pike_runoff_mm(precip_mm * share * len(SEASONS), pet) / len(SEASONS)
+            for share in self.season_shares
+        )
+        return max(self.min_runoff_mm, year)
+
+    @staticmethod
+    def _pike_runoff_mm(precip_mm: float, pet: float) -> float:
+        """Pike's curve, unfloored: rain less what the ground and plants give back."""
         if pet <= 0.0 or precip_mm <= 0.0:
-            return max(self.min_runoff_mm, precip_mm)
-        actual_et = precip_mm / math.sqrt(1.0 + (precip_mm / pet) ** 2)
-        return max(self.min_runoff_mm, precip_mm - actual_et)
+            return max(0.0, precip_mm)
+        return precip_mm - precip_mm / math.sqrt(1.0 + (precip_mm / pet) ** 2)
 
     @classmethod
     def from_json(cls, path: str) -> "WorldConfig":

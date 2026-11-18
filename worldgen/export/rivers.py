@@ -18,7 +18,7 @@ def major_sides(ws: WorldState) -> set[Side]:
     runoff decide it, falling back to the defaults on a world that recorded neither.
     """
     cfg = WorldConfig.from_dict(ws.metadata.get("config") or {})
-    runoff = ws.metadata.get("runoff_mm") or cfg.runoff_mm(cfg.mean_precip_mm)
+    runoff = ws.metadata.get("runoff_mm") or cfg.seasonal_runoff_mm()
     return {
         side
         for side, rs in ws.river_sides.items()
