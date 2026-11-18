@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Runs before every commit: ruff check, ruff format --check, then the test suite.
+# Installed with `git config core.hooksPath .githooks` (see CLAUDE.md).
+set -e
+
+# Use the project's venv, so the checks run with its ruff and pytest-xdist rather than
+# whatever python3 is first on PATH. In order: an activated venv; this checkout's own
+# .venv; the main checkout's .venv, which worktrees share since they have none of their
+# own; and only then a bare python3.
+main_root="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")"
+here_root="$(git rev-parse --show-toplevel)"
+PY=""
+for candidate in "${VIRTUAL_ENV:+$VIRTUAL_ENV/bin/python3}" \
+                 "$here_root/.venv/bin/python3" \
+                 "$main_root/.venv/bin/python3"; do
+    if [ -n "$candidate" ] && [ -x "$candidate" ]; then
+        PY="$candidate"
+        break
+    fi
+done
+if [ -z "$PY" ]; then
+    PY="python3"
+    echo "! no .venv found; using $(command -v python3)"
+fi
+
+echo "→ ruff check..."
+"$PY" -m ruff check .
+
+echo "→ ruff format check..."
+"$PY" -m ruff format --check .
+
+echo "→ pytest..."
+"$PY" -m pytest
+
+echo "✓ pre-commit passed"

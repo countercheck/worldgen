@@ -84,9 +84,15 @@ Tracked as GitHub issues labelled `tech-debt`, not in a file in the repo. The pi
 
 ## Pre-commit checks
 
-The pre-commit hook runs `ruff check` and `pytest` before every commit.
-Install after cloning: the hook is at `.git/hooks/pre-commit` (set up automatically
-if you run `pip install -e ".[dev]"` and the hook script is present).
+The pre-commit hook runs `ruff check`, `ruff format --check` and `pytest` before every
+commit. It is tracked at `.githooks/pre-commit`; install it once after cloning:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+It runs with the project's `.venv` (the main checkout's, from a worktree), not whatever
+`python3` is first on PATH, which may lack pytest-xdist.
 
 To bypass in an emergency: `git commit --no-verify` (use sparingly).
 
