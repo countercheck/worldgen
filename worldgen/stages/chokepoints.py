@@ -191,6 +191,11 @@ class ChokepointStage(GeneratorStage):
         per = cfg.toll_per_journey * cfg.people_per_food  # people a journey's toll keeps
         sites = wayside.toll_sites(state, cfg, rivers, lambda c: PASS in hexes[c].tags)
         by_coord = {s.coord: s for s in state.settlements}
+        # A journey from gate to gate pays from outside: new people to whoever collects
+        # it, not people moved off a settlement. A town's trade with a gate is the town's.
+        offmap = {g.coord for g in state.gates}
+        paying = _offmap_paying(state, sites, offmap, per)
+        imported = 0.0
         delta: dict[HexCoord, float] = {}
         tolls: list[list[Any]] = []
         collected: dict[tuple[HexCoord, str, HexCoord], float] = {}
@@ -202,17 +207,24 @@ class ChokepointStage(GeneratorStage):
             for (a, b), n in sorted(pairs.items()):
                 if holder in (a, b):
                     continue
+                n *= paying.get((a, b), 1.0)
                 cut = n * per
                 if holder is None:
-                    for seat in (a, b):
+                    for seat in _payers(a, b, offmap):
                         unpaid.append([*site, *seat, n * cfg.toll_per_journey / 2, cut / 2, kind])
                     continue
                 delta[holder] = delta.get(holder, 0.0) + cut
-                delta[a] = delta.get(a, 0.0) - cut / 2
-                delta[b] = delta.get(b, 0.0) - cut / 2
+                for end in _payers(a, b, offmap):
+                    if end in offmap:
+                        imported += cut / 2
+                    else:
+                        delta[end] = delta.get(end, 0.0) - cut / 2
                 key = (site, kind, holder)
                 collected[key] = collected.get(key, 0.0) + n
         _apply(delta, by_coord)
+        if imported:
+            md = state.metadata
+            md["offmap_imports"] = md.get("offmap_imports", 0.0) + imported
         income: dict[HexCoord, dict[str, float]] = {}
         for (site, kind, holder), n in sorted(collected.items()):
             tolls.append(
@@ -255,9 +267,10 @@ class ChokepointStage(GeneratorStage):
             ):
                 continue
             rows = [
-                [*site, *seat, n * cfg.toll_per_journey / 2, n * per / 2, wayside.CROSSROADS]
+                [*site, *seat, m * cfg.toll_per_journey / 2, m * per / 2, wayside.CROSSROADS]
                 for (a, b), n in sorted(pairs.items())
-                for seat in (a, b)
+                for m in (n * paying.get((a, b), 1.0),)
+                for seat in _payers(a, b, offmap)
             ]
             founder.found_on_tolls(state, rows, reachable, 0.0)
 
@@ -443,6 +456,41 @@ class ChokepointStage(GeneratorStage):
             hx.settlement = s
             out.append(s)
         return out
+
+
+def _offmap_paying(state, sites, offmap: set[HexCoord], per: float) -> dict[wayside.Pair, float]:
+    """The share of its tolls each journey through the map from gate to gate can pay: at most 1.
+
+    Through-trade pays its road tolls from outside, so nothing on the map runs short paying
+    them — but it pays them out of its cargo, and a haul across the map past a bridge
+    every few hexes would otherwise pay more than the cargo was worth, conjuring people.
+    So each pair of gates pays, between all its tolls, no more than its cargo had left once
+    its quays and portages were paid (`metadata["offmap_trade"]`); a pair owing more pays
+    that share of each.
+    """
+    left: dict[wayside.Pair, float] = {}
+    for oq, or_, dq, dr, _people, _kind, rest, _path in state.metadata.get("offmap_trade", []):
+        key = road_edge_key((oq, or_), (dq, dr))
+        left[key] = left.get(key, 0.0) + rest
+    owed: dict[wayside.Pair, float] = {}
+    for pairs in sites.values():
+        for (a, b), n in pairs.items():
+            if a in offmap and b in offmap:
+                owed[(a, b)] = owed.get((a, b), 0.0) + n * per
+    return {pair: min(1.0, left.get(pair, 0.0) / o) for pair, o in owed.items() if o > 0.0}
+
+
+def _payers(a: HexCoord, b: HexCoord, offmap: set[HexCoord]) -> tuple[HexCoord, HexCoord]:
+    """Who pays each half of a toll on the journey between *a* and *b*.
+
+    Each end pays half. A journey between a gate and a town is the town's trade with the
+    world beyond, whose worth the town has already been paid (`CityPromotionStage`), so
+    the town pays both halves; a gate is left paying only for a journey from gate to gate.
+    """
+    if (a in offmap) != (b in offmap):
+        town = b if a in offmap else a
+        return town, town
+    return a, b
 
 
 def _apply(delta, by_coord) -> None:

@@ -177,6 +177,7 @@ def test_organic_stage_order_is_load_bearing():
     order = [
         "SoilStage",  # land use reads what the ground is
         "LandCoverStage",  # soil decides what grows until somebody clears it
+        "OffmapGateStage",  # a city grows on the trade that comes in through the gates
         "CrossingStage",  # a bridging point should be a reason a market grows there
         "MarketStage",  # land use founds what this stage sites
         "LandUseStage",  # a market is worth what its countryside actually sends

@@ -592,6 +592,19 @@ manufactured_trade_share: 0.1 # Share of each city's people's worth put into man
 manufactured_range_mult: 3.0 # How many times haulage_range_land manufactures travel: worth more per ton than grain, so carried further. Default: 3.0
 river_trade_share: 0.2 # Long-haul trade down the rivers: each town or city on a navigable reach and off the coast ships this share of its people's worth downstream to the coastal town it reaches most cheaply, paying transship_share at every quay and toll_portage_share at every portage on the way, drawn half from each end. The trade the portage towns lived on (Aswan, Louisville, the fall-line towns). 0 turns it off. Default: 0.2
 river_trade_range_mult: 6.0 # How many times haulage_range_land the downriver trade reaches: a boat going down rides the current, and its cargo is a region's staple export. Default: 6.0
+# Trade from beyond the map (tech-debt #149): gates on the map's edges where roads and sea
+# lanes run on off it, and the trade that comes in through them. Unlike every other flow it
+# is not conserved: it brings worth from outside, and so people (metadata["offmap_imports"]).
+offmap_trade_edges: ["north", "south", "east", "west"] # Edges trade comes in from. Default: all four
+offmap_land_gate_spacing: 40 # One land gate per this many hexes of land border on an edge, at least one on any edge with land. Default: 40
+offmap_sea_gate_spacing: 60 # One sea gate per this many hexes of open-water border on an edge, at least one on any edge with sea. Default: 60
+offmap_gate_depth: 10 # A land gate stands on the border hex from which getting this many hexes inland costs least: a valley mouth or a low pass. Default: 10
+offmap_gate_crowding_radius: 25 # Gates within this many hexes of a chosen gate are scored worse, the closer the worse. Default: 25
+offmap_gate_crowding_penalty: 1.0 # How much worse. Candidates are ranked 0 (cheapest way in) to 1 (dearest) on their edge, and a chosen gate adds this, less with distance; at 1 the hex beside a gate is as poor as the worst ground on the edge. 0 lets gates bunch. Default: 1.0
+offmap_trade_share: 0.05 # Off-map trade coming in, as a share of the people in the map's towns and cities, split evenly over the gates. New people, not moved ones. 0 turns off-map trade off. Default: 0.05
+offmap_transit_share: 0.5 # Share of each gate's trade that passes straight through to a gate on another edge, paying tolls on the way; the rest goes to the towns it reaches. 0-1. Default: 0.5
+offmap_trade_range_mult: 3.0 # How far off-map trade reaches from its gate, in multiples of haulage_range_land. Default: 3.0
+offmap_transit_range_mult: 2.0 # How much further again the through-trade reaches, to get across the map. Default: 2.0
 transship_share: 0.2 # Every change in how a city's cargo travels on its way (cart to boat, boat to cart, barge to ship at a river mouth) leaves this share of the people it feeds with the settlement handling that quay, off the city's gain. Conserved: the handlers eat out of the cargo. Only the places between the source market and the city are paid. 0.2 turns a quay town with next to no hinterland into a trade town of 3-5k on seeds 42/7/3. 0 turns it off. Default: 0.2
 transship_radius: 2 # How far from a quay, in hexes, the settlement that handles it may stand. Default: 2
 toll_bridge_share: 0.1 # Tolls at chokepoints: a share of every cargo (provisioning, manufactures, river trade) stepping over a bridge across water too big to wade stays with the settlement nearest the bridge within toll_radius; neither end of the flow pays itself. A share of the people it feeds, not of its price: the toll proper was small (the Sound Dues ran about 1-5% of value) but a bridge town lived on everything the traffic needed. A carter goes round by a ford if the detour costs less than toll_bridge_share x haulage_range_land of haul. 0 turns bridge tolls off. Default: 0.1

@@ -275,12 +275,15 @@ def test_a_city_takes_its_surplus_from_the_markets_it_reaches():
     per settlement touched. This used to allow 5% slack, which was wide enough to hide
     both a promoted seat keeping surplus another city had taken and the founding jitter
     being silently stripped from the whole tier.
+
+    The one thing that is not moved is the trade from beyond the map, which brings people
+    from outside (`offmap_trade`), and it is counted: the books balance less exactly that.
     """
     before, after = _before_and_after()
     if not _split(after)[0]:
         return
     was = sum(s.population for s in before.settlements)
-    now = sum(s.population for s in after.settlements)
+    now = sum(s.population for s in after.settlements) - after.metadata.get("offmap_imports", 0.0)
     assert abs(now - was) <= len(after.settlements), (
         f"population went from {was:,} to {now:,} — promotion is creating surplus, not moving it"
     )

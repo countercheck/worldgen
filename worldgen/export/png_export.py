@@ -142,6 +142,28 @@ def _draw_anchorage(draw: ImageDraw.ImageDraw, cx, cy, scale: float = 1.0):
     )
 
 
+# Off-map gates: road-brown where a road leaves the map, anchorage-navy where ships sail in.
+_GATE_INK = {"land": (110, 52, 24), "sea": (27, 58, 92)}
+
+
+def _gate_triangle(cx, cy, dx, dy, scale: float) -> list[tuple[float, float]]:
+    """A triangle on the gate pointing into the map along (*dx*, *dy*)."""
+    s = 8.0 * scale
+    px, py = -dy, dx
+    return [
+        (cx + dx * 0.95 * s, cy + dy * 0.95 * s),
+        (cx - dx * 0.55 * s + px * 0.75 * s, cy - dy * 0.55 * s + py * 0.75 * s),
+        (cx - dx * 0.55 * s - px * 0.75 * s, cy - dy * 0.55 * s - py * 0.75 * s),
+    ]
+
+
+def _draw_gate(draw: ImageDraw.ImageDraw, kind, cx, cy, dx, dy, scale: float = 1.0):
+    """Where off-map trade comes in: a solid arrowhead on the border, pointing inward."""
+    draw.polygon(
+        _gate_triangle(cx, cy, dx, dy, scale), fill=_GATE_INK[kind], outline=(255, 255, 255)
+    )
+
+
 _CROSSING_INK = (43, 33, 24)
 
 
@@ -274,6 +296,8 @@ def _draw_legend_glyph(draw: ImageDraw.ImageDraw, row, cx, cy, g: float, color_m
         _draw_settlement(draw, row.sample, cx, cy, scale=g / legend.SYMBOL_BOX)
     elif row.kind == "anchorage":
         _draw_anchorage(draw, cx, cy, scale=g / legend.SYMBOL_BOX)
+    elif row.kind == "gate":
+        _draw_gate(draw, "land", cx, cy, 1.0, 0.0, scale=g / legend.SYMBOL_BOX)
     elif row.kind in ("river_source", "river_end", "rapids"):
         kind = row.kind.removeprefix("river_")
         _draw_river_mark(draw, kind, cx, cy, 0.0, scale=g / legend.SYMBOL_BOX)
@@ -634,6 +658,8 @@ def render(ws: WorldState, config: PNGConfig | None = None) -> Image.Image:
                 draw.line(pts, fill=_ROAD_CASING, width=lw + max(1, round(2.0 * outline)))
         for pts, lw, tier in legs:
             draw.line(pts, fill=_ROAD_COLOR[tier], width=lw)
+        for px, py, kind, dx, dy in legend.gate_marks(ws, size):
+            _draw_gate(draw, kind, px + ox, py + oy, dx, dy, scale=size / 12.0)
 
     if "crossings" in layers:
         for px, py, kind, angle in legend.crossings(ws, size):

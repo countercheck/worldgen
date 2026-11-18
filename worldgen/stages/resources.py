@@ -126,17 +126,11 @@ class ResourceStage(GeneratorStage):
 
             # Work out every transfer before making any, so a port that falls short takes
             # nobody with it.
-            transfers = [
-                (by_coord[seat], min(round(people), by_coord[seat].population - 1))
-                for seat, people in sorted(owed.items())
-                if seat in by_coord
-            ]
+            transfers = _transfers(owed, by_coord, _gates(state))
             moved = sum(n for _, n in transfers if n > 0)
             if moved < cfg.port_min_population:
                 continue
-            for city, n in transfers:
-                if n > 0:
-                    city.population -= n
+            _move(state, transfers)
             # A port that the trade alone makes a city is the entrepôt, and it is one on the
             # same terms as a town grown past `city_min_population`.
             big = 0 < cfg.city_min_population <= moved and self._may_be_city(state, quay)
@@ -213,16 +207,14 @@ class ResourceStage(GeneratorStage):
                 if sum(owed.values()) < floor:
                     continue
             transfers = [
-                (by_coord[seat], min(round(people), by_coord[seat].population - 1))
-                for seat, people in sorted(owed.items())
-                if seat in by_coord and by_coord[seat] is not holder
+                (src, n)
+                for src, n in _transfers(owed, by_coord, _gates(state))
+                if src is None or src is not holder
             ]
             moved = sum(n for _, n in transfers if n > 0)
             if holder is None and moved < floor:
                 continue
-            for city, n in transfers:
-                if n > 0:
-                    city.population -= n
+            _move(state, transfers)
             if holder is not None:
                 holder.population += moved
                 continue
@@ -504,6 +496,42 @@ class ResourceStage(GeneratorStage):
         )
         hx.settlement = s
         state.settlements.append(s)
+
+
+def _gates(state) -> set[HexCoord]:
+    return {g.coord for g in state.gates}
+
+
+def _transfers(
+    owed: dict[HexCoord, float], by_coord: dict[HexCoord, Settlement], gates: set[HexCoord]
+) -> list[tuple[Settlement | None, int]]:
+    """Who pays what of *owed*: `(settlement, people)`, or `(None, people)` from off the map.
+
+    A seat that is a gate is trade from beyond the map (`offmap_trade`): it pays in full,
+    out of worth from outside. A settlement never pays down below one.
+    """
+    out: list[tuple[Settlement | None, int]] = []
+    for seat, people in sorted(owed.items()):
+        if seat in gates:
+            out.append((None, round(people)))
+        elif seat in by_coord:
+            out.append((by_coord[seat], min(round(people), by_coord[seat].population - 1)))
+    return out
+
+
+def _move(state, transfers: list[tuple[Settlement | None, int]]) -> None:
+    """Take *transfers* off the settlements paying them, and count what came from outside."""
+    imported = 0
+    for src, n in transfers:
+        if n <= 0:
+            continue
+        if src is None:
+            imported += n
+        else:
+            src.population -= n
+    if imported:
+        md = state.metadata
+        md["offmap_imports"] = md.get("offmap_imports", 0.0) + imported
 
 
 __all__ = ["ResourceStage"]
