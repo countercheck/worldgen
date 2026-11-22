@@ -20,6 +20,7 @@ from worldgen.stages.cities import CityPromotionStage
 from worldgen.stages.offmap_gates import LAND, SEA
 from worldgen.stages.offmap_trade import IMPORT, TRANSIT, offmap_trade_flows
 from worldgen.stages.riverside import river_index
+from worldgen.stages.wayside import Pair
 
 _WORLD = {
     "seed": 42,
@@ -155,7 +156,7 @@ def test_through_trade_pays_no_pair_more_than_it_had_left(monkeypatch):
     ledger the stage spends down: no pair overdrawn, and every person brought spent from it."""
     from worldgen.stages import chokepoints
 
-    ledger: dict = {}
+    ledger: dict[Pair, float] = {}
     real = chokepoints._offmap_left
 
     def spy(state):
