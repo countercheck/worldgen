@@ -20,6 +20,7 @@ from worldgen.stages.cities import CityPromotionStage
 from worldgen.stages.offmap_gates import LAND, SEA
 from worldgen.stages.offmap_trade import IMPORT, TRANSIT, offmap_trade_flows
 from worldgen.stages.riverside import river_index
+from worldgen.stages.wayside import Pair
 
 _WORLD = {
     "seed": 42,
@@ -147,3 +148,43 @@ def test_road_tolls_bring_no_more_than_the_through_trade_had_left():
     left = sum(row[6] for row in routed.metadata["offmap_trade"])
     brought = tolled.metadata["offmap_imports"] - routed.metadata["offmap_imports"]
     assert 0.0 <= brought <= left + 1.0
+
+
+def test_through_trade_pays_no_pair_more_than_it_had_left(monkeypatch):
+    """Each pair of gates, between its toll sites and every crossroads it passes, pays no more
+    than its own cargo had left — not merely the map's through-trade in total. Read off the
+    ledger the stage spends down: no pair overdrawn, and every person brought spent from it."""
+    from worldgen.stages import chokepoints
+
+    ledger: dict[Pair, float] = {}
+    real = chokepoints._offmap_left
+
+    def spy(state):
+        ledger.update(real(state))
+        return ledger
+
+    monkeypatch.setattr(chokepoints, "_offmap_left", spy)
+    state = copy.deepcopy(build_world(until="InterurbanRoadStage", **_WORLD))
+    start = real(state)
+    before = state.metadata["offmap_imports"]
+    state = chokepoints.ChokepointStage(_cfg(state), np.random.default_rng(0)).run(state)
+    brought = state.metadata["offmap_imports"] - before
+    assert brought > 0.0
+    overdrawn = {pair: v for pair, v in ledger.items() if v < -1e-6}
+    assert not overdrawn, overdrawn
+    # Tolls charged where no town is founded are spent and never arrive, so it is at most;
+    # a founded town's are rounded to whole people, one gate at a time.
+    spent = sum(start.values()) - sum(ledger.values())
+    assert brought <= spent + len(state.gates), (brought, spent)
+
+
+def test_a_gate_pair_pays_a_crossroads_only_what_it_has_left():
+    from worldgen.stages.chokepoints import _capped
+
+    gate, other, town = (0, 5), (20, 5), (10, 5)
+    offmap = {gate, other}
+    left = {(gate, other): 3.0}
+    assert _capped((gate, other), 10.0, left, offmap, 1.5) == 2.0
+    assert _capped((gate, other), 1.0, left, offmap, 1.5) == 1.0
+    assert _capped((gate, other), 10.0, {(gate, other): -1.0}, offmap, 1.5) == 0.0
+    assert _capped((gate, town), 10.0, {}, offmap, 1.5) == 10.0, "a town pays its own"
